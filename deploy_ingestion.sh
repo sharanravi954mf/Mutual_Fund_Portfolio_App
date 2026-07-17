@@ -36,23 +36,31 @@ CLI="./supabase-cli/supabase"
 # 2. Collect Inputs
 echo ""
 read -p "Enter your Supabase Personal Access Token (from https://supabase.com/dashboard/account/tokens): " ACCESS_TOKEN
-read -p "Enter your IMAP Email User (e.g. your-email@gmail.com): " IMAP_USER
-read -sp "Enter your IMAP Email Password (or Google App Password): " IMAP_PASS
-echo ""
-read -p "Enter your RTA Decryption Password (if statements are encrypted, else leave empty): " RTA_DECRYPT
 
 export SUPABASE_ACCESS_TOKEN="$ACCESS_TOKEN"
 PROJECT_REF="auxbbotbcvrgzvynyrgg"
 
-# 3. Set Ingestion Secrets on Supabase
-echo ""
-echo "Configuring IMAP and Decryption secrets in Supabase project ($PROJECT_REF)..."
-$CLI secrets set --project-ref "$PROJECT_REF" \
-  IMAP_HOST="imap.gmail.com" \
-  IMAP_PORT="993" \
-  IMAP_USER="$IMAP_USER" \
-  IMAP_PASSWORD="$IMAP_PASS" \
-  RTA_DECRYPTION_PASSWORD="$RTA_DECRYPT"
+read -p "Do you want to configure Gmail/IMAP credentials now? (y/n): " CONFIGURE_SECRETS
+
+if [ "$CONFIGURE_SECRETS" = "y" ] || [ "$CONFIGURE_SECRETS" = "Y" ]; then
+  read -p "Enter your IMAP Email User (e.g. your-email@gmail.com): " IMAP_USER
+  read -sp "Enter your IMAP Email Password (or Google App Password): " IMAP_PASS
+  echo ""
+  read -p "Enter your RTA Decryption Password (if statements are encrypted, else leave empty): " RTA_DECRYPT
+
+  # 3. Set Ingestion Secrets on Supabase
+  echo ""
+  echo "Configuring IMAP and Decryption secrets in Supabase project ($PROJECT_REF)..."
+  $CLI secrets set --project-ref "$PROJECT_REF" \
+    IMAP_HOST="imap.gmail.com" \
+    IMAP_PORT="993" \
+    IMAP_USER="$IMAP_USER" \
+    IMAP_PASSWORD="$IMAP_PASS" \
+    RTA_DECRYPTION_PASSWORD="$RTA_DECRYPT"
+else
+  echo ""
+  echo "Skipping secrets configuration. You can configure them later in your Supabase Dashboard."
+fi
 
 # 4. Deploy the Edge Functions
 echo ""
