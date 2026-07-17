@@ -81,11 +81,11 @@ fi
 # 4. Deploy the Edge Functions
 echo ""
 echo "Deploying Edge Function: cams-kfintech-ingestion..."
-$CLI functions deploy cams-kfintech-ingestion --project-ref "$PROJECT_REF" --no-verify-jwt --no-docker
+$CLI functions deploy cams-kfintech-ingestion --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
 
 echo ""
 echo "Deploying Edge Function: daily-nav-updater..."
-$CLI functions deploy daily-nav-updater --project-ref "$PROJECT_REF" --no-verify-jwt --no-docker
+$CLI functions deploy daily-nav-updater --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
 
 echo ""
 echo "===================================================="
