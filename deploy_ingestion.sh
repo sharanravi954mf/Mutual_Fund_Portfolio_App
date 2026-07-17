@@ -10,7 +10,7 @@ echo "===================================================="
 
 # 1. Detect Architecture and Download Supabase CLI
 ARCH=$(uname -m)
-CLI_VER="1.178.2"
+CLI_VER="2.109.1"
 
 if [ "$ARCH" = "arm64" ]; then
   TAR_NAME="supabase_darwin_arm64.tar.gz"
@@ -20,15 +20,21 @@ fi
 
 URL="https://github.com/supabase/cli/releases/download/v${CLI_VER}/${TAR_NAME}"
 
-if [ ! -f "./supabase-cli/supabase" ]; then
-  echo "Downloading Supabase CLI v${CLI_VER} for macOS ($ARCH)..."
+CURRENT_VER=""
+if [ -f "./supabase-cli/supabase" ]; then
+  CURRENT_VER=$(./supabase-cli/supabase --version 2>/dev/null | awk '{print $2}')
+fi
+
+if [ "$CURRENT_VER" != "$CLI_VER" ]; then
+  echo "Updating Supabase CLI from '$CURRENT_VER' to '$CLI_VER'..."
+  rm -rf supabase-cli
   mkdir -p supabase-cli
   curl -sSL "$URL" -o "supabase-cli/${TAR_NAME}"
   tar -xzf "supabase-cli/${TAR_NAME}" -C supabase-cli
   rm "supabase-cli/${TAR_NAME}"
-  echo "Supabase CLI downloaded successfully."
+  echo "Supabase CLI updated successfully."
 else
-  echo "Supabase CLI already present."
+  echo "Supabase CLI v$CLI_VER already present."
 fi
 
 CLI="./supabase-cli/supabase"
@@ -75,11 +81,11 @@ fi
 # 4. Deploy the Edge Functions
 echo ""
 echo "Deploying Edge Function: cams-kfintech-ingestion..."
-$CLI functions deploy cams-kfintech-ingestion --project-ref "$PROJECT_REF" --no-verify-jwt
+$CLI functions deploy cams-kfintech-ingestion --project-ref "$PROJECT_REF" --no-verify-jwt --no-docker
 
 echo ""
 echo "Deploying Edge Function: daily-nav-updater..."
-$CLI functions deploy daily-nav-updater --project-ref "$PROJECT_REF" --no-verify-jwt
+$CLI functions deploy daily-nav-updater --project-ref "$PROJECT_REF" --no-verify-jwt --no-docker
 
 echo ""
 echo "===================================================="
