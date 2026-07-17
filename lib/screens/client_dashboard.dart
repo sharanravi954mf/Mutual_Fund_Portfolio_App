@@ -47,11 +47,18 @@ class _ClientDashboardState extends State<ClientDashboard> {
         .select()
         .order('scheme_name', ascending: true);
 
+    final profileRes = await client
+        .from('profiles')
+        .select()
+        .eq('id', userId)
+        .maybeSingle();
+
     if (portfolioRes == null) {
       return {
         'portfolio': null,
         'transactions': <Map<String, dynamic>>[],
         'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
+        'profile': profileRes,
       };
     }
 
@@ -66,6 +73,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
       'portfolio': portfolioRes,
       'transactions': List<Map<String, dynamic>>.from(transactionsRes ?? []),
       'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
+      'profile': profileRes,
     };
   }
 
@@ -129,6 +137,23 @@ class _ClientDashboardState extends State<ClientDashboard> {
             final portfolio = data?['portfolio'] as Map<String, dynamic>?;
             final transactions = data?['transactions'] as List<Map<String, dynamic>>;
             final allFunds = data?['all_funds'] as List<Map<String, dynamic>>? ?? [];
+            final profile = data?['profile'] as Map<String, dynamic>?;
+            
+            final clientName = profile != null && profile['full_name'] != null && (profile['full_name'] as String).trim().isNotEmpty
+                ? profile['full_name'] as String
+                : (user?.email?.split('@')[0] ?? 'Investor');
+
+            final hour = DateTime.now().hour;
+            String greeting;
+            if (hour >= 3 && hour < 12) {
+              greeting = "Good Morning";
+            } else if (hour >= 12 && hour < 16) {
+              greeting = "Good Afternoon";
+            } else if (hour >= 16 && hour <= 23) {
+              greeting = "Good Evening";
+            } else {
+              greeting = "Good Night";
+            }
 
             final double invested = portfolio != null
                 ? (portfolio['total_invested_value'] as num).toDouble()
@@ -217,12 +242,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  "Welcome Back",
+                                  "Investor Console",
                                   style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  user?.email ?? "Investor Console",
+                                  "$greeting, $clientName",
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.outfit(
                                     color: Colors.white,
