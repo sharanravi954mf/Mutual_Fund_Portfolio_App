@@ -42,10 +42,16 @@ class _ClientDashboardState extends State<ClientDashboard> {
         .eq('client_id', userId)
         .maybeSingle();
 
+    final allFundsRes = await client
+        .from('mutual_funds')
+        .select()
+        .order('scheme_name', ascending: true);
+
     if (portfolioRes == null) {
       return {
         'portfolio': null,
         'transactions': <Map<String, dynamic>>[],
+        'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
       };
     }
 
@@ -59,6 +65,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     return {
       'portfolio': portfolioRes,
       'transactions': List<Map<String, dynamic>>.from(transactionsRes ?? []),
+      'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
     };
   }
 
@@ -121,6 +128,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
             final data = snapshot.data;
             final portfolio = data?['portfolio'] as Map<String, dynamic>?;
             final transactions = data?['transactions'] as List<Map<String, dynamic>>;
+            final allFunds = data?['all_funds'] as List<Map<String, dynamic>>? ?? [];
 
             final double invested = portfolio != null
                 ? (portfolio['total_invested_value'] as num).toDouble()
@@ -279,6 +287,118 @@ class _ClientDashboardState extends State<ClientDashboard> {
                             ),
                       const SizedBox(height: 36),
 
+                      // Search Mutual Funds section
+                      Text(
+                        "Search & Explore Fund Factsheets",
+                        style: GoogleFonts.outfit(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Autocomplete<Map<String, dynamic>>(
+                        displayStringForOption: (option) => option['scheme_name'] ?? '',
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          if (textEditingValue.text.isEmpty || textEditingValue.text.length < 2) {
+                            return const Iterable<Map<String, dynamic>>.empty();
+                          }
+                          return allFunds.where((fund) {
+                            final name = (fund['scheme_name'] ?? '').toString().toLowerCase();
+                            final code = (fund['scheme_code'] ?? '').toString().toLowerCase();
+                            final query = textEditingValue.text.toLowerCase();
+                            return name.contains(query) || code.contains(query);
+                          });
+                        },
+                        onSelected: (Map<String, dynamic> selection) {
+                          showDialog(
+                            context: context,
+                            builder: (context) => FactsheetDialog(
+                              fundId: selection['id'],
+                              schemeName: selection['scheme_name'],
+                              category: selection['category'] ?? 'Mutual Fund',
+                              fundHouse: selection['fund_house'] ?? 'Sharan Fincorp',
+                            ),
+                          );
+                        },
+                        fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                          return TextField(
+                            controller: textEditingController,
+                            focusNode: focusNode,
+                            style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: "Enter at least 2 characters to search funds...",
+                              hintStyle: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
+                              prefixIcon: const Icon(Icons.search, color: Colors.grey, size: 20),
+                              suffixIcon: textEditingController.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, color: Colors.grey, size: 18),
+                                      onPressed: () {
+                                        textEditingController.clear();
+                                      },
+                                    )
+                                  : null,
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.03),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: Colors.white.withOpacity(0.06)),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(color: Color(0xFFE94057)),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                            ),
+                          );
+                        },
+                        optionsViewBuilder: (context, onSelected, options) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              color: const Color(0xFF151030),
+                              borderRadius: BorderRadius.circular(12),
+                              elevation: 4,
+                              shape: RoundedRectangleBorder(
+                                side: BorderSide(color: Colors.white.withOpacity(0.08)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Container(
+                                width: isDesktop ? 600 : constraints.maxWidth - 48,
+                                constraints: const BoxConstraints(maxHeight: 200),
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  shrinkWrap: true,
+                                  itemCount: options.length,
+                                  itemBuilder: (BuildContext context, int index) {
+                                    final option = options.elementAt(index);
+                                    return ListTile(
+                                      title: Text(
+                                        option['scheme_name'] ?? '',
+                                        style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: Text(
+                                        "Code: ${option['scheme_code']} | ${option['category'] ?? 'N/A'}",
+                                        style: GoogleFonts.inter(color: Colors.grey, fontSize: 11),
+                                      ),
+                                      onTap: () => onSelected(option),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 36),
+
+                      // Holdings Header
+                      // ignore: duplicate_ignore
+                      // ignore: duplicate_nodes
+                      // ignore: duplicate_ignore
+                      // ignore: duplicate_nodes
                       // Holdings Header
                       Text(
                         "Your Portfolio Holdings",
