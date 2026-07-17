@@ -39,13 +39,13 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Sign in using credentials and load corresponding profile role
-  Future<bool> signIn(String email, String password) async {
+  Future<bool> signIn(String emailOrPhone, String password) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final response = await _supabaseService.signIn(email, password);
+      final response = await _supabaseService.signIn(emailOrPhone, password);
       _user = response.user;
       if (_user != null) {
         _role = await _supabaseService.getUserRole(_user!.id);

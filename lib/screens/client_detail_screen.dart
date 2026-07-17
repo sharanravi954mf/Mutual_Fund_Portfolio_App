@@ -1,19 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../providers/auth_provider.dart';
 import '../utils/finance.dart';
 
-class ClientDashboard extends StatefulWidget {
-  const ClientDashboard({super.key});
+class ClientDetailScreen extends StatefulWidget {
+  final String clientId;
+  final String clientName;
+  final String clientPan;
+
+  const ClientDetailScreen({
+    super.key,
+    required this.clientId,
+    required this.clientName,
+    required this.clientPan,
+  });
 
   @override
-  State<ClientDashboard> createState() => _ClientDashboardState();
+  State<ClientDetailScreen> createState() => _ClientDetailScreenState();
 }
 
-class _ClientDashboardState extends State<ClientDashboard> {
+class _ClientDetailScreenState extends State<ClientDetailScreen> {
   late Future<Map<String, dynamic>> _portfolioDataFuture;
   final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
@@ -25,9 +32,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
   }
 
   void _refreshData() {
-    final userId = Provider.of<AuthProvider>(context, listen: false).user?.id;
     setState(() {
-      _portfolioDataFuture = _fetchClientPortfolioData(userId ?? '');
+      _portfolioDataFuture = _fetchClientPortfolioData(widget.clientId);
     });
   }
 
@@ -57,22 +63,19 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
     return {
       'portfolio': portfolioRes,
-      'transactions': List<Map<String, dynamic>>.from(transactionsRes ?? []),
+      'transactions': List<Map<String, dynamic>>.from(transactionsRes),
     };
   }
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context);
-    final user = authProvider.user;
-
     return Scaffold(
       backgroundColor: const Color(0xFF0F0C20),
       appBar: AppBar(
         backgroundColor: const Color(0xFF151030),
         elevation: 0,
         title: Text(
-          "Client Console",
+          widget.clientName,
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -83,13 +86,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
             icon: const Icon(Icons.refresh, color: Colors.grey),
             tooltip: "Refresh Data",
             onPressed: _refreshData,
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.grey),
-            tooltip: "Logout",
-            onPressed: () {
-              Provider.of<AuthProvider>(context, listen: false).signOut();
-            },
           ),
         ],
       ),
@@ -177,7 +173,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
               }
             }
 
-            // Remove zero or negative holdings
             final activeHoldings = holdings.values
                 .where((h) => (h['units'] as double) > 0.0001)
                 .toList();
@@ -196,42 +191,39 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header
+                      // Header info
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  "Welcome Back",
-                                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "PAN: ${widget.clientPan.toUpperCase()}",
+                                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                "Client Portfolio Analysis",
+                                style: GoogleFonts.outfit(
+                                  color: Colors.grey.shade300,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  user?.email ?? "Investor Console",
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.outfit(
-                                    color: Colors.white,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF8A2387).withOpacity(0.1),
+                              color: const Color(0xFFE94057).withOpacity(0.1),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: const Color(0xFF8A2387).withOpacity(0.3)),
+                              border: Border.all(color: const Color(0xFFE94057).withOpacity(0.3)),
                             ),
                             child: Text(
-                              "Verified Client",
+                              "Active Portfolio",
                               style: GoogleFonts.inter(
-                                color: const Color(0xFFC04BF0),
+                                color: const Color(0xFFE94057),
                                 fontWeight: FontWeight.w600,
                                 fontSize: 11,
                               ),
@@ -277,7 +269,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                       // Holdings Header
                       Text(
-                        "Your Portfolio Holdings",
+                        "Portfolio Holdings",
                         style: GoogleFonts.outfit(
                           color: Colors.white,
                           fontSize: 18,
@@ -290,7 +282,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                       if (activeHoldings.isEmpty)
                         _buildEmptyStateCard(
                           "No Active Holdings",
-                          "Your account does not have any active fund units logged yet. Check back once your financial advisor processes your CAMS/KFintech mailback statements.",
+                          "This client does not have any active fund units logged yet.",
                           Icons.folder_open_outlined,
                         )
                       else
@@ -347,7 +339,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                       // Transactions List
                       Text(
-                        "Recent Transactions Log",
+                        "Transaction History",
                         style: GoogleFonts.outfit(
                           color: Colors.white,
                           fontSize: 18,
@@ -438,7 +430,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
   Widget _buildMetricCard(String label, String value, IconData icon, Color accentColor, {bool isReturn = false, double returnValue = 0.0}) {
     return Container(
-      padding: const EdgeInsets.all(20.0),
+      padding: const EdgeInsets.all(18.0),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.02),
         borderRadius: BorderRadius.circular(18),
@@ -452,16 +444,16 @@ class _ClientDashboardState extends State<ClientDashboard> {
               color: accentColor.withOpacity(0.1),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, color: accentColor, size: 24),
+            child: Icon(icon, color: accentColor, size: 22),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
+                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 11),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -470,7 +462,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     color: isReturn
                         ? (returnValue >= 0 ? const Color(0xFF00C853) : const Color(0xFFFF1744))
                         : Colors.white,
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),

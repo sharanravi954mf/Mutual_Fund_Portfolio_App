@@ -7,9 +7,16 @@ class SupabaseService {
 
   final SupabaseClient client = Supabase.instance.client;
 
-  /// Authenticate user via email & password
-  Future<AuthResponse> signIn(String email, String password) async {
-    return await client.auth.signInWithPassword(email: email, password: password);
+  /// Authenticate user via email/phone & password
+  Future<AuthResponse> signIn(String emailOrPhone, String password) async {
+    final trimmed = emailOrPhone.trim();
+    final isPhone = RegExp(r'^\d{3}').hasMatch(trimmed);
+    if (isPhone) {
+      final phone = trimmed.startsWith('+') ? trimmed : '+91$trimmed';
+      return await client.auth.signInWithPassword(phone: phone, password: password);
+    } else {
+      return await client.auth.signInWithPassword(email: trimmed, password: password);
+    }
   }
 
   /// Sign out current user
