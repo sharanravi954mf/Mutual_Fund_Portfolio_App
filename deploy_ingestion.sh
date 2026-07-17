@@ -62,6 +62,16 @@ else
   echo "Skipping secrets configuration. You can configure them later in your Supabase Dashboard."
 fi
 
+# Ensure Supabase configuration is initialized
+if [ ! -f "./supabase/config.toml" ]; then
+  echo ""
+  echo "Initializing Supabase local configuration..."
+  $CLI init
+  # Replace project_id with our actual project ref
+  sed -i '' 's/project_id = "Mutual_Fund_Portfolio_App"/project_id = "auxbbotbcvrgzvynyrgg"/g' ./supabase/config.toml 2>/dev/null || \
+  sed -i 's/project_id = "Mutual_Fund_Portfolio_App"/project_id = "auxbbotbcvrgzvynyrgg"/g' ./supabase/config.toml
+fi
+
 # 4. Deploy the Edge Functions
 echo ""
 echo "Deploying Edge Function: cams-kfintech-ingestion..."
