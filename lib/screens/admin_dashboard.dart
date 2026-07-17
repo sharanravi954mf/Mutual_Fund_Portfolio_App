@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
 import 'client_detail_screen.dart';
+import '../services/supabase_service.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -24,6 +25,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   List<Map<String, dynamic>> _allClients = [];
   List<Map<String, dynamic>> _filteredClients = [];
+
+  // Factsheet Management variables
+  final SupabaseService _supabaseService = SupabaseService();
+  List<Map<String, dynamic>> _fundsList = [];
+  String? _selectedFundId;
+  bool _savingFactsheet = false;
+  final TextEditingController _factsheetPdfController = TextEditingController();
+  final TextEditingController _factsheetHoldingsUrlController = TextEditingController();
+  final TextEditingController _factsheetManagersController = TextEditingController();
+  final TextEditingController _factsheetTopHoldingsController = TextEditingController();
+  final TextEditingController _factsheetMonthController = TextEditingController(
+    text: "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-01",
+  );
 
   @override
   void initState() {
@@ -145,9 +159,120 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _fetchFundsList() async {
+    try {
+      final client = Supabase.instance.client;
+      final response = await client
+          .from('mutual_funds')
+          .select('id, scheme_name, scheme_code, category, fund_house')
+          .order('scheme_name', ascending: true);
+      
+      setState(() {
+        _fundsList = List<Map<String, dynamic>>.from(response ?? []);
+        if (_fundsList.isNotEmpty && _selectedFundId == null) {
+          _selectedFundId = _fundsList[0]['id'];
+          _loadFactsheetForSelectedFund();
+        }
+      });
+    } catch (e) {
+      // Ignored
+    }
+  }
+
+  Future<void> _loadFactsheetForSelectedFund() async {
+    if (_selectedFundId == null) return;
+    
+    final data = await _supabaseService.getLatestFactsheet(_selectedFundId!);
+    setState(() {
+      if (data != null) {
+        _factsheetPdfController.text = data['factsheet_url'] ?? '';
+        _factsheetHoldingsUrlController.text = data['portfolio_holdings_url'] ?? '';
+        _factsheetMonthController.text = data['month_year'] ?? '';
+        
+        final managersList = data['managers'] as List?;
+        _factsheetManagersController.text = managersList?.join(', ') ?? '';
+        
+        final holdingsList = data['top_holdings'] as List?;
+        if (holdingsList != null) {
+          final lines = holdingsList.map((h) => "${h['company']}: ${h['weight']}");
+          _factsheetTopHoldingsController.text = lines.join(', ');
+        } else {
+          _factsheetTopHoldingsController.text = '';
+        }
+      } else {
+        _factsheetPdfController.text = '';
+        _factsheetHoldingsUrlController.text = '';
+        _factsheetManagersController.text = '';
+        _factsheetTopHoldingsController.text = '';
+      }
+    });
+  }
+
+  Future<void> _saveFactsheet() async {
+    if (_selectedFundId == null) return;
+    
+    setState(() {
+      _savingFactsheet = true;
+    });
+    
+    final managers = _factsheetManagersController.text
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+        
+    final topHoldings = <Map<String, dynamic>>[];
+    final holdingsStr = _factsheetTopHoldingsController.text.trim();
+    if (holdingsStr.isNotEmpty) {
+      final parts = holdingsStr.split(',');
+      for (var part in parts) {
+        final pair = part.split(':');
+        if (pair.length == 2) {
+          final company = pair[0].trim();
+          final weight = double.tryParse(pair[1].trim()) ?? 0.0;
+          if (company.isNotEmpty && weight > 0) {
+            topHoldings.add({
+              'company': company,
+              'weight': weight,
+            });
+          }
+        }
+      }
+    }
+    
+    final payload = {
+      'mutual_fund_id': _selectedFundId,
+      'month_year': _factsheetMonthController.text.trim(),
+      'factsheet_url': _factsheetPdfController.text.trim(),
+      'portfolio_holdings_url': _factsheetHoldingsUrlController.text.trim(),
+      'managers': managers,
+      'top_holdings': topHoldings,
+    };
+    
+    final success = await _supabaseService.upsertFactsheet(payload);
+    
+    setState(() {
+      _savingFactsheet = false;
+    });
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? "Factsheet updated successfully!" : "Failed to update factsheet."),
+          backgroundColor: success ? Colors.green : Colors.redAccent,
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
+    _factsheetPdfController.dispose();
+    _factsheetHoldingsUrlController.dispose();
+    _factsheetManagersController.dispose();
+    _factsheetTopHoldingsController.dispose();
+    _factsheetMonthController.dispose();
     super.dispose();
   }
 
@@ -194,6 +319,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   const SizedBox(height: 16),
                   _buildSidebarItem(0, "Clients Management", Icons.people_outline),
                   _buildSidebarItem(1, "Data Ingestion", Icons.cloud_upload_outlined),
+                  _buildSidebarItem(2, "Factsheets Manager", Icons.document_scanner_outlined),
                   const Spacer(),
                   Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -224,7 +350,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 backgroundColor: const Color(0xFF151030),
                 elevation: 0,
                 title: Text(
-                  _selectedTab == 0 ? "Clients Directory" : "Data Ingestion Engine",
+                  _selectedTab == 0
+                      ? "Clients Directory"
+                      : (_selectedTab == 1 ? "Data Ingestion Engine" : "Factsheets Manager"),
                   style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 actions: [
@@ -249,11 +377,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       onTap: (index) {
                         setState(() {
                           _selectedTab = index;
+                          if (index == 2) {
+                            _fetchFundsList();
+                          }
                         });
                       },
                       items: const [
                         BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: "Clients"),
                         BottomNavigationBarItem(icon: Icon(Icons.cloud_upload_outlined), label: "Ingest"),
+                        BottomNavigationBarItem(icon: Icon(Icons.document_scanner_outlined), label: "Factsheets"),
                       ],
                     )
                   : null,
@@ -273,6 +405,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         onTap: () {
           setState(() {
             _selectedTab = index;
+            if (index == 2) {
+              _fetchFundsList();
+            }
           });
         },
         borderRadius: BorderRadius.circular(10),
@@ -307,6 +442,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return _buildClientsListContent();
       case 1:
         return _buildIngestionContent();
+      case 2:
+        return _buildFactsheetsContent();
       default:
         return const SizedBox.shrink();
     }
@@ -519,6 +656,187 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFactsheetsContent() {
+    return _fundsList.isEmpty
+        ? const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+            ),
+          )
+        : SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Factsheet & Holdings Editor",
+                  style: GoogleFonts.outfit(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Select a mutual fund scheme to configure its monthly factsheet, managers, and top holdings.",
+                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+
+                // Dropdown Selector
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withOpacity(0.08)),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedFundId,
+                      dropdownColor: const Color(0xFF151030),
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                      isExpanded: true,
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedFundId = val;
+                          _loadFactsheetForSelectedFund();
+                        });
+                      },
+                      items: _fundsList.map((fund) {
+                        return DropdownMenuItem<String>(
+                          value: fund['id'],
+                          child: Text(
+                            "${fund['scheme_name']} (${fund['scheme_code']})",
+                            style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Edit Form Card
+                Container(
+                  padding: const EdgeInsets.all(24.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.02),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Month Year Text field
+                      _buildLabel("Report Date (YYYY-MM-DD)"),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _factsheetMonthController,
+                        style: GoogleFonts.inter(color: Colors.white),
+                        decoration: _buildInputDecoration("e.g. 2026-07-01"),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // PDF Link Text field
+                      _buildLabel("Factsheet PDF Download URL"),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _factsheetPdfController,
+                        style: GoogleFonts.inter(color: Colors.white),
+                        decoration: _buildInputDecoration("e.g. https://amc.com/factsheet.pdf"),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Holdings URL Text field
+                      _buildLabel("AMC Portfolio Disclosures Web URL"),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _factsheetHoldingsUrlController,
+                        style: GoogleFonts.inter(color: Colors.white),
+                        decoration: _buildInputDecoration("e.g. https://amc.com/disclosures"),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Fund Managers (Comma separated)
+                      _buildLabel("Fund Managers (Comma separated)"),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _factsheetManagersController,
+                        style: GoogleFonts.inter(color: Colors.white),
+                        decoration: _buildInputDecoration("e.g. John Doe, Jane Smith"),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Top Holdings (Text Area format)
+                      _buildLabel("Top Holdings (Format: CompanyName: Weight, Company2: Weight)"),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _factsheetTopHoldingsController,
+                        maxLines: 3,
+                        style: GoogleFonts.inter(color: Colors.white),
+                        decoration: _buildInputDecoration("e.g. HDFC Bank: 9.5, Reliance: 8.2, TCS: 5.4"),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Save Button
+                      ElevatedButton(
+                        onPressed: _savingFactsheet ? null : _saveFactsheet,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE94057),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: _savingFactsheet
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                "Save Config",
+                                style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+  }
+
+  Widget _buildLabel(String labelText) {
+    return Text(
+      labelText,
+      style: GoogleFonts.inter(
+        fontSize: 13,
+        color: Colors.grey.shade400,
+        fontWeight: FontWeight.w500,
+      ),
+    );
+  }
+
+  InputDecoration _buildInputDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: GoogleFonts.inter(color: Colors.grey.shade600),
+      filled: true,
+      fillColor: Colors.black.withOpacity(0.2),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 }

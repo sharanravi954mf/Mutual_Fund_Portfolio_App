@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/finance.dart';
+import 'factsheet_dialog.dart';
 
 class ClientDetailScreen extends StatefulWidget {
   final String clientId;
@@ -156,11 +157,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
               if (!holdings.containsKey(code)) {
                 holdings[code] = {
+                  'id': fund['id'] ?? '',
                   'code': code,
                   'name': name,
                   'units': 0.0,
                   'invested': 0.0,
                   'nav': nav,
+                  'category': fund['category'] ?? 'Mutual Fund',
+                  'fund_house': fund['fund_house'] ?? 'Sharan Fincorp',
                 };
               }
 
@@ -304,34 +308,57 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                               final curVal = units * nav;
 
                               return ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                title: Text(
-                                  h['name'],
-                                  style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Text(
-                                    "${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
-                                    style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
-                                  ),
-                                ),
-                                trailing: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      currencyFormat.format(curVal),
-                                      style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      h['code'],
-                                      style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
-                                    ),
-                                  ],
-                                ),
-                              );
+                                 contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                 leading: Container(
+                                   padding: const EdgeInsets.all(8),
+                                   decoration: BoxDecoration(
+                                     color: const Color(0xFFE94057).withOpacity(0.1),
+                                     shape: BoxShape.circle,
+                                   ),
+                                   child: const Icon(
+                                     Icons.insert_chart_outlined_rounded,
+                                     color: Color(0xFFE94057),
+                                     size: 20,
+                                   ),
+                                 ),
+                                 title: Text(
+                                   h['name'],
+                                   style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                 ),
+                                 subtitle: Padding(
+                                   padding: const EdgeInsets.only(top: 4.0),
+                                   child: Text(
+                                     "${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
+                                     style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
+                                   ),
+                                 ),
+                                 trailing: Column(
+                                   mainAxisAlignment: MainAxisAlignment.center,
+                                   crossAxisAlignment: CrossAxisAlignment.end,
+                                   children: [
+                                     Text(
+                                       currencyFormat.format(curVal),
+                                       style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                     ),
+                                     const SizedBox(height: 4),
+                                     Text(
+                                       h['code'],
+                                       style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
+                                     ),
+                                   ],
+                                 ),
+                                 onTap: () {
+                                   showDialog(
+                                     context: context,
+                                     builder: (context) => FactsheetDialog(
+                                       fundId: h['id'],
+                                       schemeName: h['name'],
+                                       category: h['category'],
+                                       fundHouse: h['fund_house'],
+                                     ),
+                                   );
+                                 },
+                               );
                             },
                           ),
                         ),
