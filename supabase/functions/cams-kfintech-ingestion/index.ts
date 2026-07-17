@@ -4,7 +4,17 @@ import { RtaFileParser } from "./parser.ts";
 import { DatabaseSyncService } from "./database.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL") || "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
@@ -62,7 +72,7 @@ serve(async (req) => {
       totalLines: parser.totalLinesProcessed,
       totalErrors: parser.totalErrors
     }), {
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
     // 5. Update log failure status
@@ -85,7 +95,7 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({ success: false, error: String(err) }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

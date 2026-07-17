@@ -18,6 +18,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _selectedTab = 0;
   String _searchQuery = "";
   bool _isIngesting = false;
+  bool _isSyncingNAV = false;
   bool _isLoading = true;
   
   final TextEditingController _searchController = TextEditingController();
@@ -155,6 +156,59 @@ class _AdminDashboardState extends State<AdminDashboard> {
     } finally {
       setState(() {
         _isIngesting = false;
+      });
+    }
+  }
+
+  Future<void> _triggerNAVUpdateSync() async {
+    setState(() {
+      _isSyncingNAV = true;
+    });
+
+    try {
+      final client = Supabase.instance.client;
+      final response = await client.functions.invoke('daily-nav-updater');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text("NAV sync complete! Response: ${response.data}", style: GoogleFonts.inter()),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF00C853),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      // Reload updated portfolio values
+      await _refreshClients();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text("NAV sync trigger failed: $e", style: GoogleFonts.inter()),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.redAccent.shade400,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isSyncingNAV = false;
       });
     }
   }
@@ -646,6 +700,63 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     onPressed: _isIngesting ? null : _triggerManualIngestion,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFE94057),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // NAV Sync Action Card
+          Container(
+            padding: const EdgeInsets.all(28.0),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.02),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.white.withOpacity(0.05)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.currency_rupee, color: Color(0xFFF27121), size: 24),
+                    const SizedBox(width: 12),
+                    Text(
+                      "Force Daily NAV Price Sync",
+                      style: GoogleFonts.outfit(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Queries the mfapi.in API database for all registered mutual funds to fetch today's latest Net Asset Values and updates client portfolio valuations.",
+                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: _isSyncingNAV
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.trending_up, color: Colors.white),
+                    label: Text(
+                      _isSyncingNAV ? "Syncing NAV Prices..." : "Sync Daily NAV Prices Now",
+                      style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                    ),
+                    onPressed: _isSyncingNAV ? null : _triggerNAVUpdateSync,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF27121),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
