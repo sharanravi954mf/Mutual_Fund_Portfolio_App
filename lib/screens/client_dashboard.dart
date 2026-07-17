@@ -242,16 +242,11 @@ class _ClientDashboardState extends State<ClientDashboard> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  "Investor Console",
-                                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
                                   "$greeting, $clientName",
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.outfit(
                                     color: Colors.white,
-                                    fontSize: 20,
+                                    fontSize: 22,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
