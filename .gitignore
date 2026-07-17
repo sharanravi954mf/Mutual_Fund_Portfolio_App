@@ -1,1 +1,28 @@
-.env.txt
+.env
+
+# Flutter/Dart build and cache directories
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+pubspec.lock
+
+# Android build/configuration outputs
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# IDE & Editor files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+
+# Local CLI tools
+supabase-cli/

@@ -59,7 +59,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
     final authProvider = Provider.of<AuthProvider>(context);
 
     return Scaffold(
@@ -117,7 +116,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       
                       // Heading
                       Text(
-                        "Fortress Wealth",
+                        "Sharan Fincorp",
                         textAlign: TextAlign.center,
                         style: GoogleFonts.outfit(
                           fontSize: 32,
@@ -151,9 +150,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Email input field
+                            // Email or Mobile input field
                             Text(
-                              "Email Address",
+                              "Email or Mobile Number",
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: Colors.grey.shade300,
@@ -166,9 +165,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: GoogleFonts.inter(color: Colors.white),
                               keyboardType: TextInputType.emailAddress,
                               decoration: InputDecoration(
-                                hintText: "name@example.com",
+                                hintText: "name@example.com or 9876543210",
                                 hintStyle: GoogleFonts.inter(color: Colors.grey.shade600),
-                                prefixIcon: Icon(Icons.mail_outline, color: Colors.grey.shade400),
+                                prefixIcon: Icon(Icons.person_outline, color: Colors.grey.shade400),
                                 filled: true,
                                 fillColor: Colors.black.withOpacity(0.2),
                                 border: OutlineInputBorder(
@@ -179,10 +178,22 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               validator: (value) {
                                 if (value == null || value.trim().isEmpty) {
-                                  return "Email is required";
+                                  return "Email or mobile number is required";
                                 }
-                                if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim())) {
-                                  return "Please enter a valid email address";
+                                final trimmed = value.trim();
+                                final isPhone = RegExp(r'^\d{3}').hasMatch(trimmed);
+                                if (isPhone) {
+                                  final cleanPhone = trimmed.replaceAll(RegExp(r'\D'), '');
+                                  if (cleanPhone.length < 10) {
+                                    return "Please enter a valid 10-digit mobile number";
+                                  }
+                                } else {
+                                  if (!trimmed.contains('@')) {
+                                    return "Email address must contain '@'";
+                                  }
+                                  if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(trimmed)) {
+                                    return "Please enter a valid email address";
+                                  }
                                 }
                                 return null;
                               },
