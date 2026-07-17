@@ -1,4 +1,5 @@
 import { Buffer } from "https://deno.land/std@0.177.0/node/buffer.ts";
+import { ImapFlow } from "https://esm.sh/imapflow@1.0.155";
 
 export interface EmailAttachment {
   filename: string;
@@ -13,82 +14,104 @@ export class ImapClient {
   private pass: string;
 
   constructor() {
-    this.hostname = Deno.env.get("IMAP_HOST") || "";
+    this.hostname = Deno.env.get("IMAP_HOST") || "imap.gmail.com";
     this.port = parseInt(Deno.env.get("IMAP_PORT") || "993");
     this.user = Deno.env.get("IMAP_USER") || "";
     this.pass = Deno.env.get("IMAP_PASSWORD") || "";
   }
 
   /**
-   * Connects via IMAP over TLS, logins, searches for reports, and downloads attachments.
+   * Connects via IMAP using ImapFlow, searches for reports, and downloads attachments or parses body links.
    */
   async fetchNewReportAttachments(): Promise<EmailAttachment[]> {
     if (!this.hostname || !this.user || !this.pass) {
       throw new Error("IMAP credentials are not fully configured in environment variables.");
     }
 
-    const conn = await Deno.connectTls({ hostname: this.hostname, port: this.port });
-    const reader = conn.readable.getReader();
-    const writer = conn.writable.getWriter();
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
+    const client = new ImapFlow({
+      host: this.hostname,
+      port: this.port,
+      secure: this.port === 993,
+      auth: { user: this.user, pass: this.pass },
+      logger: false
+    });
 
-    const sendCmd = async (cmd: string): Promise<string> => {
-      await writer.write(encoder.encode(cmd + "\r\n"));
-      let response = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        response += decoder.decode(value);
-        if (response.includes("\n") && response.trim().endsWith("OK") || response.includes("BAD") || response.includes("NO")) {
-          break;
-        }
-      }
-      return response;
-    };
+    await client.connect();
+    const lock = await client.getMailboxLock("INBOX");
+    const attachments: EmailAttachment[] = [];
 
     try {
-      // 1. Read Greeting
-      const greeting = await reader.read();
-      
-      // 2. Login
-      await sendCmd(`A1 LOGIN "${this.user}" "${this.pass}"`);
+      // 1. Search for unseen emails containing standard RTA attachments (cams@camsonline.com or kfintech@kfintech.com)
+      const searchResult1 = await client.search({
+        seen: false,
+        or: [
+          { from: "cams@camsonline.com" },
+          { from: "kfintech@kfintech.com" }
+        ]
+      }, { uid: true });
 
-      // 3. Select Inbox
-      await sendCmd(`A2 SELECT INBOX`);
+      for (const uid of searchResult1) {
+        const message = await client.fetchOne(uid, { source: true }, { uid: true });
+        if (message && message.source) {
+          const rawEmail = message.source.toString();
+          const parsed = this.parseMimeAttachments(rawEmail);
+          attachments.push(...parsed);
 
-      // 4. Search for unread emails from RTAs with files
-      // We search for UNSEEN emails containing RTA addresses
-      const searchRes = await sendCmd(`A3 SEARCH UNSEEN OR FROM "cams@camsonline.com" FROM "kfintech@kfintech.com"`);
-      
-      // Parse message numbers from search result
-      const idsMatch = searchRes.match(/\* SEARCH ([\d\s]+)/);
-      if (!idsMatch || !idsMatch[1].trim()) {
-        conn.close();
-        return []; // No new reports
+          // Mark as read after successful extraction
+          await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
+        }
       }
 
-      const msgIds = idsMatch[1].trim().split(/\s+/);
-      const attachments: EmailAttachment[] = [];
+      // 2. Search for unseen CAMS Mailback Server WBR9 reports
+      const searchResult2 = await client.search({
+        seen: false,
+        from: "CAMS Mailback Server",
+        subject: "WBR9"
+      }, { uid: true });
 
-      for (const id of msgIds) {
-        // Fetch raw message RFC822 or structure
-        const fetchRes = await sendCmd(`A4 FETCH ${id} (BODY.PEEK[])`);
-        // Extract attachment data (simplified MIME boundary extraction in this pipeline stub)
-        const parsed = this.parseMimeAttachments(fetchRes);
-        attachments.push(...parsed);
-        
-        // Mark as read after successful extraction
-        await sendCmd(`A5 STORE ${id} +FLAGS (\\Seen)`);
+      for (const uid of searchResult2) {
+        const message = await client.fetchOne(uid, { source: true }, { uid: true });
+        if (message && message.source) {
+          const emailText = message.source.toString();
+          const decodedText = this.decodeQuotedPrintable(emailText);
+          // Regular Expression targeting the secure DownloadURL parameter inside the HTML table layout
+          const urlRegex = /https:\/\/mailback\d+\.camsonline\.com\/mailback_result\/[A-Za-z0-9]+/g;
+          const match = decodedText.match(urlRegex);
+
+          if (match) {
+            const downloadUrl = match[0];
+            const response = await fetch(downloadUrl);
+            if (!response.ok) {
+              throw new Error(`Failed to download CAMS WBR9 report from: ${downloadUrl}`);
+            }
+            const fileData = new Uint8Array(await response.arrayBuffer());
+
+            // Extract filename from headers or use default
+            let filename = "cams_wbr9_report.txt";
+            const contentDisposition = response.headers.get("content-disposition");
+            if (contentDisposition) {
+              const fileMatch = contentDisposition.match(/filename="?([^"\s]+)"?/i);
+              if (fileMatch) {
+                filename = fileMatch[1];
+              }
+            }
+            const contentType = response.headers.get("content-type") || "text/plain";
+            attachments.push({
+              filename,
+              contentType,
+              data: fileData
+            });
+
+            // Mark as read after successful extraction
+            await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
+          }
+        }
       }
 
-      // Logout & Close
-      await sendCmd(`A6 LOGOUT`);
-      conn.close();
       return attachments;
-    } catch (e) {
-      conn.close();
-      throw e;
+    } finally {
+      lock.release();
+      await client.logout();
     }
   }
 
@@ -121,5 +144,11 @@ export class ImapClient {
       }
     }
     return list;
+  }
+
+  private decodeQuotedPrintable(str: string): string {
+    return str
+      .replace(/=\r?\n/g, "")
+      .replace(/=([0-9A-F]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
   }
 }

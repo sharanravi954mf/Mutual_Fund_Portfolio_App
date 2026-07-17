@@ -19,10 +19,11 @@ serve(async (req) => {
 
   const logId = logEntry?.id;
   let recordsProcessed = 0;
+  let parser: RtaFileParser | null = null;
 
   try {
     const imap = new ImapClient();
-    const parser = new RtaFileParser();
+    parser = new RtaFileParser();
     const db = new DatabaseSyncService();
 
     // 2. Fetch attachments
@@ -44,12 +45,23 @@ serve(async (req) => {
         .update({
           status: "SUCCESS",
           completed_at: new Date().toISOString(),
-          records_processed: recordsProcessed
+          records_processed: recordsProcessed,
+          log_details: {
+            totalLinesProcessed: parser.totalLinesProcessed,
+            totalRecordsParsed: parser.totalRecordsParsed,
+            totalErrors: parser.totalErrors,
+            errors: parser.errors
+          }
         })
         .eq("id", logId);
     }
 
-    return new Response(JSON.stringify({ success: true, processed: recordsProcessed }), {
+    return new Response(JSON.stringify({ 
+      success: true, 
+      processed: recordsProcessed,
+      totalLines: parser.totalLinesProcessed,
+      totalErrors: parser.totalErrors
+    }), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
@@ -60,7 +72,13 @@ serve(async (req) => {
         .update({
           status: "FAILED",
           completed_at: new Date().toISOString(),
-          error_message: err instanceof Error ? err.message : String(err)
+          error_message: err instanceof Error ? err.message : String(err),
+          log_details: {
+            totalLinesProcessed: parser?.totalLinesProcessed || 0,
+            totalRecordsParsed: parser?.totalRecordsParsed || 0,
+            totalErrors: parser?.totalErrors || 0,
+            errors: parser?.errors || []
+          }
         })
         .eq("id", logId);
     }
