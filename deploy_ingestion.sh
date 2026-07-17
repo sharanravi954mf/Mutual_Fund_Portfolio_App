@@ -54,10 +54,14 @@ $CLI secrets set --project-ref "$PROJECT_REF" \
   IMAP_PASSWORD="$IMAP_PASS" \
   RTA_DECRYPTION_PASSWORD="$RTA_DECRYPT"
 
-# 4. Deploy the Edge Function
+# 4. Deploy the Edge Functions
 echo ""
 echo "Deploying Edge Function: cams-kfintech-ingestion..."
 $CLI functions deploy cams-kfintech-ingestion --project-ref "$PROJECT_REF" --no-verify-jwt
+
+echo ""
+echo "Deploying Edge Function: daily-nav-updater..."
+$CLI functions deploy daily-nav-updater --project-ref "$PROJECT_REF" --no-verify-jwt
 
 echo ""
 echo "===================================================="

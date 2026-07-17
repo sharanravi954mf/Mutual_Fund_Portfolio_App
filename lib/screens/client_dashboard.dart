@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
 import '../utils/finance.dart';
+import 'factsheet_dialog.dart';
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({super.key});
@@ -160,11 +161,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
               if (!holdings.containsKey(code)) {
                 holdings[code] = {
+                  'id': fund['id'] ?? '',
                   'code': code,
                   'name': name,
                   'units': 0.0,
                   'invested': 0.0,
                   'nav': nav,
+                  'category': fund['category'] ?? 'Mutual Fund',
+                  'fund_house': fund['fund_house'] ?? 'Sharan Fincorp',
                 };
               }
 
@@ -313,6 +317,18 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                               return ListTile(
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                leading: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE94057).withOpacity(0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.insert_chart_outlined_rounded,
+                                    color: Color(0xFFE94057),
+                                    size: 20,
+                                  ),
+                                ),
                                 title: Text(
                                   h['name'],
                                   style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
@@ -339,6 +355,17 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                     ),
                                   ],
                                 ),
+                                onTap: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => FactsheetDialog(
+                                      fundId: h['id'],
+                                      schemeName: h['name'],
+                                      category: h['category'],
+                                      fundHouse: h['fund_house'],
+                                    ),
+                                  );
+                                },
                               );
                             },
                           ),

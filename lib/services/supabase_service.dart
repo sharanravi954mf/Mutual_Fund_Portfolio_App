@@ -41,4 +41,30 @@ class SupabaseService {
       return null;
     }
   }
+
+  /// Fetch the latest factsheet for a given mutual fund scheme
+  Future<Map<String, dynamic>?> getLatestFactsheet(String fundId) async {
+    try {
+      final response = await client
+          .from('fund_factsheets')
+          .select()
+          .eq('mutual_fund_id', fundId)
+          .order('month_year', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      return response;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Upsert a factsheet for a given mutual fund (Admin only)
+  Future<bool> upsertFactsheet(Map<String, dynamic> data) async {
+    try {
+      await client.from('fund_factsheets').upsert(data, onConflict: 'mutual_fund_id,month_year');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 }
