@@ -1592,7 +1592,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final originalExcelName = _selectedExcelFile!.filename;
       final payload = {
         "excelFile": _selectedExcelFile!.base64String,
-        "zipFile": _selectedExcelZipArchive!.base64String,
+        "zipFile": _selectedInvoicePdf!.base64String,
       };
 
       final response = await _supabaseService.client.functions.invoke(
@@ -1662,26 +1662,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
             }
           },
         ),
-        const SizedBox(height: 16),
-        _buildUploadCard(
-          title: "Select CAMS Invoices ZIP Archive",
-          subtitle: _selectedExcelZipArchive != null ? _selectedExcelZipArchive!.filename : "Select ZIP Archive",
-          icon: Icons.archive_outlined,
-          isSelected: _selectedExcelZipArchive != null,
-          onTap: () async {
-            final file = await fph.pickFile('.zip,application/zip,application/x-zip-compressed');
-            if (file != null) {
-              setState(() {
-                _selectedExcelZipArchive = file;
-              });
-            }
-          },
-        ),
       ],
     );
   }
 
   Widget _buildExcelControlPanel() {
+    final hasSourceInvoice = _selectedInvoicePdf != null;
+    final hasExcelTracker = _selectedExcelFile != null;
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1702,9 +1690,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           const SizedBox(height: 12),
           Text(
-            _selectedExcelFile == null || _selectedExcelZipArchive == null
-                ? "Please upload both the Excel tracker and PDF ZIP archive to start processing."
-                : "Ready to automatically extract invoice data and update matching rows.",
+            !hasExcelTracker
+                ? "Please upload the Excel tracker (.xlsx) to proceed."
+                : (!hasSourceInvoice
+                    ? "Please upload the Distributor Invoice PDF/ZIP in the top card first."
+                    : "Ready to automatically extract invoice data and update matching rows."),
             style: GoogleFonts.inter(
               fontSize: 13,
               color: Colors.grey.shade400,
@@ -1715,9 +1705,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             width: double.infinity,
             height: 50,
             child: ElevatedButton(
-              onPressed: _selectedExcelFile == null ||
-                      _selectedExcelZipArchive == null ||
-                      _updatingExcel
+              onPressed: !hasExcelTracker || !hasSourceInvoice || _updatingExcel
                   ? null
                   : _updateExcelProcess,
               style: ElevatedButton.styleFrom(
