@@ -1359,7 +1359,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
           );
 
           if (signResponse.status == 200 && signResponse.data != null) {
-            final signedBytes = signResponse.data as List<int>;
+            final Map<String, dynamic> signResponseData = signResponse.data is String 
+                ? jsonDecode(signResponse.data as String) 
+                : Map<String, dynamic>.from(signResponse.data as Map);
+            final base64SignedPdf = signResponseData['signedPdf'] as String;
+            final signedBytes = base64Decode(base64SignedPdf);
+            
             outArchive.addFile(archive.ArchiveFile(
               filename,
               signedBytes.length,
@@ -1412,8 +1417,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         );
 
         if (response.status == 200 && response.data != null) {
-          final bytes = response.data as List<int>;
-          final uint8Bytes = Uint8List.fromList(bytes);
+          final Map<String, dynamic> responseData = response.data is String 
+              ? jsonDecode(response.data as String) 
+              : Map<String, dynamic>.from(response.data as Map);
+          final base64SignedPdf = responseData['signedPdf'] as String;
+          final uint8Bytes = base64Decode(base64SignedPdf);
 
           final outputName = originalName.toLowerCase().endsWith(".pdf")
               ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.pdf"
