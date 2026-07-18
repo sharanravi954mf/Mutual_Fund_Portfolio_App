@@ -21,7 +21,8 @@ export class ImapClient {
   }
 
   /**
-   * Connects via IMAP, searches for reports, and downloads attachments or parses body links.
+   * Connects via IMAP, searches for reports from the last 30 days (regardless of read status),
+   * and downloads attachments or parses body links.
    */
   async fetchNewReportAttachments(): Promise<EmailAttachment[]> {
     if (!this.hostname || !this.user || !this.pass) {
@@ -41,9 +42,9 @@ export class ImapClient {
     const attachments: EmailAttachment[] = [];
 
     try {
-      // 1. Unified search for unseen emails from CAMS/KFintech or containing WBR9
+      // Search for both read and unread matching emails received in the last 30 days
       const searchResult = await client.search({
-        seen: false,
+        since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Check last 30 days
         or: [
           { subject: "WBR9" },
           { from: "donotreply@camsonline.com" },
@@ -52,7 +53,7 @@ export class ImapClient {
         ]
       }, { uid: true });
 
-      console.log(`IMAP Search found ${searchResult.length} unseen matching emails.`);
+      console.log(`IMAP Search found ${searchResult.length} emails (read/unread) in the last 30 days.`);
 
       for (const uid of searchResult) {
         const message = await client.fetchOne(uid, { source: true }, { uid: true });
@@ -67,7 +68,6 @@ export class ImapClient {
 
           // B. Try extracting DownloadURL from email body (e.g. CAMS WBR9 links)
           const decodedText = this.decodeQuotedPrintable(rawEmail);
-          // Match standard cams mailback download links (supporting .zip, .dbf, etc.)
           const urlRegex = /https:\/\/mailback\d+\.camsonline\.com\/mailback_result\/[^\s"<>']+/g;
           const matches = decodedText.match(urlRegex);
 
@@ -90,7 +90,6 @@ export class ImapClient {
                     filename = fileMatch[1];
                   }
                 } else {
-                  // Fallback filename extraction from URL
                   const urlParts = downloadUrl.split("/");
                   const lastPart = urlParts[urlParts.length - 1];
                   if (lastPart.toLowerCase().endsWith(".zip") || lastPart.toLowerCase().endsWith(".dbf")) {
@@ -109,9 +108,6 @@ export class ImapClient {
               }
             }
           }
-
-          // Mark email as read after processing
-          await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
         }
       }
 
