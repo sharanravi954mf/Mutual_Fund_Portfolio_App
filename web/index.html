@@ -28,6 +28,29 @@
       });
     }
   </script>
+  <!-- PDFJS Library for client-side text extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    window.extractPdfText = async function(pdfBytes) {
+      try {
+        const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
+        const pdf = await loadingTask.promise;
+        let fullText = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(" ");
+          fullText += pageText + "\n";
+        }
+        return fullText;
+      } catch (err) {
+        console.error("PDFJS text extraction failed:", err);
+        throw err;
+      }
+    };
+  </script>
 </head>
 <body style="background-color: #0F0C20;">
   <script src="flutter_bootstrap.js" async></script>

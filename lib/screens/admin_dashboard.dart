@@ -7,6 +7,7 @@ import '../providers/auth_provider.dart';
 import 'client_detail_screen.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
+import '../utils/excel_updater.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:archive/archive.dart' as archive;
@@ -1586,42 +1587,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     try {
       final originalExcelName = _selectedExcelFile!.filename;
-      final payload = {
-        "excelFile": _selectedExcelFile!.base64String,
-        "zipFile": _selectedInvoicePdf!.base64String,
-      };
+      final excelBytes = base64Decode(_selectedExcelFile!.base64String!);
+      final zipBytes = base64Decode(_selectedInvoicePdf!.base64String!);
 
-      final response = await _supabaseService.client.functions.invoke(
-        'update-excel-metadata',
-        body: payload,
+      final result = await ExcelMetadataUpdater.updateExcelMetadata(
+        excelBytes: excelBytes,
+        zipBytes: zipBytes,
       );
 
-      if (response.status == 200 && response.data != null) {
-        final Map<String, dynamic> responseData = response.data is String 
-            ? jsonDecode(response.data as String) 
-            : Map<String, dynamic>.from(response.data as Map);
-        
-        final base64Excel = responseData['updatedExcel'] as String;
-        final updatedCount = responseData['updatedCount'] as int;
-        
-        final uint8Bytes = base64Decode(base64Excel);
-        
-        final outputName = originalExcelName.toLowerCase().endsWith(".xlsx")
-            ? "${originalExcelName.substring(0, originalExcelName.length - 5)}_UPDATED.xlsx"
-            : "${originalExcelName}_UPDATED.xlsx";
+      final uint8Bytes = result['updatedExcel'] as Uint8List;
+      final updatedCount = result['updatedCount'] as int;
 
-        await fph.saveFileBytes(uint8Bytes, outputName);
+      final outputName = originalExcelName.toLowerCase().endsWith(".xlsx")
+          ? "${originalExcelName.substring(0, originalExcelName.length - 5)}_UPDATED.xlsx"
+          : "${originalExcelName}_UPDATED.xlsx";
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("Excel updated successfully! Populated $updatedCount invoice records. Download started."),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else {
-        throw Exception(response.data?["error"] ?? "Failed to process Excel file. Server returned status code ${response.status}");
+      await fph.saveFileBytes(uint8Bytes, outputName);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Excel updated successfully! Populated $updatedCount invoice records. Download started."),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
