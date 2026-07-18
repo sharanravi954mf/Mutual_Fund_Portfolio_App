@@ -53,6 +53,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
   double _sigX = 420;
   double _sigY = 72;
   bool _signingInvoice = false;
+  String _selectedPreset = "CAMS Distributor (Default)";
+
+  void _applyCoordinatePreset(String preset) {
+    setState(() {
+      _selectedPreset = preset;
+      if (preset == "CAMS Distributor (Default)") {
+        _stampX = 400;
+        _stampY = 102;
+        _sigX = 420;
+        _sigY = 72;
+      } else if (preset == "KFintech / Karvy Distributor") {
+        _stampX = 430;
+        _stampY = 120;
+        _sigX = 450;
+        _sigY = 80;
+      } else if (preset == "Bottom Right Corner") {
+        _stampX = 400;
+        _stampY = 150;
+        _sigX = 400;
+        _sigY = 80;
+      } else if (preset == "Bottom Left Corner") {
+        _stampX = 60;
+        _stampY = 150;
+        _sigX = 60;
+        _sigY = 80;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -1172,6 +1200,54 @@ class _AdminDashboardState extends State<AdminDashboard> {
               color: Colors.grey.shade500,
             ),
           ),
+           const SizedBox(height: 24),
+          Text(
+            "Overlay Location Preset",
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.04),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedPreset,
+                dropdownColor: const Color(0xFF151030),
+                style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                icon: const Icon(Icons.arrow_drop_down, color: Colors.white54),
+                isExpanded: true,
+                items: [
+                  "CAMS Distributor (Default)",
+                  "KFintech / Karvy Distributor",
+                  "Bottom Right Corner",
+                  "Bottom Left Corner",
+                  "Custom Placement",
+                ].map((String value) {
+                  return DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(value),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  if (newValue != null && newValue != "Custom Placement") {
+                    _applyCoordinatePreset(newValue);
+                  } else if (newValue == "Custom Placement") {
+                    setState(() {
+                      _selectedPreset = newValue!;
+                    });
+                  }
+                },
+              ),
+            ),
+          ),
           const SizedBox(height: 24),
           _buildCoordinateSlider(
             label: "Company Stamp X (Horizontal)",
@@ -1181,6 +1257,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: (val) {
               setState(() {
                 _stampX = val;
+                _selectedPreset = "Custom Placement";
               });
             },
           ),
@@ -1192,6 +1269,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: (val) {
               setState(() {
                 _stampY = val;
+                _selectedPreset = "Custom Placement";
               });
             },
           ),
@@ -1204,6 +1282,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: (val) {
               setState(() {
                 _sigX = val;
+                _selectedPreset = "Custom Placement";
               });
             },
           ),
@@ -1215,6 +1294,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: (val) {
               setState(() {
                 _sigY = val;
+                _selectedPreset = "Custom Placement";
               });
             },
           ),
