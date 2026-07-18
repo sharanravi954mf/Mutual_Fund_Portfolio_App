@@ -57,8 +57,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // Excel Metadata Ingestion & Updater variables
   fph.PickedFileData? _selectedExcelFile;
-  fph.PickedFileData? _selectedExcelZipArchive;
   bool _updatingExcel = false;
+  bool _processingAll = false;
 
   void _applyCoordinatePreset(String preset) {
     setState(() {
@@ -1011,7 +1011,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "Invoice PDF Signer & Stamper",
+            "Distributor Invoice Signer & Excel Auto-Updater",
             style: GoogleFonts.outfit(
               fontSize: 20,
               fontWeight: FontWeight.bold,
@@ -1020,7 +1020,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           const SizedBox(height: 8),
           Text(
-            "Upload a standard CAMS distributor invoice PDF, upload transparent signature and stamp assets, and overlay them on the final page of the PDF with adjustable placement offsets.",
+            "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
             style: GoogleFonts.inter(
               fontSize: 14,
               color: Colors.grey.shade400,
@@ -1048,45 +1048,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
             },
           ),
-          const Divider(color: Colors.white10, height: 48),
-          Text(
-            "Excel Invoice Metadata Ingestion & Auto-Updater",
-            style: GoogleFonts.outfit(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Upload an Excel sheets tracker (.xlsx) alongside a ZIP containing corresponding PDF invoices. The system will extract the Invoice Number, Invoice Date, and File Name from the PDFs, automatically match them to the correct AMC rows, and download the fully updated Excel workbook.",
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: Colors.grey.shade400,
-            ),
-          ),
-          const SizedBox(height: 24),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isDesktop = constraints.maxWidth > 800;
-              return isDesktop
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: _buildExcelUploadPanel()),
-                        const SizedBox(width: 24),
-                        Expanded(child: _buildExcelControlPanel()),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        _buildExcelUploadPanel(),
-                        const SizedBox(height: 24),
-                        _buildExcelControlPanel(),
-                      ],
-                    );
-            },
-          ),
         ],
       ),
     );
@@ -1109,6 +1070,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
             if (file != null) {
               setState(() {
                 _selectedInvoicePdf = file;
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildUploadCard(
+          title: "Excel Invoice Tracker (.xlsx)",
+          subtitle: _selectedExcelFile != null ? _selectedExcelFile!.filename : "Select Excel Tracker File",
+          icon: Icons.table_chart_outlined,
+          isSelected: _selectedExcelFile != null,
+          onTap: () async {
+            final file = await fph.pickFile('.xlsx');
+            if (file != null) {
+              setState(() {
+                _selectedExcelFile = file;
               });
             }
           },
@@ -1348,11 +1324,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
             height: 50,
             child: ElevatedButton(
               onPressed: _selectedInvoicePdf == null ||
+                      _selectedExcelFile == null ||
                       _selectedSignaturePng == null ||
                       _selectedStampPng == null ||
-                      _signingInvoice
+                      _processingAll
                   ? null
-                  : _signInvoiceProcess,
+                  : _processAllInvoices,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFE94057),
                 disabledBackgroundColor: Colors.white10,
@@ -1360,7 +1337,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: _signingInvoice
+              child: _processingAll
                   ? const SizedBox(
                       width: 20,
                       height: 20,
@@ -1370,7 +1347,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ),
                     )
                   : Text(
-                      "Sign & Stamp Invoice",
+                      "Sign, Stamp & Update Tracker",
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
@@ -1583,6 +1560,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _processAllInvoices() async {
+    setState(() {
+      _processingAll = true;
+    });
+
+    try {
+      await _signInvoiceProcess();
+      await _updateExcelProcess();
+    } catch (e) {
+      // Individual sub-methods catch errors and show snackbars
+    } finally {
+      if (mounted) {
+        setState(() {
+          _processingAll = false;
+        });
+      }
+    }
+  }
+
   Future<void> _updateExcelProcess() async {
     setState(() {
       _updatingExcel = true;
@@ -1645,97 +1641,4 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  Widget _buildExcelUploadPanel() {
-    return Column(
-      children: [
-        _buildUploadCard(
-          title: "Select Excel Invoice Tracker (.xlsx)",
-          subtitle: _selectedExcelFile != null ? _selectedExcelFile!.filename : "Select Excel File",
-          icon: Icons.table_chart_outlined,
-          isSelected: _selectedExcelFile != null,
-          onTap: () async {
-            final file = await fph.pickFile('.xlsx');
-            if (file != null) {
-              setState(() {
-                _selectedExcelFile = file;
-              });
-            }
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildExcelControlPanel() {
-    final hasSourceInvoice = _selectedInvoicePdf != null;
-    final hasExcelTracker = _selectedExcelFile != null;
-
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFF151030),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Auto-Extraction Status",
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            !hasExcelTracker
-                ? "Please upload the Excel tracker (.xlsx) to proceed."
-                : (!hasSourceInvoice
-                    ? "Please upload the Distributor Invoice PDF/ZIP in the top card first."
-                    : "Ready to automatically extract invoice data and update matching rows."),
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: Colors.grey.shade400,
-            ),
-          ),
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              onPressed: !hasExcelTracker || !hasSourceInvoice || _updatingExcel
-                  ? null
-                  : _updateExcelProcess,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFE94057),
-                disabledBackgroundColor: Colors.white10,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: _updatingExcel
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : Text(
-                      "Process & Update Excel",
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Colors.white,
-                      ),
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
