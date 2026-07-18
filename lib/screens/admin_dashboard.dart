@@ -1033,7 +1033,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               : Icons.picture_as_pdf_outlined,
           isSelected: _selectedInvoicePdf != null,
           onTap: () async {
-            final file = await fph.pickFile('.pdf,.zip');
+            final file = await fph.pickFile('.pdf,.zip,application/pdf,application/zip,application/x-zip-compressed');
             if (file != null) {
               setState(() {
                 _selectedInvoicePdf = file;
