@@ -33,21 +33,34 @@
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    window.extractPdfText = async function(pdfBytes) {
+    window.extractPdfText = function(pdfBytes, id) {
       try {
-        const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
-        const pdf = await loadingTask.promise;
-        let fullText = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          const pageText = textContent.items.map(item => item.str).join(" ");
-          fullText += pageText + "\n";
+        // Convert pdfBytes to Uint8Array safely
+        let bytes = pdfBytes;
+        if (pdfBytes && pdfBytes.buffer) {
+          bytes = new Uint8Array(pdfBytes.buffer);
+        } else if (pdfBytes && pdfBytes.bytes) {
+          bytes = new Uint8Array(pdfBytes.bytes);
+        } else {
+          bytes = new Uint8Array(pdfBytes);
         }
-        return fullText;
+
+        pdfjsLib.getDocument({ data: bytes }).promise.then(async function(pdf) {
+          let fullText = "";
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(" ");
+            fullText += pageText + "\n";
+          }
+          window['pdf_result_' + id] = { text: fullText, error: null };
+        }).catch(function(err) {
+          console.error("PDFJS failed to process document:", err);
+          window['pdf_result_' + id] = { text: null, error: err.toString() };
+        });
       } catch (err) {
-        console.error("PDFJS text extraction failed:", err);
-        throw err;
+        console.error("PDFJS failed synchronously:", err);
+        window['pdf_result_' + id] = { text: null, error: err.toString() };
       }
     };
   </script>

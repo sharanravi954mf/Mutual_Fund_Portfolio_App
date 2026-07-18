@@ -3,15 +3,30 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:js' as js;
-import 'dart:js_util' as js_util;
 import 'package:excel/excel.dart';
 import 'package:archive/archive.dart' as archive;
 
 class ExcelMetadataUpdater {
   static Future<String> extractPdfText(Uint8List pdfBytes) async {
-    final promise = js.context.callMethod('extractPdfText', [pdfBytes]);
-    final result = await js_util.promiseToFuture(promise);
-    return result as String;
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    js.context.callMethod('extractPdfText', [pdfBytes, id]);
+
+    final key = 'pdf_result_$id';
+    while (true) {
+      final res = js.context[key];
+      if (res != null) {
+        final error = res['error'];
+        final text = res['text'];
+        
+        js.context[key] = null; // Clean up window object reference
+
+        if (error != null) {
+          throw Exception(error);
+        }
+        return text as String;
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
   }
 
   static Future<Map<String, dynamic>> updateExcelMetadata({
