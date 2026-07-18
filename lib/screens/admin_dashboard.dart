@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
 import 'client_detail_screen.dart';
 import '../services/supabase_service.dart';
+import '../utils/file_picker_helper.dart' as fph;
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -39,6 +40,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final TextEditingController _factsheetMonthController = TextEditingController(
     text: "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-01",
   );
+
+  // Invoice Signer variables
+  fph.PickedFileData? _selectedInvoicePdf;
+  fph.PickedFileData? _selectedSignaturePng;
+  fph.PickedFileData? _selectedStampPng;
+  double _stampX = 400;
+  double _stampY = 102;
+  double _sigX = 420;
+  double _sigY = 72;
+  bool _signingInvoice = false;
 
   @override
   void initState() {
@@ -374,6 +385,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   _buildSidebarItem(0, "Clients Management", Icons.people_outline),
                   _buildSidebarItem(1, "Data Ingestion", Icons.cloud_upload_outlined),
                   _buildSidebarItem(2, "Factsheets Manager", Icons.document_scanner_outlined),
+                  _buildSidebarItem(3, "Invoice Signer", Icons.draw_outlined),
                   const Spacer(),
                   Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -406,7 +418,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 title: Text(
                   _selectedTab == 0
                       ? "Clients Directory"
-                      : (_selectedTab == 1 ? "Data Ingestion Engine" : "Factsheets Manager"),
+                      : (_selectedTab == 1 
+                          ? "Data Ingestion Engine" 
+                          : (_selectedTab == 2 ? "Factsheets Manager" : "Invoice Signer")),
                   style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 actions: [
@@ -428,6 +442,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       backgroundColor: const Color(0xFF151030),
                       selectedItemColor: const Color(0xFFE94057),
                       unselectedItemColor: Colors.grey,
+                      type: BottomNavigationBarType.fixed,
                       onTap: (index) {
                         setState(() {
                           _selectedTab = index;
@@ -440,6 +455,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: "Clients"),
                         BottomNavigationBarItem(icon: Icon(Icons.cloud_upload_outlined), label: "Ingest"),
                         BottomNavigationBarItem(icon: Icon(Icons.document_scanner_outlined), label: "Factsheets"),
+                        BottomNavigationBarItem(icon: Icon(Icons.draw_outlined), label: "Signer"),
                       ],
                     )
                   : null,
@@ -498,6 +514,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return _buildIngestionContent();
       case 2:
         return _buildFactsheetsContent();
+      case 3:
+        return _buildInvoiceSignerContent();
       default:
         return const SizedBox.shrink();
     }
@@ -949,5 +967,398 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
+  }
+  Widget _buildInvoiceSignerContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Invoice PDF Signer & Stamper",
+            style: GoogleFonts.outfit(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Upload a standard CAMS distributor invoice PDF, upload transparent signature and stamp assets, and overlay them on the final page of the PDF with adjustable placement offsets.",
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 24),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isDesktop = constraints.maxWidth > 800;
+              return isDesktop
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _buildUploadPanel()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _buildControlPanel()),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        _buildUploadPanel(),
+                        const SizedBox(height: 24),
+                        _buildControlPanel(),
+                      ],
+                    );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUploadPanel() {
+    return Column(
+      children: [
+        _buildUploadCard(
+          title: _selectedInvoicePdf != null && _selectedInvoicePdf!.filename.toLowerCase().endsWith(".zip") 
+              ? "Distributor Invoice ZIP Archive" 
+              : "Distributor Invoice PDF / ZIP",
+          subtitle: _selectedInvoicePdf != null ? _selectedInvoicePdf!.filename : "Select PDF Invoice or ZIP Archive",
+          icon: _selectedInvoicePdf != null && _selectedInvoicePdf!.filename.toLowerCase().endsWith(".zip") 
+              ? Icons.archive_outlined 
+              : Icons.picture_as_pdf_outlined,
+          isSelected: _selectedInvoicePdf != null,
+          onTap: () async {
+            final file = await fph.pickFile('.pdf,.zip');
+            if (file != null) {
+              setState(() {
+                _selectedInvoicePdf = file;
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildUploadCard(
+          title: "Transparent Signature PNG",
+          subtitle: _selectedSignaturePng != null ? _selectedSignaturePng!.filename : "Select signature_transparent.png",
+          icon: Icons.draw_outlined,
+          isSelected: _selectedSignaturePng != null,
+          onTap: () async {
+            final file = await fph.pickFile('.png');
+            if (file != null) {
+              setState(() {
+                _selectedSignaturePng = file;
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildUploadCard(
+          title: "Transparent Company Stamp PNG",
+          subtitle: _selectedStampPng != null ? _selectedStampPng!.filename : "Select stamp_transparent.png",
+          icon: Icons.qr_code_scanner_outlined,
+          isSelected: _selectedStampPng != null,
+          onTap: () async {
+            final file = await fph.pickFile('.png');
+            if (file != null) {
+              setState(() {
+                _selectedStampPng = file;
+              });
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUploadCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF151030),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFE94057) : Colors.white10,
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFFE94057).withOpacity(0.1) : Colors.black26,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                color: isSelected ? const Color(0xFFE94057) : Colors.grey,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: isSelected ? Colors.grey.shade300 : Colors.grey.shade600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              isSelected ? Icons.check_circle : Icons.arrow_forward_ios,
+              color: isSelected ? const Color(0xFFE94057) : Colors.grey.shade700,
+              size: isSelected ? 22 : 14,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlPanel() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151030),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Coordinate Offsets Customizer",
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Fine-tune the overlays positioning relative to the bottom-left point boundary of the page space (A4 Point bounds).",
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              color: Colors.grey.shade500,
+            ),
+          ),
+          const SizedBox(height: 24),
+          _buildCoordinateSlider(
+            label: "Company Stamp X (Horizontal)",
+            value: _stampX,
+            min: 0,
+            max: 600,
+            onChanged: (val) {
+              setState(() {
+                _stampX = val;
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Company Stamp Y (Vertical)",
+            value: _stampY,
+            min: 0,
+            max: 800,
+            onChanged: (val) {
+              setState(() {
+                _stampY = val;
+              });
+            },
+          ),
+          const Divider(color: Colors.white10, height: 32),
+          _buildCoordinateSlider(
+            label: "Distributor Signature X (Horizontal)",
+            value: _sigX,
+            min: 0,
+            max: 600,
+            onChanged: (val) {
+              setState(() {
+                _sigX = val;
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Distributor Signature Y (Vertical)",
+            value: _sigY,
+            min: 0,
+            max: 800,
+            onChanged: (val) {
+              setState(() {
+                _sigY = val;
+              });
+            },
+          ),
+          const SizedBox(height: 32),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _selectedInvoicePdf == null ||
+                      _selectedSignaturePng == null ||
+                      _selectedStampPng == null ||
+                      _signingInvoice
+                  ? null
+                  : _signInvoiceProcess,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE94057),
+                disabledBackgroundColor: Colors.white10,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: _signingInvoice
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      "Sign & Stamp Invoice",
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.white,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoordinateSlider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: Colors.grey.shade400,
+              ),
+            ),
+            Text(
+              value.round().toString(),
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFFE94057),
+              ),
+            ),
+          ],
+        ),
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          activeColor: const Color(0xFFE94057),
+          inactiveColor: Colors.black26,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _signInvoiceProcess() async {
+    setState(() {
+      _signingInvoice = true;
+    });
+
+    try {
+      final payload = {
+        "invoiceFile": _selectedInvoicePdf!.base64String,
+        "signaturePng": _selectedSignaturePng!.base64String,
+        "stampPng": _selectedStampPng!.base64String,
+        "stampX": _stampX.round(),
+        "stampY": _stampY.round(),
+        "sigX": _sigX.round(),
+        "sigY": _sigY.round(),
+      };
+
+      final response = await _supabaseService.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: payload,
+      );
+
+      if (response.status == 200 && response.data != null) {
+        final bytes = response.data as List<int>;
+        final uint8Bytes = Uint8List.fromList(bytes);
+
+        final originalName = _selectedInvoicePdf!.filename;
+        final outputName = originalName.toLowerCase().endsWith(".zip")
+            ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.zip"
+            : (originalName.toLowerCase().endsWith(".pdf")
+                ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.pdf"
+                : "${originalName}_SIGNED.pdf");
+
+        await fph.saveFileBytes(uint8Bytes, outputName);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Invoice signed successfully! Download started."),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception(response.data?["error"] ?? "Failed to sign invoice. Server returned status code ${response.status}");
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error: ${e.toString()}"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _signingInvoice = false;
+        });
+      }
+    }
   }
 }
