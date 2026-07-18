@@ -18,6 +18,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
   late Future<Map<String, dynamic>> _portfolioDataFuture;
   final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
+  TextEditingController? _autocompleteTextController;
 
   @override
   void initState() {
@@ -266,6 +267,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         });
                       },
                       onSelected: (Map<String, dynamic> selection) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _autocompleteTextController?.clear();
+                        });
                         showDialog(
                           context: context,
                           builder: (context) => FactsheetDialog(
@@ -277,6 +281,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         );
                       },
                       fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                        _autocompleteTextController = textEditingController;
                         return TextField(
                           controller: textEditingController,
                           focusNode: focusNode,

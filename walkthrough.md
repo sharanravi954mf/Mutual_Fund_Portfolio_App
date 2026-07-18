@@ -27,10 +27,10 @@
 ### 1.5 Unregistered Client Ingestion & Auto-Linking
 * **Unregistered Ingestion**: Automatically creates profile records in the `profiles` table using the name and PAN from the statement.
 * **Auto-Linking Trigger**: Updated the `handle_new_user()` trigger. When a new user registers on the app via email/mobile/PAN, it auto-links their profile, instantly populating their portfolio.
-
-### 1.6 CAMS WBR9 Blueprint Schema & Staging Table
-* **Staging Table**: Added `cams_statements` table to record raw parsed CAMS WBR9 fields (Folio, PANs, contact details, nominees, banking info).
-* **Positional DBF Parsing**: Extracts all 25+ fields of the CAMS WBR9 specification, trims whitespace pads, aligns decimals to 6 decimal positions (`CLOS_BAL`, `RUPEE_BAL`), and streams records directly into the table.
+### 1.7 In-Memory Batch ZIP Invoice Signer
+* **Dual Format Support**: The Invoice Signer tab handles both single `.pdf` files and zipped `.zip` file archives containing multiple PDFs.
+* **In-Memory ZIP Processing**: Extends Deno Edge Function to dynamically extract PDF entries from ZIP archives in-memory, sign/stamp them with configurable placement offsets, compress them back to a new ZIP archive, and return the zipped binary.
+* **Auto Cache-Busting**: Added cache unregistration to `index.html` to prevent Safari and Chrome from serving cached Service Worker builds.
 
 ---
 
@@ -81,7 +81,7 @@ Edge functions successfully deployed to Supabase project `auxbbotbcvrgzvynyrgg`:
 ```json
 {
   "project_ref": "auxbbotbcvrgzvynyrgg",
-  "functions": ["cams-kfintech-ingestion"],
+  "functions": ["cams-kfintech-ingestion", "sign-stamp-invoice"],
   "dashboard_url": "https://supabase.com/dashboard/project/auxbbotbcvrgzvynyrgg/functions",
   "message": "Deployed Functions."
 }
