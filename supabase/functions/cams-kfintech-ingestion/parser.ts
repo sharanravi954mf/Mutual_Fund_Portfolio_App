@@ -13,6 +13,34 @@ export interface ParsedTransaction {
   nav: number;
   amount: number;
   date: Date;
+
+  // CAMS WBR9 Blueprint Schema
+  foliochk: string;
+  inv_name: string;
+  address1: string;
+  address2: string;
+  address3: string;
+  city: string;
+  pincode: string;
+  product: string;
+  sch_name: string;
+  rep_date: Date;
+  clos_bal: number;
+  rupee_bal: number;
+  pan_no: string;
+  joint1_pan: string;
+  joint2_pan: string;
+  guard_pan: string;
+  email: string;
+  mobile_no: string;
+  bank_name: string;
+  branch: string;
+  ac_type: string;
+  ac_no: string;
+  ifsc_code: string;
+  nom_name: string;
+  relation: string;
+  nom_percen: number;
 }
 
 export interface ParsingError {
@@ -25,6 +53,13 @@ interface DbfField {
   name: string;
   type: string;
   length: number;
+}
+
+function parseDecimal(val: any): number {
+  const parsed = parseFloat(val);
+  if (isNaN(parsed)) return 0;
+  // Format/align decimals up to 6 decimal positions
+  return Math.round(parsed * 1000000) / 1000000;
 }
 
 // 1. Pure TypeScript DBF File Format Parser
@@ -99,7 +134,7 @@ function parseDbf(data: Uint8Array): Array<Record<string, any>> {
   return records;
 }
 
-// 2. Map xBase / dBASE DBF key-values to ParsedTransaction structure
+// 2. Map CAMS WBR9 keys to dynamic ParsedTransaction model
 function mapDbfRecordToTransaction(rec: Record<string, any>): ParsedTransaction {
   const getVal = (keys: string[]): any => {
     for (const k of keys) {
@@ -111,40 +146,75 @@ function mapDbfRecordToTransaction(rec: Record<string, any>): ParsedTransaction 
     return null;
   };
 
-  const clientPan = String(getVal(["pan", "appl_pan", "pan_no", "pan_num"]) || "").toUpperCase().trim();
-  const investorName = String(getVal(["inv_name", "holder_name", "name", "inv_nm"]) || "Unknown").trim();
-  const folioNumber = String(getVal(["folio_no", "folio_num", "folio"]) || "").trim();
-  const schemeCode = String(getVal(["scheme_cd", "sch_code", "scheme_code", "fm_code"]) || "").trim();
-  const schemeName = String(getVal(["scheme_nm", "scheme_name", "fm_name", "sch_name"]) || "Unknown Scheme").trim();
+  // CAMS WBR9 Explicit Alphanumeric, Date and Numeric Attributes
+  const foliochk = String(getVal(["foliochk", "folio_no", "folio"]) || "").trim();
+  const inv_name = String(getVal(["inv_name", "holder_name", "name", "inv_nm"]) || "Unknown").trim();
+  const address1 = String(getVal(["address1", "add1"]) || "").trim();
+  const address2 = String(getVal(["address2", "add2"]) || "").trim();
+  const address3 = String(getVal(["address3", "add3"]) || "").trim();
+  const city = String(getVal(["city"]) || "").trim();
+  const pincode = String(getVal(["pincode", "pin"]) || "").trim();
+  const product = String(getVal(["product", "scheme_cd", "sch_code", "fm_code"]) || "").trim();
+  const sch_name = String(getVal(["sch_name", "scheme_nm", "scheme_name", "fm_name"]) || "Unknown Scheme").trim();
+  
+  const rawRepDate = getVal(["rep_date", "trx_date", "tx_date", "date", "execution_date"]);
+  let rep_date = new Date();
+  if (rawRepDate) {
+    const dStr = String(rawRepDate).trim();
+    if (dStr.length === 8 && /^\d+$/.test(dStr)) {
+      // YYYYMMDD format support
+      const y = parseInt(dStr.substring(0, 4));
+      const m = parseInt(dStr.substring(4, 6)) - 1;
+      const d = parseInt(dStr.substring(6, 8));
+      rep_date = new Date(y, m, d);
+    } else {
+      rep_date = new Date(dStr);
+    }
+  }
+  
+  // Align decimals up to 6 decimal positions
+  const clos_bal = parseDecimal(getVal(["clos_bal", "units", "qty", "unit_qty"]));
+  const rupee_bal = parseDecimal(getVal(["rupee_bal", "amount", "amt", "trx_amt"]));
+  
+  const pan_no = String(getVal(["pan_no", "pan", "appl_pan"]) || "").toUpperCase().trim();
+  const joint1_pan = String(getVal(["joint1_pan"]) || "").toUpperCase().trim();
+  const joint2_pan = String(getVal(["joint2_pan"]) || "").toUpperCase().trim();
+  const guard_pan = String(getVal(["guard_pan"]) || "").toUpperCase().trim();
+  
+  const email = String(getVal(["email"]) || "").trim();
+  const mobile_no = String(getVal(["mobile_no", "mobile"]) || "").trim();
+  
+  const bank_name = String(getVal(["bank_name", "bank"]) || "").trim();
+  const branch = String(getVal(["branch"]) || "").trim();
+  const ac_type = String(getVal(["ac_type"]) || "").trim();
+  const ac_no = String(getVal(["ac_no", "acno"]) || "").trim();
+  const ifsc_code = String(getVal(["ifsc_code", "ifsc"]) || "").trim();
+  
+  const nom_name = String(getVal(["nom_name", "nominee"]) || "").trim();
+  const relation = String(getVal(["relation"]) || "").trim();
+  const nom_percen = parseDecimal(getVal(["nom_percen", "nominee_percent"]));
+
+  // Backward compatible mappings for portfolios sync
+  const clientPan = pan_no;
+  const investorName = inv_name;
+  const folioNumber = foliochk;
+  const schemeCode = product;
+  const schemeName = sch_name;
   const fundHouse = String(getVal(["fund_house", "fm_house", "amc_name", "amc"]) || "Mutual Fund").trim();
   const category = String(getVal(["category", "scheme_cat", "cat"]) || "Mutual Fund").trim();
   
   const rawType = String(getVal(["trx_type", "tx_type", "type", "tr_type"]) || "").toUpperCase();
   let transactionType: "BUY" | "SELL" | "SWITCH" = "BUY";
-  if (rawType.includes("SELL") || rawType.includes("RED") || rawType.includes("OUT")) {
+  if (rawType.includes("SELL") || rawType.includes("RED") || rawType.includes("OUT") || clos_bal < 0) {
     transactionType = "SELL";
   } else if (rawType.includes("SWITCH") || rawType.includes("SWI")) {
     transactionType = "SWITCH";
   }
 
-  const units = parseFloat(getVal(["units", "qty", "unit_qty"]) || "0");
-  const nav = parseFloat(getVal(["nav", "price", "rate"]) || "0");
-  const amount = parseFloat(getVal(["amount", "amt", "trx_amt"]) || "0");
-  
-  const rawDate = getVal(["trx_date", "tx_date", "date", "execution_date"]);
-  let date = new Date();
-  if (rawDate) {
-    const dStr = String(rawDate).trim();
-    if (dStr.length === 8 && /^\d+$/.test(dStr)) {
-      // YYYYMMDD format
-      const y = parseInt(dStr.substring(0, 4));
-      const m = parseInt(dStr.substring(4, 6)) - 1;
-      const d = parseInt(dStr.substring(6, 8));
-      date = new Date(y, m, d);
-    } else {
-      date = new Date(dStr);
-    }
-  }
+  const units = Math.abs(clos_bal);
+  const amount = Math.abs(rupee_bal);
+  const navVal = parseFloat(getVal(["nav", "price", "rate"]) || "0");
+  const nav = navVal > 0 ? navVal : (units > 0 ? Math.round((amount / units) * 10000) / 10000 : 0);
 
   return {
     clientPan,
@@ -158,46 +228,63 @@ function mapDbfRecordToTransaction(rec: Record<string, any>): ParsedTransaction 
     units,
     nav,
     amount,
-    date
+    date: rep_date,
+
+    foliochk,
+    inv_name,
+    address1,
+    address2,
+    address3,
+    city,
+    pincode,
+    product,
+    sch_name,
+    rep_date,
+    clos_bal,
+    rupee_bal,
+    pan_no,
+    joint1_pan,
+    joint2_pan,
+    guard_pan,
+    email,
+    mobile_no,
+    bank_name,
+    branch,
+    ac_type,
+    ac_no,
+    ifsc_code,
+    nom_name,
+    relation,
+    nom_percen
   };
 }
 
 // 3. Schema and values validation helper
 function validateParsedTransaction(tx: ParsedTransaction): string[] {
   const errors: string[] = [];
-  if (!tx.folioNumber) errors.push("Folio number is missing");
+  if (!tx.foliochk) errors.push("Folio number is missing");
   
   const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-  if (!tx.clientPan) {
+  if (!tx.pan_no) {
     errors.push("PAN is missing");
-  } else if (!panRegex.test(tx.clientPan.toUpperCase())) {
-    errors.push(`Invalid PAN format: "${tx.clientPan}"`);
+  } else if (!panRegex.test(tx.pan_no.toUpperCase())) {
+    errors.push(`Invalid PAN format: "${tx.pan_no}"`);
   }
   
-  if (!tx.investorName) errors.push("Investor name is missing");
-  if (!tx.schemeCode) errors.push("Scheme code is missing");
-  if (!tx.schemeName) errors.push("Scheme name is missing");
-  if (!tx.fundHouse) errors.push("Fund house is missing");
-  if (!tx.category) errors.push("Category is missing");
+  if (!tx.inv_name) errors.push("Investor name is missing");
+  if (!tx.product) errors.push("Scheme product code is missing");
+  if (!tx.sch_name) errors.push("Scheme name is missing");
   
-  if (tx.transactionType !== "BUY" && tx.transactionType !== "SELL" && tx.transactionType !== "SWITCH") {
-    errors.push(`Invalid transaction type: "${tx.transactionType}" (must be BUY, SELL, or SWITCH)`);
+  if (isNaN(tx.clos_bal)) {
+    errors.push(`Invalid closing balance: "${tx.clos_bal}"`);
   }
   
-  if (isNaN(tx.units) || tx.units <= 0) {
-    errors.push(`Invalid units: "${tx.units}" (must be a positive number)`);
+  if (isNaN(tx.rupee_bal)) {
+    errors.push(`Invalid rupee balance: "${tx.rupee_bal}"`);
   }
   
-  if (isNaN(tx.nav) || tx.nav < 0) {
-    errors.push(`Invalid NAV: "${tx.nav}" (must be a non-negative number)`);
-  }
-  
-  if (isNaN(tx.amount) || tx.amount < 0) {
-    errors.push(`Invalid amount: "${tx.amount}" (must be a non-negative number)`);
-  }
-  
-  if (isNaN(tx.date.getTime())) {
-    errors.push(`Invalid date format: "${tx.date}"`);
+  if (isNaN(tx.rep_date.getTime())) {
+    errors.push(`Invalid date format: "${tx.rep_date}"`);
   }
   
   return errors;
@@ -356,12 +443,12 @@ export class RtaFileParser {
     }
 
     const parts = trimmed.split(delimiter).map(p => p.trim());
-    if (parts.length !== 12) {
+    if (parts.length < 12) {
       this.totalErrors++;
       this.errors.push({
         line: trimmed,
         lineNumber: lineNum,
-        reason: `Incorrect number of fields: expected 12, got ${parts.length}`
+        reason: `Incorrect number of fields: expected at least 12, got ${parts.length}`
       });
       return null;
     }
@@ -381,19 +468,51 @@ export class RtaFileParser {
       dateStr
     ] = parts;
 
+    // Convert parsed CSV line to the ParsedTransaction blueprint structure
+    const clos_bal = parseDecimal(unitsStr);
+    const rupee_bal = parseDecimal(amountStr);
+    const rep_date = new Date(dateStr);
+
     const transaction = {
-      folioNumber: folio,
       clientPan: pan.toUpperCase(),
       investorName: name,
+      folioNumber: folio,
       schemeCode,
       schemeName,
       fundHouse,
       category,
       transactionType: type.toUpperCase() as "BUY" | "SELL" | "SWITCH",
-      units: parseFloat(unitsStr),
+      units: clos_bal,
       nav: parseFloat(navStr),
-      amount: parseFloat(amountStr),
-      date: new Date(dateStr)
+      amount: rupee_bal,
+      date: rep_date,
+
+      foliochk: folio,
+      inv_name: name,
+      address1: "",
+      address2: "",
+      address3: "",
+      city: "",
+      pincode: "",
+      product: schemeCode,
+      sch_name: schemeName,
+      rep_date,
+      clos_bal,
+      rupee_bal,
+      pan_no: pan.toUpperCase(),
+      joint1_pan: "",
+      joint2_pan: "",
+      guard_pan: "",
+      email: "",
+      mobile_no: "",
+      bank_name: "",
+      branch: "",
+      ac_type: "",
+      ac_no: "",
+      ifsc_code: "",
+      nom_name: "",
+      relation: "",
+      nom_percen: 0.0
     };
 
     const validationErrors = validateParsedTransaction(transaction);
