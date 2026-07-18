@@ -55,6 +55,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _signingInvoice = false;
   String _selectedPreset = "CAMS Distributor (Default)";
 
+  // Excel Metadata Ingestion & Updater variables
+  fph.PickedFileData? _selectedExcelFile;
+  fph.PickedFileData? _selectedExcelZipArchive;
+  bool _updatingExcel = false;
+
   void _applyCoordinatePreset(String preset) {
     setState(() {
       _selectedPreset = preset;
@@ -1043,6 +1048,45 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
             },
           ),
+          const Divider(color: Colors.white10, height: 48),
+          Text(
+            "Excel Invoice Metadata Ingestion & Auto-Updater",
+            style: GoogleFonts.outfit(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Upload an Excel sheets tracker (.xlsx) alongside a ZIP containing corresponding PDF invoices. The system will extract the Invoice Number, Invoice Date, and File Name from the PDFs, automatically match them to the correct AMC rows, and download the fully updated Excel workbook.",
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 24),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isDesktop = constraints.maxWidth > 800;
+              return isDesktop
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _buildExcelUploadPanel()),
+                        const SizedBox(width: 24),
+                        Expanded(child: _buildExcelControlPanel()),
+                      ],
+                    )
+                  : Column(
+                      children: [
+                        _buildExcelUploadPanel(),
+                        const SizedBox(height: 24),
+                        _buildExcelControlPanel(),
+                      ],
+                    );
+            },
+          ),
         ],
       ),
     );
@@ -1537,5 +1581,173 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       }
     }
+  }
+
+  Future<void> _updateExcelProcess() async {
+    setState(() {
+      _updatingExcel = true;
+    });
+
+    try {
+      final originalExcelName = _selectedExcelFile!.filename;
+      final payload = {
+        "excelFile": _selectedExcelFile!.base64String,
+        "zipFile": _selectedExcelZipArchive!.base64String,
+      };
+
+      final response = await _supabaseService.client.functions.invoke(
+        'update-excel-metadata',
+        body: payload,
+      );
+
+      if (response.status == 200 && response.data != null) {
+        final Map<String, dynamic> responseData = response.data is String 
+            ? jsonDecode(response.data as String) 
+            : Map<String, dynamic>.from(response.data as Map);
+        
+        final base64Excel = responseData['updatedExcel'] as String;
+        final updatedCount = responseData['updatedCount'] as int;
+        
+        final uint8Bytes = base64Decode(base64Excel);
+        
+        final outputName = originalExcelName.toLowerCase().endsWith(".xlsx")
+            ? "${originalExcelName.substring(0, originalExcelName.length - 5)}_UPDATED.xlsx"
+            : "${originalExcelName}_UPDATED.xlsx";
+
+        await fph.saveFileBytes(uint8Bytes, outputName);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Excel updated successfully! Populated $updatedCount invoice records. Download started."),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception(response.data?["error"] ?? "Failed to process Excel file. Server returned status code ${response.status}");
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Error: ${e.toString()}"),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingExcel = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildExcelUploadPanel() {
+    return Column(
+      children: [
+        _buildUploadCard(
+          title: "Select Excel Invoice Tracker (.xlsx)",
+          subtitle: _selectedExcelFile != null ? _selectedExcelFile!.filename : "Select Excel File",
+          icon: Icons.table_chart_outlined,
+          isSelected: _selectedExcelFile != null,
+          onTap: () async {
+            final file = await fph.pickFile('.xlsx');
+            if (file != null) {
+              setState(() {
+                _selectedExcelFile = file;
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildUploadCard(
+          title: "Select CAMS Invoices ZIP Archive",
+          subtitle: _selectedExcelZipArchive != null ? _selectedExcelZipArchive!.filename : "Select ZIP Archive",
+          icon: Icons.archive_outlined,
+          isSelected: _selectedExcelZipArchive != null,
+          onTap: () async {
+            final file = await fph.pickFile('.zip,application/zip,application/x-zip-compressed');
+            if (file != null) {
+              setState(() {
+                _selectedExcelZipArchive = file;
+              });
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExcelControlPanel() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151030),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Auto-Extraction Status",
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _selectedExcelFile == null || _selectedExcelZipArchive == null
+                ? "Please upload both the Excel tracker and PDF ZIP archive to start processing."
+                : "Ready to automatically extract invoice data and update matching rows.",
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 32),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _selectedExcelFile == null ||
+                      _selectedExcelZipArchive == null ||
+                      _updatingExcel
+                  ? null
+                  : _updateExcelProcess,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE94057),
+                disabledBackgroundColor: Colors.white10,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: _updatingExcel
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      "Process & Update Excel",
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: Colors.white,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
