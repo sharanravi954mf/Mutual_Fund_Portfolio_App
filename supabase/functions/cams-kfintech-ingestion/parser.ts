@@ -154,8 +154,8 @@ function mapDbfRecordToTransaction(rec: Record<string, any>): ParsedTransaction 
   const address3 = String(getVal(["address3", "add3"]) || "").trim();
   const city = String(getVal(["city"]) || "").trim();
   const pincode = String(getVal(["pincode", "pin"]) || "").trim();
-  const product = String(getVal(["product", "scheme_cd", "sch_code", "fm_code"]) || "").trim();
-  const sch_name = String(getVal(["sch_name", "scheme_nm", "scheme_name", "fm_name"]) || "Unknown Scheme").trim();
+  const product = String(getVal(["product", "prodcode", "scheme_cd", "sch_code", "fm_code"]) || "").trim();
+  const sch_name = String(getVal(["sch_name", "scheme", "scheme_nm", "scheme_name", "fm_name"]) || "Unknown Scheme").trim();
   
   const rawRepDate = getVal(["rep_date", "trx_date", "tx_date", "date", "execution_date"]);
   let rep_date = new Date();

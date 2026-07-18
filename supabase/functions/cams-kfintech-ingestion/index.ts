@@ -39,12 +39,17 @@ serve(async (req) => {
     // 2. Fetch attachments
     const attachments = await imap.fetchNewReportAttachments();
 
-    // 3. Process each attachment
+    // 3. Process each attachment in a single batch
     for (const attachment of attachments) {
       const parsedStream = parser.parseFileStream(attachment.filename, attachment.data);
+      const batch = [];
       for await (const record of parsedStream) {
-        await db.processParsedRecord(record);
-        recordsProcessed++;
+        batch.push(record);
+      }
+      if (batch.length > 0) {
+        console.log(`Ingesting batch of ${batch.length} parsed records...`);
+        await db.processParsedRecordsBatch(batch);
+        recordsProcessed += batch.length;
       }
     }
 
