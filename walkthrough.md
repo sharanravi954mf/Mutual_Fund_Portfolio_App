@@ -25,20 +25,26 @@
 * **Schema Validation**: Unified validator checks columns (PAN, Folio, Units, Amount, Date, etc.) for database constraints.
 
 ### 1.5 Unregistered Client Ingestion & Auto-Linking
-* **Unregistered Ingestion**: The system no longer drops or skips records of unregistered clients. It automatically creates "ghost" profile records in the `profiles` table using the name and PAN from the statement.
-* **Auto-Linking Trigger**: Updated the `handle_new_user()` database trigger. When a new user registers on the app via email/mobile/PAN, the trigger searches for any pre-existing ghost profile and automatically links it, instantly populating their portfolio.
+* **Unregistered Ingestion**: Automatically creates profile records in the `profiles` table using the name and PAN from the statement.
+* **Auto-Linking Trigger**: Updated the `handle_new_user()` trigger. When a new user registers on the app via email/mobile/PAN, it auto-links their profile, instantly populating their portfolio.
+
+### 1.6 CAMS WBR9 Blueprint Schema & Staging Table
+* **Staging Table**: Added `cams_statements` table to record raw parsed CAMS WBR9 fields (Folio, PANs, contact details, nominees, banking info).
+* **Positional DBF Parsing**: Extracts all 25+ fields of the CAMS WBR9 specification, trims whitespace pads, aligns decimals to 6 decimal positions (`CLOS_BAL`, `RUPEE_BAL`), and streams records directly into the table.
 
 ---
 
 ## 2. Database Migration Deployment Instructions
 
-To apply the schema changes and update RLS policies, execute the SQL migration script:
+To apply the schema changes and update RLS policies, execute the SQL migration scripts in order:
 
-1. Open your **[Supabase Dashboard](https://supabase.com/dashboard)**.
-2. Navigate to **SQL Editor** on the left menu.
-3. Click **New Query**.
-4. Copy the SQL commands from **[20260718000001_unregistered_clients.sql](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/supabase/migrations/20260718000001_unregistered_clients.sql)** and paste them into the editor.
-5. Click **Run**.
+### Migration 1: Unregistered Clients & Auto-Linking
+1. Copy the SQL commands from **[20260718000001_unregistered_clients.sql](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/supabase/migrations/20260718000001_unregistered_clients.sql)**.
+2. Run them in your **[Supabase Dashboard SQL Editor](https://supabase.com/dashboard/project/auxbbotbcvrgzvynyrgg/sql/new)**.
+
+### Migration 2: CAMS WBR9 Staging Table
+1. Copy the SQL commands from **[20260718000002_cams_statements_schema.sql](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/supabase/migrations/20260718000002_cams_statements_schema.sql)**.
+2. Run them in your **[Supabase Dashboard SQL Editor](https://supabase.com/dashboard/project/auxbbotbcvrgzvynyrgg/sql/new)**.
 
 ---
 
@@ -62,9 +68,9 @@ Extracting file: 17072026065215_208650458R9.dbf
 Parsing DBF database structure: 17072026065215_208650458R9.dbf
 Successfully extracted 1 records from DBF.
 ----- output end -----
-RTA Ingestion Ingests Password-Protected ZIP containing DBF Statement ... ok (24ms)
+RTA Ingestion Ingests Password-Protected ZIP containing DBF Statement ... ok (25ms)
 
-ok | 1 passed | 0 failed (27ms)
+ok | 1 passed | 0 failed (28ms)
 ```
 
 ---
