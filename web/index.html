@@ -18,6 +18,16 @@
 
   <title>Sharan Fincorp</title>
   <link rel="manifest" href="manifest.json">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for (let registration of registrations) {
+          registration.unregister();
+          console.log("Unregistered service worker to force new build reload.");
+        }
+      });
+    }
+  </script>
 </head>
 <body style="background-color: #0F0C20;">
   <script src="flutter_bootstrap.js" async></script>
