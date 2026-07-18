@@ -7,6 +7,9 @@ import '../providers/auth_provider.dart';
 import 'client_detail_screen.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
+import 'dart:typed_data';
+import 'dart:convert';
+import 'package:archive/archive.dart' as archive;
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -1305,44 +1308,121 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      final payload = {
-        "invoiceFile": _selectedInvoicePdf!.base64String,
-        "signaturePng": _selectedSignaturePng!.base64String,
-        "stampPng": _selectedStampPng!.base64String,
-        "stampX": _stampX.round(),
-        "stampY": _stampY.round(),
-        "sigX": _sigX.round(),
-        "sigY": _sigY.round(),
-      };
+      final originalName = _selectedInvoicePdf!.filename;
+      final isZip = originalName.toLowerCase().endsWith(".zip");
 
-      final response = await _supabaseService.client.functions.invoke(
-        'sign-stamp-invoice',
-        body: payload,
-      );
+      if (isZip) {
+        final zipBytes = base64Decode(_selectedInvoicePdf!.base64String!);
+        final decoder = archive.ZipDecoder();
+        final archiveFiles = decoder.decodeBytes(zipBytes);
+        
+        final outArchive = archive.Archive();
+        final encoder = archive.ZipEncoder();
+        
+        int signedCount = 0;
+        int skippedCount = 0;
 
-      if (response.status == 200 && response.data != null) {
-        final bytes = response.data as List<int>;
-        final uint8Bytes = Uint8List.fromList(bytes);
+        for (final file in archiveFiles.files) {
+          final lowerName = file.name.toLowerCase();
+          final filenameOnly = file.name.split('/').last;
 
-        final originalName = _selectedInvoicePdf!.filename;
+          if (file.isFile &&
+              lowerName.endsWith('.pdf') &&
+              !lowerName.contains('__macosx') &&
+              !filenameOnly.startsWith('._')) {
+            
+            final rawBytes = file.content as List<int>;
+            final base64Pdf = base64Encode(rawBytes);
+
+            final payload = {
+              "invoiceFile": base64Pdf,
+              "signaturePng": _selectedSignaturePng!.base64String,
+              "stampPng": _selectedStampPng!.base64String,
+              "stampX": _stampX.round(),
+              "stampY": _stampY.round(),
+              "sigX": _sigX.round(),
+              "sigY": _sigY.round(),
+            };
+
+            final response = await _supabaseService.client.functions.invoke(
+              'sign-stamp-invoice',
+              body: payload,
+            );
+
+            if (response.status == 200 && response.data != null) {
+              final signedBytes = response.data as List<int>;
+              outArchive.addFile(archive.ArchiveFile(
+                file.name,
+                signedBytes.length,
+                signedBytes,
+              ));
+              signedCount++;
+            } else {
+              outArchive.addFile(file);
+              skippedCount++;
+            }
+          } else {
+            outArchive.addFile(file);
+          }
+        }
+
+        final outputBytes = encoder.encode(outArchive);
+        if (outputBytes == null) {
+          throw Exception("Failed to encode output ZIP archive.");
+        }
+
+        final uint8Bytes = Uint8List.fromList(outputBytes);
         final outputName = originalName.toLowerCase().endsWith(".zip")
             ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.zip"
-            : (originalName.toLowerCase().endsWith(".pdf")
-                ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.pdf"
-                : "${originalName}_SIGNED.pdf");
+            : "${originalName}_SIGNED.zip";
 
         await fph.saveFileBytes(uint8Bytes, outputName);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Invoice signed successfully! Download started."),
+            SnackBar(
+              content: Text("Batch signing complete! Signed $signedCount PDFs. Download started."),
               backgroundColor: Colors.green,
             ),
           );
         }
       } else {
-        throw Exception(response.data?["error"] ?? "Failed to sign invoice. Server returned status code ${response.status}");
+        final payload = {
+          "invoiceFile": _selectedInvoicePdf!.base64String,
+          "signaturePng": _selectedSignaturePng!.base64String,
+          "stampPng": _selectedStampPng!.base64String,
+          "stampX": _stampX.round(),
+          "stampY": _stampY.round(),
+          "sigX": _sigX.round(),
+          "sigY": _sigY.round(),
+        };
+
+        final response = await _supabaseService.client.functions.invoke(
+          'sign-stamp-invoice',
+          body: payload,
+        );
+
+        if (response.status == 200 && response.data != null) {
+          final bytes = response.data as List<int>;
+          final uint8Bytes = Uint8List.fromList(bytes);
+
+          final outputName = originalName.toLowerCase().endsWith(".pdf")
+              ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.pdf"
+              : "${originalName}_SIGNED.pdf";
+
+          await fph.saveFileBytes(uint8Bytes, outputName);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Invoice signed successfully! Download started."),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else {
+          throw Exception(response.data?["error"] ?? "Failed to sign invoice. Server returned status code ${response.status}");
+        }
       }
     } catch (e) {
       if (mounted) {
