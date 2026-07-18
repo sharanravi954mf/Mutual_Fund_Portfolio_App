@@ -8,7 +8,41 @@ export class DatabaseSyncService {
   );
 
   async processParsedRecord(record: ParsedTransaction): Promise<void> {
-    // 1. Look up profile ID by PAN
+    // 1. Stream raw record directly into validated cams_statements table structure
+    const { error: insertErr } = await this.client.from("cams_statements").insert({
+      foliochk: record.foliochk,
+      inv_name: record.inv_name,
+      address1: record.address1,
+      address2: record.address2,
+      address3: record.address3,
+      city: record.city,
+      pincode: record.pincode,
+      product: record.product,
+      sch_name: record.sch_name,
+      rep_date: record.rep_date.toISOString().split("T")[0],
+      clos_bal: record.clos_bal,
+      rupee_bal: record.rupee_bal,
+      pan_no: record.pan_no,
+      joint1_pan: record.joint1_pan,
+      joint2_pan: record.joint2_pan,
+      guard_pan: record.guard_pan,
+      email: record.email,
+      mobile_no: record.mobile_no,
+      bank_name: record.bank_name,
+      branch: record.branch,
+      ac_type: record.ac_type,
+      ac_no: record.ac_no,
+      ifsc_code: record.ifsc_code,
+      nom_name: record.nom_name,
+      relation: record.relation,
+      nom_percen: record.nom_percen
+    });
+
+    if (insertErr) {
+      console.error(`Failed to ingest record into cams_statements staging table:`, insertErr);
+    }
+
+    // 2. Look up profile ID by PAN to update dynamic portfolio holdings
     const { data: profile } = await this.client
       .from("profiles")
       .select("id")
@@ -38,7 +72,7 @@ export class DatabaseSyncService {
       profileId = profile.id;
     }
 
-    // 2. Upsert Mutual Fund record
+    // 3. Upsert Mutual Fund record
     const { data: fund } = await this.client
       .from("mutual_funds")
       .upsert({
@@ -54,7 +88,7 @@ export class DatabaseSyncService {
 
     if (!fund) return;
 
-    // 3. Get or Create Portfolio for client
+    // 4. Get or Create Portfolio for client
     let { data: portfolio } = await this.client
       .from("portfolios")
       .select("id")
@@ -76,7 +110,7 @@ export class DatabaseSyncService {
 
     if (!portfolio) return;
 
-    // 4. Insert Transaction
+    // 5. Insert Transaction
     await this.client.from("transactions").insert({
       portfolio_id: portfolio.id,
       mutual_fund_id: fund.id,
@@ -87,7 +121,7 @@ export class DatabaseSyncService {
       execution_date: record.date.toISOString().split("T")[0]
     });
 
-    // 5. Call Stored Procedure to recalculate Portfolio values
+    // 6. Call Stored Procedure to recalculate Portfolio values
     await this.client.rpc("recalculate_portfolio_value", {
       portfolio_uuid: portfolio.id
     });
