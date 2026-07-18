@@ -21,8 +21,8 @@ export class ImapClient {
   }
 
   /**
-   * Connects via IMAP, searches for reports from the last 30 days (regardless of read status),
-   * and downloads attachments or parses body links.
+   * Connects via IMAP, searches for reports from the last 30 days,
+   * sorts them by newest first, and processes only the latest 3 emails to prevent timeout/compute limits.
    */
   async fetchNewReportAttachments(): Promise<EmailAttachment[]> {
     if (!this.hostname || !this.user || !this.pass) {
@@ -42,7 +42,7 @@ export class ImapClient {
     const attachments: EmailAttachment[] = [];
 
     try {
-      // Search for both read and unread matching emails received in the last 30 days
+      // 1. Search for matching emails in the last 30 days
       const searchResult = await client.search({
         since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Check last 30 days
         or: [
@@ -53,9 +53,14 @@ export class ImapClient {
         ]
       }, { uid: true });
 
-      console.log(`IMAP Search found ${searchResult.length} emails (read/unread) in the last 30 days.`);
+      console.log(`IMAP Search found ${searchResult.length} matching emails.`);
 
-      for (const uid of searchResult) {
+      // 2. Sort descending (newest first) and take only the latest 3 to prevent timeouts and memory leaks
+      const latestUids = searchResult.sort((a: number, b: number) => b - a).slice(0, 3);
+      console.log(`Restricting execution to the latest ${latestUids.length} emails to optimize compute resource usage.`);
+
+      for (const uid of latestUids) {
+        console.log(`Fetching email message source for UID: ${uid}`);
         const message = await client.fetchOne(uid, { source: true }, { uid: true });
         if (message && message.source) {
           const rawEmail = message.source.toString();
