@@ -15,9 +15,27 @@ export class DatabaseSyncService {
       .eq("pan", record.clientPan)
       .maybeSingle();
 
+    let profileId: string;
+
     if (!profile) {
-      // Skipping if profile doesn't exist yet
-      return;
+      console.log(`Creating profile for unregistered client: ${record.investorName} (PAN: ${record.clientPan})`);
+      const { data: newProfile, error: profileErr } = await this.client
+        .from("profiles")
+        .insert({
+          full_name: record.investorName,
+          role: "client",
+          pan: record.clientPan
+        })
+        .select("id")
+        .single();
+        
+      if (profileErr || !newProfile) {
+        console.error("Failed to create profile for unregistered client:", profileErr);
+        return;
+      }
+      profileId = newProfile.id;
+    } else {
+      profileId = profile.id;
     }
 
     // 2. Upsert Mutual Fund record
@@ -40,14 +58,14 @@ export class DatabaseSyncService {
     let { data: portfolio } = await this.client
       .from("portfolios")
       .select("id")
-      .eq("client_id", profile.id)
+      .eq("client_id", profileId)
       .maybeSingle();
 
     if (!portfolio) {
       const { data: newPortfolio } = await this.client
         .from("portfolios")
         .insert({
-          client_id: profile.id,
+          client_id: profileId,
           total_invested_value: 0.00,
           current_market_value: 0.00
         })
