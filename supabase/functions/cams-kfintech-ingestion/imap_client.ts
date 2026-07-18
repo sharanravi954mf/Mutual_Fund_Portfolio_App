@@ -21,7 +21,7 @@ export class ImapClient {
   }
 
   /**
-   * Connects via IMAP using ImapFlow, searches for reports, and downloads attachments or parses body links.
+   * Connects via IMAP, searches for reports, and downloads attachments or parses body links.
    */
   async fetchNewReportAttachments(): Promise<EmailAttachment[]> {
     if (!this.hostname || !this.user || !this.pass) {
@@ -41,70 +41,77 @@ export class ImapClient {
     const attachments: EmailAttachment[] = [];
 
     try {
-      // 1. Search for unseen emails containing standard RTA attachments (cams@camsonline.com or kfintech@kfintech.com)
-      const searchResult1 = await client.search({
+      // 1. Unified search for unseen emails from CAMS/KFintech or containing WBR9
+      const searchResult = await client.search({
         seen: false,
         or: [
+          { subject: "WBR9" },
+          { from: "donotreply@camsonline.com" },
           { from: "cams@camsonline.com" },
           { from: "kfintech@kfintech.com" }
         ]
       }, { uid: true });
 
-      for (const uid of searchResult1) {
+      console.log(`IMAP Search found ${searchResult.length} unseen matching emails.`);
+
+      for (const uid of searchResult) {
         const message = await client.fetchOne(uid, { source: true }, { uid: true });
         if (message && message.source) {
           const rawEmail = message.source.toString();
-          const parsed = this.parseMimeAttachments(rawEmail);
-          attachments.push(...parsed);
+          
+          // A. Try parsing direct MIME attachments
+          const mimeAttachments = this.parseMimeAttachments(rawEmail);
+          if (mimeAttachments.length > 0) {
+            attachments.push(...mimeAttachments);
+          }
 
-          // Mark as read after successful extraction
-          await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
-        }
-      }
+          // B. Try extracting DownloadURL from email body (e.g. CAMS WBR9 links)
+          const decodedText = this.decodeQuotedPrintable(rawEmail);
+          // Match standard cams mailback download links (supporting .zip, .dbf, etc.)
+          const urlRegex = /https:\/\/mailback\d+\.camsonline\.com\/mailback_result\/[^\s"<>']+/g;
+          const matches = decodedText.match(urlRegex);
 
-      // 2. Search for unseen CAMS Mailback Server WBR9 reports
-      const searchResult2 = await client.search({
-        seen: false,
-        from: "CAMS Mailback Server",
-        subject: "WBR9"
-      }, { uid: true });
+          if (matches) {
+            for (const downloadUrl of matches) {
+              console.log(`Found CAMS DownloadURL in email body: ${downloadUrl}`);
+              try {
+                const response = await fetch(downloadUrl);
+                if (!response.ok) {
+                  console.error(`Failed to fetch report from: ${downloadUrl} (status: ${response.status})`);
+                  continue;
+                }
+                const fileData = new Uint8Array(await response.arrayBuffer());
 
-      for (const uid of searchResult2) {
-        const message = await client.fetchOne(uid, { source: true }, { uid: true });
-        if (message && message.source) {
-          const emailText = message.source.toString();
-          const decodedText = this.decodeQuotedPrintable(emailText);
-          // Regular Expression targeting the secure DownloadURL parameter inside the HTML table layout
-          const urlRegex = /https:\/\/mailback\d+\.camsonline\.com\/mailback_result\/[A-Za-z0-9]+/g;
-          const match = decodedText.match(urlRegex);
+                let filename = "cams_wbr9_report.zip";
+                const contentDisposition = response.headers.get("content-disposition");
+                if (contentDisposition) {
+                  const fileMatch = contentDisposition.match(/filename="?([^"\s]+)"?/i);
+                  if (fileMatch) {
+                    filename = fileMatch[1];
+                  }
+                } else {
+                  // Fallback filename extraction from URL
+                  const urlParts = downloadUrl.split("/");
+                  const lastPart = urlParts[urlParts.length - 1];
+                  if (lastPart.toLowerCase().endsWith(".zip") || lastPart.toLowerCase().endsWith(".dbf")) {
+                    filename = lastPart;
+                  }
+                }
 
-          if (match) {
-            const downloadUrl = match[0];
-            const response = await fetch(downloadUrl);
-            if (!response.ok) {
-              throw new Error(`Failed to download CAMS WBR9 report from: ${downloadUrl}`);
-            }
-            const fileData = new Uint8Array(await response.arrayBuffer());
-
-            // Extract filename from headers or use default
-            let filename = "cams_wbr9_report.txt";
-            const contentDisposition = response.headers.get("content-disposition");
-            if (contentDisposition) {
-              const fileMatch = contentDisposition.match(/filename="?([^"\s]+)"?/i);
-              if (fileMatch) {
-                filename = fileMatch[1];
+                const contentType = response.headers.get("content-type") || "application/zip";
+                attachments.push({
+                  filename,
+                  contentType,
+                  data: fileData
+                });
+              } catch (fetchErr) {
+                console.error(`Error downloading report from URL: ${downloadUrl}`, fetchErr);
               }
             }
-            const contentType = response.headers.get("content-type") || "text/plain";
-            attachments.push({
-              filename,
-              contentType,
-              data: fileData
-            });
-
-            // Mark as read after successful extraction
-            await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
           }
+
+          // Mark email as read after processing
+          await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
         }
       }
 
@@ -117,7 +124,6 @@ export class ImapClient {
 
   private parseMimeAttachments(rawEmail: string): EmailAttachment[] {
     const list: EmailAttachment[] = [];
-    // Regular expression or custom logic to find Base64 segments with content-disposition filenames
     const boundaryMatch = rawEmail.match(/boundary="?([^"\s]+)"?/i);
     if (!boundaryMatch) return [];
 
@@ -133,12 +139,15 @@ export class ImapClient {
           const filename = fileMatch[1];
           const contentType = ctMatch ? ctMatch[1] : "application/octet-stream";
           
-          // Locate base64 content
           const splitPart = part.split(/\r?\n\r?\n/);
           if (splitPart.length > 1) {
             const base64Content = splitPart.slice(1).join("").replace(/\s+/g, "");
-            const binaryVal = Uint8Array.from(Buffer.from(base64Content, "base64"));
-            list.push({ filename, contentType, data: binaryVal });
+            try {
+              const binaryVal = Uint8Array.from(Buffer.from(base64Content, "base64"));
+              list.push({ filename, contentType, data: binaryVal });
+            } catch (err) {
+              console.error(`Failed to decode MIME attachment: ${filename}`, err);
+            }
           }
         }
       }
