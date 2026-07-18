@@ -24,9 +24,25 @@
 * **Binary DBF Reader**: Decodes standard dBASE III database files (`.dbf`) into structured JavaScript objects.
 * **Schema Validation**: Unified validator checks columns (PAN, Folio, Units, Amount, Date, etc.) for database constraints.
 
+### 1.5 Unregistered Client Ingestion & Auto-Linking
+* **Unregistered Ingestion**: The system no longer drops or skips records of unregistered clients. It automatically creates "ghost" profile records in the `profiles` table using the name and PAN from the statement.
+* **Auto-Linking Trigger**: Updated the `handle_new_user()` database trigger. When a new user registers on the app via email/mobile/PAN, the trigger searches for any pre-existing ghost profile and automatically links it, instantly populating their portfolio.
+
 ---
 
-## 2. Verification Logs
+## 2. Database Migration Deployment Instructions
+
+To apply the schema changes and update RLS policies, execute the SQL migration script:
+
+1. Open your **[Supabase Dashboard](https://supabase.com/dashboard)**.
+2. Navigate to **SQL Editor** on the left menu.
+3. Click **New Query**.
+4. Copy the SQL commands from **[20260718000001_unregistered_clients.sql](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/supabase/migrations/20260718000001_unregistered_clients.sql)** and paste them into the editor.
+5. Click **Run**.
+
+---
+
+## 3. Verification Logs
 
 ### Deno Ingestion & Parser Tests
 Deno tests verify unzipping and binary DBF parsing functionality:
@@ -53,7 +69,7 @@ ok | 1 passed | 0 failed (27ms)
 
 ---
 
-## 3. Deployment Status
+## 4. Deployment Status
 
 Edge functions successfully deployed to Supabase project `auxbbotbcvrgzvynyrgg`:
 ```json
