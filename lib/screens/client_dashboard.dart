@@ -108,16 +108,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
   Future<void> _performFundSearch(String query) async {
     final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (cleanQuery.isEmpty) return;
+
     final keywords = cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
-    if (keywords.isEmpty) return;
 
-    // Find the longest keyword of length >= 3 to query the API
-    final searchKeyword = keywords.firstWhere(
-      (k) => k.length >= 3,
-      orElse: () => keywords.first,
-    );
-
-    if (searchKeyword.length < 3) {
+    // Check if it's a numeric scheme code
+    final isNumeric = RegExp(r'^\d+$').hasMatch(cleanQuery);
+    
+    if (cleanQuery.length < 3 && !isNumeric) {
       setState(() {
         _searchResults = [];
         _fundSearchError = null;
@@ -131,35 +129,49 @@ class _ClientDashboardState extends State<ClientDashboard> {
     });
 
     try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'sign-stamp-invoice',
-        body: {
-          "action": "proxy-get",
-          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(searchKeyword)}",
-        },
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.status == 200 && response.data != null) {
-        final List<dynamic> results = response.data is String
-            ? jsonDecode(response.data as String)
-            : List<dynamic>.from(response.data as List);
-
-        // Perform client-side case-insensitive multi-keyword filtering
-        final filtered = results.where((item) {
-          final name = (item['schemeName'] as String? ?? '').toLowerCase();
-          return keywords.every((kw) => name.contains(kw));
-        }).toList();
-
-        setState(() {
-          _searchResults = filtered;
-          _searchingFunds = false;
-          if (filtered.isEmpty) {
-            _fundSearchError = "No funds found matching '$cleanQuery'.";
+      List<dynamic> results = [];
+      
+      // If it is numeric, construct a virtual search result directly
+      if (isNumeric && cleanQuery.length >= 5 && cleanQuery.length <= 6) {
+        results = [
+          {
+            "schemeCode": int.parse(cleanQuery),
+            "schemeName": "Fetch Scheme Code: $cleanQuery",
           }
-        });
+        ];
       } else {
-        throw Exception("Failed to search funds through proxy.");
+        // Query search API with the ENTIRE cleanQuery
+        final response = await Supabase.instance.client.functions.invoke(
+          'sign-stamp-invoice',
+          body: {
+            "action": "proxy-get",
+            "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(cleanQuery)}",
+          },
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.status == 200 && response.data != null) {
+          results = response.data is String
+              ? jsonDecode(response.data as String)
+              : List<dynamic>.from(response.data as List);
+        } else {
+          throw Exception("Failed to search funds through proxy.");
+        }
       }
+
+      // Perform client-side case-insensitive multi-keyword filtering on name and code
+      final filtered = results.where((item) {
+        final name = (item['schemeName'] as String? ?? '').toLowerCase();
+        final code = (item['schemeCode'] ?? '').toString().toLowerCase();
+        return keywords.every((kw) => name.contains(kw) || code.contains(kw));
+      }).toList();
+
+      setState(() {
+        _searchResults = filtered;
+        _searchingFunds = false;
+        if (filtered.isEmpty) {
+          _fundSearchError = "No funds found matching '$cleanQuery'.";
+        }
+      });
     } catch (e) {
       setState(() {
         _searchResults = [];
@@ -168,6 +180,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
       });
     }
   }
+
 
   String _getRangeLabel(String range) {
     switch (range) {
