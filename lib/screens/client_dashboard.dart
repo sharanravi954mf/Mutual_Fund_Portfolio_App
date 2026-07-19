@@ -454,293 +454,298 @@ class _ClientDashboardState extends State<ClientDashboard> {
           );
         }
 
+        final mainScaffold = Scaffold(
+          backgroundColor: showSidebar ? Colors.transparent : colors.background,
+          drawer: showSidebar
+              ? null
+              : Drawer(
+                  backgroundColor: colors.background,
+                  child: SafeArea(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 1. User Profile Header
+                        Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 28,
+                                backgroundColor: colors.primary.withOpacity(0.15),
+                                child: Text(
+                                  clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                                  style: GoogleFonts.outfit(
+                                    color: colors.primary,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 24,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                clientName,
+                                style: GoogleFonts.outfit(
+                                  color: colors.textPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                user?.email ?? '',
+                                style: GoogleFonts.inter(
+                                  color: colors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ).animate()
+                          .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                          .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                          .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+
+                        Divider(color: colors.border, height: 1),
+                        const SizedBox(height: 16),
+
+                        // 2. Navigation items
+                        Expanded(
+                          child: ListView(
+                            padding: EdgeInsets.zero,
+                            children: [
+                              _buildDrawerItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors, context),
+                              _buildDrawerItem(1, "Factsheets", Icons.document_scanner_outlined, colors, context),
+                              _buildDrawerItem(2, t('settings'), Icons.settings_outlined, colors, context),
+                              _buildDrawerItem(3, t('about_us_nav'), Icons.info_outline, colors, context),
+                              _buildDrawerItem(4, t('contact_us'), Icons.contact_support_outlined, colors, context),
+                            ],
+                          ),
+                        ),
+
+                        Divider(color: colors.border, height: 1),
+
+                        // 3. Logout List Tile at the bottom
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pop(context); // Close the drawer
+                              authProvider.signOut();
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.logout, color: colors.primary, size: 20),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    t('logout'),
+                                    style: GoogleFonts.inter(
+                                      color: colors.primary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ).animate(delay: const Duration(milliseconds: 6 * 80))
+                          .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                          .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                          .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+                      ],
+                    ),
+                  ),
+                ),
+          appBar: AppBar(
+            backgroundColor: colors.surface,
+            elevation: 0,
+            iconTheme: IconThemeData(color: colors.textPrimary),
+            leading: showSidebar
+                ? null
+                : Builder(
+                    builder: (context) => IconButton(
+                      icon: const Icon(Icons.menu),
+                      onPressed: () => Scaffold.of(context).openDrawer(),
+                    ),
+                  ),
+            title: Text(
+              appBarTitle,
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.bold,
+                color: colors.textPrimary,
+              ),
+            ),
+            actions: [
+              IconButton(
+                icon: Icon(Icons.refresh, color: colors.textSecondary),
+                tooltip: t('refresh_data'),
+                onPressed: _refreshData,
+              ),
+              const SizedBox(width: 8),
+              // My Account Profile dropdown menu button
+              PopupMenuButton<int>(
+                icon: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: colors.primary.withOpacity(0.15),
+                  child: Text(
+                    clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                    style: GoogleFonts.outfit(
+                      color: colors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                offset: const Offset(0, 48),
+                color: colors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: colors.border),
+                ),
+                onSelected: (val) {
+                  if (val == 1) {
+                    authProvider.signOut();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    enabled: false,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          clientName,
+                          style: GoogleFonts.outfit(
+                            color: colors.textPrimary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user?.email ?? '',
+                          style: GoogleFonts.inter(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 1,
+                    child: Row(
+                      children: [
+                        Icon(Icons.logout, color: colors.primary, size: 18),
+                        const SizedBox(width: 10),
+                        Text(
+                          t('logout'),
+                          style: GoogleFonts.inter(
+                            color: colors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 16),
+            ],
+          ),
+          bottomNavigationBar: !showSidebar
+              ? BottomNavigationBar(
+                  currentIndex: _selectedTab,
+                  backgroundColor: colors.surface,
+                  selectedItemColor: colors.primary,
+                  unselectedItemColor: colors.textSecondary,
+                  type: BottomNavigationBarType.fixed,
+                  onTap: (index) {
+                    setState(() {
+                      _selectedTab = index;
+                    });
+                  },
+                  items: [
+                    BottomNavigationBarItem(icon: const Icon(Icons.account_balance_wallet_outlined), label: t('portfolio').split(' ')[0]),
+                    BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: "Factsheets"),
+                    BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
+                    BottomNavigationBarItem(icon: const Icon(Icons.info_outline), label: t('about_us_nav').split(' ')[0]),
+                    BottomNavigationBarItem(icon: const Icon(Icons.contact_support_outlined), label: t('contact_us').split(' ')[0]),
+                  ],
+                )
+              : null,
+          body: SafeArea(
+            child: tabContent,
+          ),
+        );
+
+        if (!showSidebar) {
+          return mainScaffold;
+        }
+
         return Scaffold(
           backgroundColor: colors.background,
           body: Row(
             children: [
               // Sidebar left panel (Desktop only)
-              if (showSidebar)
-                Container(
-                  width: 260,
-                  decoration: BoxDecoration(
-                    color: colors.surface,
-                    border: Border(right: BorderSide(color: colors.border)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Row(
-                          children: [
-                            Icon(Icons.shield_outlined, color: colors.primary, size: 28),
-                            const SizedBox(width: 12),
-                            Text(
-                              t('investor_console').split(' ')[0] + " Central",
-                              style: GoogleFonts.outfit(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: colors.textPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Divider(color: colors.border, height: 1),
-                      const SizedBox(height: 16),
-                      _buildSidebarItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors),
-                      _buildSidebarItem(1, t('search_explore_factsheets').split(' ')[0] + " Factsheets", Icons.document_scanner_outlined, colors),
-                      _buildSidebarItem(2, t('settings'), Icons.settings_outlined, colors),
-                      _buildSidebarItem(3, t('about_us_nav'), Icons.info_outline, colors),
-                      _buildSidebarItem(4, t('contact_us'), Icons.contact_support_outlined, colors),
-                      const Spacer(),
-                      Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Text(
-                          "v1.0.2 - Premium",
-                          style: GoogleFonts.inter(color: colors.textMuted, fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  ),
+              Container(
+                width: 260,
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  border: Border(right: BorderSide(color: colors.border)),
                 ),
-
-              // Main content panel
-              Expanded(
-                child: Scaffold(
-                  backgroundColor: Colors.transparent,
-                  drawer: showSidebar
-                      ? null
-                      : Drawer(
-                          backgroundColor: colors.background,
-                          child: SafeArea(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // 1. User Profile Header
-                                Padding(
-                                  padding: const EdgeInsets.all(24.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 28,
-                                        backgroundColor: colors.primary.withOpacity(0.15),
-                                        child: Text(
-                                          clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
-                                          style: GoogleFonts.outfit(
-                                            color: colors.primary,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 24,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Text(
-                                        clientName,
-                                        style: GoogleFonts.outfit(
-                                          color: colors.textPrimary,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 18,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        user?.email ?? '',
-                                        style: GoogleFonts.inter(
-                                          color: colors.textSecondary,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ).animate()
-                                  .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                                  .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                                  .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-
-                                Divider(color: colors.border, height: 1),
-                                const SizedBox(height: 16),
-
-                                // 2. Navigation items
-                                Expanded(
-                                  child: ListView(
-                                    padding: EdgeInsets.zero,
-                                    children: [
-                                      _buildDrawerItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors, context),
-                                      _buildDrawerItem(1, "Factsheets", Icons.document_scanner_outlined, colors, context),
-                                      _buildDrawerItem(2, t('settings'), Icons.settings_outlined, colors, context),
-                                      _buildDrawerItem(3, t('about_us_nav'), Icons.info_outline, colors, context),
-                                      _buildDrawerItem(4, t('contact_us'), Icons.contact_support_outlined, colors, context),
-                                    ],
-                                  ),
-                                ),
-
-                                Divider(color: colors.border, height: 1),
-
-                                // 3. Logout List Tile at the bottom
-                                Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: InkWell(
-                                    onTap: () {
-                                      Navigator.pop(context); // Close the drawer
-                                      authProvider.signOut();
-                                    },
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      decoration: BoxDecoration(
-                                        color: colors.primary.withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.logout, color: colors.primary, size: 20),
-                                          const SizedBox(width: 16),
-                                          Text(
-                                            t('logout'),
-                                            style: GoogleFonts.inter(
-                                              color: colors.primary,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ).animate(delay: const Duration(milliseconds: 6 * 80))
-                                  .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                                  .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                                  .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-                              ],
-                            ),
-                          ),
-                        ),
-                  appBar: AppBar(
-                    backgroundColor: colors.surface,
-                    elevation: 0,
-                    iconTheme: IconThemeData(color: colors.textPrimary),
-                    leading: showSidebar
-                        ? null
-                        : Builder(
-                            builder: (context) => IconButton(
-                              icon: const Icon(Icons.menu),
-                              onPressed: () => Scaffold.of(context).openDrawer(),
-                            ),
-                          ),
-                    title: Text(
-                      appBarTitle,
-                      style: GoogleFonts.outfit(
-                        fontWeight: FontWeight.bold,
-                        color: colors.textPrimary,
-                      ),
-                    ),
-                    actions: [
-                      IconButton(
-                        icon: Icon(Icons.refresh, color: colors.textSecondary),
-                        tooltip: t('refresh_data'),
-                        onPressed: _refreshData,
-                      ),
-                      const SizedBox(width: 8),
-                      // My Account Profile dropdown menu button
-                      PopupMenuButton<int>(
-                        icon: CircleAvatar(
-                          radius: 16,
-                          backgroundColor: colors.primary.withOpacity(0.15),
-                          child: Text(
-                            clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Row(
+                        children: [
+                          Icon(Icons.shield_outlined, color: colors.primary, size: 28),
+                          const SizedBox(width: 12),
+                          Text(
+                            t('investor_console').split(' ')[0] + " Central",
                             style: GoogleFonts.outfit(
-                              color: colors.primary,
+                              fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        offset: const Offset(0, 48),
-                        color: colors.surface,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(color: colors.border),
-                        ),
-                        onSelected: (val) {
-                          if (val == 1) {
-                            authProvider.signOut();
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          PopupMenuItem(
-                            enabled: false,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  clientName,
-                                  style: GoogleFonts.outfit(
-                                    color: colors.textPrimary,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  user?.email ?? '',
-                                  style: GoogleFonts.inter(
-                                    color: colors.textSecondary,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuDivider(),
-                          PopupMenuItem(
-                            value: 1,
-                            child: Row(
-                              children: [
-                                Icon(Icons.logout, color: colors.primary, size: 18),
-                                const SizedBox(width: 10),
-                                Text(
-                                  t('logout'),
-                                  style: GoogleFonts.inter(
-                                    color: colors.textPrimary,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
+                              color: colors.textPrimary,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(width: 16),
-                    ],
-                  ),
-                  bottomNavigationBar: !showSidebar
-                      ? BottomNavigationBar(
-                          currentIndex: _selectedTab,
-                          backgroundColor: colors.surface,
-                          selectedItemColor: colors.primary,
-                          unselectedItemColor: colors.textSecondary,
-                          type: BottomNavigationBarType.fixed,
-                          onTap: (index) {
-                            setState(() {
-                              _selectedTab = index;
-                            });
-                          },
-                          items: [
-                            BottomNavigationBarItem(icon: const Icon(Icons.account_balance_wallet_outlined), label: t('portfolio').split(' ')[0]),
-                            BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: "Factsheets"),
-                            BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
-                            BottomNavigationBarItem(icon: const Icon(Icons.info_outline), label: t('about_us_nav').split(' ')[0]),
-                            BottomNavigationBarItem(icon: const Icon(Icons.contact_support_outlined), label: t('contact_us').split(' ')[0]),
-                          ],
-                        )
-                      : null,
-                  body: SafeArea(
-                    child: tabContent,
-                  ),
+                    ),
+                    Divider(color: colors.border, height: 1),
+                    const SizedBox(height: 16),
+                    _buildSidebarItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors),
+                    _buildSidebarItem(1, t('search_explore_factsheets').split(' ')[0] + " Factsheets", Icons.document_scanner_outlined, colors),
+                    _buildSidebarItem(2, t('settings'), Icons.settings_outlined, colors),
+                    _buildSidebarItem(3, t('about_us_nav'), Icons.info_outline, colors),
+                    _buildSidebarItem(4, t('contact_us'), Icons.contact_support_outlined, colors),
+                    const Spacer(),
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Text(
+                        "v1.0.2 - Premium",
+                        style: GoogleFonts.inter(color: colors.textMuted, fontSize: 11),
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+
+              // Main content panel
+              Expanded(
+                child: mainScaffold,
               ),
             ],
           ),

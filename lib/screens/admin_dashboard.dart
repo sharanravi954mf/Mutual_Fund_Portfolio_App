@@ -703,6 +703,183 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final t = languageProvider.translate;
     final showSidebar = MediaQuery.of(context).size.width > 900;
 
+    final mainScaffold = Scaffold(
+      backgroundColor: showSidebar ? Colors.transparent : colors.background,
+      drawer: showSidebar
+          ? null
+          : Drawer(
+              backgroundColor: colors.background,
+              child: SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 1. Profile Header
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundColor: colors.primary.withOpacity(0.15),
+                            child: Text(
+                              "A",
+                              style: GoogleFonts.outfit(
+                                color: colors.primary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 24,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            authProvider.user?.email ?? "Admin User",
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              color: colors.textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "System Administrator",
+                            style: GoogleFonts.inter(
+                              color: colors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ).animate()
+                      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+
+                    Divider(color: colors.border, height: 1),
+                    const SizedBox(height: 16),
+
+                    // 2. Navigation items
+                    Expanded(
+                      child: ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          _buildDrawerItem(0, t('clients_management'), Icons.people_outline, colors, context),
+                          _buildDrawerItem(1, t('data_ingestion'), Icons.cloud_upload_outlined, colors, context),
+                          _buildDrawerItem(2, t('factsheets_manager'), Icons.document_scanner_outlined, colors, context),
+                          _buildDrawerItem(3, t('invoice_signer'), Icons.draw_outlined, colors, context),
+                          _buildDrawerItem(4, t('settings'), Icons.settings_outlined, colors, context),
+                        ],
+                      ),
+                    ),
+
+                    Divider(color: colors.border, height: 1),
+
+                    // 3. Logout List Tile at the bottom
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(context); // Close the drawer
+                          authProvider.signOut();
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: colors.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.logout, color: colors.primary, size: 20),
+                              const SizedBox(width: 16),
+                              Text(
+                                t('logout'),
+                                style: GoogleFonts.inter(
+                                  color: colors.primary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ).animate(delay: const Duration(milliseconds: 6 * 80))
+                      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+                  ],
+                ),
+              ),
+            ),
+      appBar: AppBar(
+        backgroundColor: colors.surface,
+        elevation: 0,
+        iconTheme: IconThemeData(color: colors.textPrimary),
+        leading: showSidebar
+            ? null
+            : Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+        title: Text(
+          _selectedTab == 0
+              ? t('clients_directory')
+              : (_selectedTab == 1
+                  ? t('data_ingestion_engine')
+                  : (_selectedTab == 2
+                      ? t('factsheets_manager')
+                      : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh, color: colors.textSecondary),
+            onPressed: _refreshClients,
+            tooltip: t('refresh_data'),
+          ),
+          if (MediaQuery.of(context).size.width <= 900)
+            IconButton(
+              icon: Icon(Icons.logout, color: colors.textSecondary),
+              onPressed: () => authProvider.signOut(),
+            ),
+        ],
+      ),
+      bottomNavigationBar: MediaQuery.of(context).size.width <= 900
+          ? BottomNavigationBar(
+              currentIndex: _selectedTab,
+              backgroundColor: colors.surface,
+              selectedItemColor: colors.primary,
+              unselectedItemColor: colors.textSecondary,
+              type: BottomNavigationBarType.fixed,
+              onTap: (index) {
+                setState(() {
+                  _selectedTab = index;
+                  if (index == 2) {
+                    _fetchFundsList();
+                  }
+                });
+              },
+              items: [
+                BottomNavigationBarItem(icon: const Icon(Icons.people_outline), label: t('clients_directory').split(' ')[0]),
+                BottomNavigationBarItem(icon: const Icon(Icons.cloud_upload_outlined), label: t('data_ingestion').split(' ')[1]),
+                BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: t('factsheets_manager').split(' ')[0]),
+                BottomNavigationBarItem(icon: const Icon(Icons.draw_outlined), label: t('invoice_signer').split(' ')[0]),
+                BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
+              ],
+            )
+          : null,
+      body: _buildSelectedTabContent(),
+    );
+
+    if (!showSidebar) {
+      return mainScaffold;
+    }
+
     return Scaffold(
       backgroundColor: colors.background,
       body: Row(
@@ -768,178 +945,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           // Main Pane
           Expanded(
-            child: Scaffold(
-              backgroundColor: Colors.transparent,
-              drawer: showSidebar
-                  ? null
-                  : Drawer(
-                      backgroundColor: colors.background,
-                      child: SafeArea(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // 1. Profile Header
-                            Padding(
-                              padding: const EdgeInsets.all(24.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  CircleAvatar(
-                                    radius: 28,
-                                    backgroundColor: colors.primary.withOpacity(0.15),
-                                    child: Text(
-                                      "A",
-                                      style: GoogleFonts.outfit(
-                                        color: colors.primary,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 24,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    authProvider.user?.email ?? "Admin User",
-                                    overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.outfit(
-                                      color: colors.textPrimary,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "System Administrator",
-                                    style: GoogleFonts.inter(
-                                      color: colors.textSecondary,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ).animate()
-                              .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                              .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                              .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-
-                            Divider(color: colors.border, height: 1),
-                            const SizedBox(height: 16),
-
-                            // 2. Navigation items
-                            Expanded(
-                              child: ListView(
-                                padding: EdgeInsets.zero,
-                                children: [
-                                  _buildDrawerItem(0, t('clients_management'), Icons.people_outline, colors, context),
-                                  _buildDrawerItem(1, t('data_ingestion'), Icons.cloud_upload_outlined, colors, context),
-                                  _buildDrawerItem(2, t('factsheets_manager'), Icons.document_scanner_outlined, colors, context),
-                                  _buildDrawerItem(3, t('invoice_signer'), Icons.draw_outlined, colors, context),
-                                  _buildDrawerItem(4, t('settings'), Icons.settings_outlined, colors, context),
-                                ],
-                              ),
-                            ),
-
-                            Divider(color: colors.border, height: 1),
-
-                            // 3. Logout List Tile at the bottom
-                            Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: InkWell(
-                                onTap: () {
-                                  Navigator.pop(context); // Close the drawer
-                                  authProvider.signOut();
-                                },
-                                borderRadius: BorderRadius.circular(12),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    color: colors.primary.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.logout, color: colors.primary, size: 20),
-                                      const SizedBox(width: 16),
-                                      Text(
-                                        t('logout'),
-                                        style: GoogleFonts.inter(
-                                          color: colors.primary,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ).animate(delay: const Duration(milliseconds: 6 * 80))
-                              .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                              .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                              .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-                          ],
-                        ),
-                      ),
-                    ),
-              appBar: AppBar(
-                backgroundColor: colors.surface,
-                elevation: 0,
-                iconTheme: IconThemeData(color: colors.textPrimary),
-                leading: showSidebar
-                    ? null
-                    : Builder(
-                        builder: (context) => IconButton(
-                          icon: const Icon(Icons.menu),
-                          onPressed: () => Scaffold.of(context).openDrawer(),
-                        ),
-                      ),
-                title: Text(
-                  _selectedTab == 0
-                      ? t('clients_directory')
-                      : (_selectedTab == 1 
-                          ? t('data_ingestion_engine') 
-                          : (_selectedTab == 2 
-                              ? t('factsheets_manager') 
-                              : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
-                ),
-                actions: [
-                  IconButton(
-                    icon: Icon(Icons.refresh, color: colors.textSecondary),
-                    onPressed: _refreshClients,
-                    tooltip: t('refresh_data'),
-                  ),
-                  if (MediaQuery.of(context).size.width <= 900)
-                    IconButton(
-                      icon: Icon(Icons.logout, color: colors.textSecondary),
-                      onPressed: () => authProvider.signOut(),
-                    ),
-                ],
-              ),
-              bottomNavigationBar: MediaQuery.of(context).size.width <= 900
-                  ? BottomNavigationBar(
-                      currentIndex: _selectedTab,
-                      backgroundColor: colors.surface,
-                      selectedItemColor: colors.primary,
-                      unselectedItemColor: colors.textSecondary,
-                      type: BottomNavigationBarType.fixed,
-                      onTap: (index) {
-                        setState(() {
-                          _selectedTab = index;
-                          if (index == 2) {
-                            _fetchFundsList();
-                          }
-                        });
-                      },
-                      items: [
-                        BottomNavigationBarItem(icon: const Icon(Icons.people_outline), label: t('clients_directory').split(' ')[0]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.cloud_upload_outlined), label: t('data_ingestion').split(' ')[1]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: t('factsheets_manager').split(' ')[0]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.draw_outlined), label: t('invoice_signer').split(' ')[0]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
-                      ],
-                    )
-                  : null,
-              body: _buildSelectedTabContent(),
-            ),
+            child: mainScaffold,
           ),
         ],
       ),
