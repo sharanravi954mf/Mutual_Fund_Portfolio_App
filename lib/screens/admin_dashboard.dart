@@ -12,8 +12,10 @@ import '../utils/file_picker_helper.dart' as fph;
 import '../utils/excel_updater.dart';
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:async';
 import 'dart:js' as js;
 import 'package:archive/archive.dart' as archive;
+import 'package:http/http.dart' as http;
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -47,6 +49,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final TextEditingController _factsheetMonthController = TextEditingController(
     text: "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-01",
   );
+
+  // Fund Search and Details variables
+  final TextEditingController _fundSearchController = TextEditingController();
+  List<dynamic> _searchResults = [];
+  bool _searchingFunds = false;
+  bool _fetchingFundDetails = false;
+  Map<String, dynamic>? _selectedFundDetails;
+  String? _fundSearchError;
+  Timer? _debounceTimer;
 
   // Invoice Signer variables
   fph.PickedFileData? _selectedInvoicePdf;
@@ -369,6 +380,82 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  void _onSearchQueryChanged(String query) {
+    _debounceTimer?.cancel();
+    if (query.trim().length < 3) {
+      setState(() {
+        _searchResults = [];
+        _fundSearchError = null;
+      });
+      return;
+    }
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _performFundSearch(query.trim());
+    });
+  }
+
+  Future<void> _performFundSearch(String query) async {
+    setState(() {
+      _searchingFunds = true;
+      _fundSearchError = null;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse("https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(query)}"),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> results = jsonDecode(response.body);
+        setState(() {
+          _searchResults = results;
+          _searchingFunds = false;
+          if (results.isEmpty) {
+            _fundSearchError = "No funds found matching '$query'.";
+          }
+        });
+      } else {
+        throw Exception("Server returned code ${response.statusCode}");
+      }
+    } catch (e) {
+      setState(() {
+        _searchResults = [];
+        _searchingFunds = false;
+        _fundSearchError = "Failed to search funds: Network error.";
+      });
+    }
+  }
+
+  Future<void> _fetchFundDetails(String schemeCode) async {
+    setState(() {
+      _fetchingFundDetails = true;
+      _fundSearchError = null;
+      _searchResults = []; // Close the dropdown
+      _fundSearchController.clear(); // Clear search field
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse("https://api.mfapi.in/mf/$schemeCode"),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> details = jsonDecode(response.body);
+        setState(() {
+          _selectedFundDetails = details;
+          _fetchingFundDetails = false;
+        });
+      } else {
+        throw Exception("Server returned code ${response.statusCode}");
+      }
+    } catch (e) {
+      setState(() {
+        _fetchingFundDetails = false;
+        _fundSearchError = "Failed to fetch fund details: Network error.";
+      });
+    }
+  }
+
   Future<void> _fetchFundsList() async {
     try {
       final client = Supabase.instance.client;
@@ -483,6 +570,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _factsheetManagersController.dispose();
     _factsheetTopHoldingsController.dispose();
     _factsheetMonthController.dispose();
+    _fundSearchController.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
@@ -934,159 +1023,416 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildFactsheetsContent() {
-    return _fundsList.isEmpty
-        ? const Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Fund Facts Finder",
+            style: GoogleFonts.outfit(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
             ),
-          )
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Factsheet & Holdings Editor",
-                  style: GoogleFonts.outfit(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Type a mutual fund name to lookup its real-time scheme classification, ISIN codes, and historical NAV data.",
+            style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+
+          // Search Bar Container
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF151030),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white10),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  "Select a mutual fund scheme to configure its monthly factsheet, managers, and top holdings.",
-                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-                ),
-                const SizedBox(height: 24),
-
-                // Dropdown Selector
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.08)),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _selectedFundId,
-                      dropdownColor: const Color(0xFF151030),
-                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
-                      isExpanded: true,
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedFundId = val;
-                          _loadFactsheetForSelectedFund();
-                        });
-                      },
-                      items: _fundsList.map((fund) {
-                        return DropdownMenuItem<String>(
-                          value: fund['id'],
-                          child: Text(
-                            "${fund['scheme_name']} (${fund['scheme_code']})",
-                            style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Edit Form Card
-                Container(
-                  padding: const EdgeInsets.all(24.0),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.02),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withOpacity(0.05)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Month Year Text field
-                      _buildLabel("Report Date (YYYY-MM-DD)"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetMonthController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. 2026-07-01"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // PDF Link Text field
-                      _buildLabel("Factsheet PDF Download URL"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetPdfController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. https://amc.com/factsheet.pdf"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Holdings URL Text field
-                      _buildLabel("AMC Portfolio Disclosures Web URL"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetHoldingsUrlController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. https://amc.com/disclosures"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Fund Managers (Comma separated)
-                      _buildLabel("Fund Managers (Comma separated)"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetManagersController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. John Doe, Jane Smith"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Top Holdings (Text Area format)
-                      _buildLabel("Top Holdings (Format: CompanyName: Weight, Company2: Weight)"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetTopHoldingsController,
-                        maxLines: 3,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. HDFC Bank: 9.5, Reliance: 8.2, TCS: 5.4"),
-                      ),
-                      const SizedBox(height: 32),
-
-                      // Save Button
-                      ElevatedButton(
-                        onPressed: _savingFactsheet ? null : _saveFactsheet,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE94057),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: _savingFactsheet
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Text(
-                                "Save Config",
-                                style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                child: TextFormField(
+                  controller: _fundSearchController,
+                  style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                  onChanged: _onSearchQueryChanged,
+                  decoration: InputDecoration(
+                    hintText: "Type 3+ characters to search funds (e.g. Axis Bluechip, SBI Liquid)...",
+                    hintStyle: GoogleFonts.inter(color: Colors.grey.shade600, fontSize: 13),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                    suffixIcon: _searchingFunds
+                        ? const Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
                               ),
+                            ),
+                          )
+                        : (_fundSearchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, color: Colors.white54),
+                                onPressed: () {
+                                  setState(() {
+                                    _fundSearchController.clear();
+                                    _searchResults = [];
+                                    _fundSearchError = null;
+                                  });
+                                },
+                              )
+                            : null),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  ),
+                ),
+              ),
+
+              // Search Results Dropdown Overlay
+              if (_searchResults.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 250),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF151030),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.4),
+                        blurRadius: 12,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                   ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const ClampingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: _searchResults.length,
+                    separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                    itemBuilder: (context, index) {
+                      final item = _searchResults[index];
+                      final schemeName = item['schemeName'] as String? ?? '';
+                      final schemeCode = (item['schemeCode'] ?? '').toString();
+
+                      return ListTile(
+                        title: Text(
+                          schemeName,
+                          style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          "Scheme Code: $schemeCode",
+                          style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
+                        ),
+                        hoverColor: Colors.white.withOpacity(0.04),
+                        onTap: () => _fetchFundDetails(schemeCode),
+                      );
+                    },
+                  ),
                 ),
               ],
+            ],
+          ),
+
+          if (_fundSearchError != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.redAccent.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _fundSearchError!,
+                      style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          );
+          ],
+
+          const SizedBox(height: 24),
+
+          // Detail Display Card
+          if (_fetchingFundDetails) ...[
+            const SizedBox(height: 40),
+            const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+              ),
+            ),
+          ] else if (_selectedFundDetails != null) ...[
+            _buildSelectedFundCard(),
+          ] else ...[
+            // Default placeholder card
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.02),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.search_outlined, color: Colors.grey.shade700, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      "No Fund Selected",
+                      style: GoogleFonts.outfit(color: Colors.grey.shade500, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Search and select a mutual fund to view its meta information and historical NAV data.",
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(color: Colors.grey.shade600, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedFundCard() {
+    final meta = _selectedFundDetails!['meta'] as Map<String, dynamic>? ?? {};
+    final data = _selectedFundDetails!['data'] as List<dynamic>? ?? [];
+
+    final fundHouse = meta['fund_house'] ?? 'N/A';
+    final schemeName = meta['scheme_name'] ?? 'N/A';
+    final schemeCode = (meta['scheme_code'] ?? 'N/A').toString();
+    final schemeType = meta['scheme_type'] ?? 'N/A';
+    final schemeCategory = meta['scheme_category'] ?? 'N/A';
+    final isin = meta['isin_div_payout'] ?? meta['isin_div_reinvestment'] ?? 'N/A';
+
+    String latestDate = 'N/A';
+    String latestNav = 'N/A';
+    if (data.isNotEmpty) {
+      latestDate = data[0]['date'] ?? 'N/A';
+      latestNav = data[0]['nav'] ?? 'N/A';
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF151030),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white10),
+      ),
+      padding: const EdgeInsets.all(28.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fundHouse.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        color: const Color(0xFFF27121),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      schemeName,
+                      style: GoogleFonts.outfit(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Scheme Code: $schemeCode",
+                      style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              // NAV Tag
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE94057).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE94057).withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "LATEST NAV",
+                      style: GoogleFonts.inter(
+                        color: const Color(0xFFE94057),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "₹$latestNav",
+                      style: GoogleFonts.outfit(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      latestDate,
+                      style: GoogleFonts.inter(
+                        color: Colors.grey.shade400,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const Divider(color: Colors.white10, height: 40),
+          
+          Text(
+            "Scheme Specifications",
+            style: GoogleFonts.outfit(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Specifications Grid
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 600;
+              return GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: isWide ? 3 : 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: isWide ? 2.5 : 2.0,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildSpecTile("Scheme Type", schemeType),
+                  _buildSpecTile("Category", schemeCategory),
+                  _buildSpecTile("ISIN", isin),
+                ],
+              );
+            },
+          ),
+          
+          const Divider(color: Colors.white10, height: 40),
+          
+          Text(
+            "Recent Historical NAVs",
+            style: GoogleFonts.outfit(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Historical NAV list
+          if (data.isEmpty)
+            Text(
+              "No historical NAV details available.",
+              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.02),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: data.length > 5 ? 5 : data.length,
+                separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                itemBuilder: (context, index) {
+                  final navItem = data[index];
+                  final date = navItem['date'] ?? 'N/A';
+                  final navVal = navItem['nav'] ?? 'N/A';
+                  
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          date,
+                          style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                        ),
+                        Text(
+                          "₹$navVal",
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecTile(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.04)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildLabel(String labelText) {
