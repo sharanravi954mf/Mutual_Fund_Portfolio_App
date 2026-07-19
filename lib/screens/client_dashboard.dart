@@ -509,6 +509,114 @@ class _ClientDashboardState extends State<ClientDashboard> {
               Expanded(
                 child: Scaffold(
                   backgroundColor: Colors.transparent,
+                  drawer: showSidebar
+                      ? null
+                      : Drawer(
+                          backgroundColor: colors.background,
+                          child: SafeArea(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 1. User Profile Header
+                                Padding(
+                                  padding: const EdgeInsets.all(24.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 28,
+                                        backgroundColor: colors.primary.withOpacity(0.15),
+                                        child: Text(
+                                          clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                                          style: GoogleFonts.outfit(
+                                            color: colors.primary,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 24,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        clientName,
+                                        style: GoogleFonts.outfit(
+                                          color: colors.textPrimary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        user?.email ?? '',
+                                        style: GoogleFonts.inter(
+                                          color: colors.textSecondary,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ).animate()
+                                  .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                                  .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                                  .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+
+                                Divider(color: colors.border, height: 1),
+                                const SizedBox(height: 16),
+
+                                // 2. Navigation items
+                                Expanded(
+                                  child: ListView(
+                                    padding: EdgeInsets.zero,
+                                    children: [
+                                      _buildDrawerItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors, context),
+                                      _buildDrawerItem(1, "Factsheets", Icons.document_scanner_outlined, colors, context),
+                                      _buildDrawerItem(2, t('settings'), Icons.settings_outlined, colors, context),
+                                      _buildDrawerItem(3, t('about_us_nav'), Icons.info_outline, colors, context),
+                                      _buildDrawerItem(4, t('contact_us'), Icons.contact_support_outlined, colors, context),
+                                    ],
+                                  ),
+                                ),
+
+                                Divider(color: colors.border, height: 1),
+
+                                // 3. Logout List Tile at the bottom
+                                Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: InkWell(
+                                    onTap: () {
+                                      Navigator.pop(context); // Close the drawer
+                                      authProvider.signOut();
+                                    },
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                      decoration: BoxDecoration(
+                                        color: colors.primary.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.logout, color: colors.primary, size: 20),
+                                          const SizedBox(width: 16),
+                                          Text(
+                                            t('logout'),
+                                            style: GoogleFonts.inter(
+                                              color: colors.primary,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ).animate(delay: const Duration(milliseconds: 6 * 80))
+                                  .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                                  .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                                  .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+                              ],
+                            ),
+                          ),
+                        ),
                   appBar: AppBar(
                     backgroundColor: colors.surface,
                     elevation: 0,
@@ -631,6 +739,54 @@ class _ClientDashboardState extends State<ClientDashboard> {
         );
       },
     );
+  }
+
+  Widget _buildDrawerItem(int index, String title, IconData icon, AppThemeColors colors, BuildContext context) {
+    final isSelected = _selectedTab == index;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: InkWell(
+        onTap: () {
+          Navigator.pop(context); // Close the drawer natively
+          setState(() {
+            _selectedTab = index;
+          });
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                color: isSelected ? colors.primary : colors.textSecondary,
+                size: 20,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: isSelected ? colors.primary : colors.textPrimary,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).animate(delay: Duration(milliseconds: (index + 1) * 80))
+      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic);
   }
 
   Widget _buildSidebarItem(int index, String title, IconData icon, AppThemeColors colors) {
