@@ -395,6 +395,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _performFundSearch(String query) async {
+    final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final keywords = cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
+    if (keywords.isEmpty) return;
+
+    // Find the longest keyword of length >= 3 to query the API
+    final searchKeyword = keywords.firstWhere(
+      (k) => k.length >= 3,
+      orElse: () => keywords.first,
+    );
+
+    if (searchKeyword.length < 3) {
+      setState(() {
+        _searchResults = [];
+        _fundSearchError = null;
+      });
+      return;
+    }
+
     setState(() {
       _searchingFunds = true;
       _fundSearchError = null;
@@ -405,7 +423,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         'sign-stamp-invoice',
         body: {
           "action": "proxy-get",
-          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(query)}",
+          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(searchKeyword)}",
         },
       ).timeout(const Duration(seconds: 15));
 
@@ -413,11 +431,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
         final List<dynamic> results = response.data is String
             ? jsonDecode(response.data as String)
             : List<dynamic>.from(response.data as List);
+
+        // Perform client-side case-insensitive multi-keyword filtering
+        final filtered = results.where((item) {
+          final name = (item['schemeName'] as String? ?? '').toLowerCase();
+          return keywords.every((kw) => name.contains(kw));
+        }).toList();
+
         setState(() {
-          _searchResults = results;
+          _searchResults = filtered;
           _searchingFunds = false;
-          if (results.isEmpty) {
-            _fundSearchError = "No funds found matching '$query'.";
+          if (filtered.isEmpty) {
+            _fundSearchError = "No funds found matching '$cleanQuery'.";
           }
         });
       } else {
