@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
 import '../utils/finance.dart';
 import 'factsheet_dialog.dart';
 
@@ -535,26 +536,37 @@ class _ClientDashboardState extends State<ClientDashboard> {
           );
         }
 
+        final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+        final colors = AppThemeColors(isDark);
+
         return Scaffold(
-          backgroundColor: const Color(0xFF0F0C20),
+          backgroundColor: colors.background,
           appBar: AppBar(
-            backgroundColor: const Color(0xFF151030),
+            backgroundColor: colors.surface,
             elevation: 0,
+            iconTheme: IconThemeData(color: colors.textPrimary),
             title: Text(
               appBarTitle,
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: colors.textPrimary,
               ),
             ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.refresh, color: Colors.grey),
+                icon: Icon(Icons.refresh, color: colors.textSecondary),
                 tooltip: "Refresh Data",
                 onPressed: _refreshData,
               ),
               IconButton(
-                icon: const Icon(Icons.logout, color: Colors.grey),
+                icon: Icon(Icons.settings_outlined, color: colors.textSecondary),
+                tooltip: "Display Settings",
+                onPressed: () {
+                  _showSettingsDialog(context);
+                },
+              ),
+              IconButton(
+                icon: Icon(Icons.logout, color: colors.textSecondary),
                 tooltip: "Logout",
                 onPressed: () {
                   Provider.of<AuthProvider>(context, listen: false).signOut();
@@ -640,6 +652,99 @@ class _ClientDashboardState extends State<ClientDashboard> {
             style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13, height: 1.4),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showSettingsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        final themeProvider = Provider.of<ThemeProvider>(context);
+        final isDark = themeProvider.isDarkMode(context);
+        final colors = AppThemeColors(isDark);
+
+        return AlertDialog(
+          backgroundColor: colors.surface,
+          title: Text(
+            "Display Settings",
+            style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildThemeOptionRadio(
+                context: context,
+                title: "Light Mode",
+                option: ThemeModeOption.light,
+                themeProvider: themeProvider,
+                colors: colors,
+              ),
+              _buildThemeOptionRadio(
+                context: context,
+                title: "Dark Mode",
+                option: ThemeModeOption.dark,
+                themeProvider: themeProvider,
+                colors: colors,
+              ),
+              _buildThemeOptionRadio(
+                context: context,
+                title: "System Preference",
+                option: ThemeModeOption.system,
+                themeProvider: themeProvider,
+                colors: colors,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text("Close", style: GoogleFonts.inter(color: colors.primary, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildThemeOptionRadio({
+    required BuildContext context,
+    required String title,
+    required ThemeModeOption option,
+    required ThemeProvider themeProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = themeProvider.themeModeOption == option;
+    return InkWell(
+      onTap: () {
+        themeProvider.setThemeMode(option);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10.0),
+        child: Row(
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? colors.primary : colors.textSecondary,
+                  width: isSelected ? 5.5 : 2,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Text(
+              title,
+              style: GoogleFonts.inter(
+                color: isSelected ? colors.textPrimary : colors.textSecondary,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

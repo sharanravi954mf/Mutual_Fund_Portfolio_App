@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'providers/auth_provider.dart';
+import 'providers/theme_provider.dart';
 import 'screens/admin_dashboard.dart';
 import 'screens/client_dashboard.dart';
 import 'screens/login_screen.dart';
@@ -33,8 +34,11 @@ void main() async {
   }
 
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AuthProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+      ],
       child: const MyApp(),
     ),
   );
@@ -45,12 +49,29 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDark = themeProvider.isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+
     return MaterialApp(
       title: 'Sharan Fincorp',
       debugShowCheckedModeBanner: false,
+      themeMode: themeProvider.getThemeMode(),
       theme: ThemeData(
+        brightness: Brightness.light,
+        primaryColor: colors.primary,
+        scaffoldBackgroundColor: colors.background,
+        colorScheme: ColorScheme.light(
+          primary: colors.primary,
+          secondary: colors.secondary,
+          background: colors.background,
+          surface: colors.surface,
+        ),
+        useMaterial3: true,
+      ),
+      darkTheme: ThemeData(
         brightness: Brightness.dark,
-        primaryColor: const Color(0xFFE94057),
+        primaryColor: colors.primary,
         scaffoldBackgroundColor: const Color(0xFF0F0C20),
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFFE94057),

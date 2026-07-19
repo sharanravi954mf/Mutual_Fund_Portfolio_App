@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
 import 'client_detail_screen.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
@@ -681,9 +682,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0C20),
+      backgroundColor: colors.background,
       body: Row(
         children: [
           // Sidebar - Hidden on mobile viewports for responsiveness
@@ -693,9 +696,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             return Container(
               width: 260,
-              decoration: const BoxDecoration(
-                color: Color(0xFF151030),
-                border: Border(right: BorderSide(color: Colors.white10)),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                border: Border(right: BorderSide(color: colors.border)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -704,25 +707,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     padding: const EdgeInsets.all(24.0),
                     child: Row(
                       children: [
-                        const Icon(Icons.shield_outlined, color: Color(0xFFE94057), size: 28),
+                        Icon(Icons.shield_outlined, color: colors.primary, size: 28),
                         const SizedBox(width: 12),
                         Text(
                           "Admin Central",
                           style: GoogleFonts.outfit(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: colors.textPrimary,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const Divider(color: Colors.white10, height: 1),
+                  Divider(color: colors.border, height: 1),
                   const SizedBox(height: 16),
                   _buildSidebarItem(0, "Clients Management", Icons.people_outline),
                   _buildSidebarItem(1, "Data Ingestion", Icons.cloud_upload_outlined),
                   _buildSidebarItem(2, "Factsheets Manager", Icons.document_scanner_outlined),
                   _buildSidebarItem(3, "Invoice Signer", Icons.draw_outlined),
+                  _buildSidebarItem(4, "Settings", Icons.settings_outlined),
                   const Spacer(),
                   Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -731,9 +735,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       title: Text(
                         authProvider.user?.email ?? "Admin User",
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.inter(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                       ),
-                      subtitle: Text("System Administrator", style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11)),
+                      subtitle: Text("System Administrator", style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11)),
                       trailing: IconButton(
                         icon: const Icon(Icons.logout, color: Colors.grey),
                         onPressed: () => authProvider.signOut(),
@@ -750,25 +754,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Scaffold(
               backgroundColor: Colors.transparent,
               appBar: AppBar(
-                backgroundColor: const Color(0xFF151030),
+                backgroundColor: colors.surface,
                 elevation: 0,
+                iconTheme: IconThemeData(color: colors.textPrimary),
                 title: Text(
                   _selectedTab == 0
                       ? "Clients Directory"
                       : (_selectedTab == 1 
                           ? "Data Ingestion Engine" 
-                          : (_selectedTab == 2 ? "Factsheets Manager" : "Invoice Signer")),
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white),
+                          : (_selectedTab == 2 
+                              ? "Factsheets Manager" 
+                              : (_selectedTab == 3 ? "Invoice Signer" : "Settings Console"))),
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
                 ),
                 actions: [
                   IconButton(
-                    icon: const Icon(Icons.refresh, color: Colors.grey),
+                    icon: Icon(Icons.refresh, color: colors.textSecondary),
                     onPressed: _refreshClients,
                     tooltip: "Reload Profiles",
                   ),
                   if (MediaQuery.of(context).size.width <= 900)
                     IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.grey),
+                      icon: Icon(Icons.logout, color: colors.textSecondary),
                       onPressed: () => authProvider.signOut(),
                     ),
                 ],
@@ -776,9 +783,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               bottomNavigationBar: MediaQuery.of(context).size.width <= 900
                   ? BottomNavigationBar(
                       currentIndex: _selectedTab,
-                      backgroundColor: const Color(0xFF151030),
-                      selectedItemColor: const Color(0xFFE94057),
-                      unselectedItemColor: Colors.grey,
+                      backgroundColor: colors.surface,
+                      selectedItemColor: colors.primary,
+                      unselectedItemColor: colors.textSecondary,
                       type: BottomNavigationBarType.fixed,
                       onTap: (index) {
                         setState(() {
@@ -793,6 +800,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         BottomNavigationBarItem(icon: Icon(Icons.cloud_upload_outlined), label: "Ingest"),
                         BottomNavigationBarItem(icon: Icon(Icons.document_scanner_outlined), label: "Factsheets"),
                         BottomNavigationBarItem(icon: Icon(Icons.draw_outlined), label: "Signer"),
+                        BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: "Settings"),
                       ],
                     )
                   : null,
@@ -805,6 +813,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildSidebarItem(int index, String label, IconData icon) {
+    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
     final isSelected = _selectedTab == index;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
@@ -821,17 +831,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFE94057).withOpacity(0.1) : Colors.transparent,
+            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
             children: [
-              Icon(icon, color: isSelected ? const Color(0xFFE94057) : Colors.grey, size: 22),
+              Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 22),
               const SizedBox(width: 16),
               Text(
                 label,
                 style: GoogleFonts.inter(
-                  color: isSelected ? Colors.white : Colors.grey.shade400,
+                  color: isSelected ? colors.textPrimary : colors.textSecondary,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   fontSize: 14,
                 ),
@@ -853,6 +863,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return _buildFactsheetsContent();
       case 3:
         return _buildInvoiceSignerContent();
+      case 4:
+        return _buildSettingsContent();
       default:
         return const SizedBox.shrink();
     }
@@ -2604,6 +2616,134 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       }
     }
+  }
+
+  Widget _buildSettingsContent() {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDark = themeProvider.isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(28.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Display Settings",
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Customize the application appearance to suit your preference.",
+            style: GoogleFonts.inter(
+              color: colors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 28),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.cardShadow,
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ]
+            ),
+            child: Column(
+              children: [
+                _buildThemeOptionTile(
+                  title: "Light Mode",
+                  subtitle: "Clean, light-hearted appearance",
+                  icon: Icons.light_mode_outlined,
+                  option: ThemeModeOption.light,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildThemeOptionTile(
+                  title: "Dark Mode",
+                  subtitle: "Classic deep space appearance",
+                  icon: Icons.dark_mode_outlined,
+                  option: ThemeModeOption.dark,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildThemeOptionTile(
+                  title: "System Preference",
+                  subtitle: "Automatically match device settings",
+                  icon: Icons.brightness_auto_outlined,
+                  option: ThemeModeOption.system,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemeOptionTile({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required ThemeModeOption option,
+    required ThemeProvider themeProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = themeProvider.themeModeOption == option;
+    return InkWell(
+      onTap: () {
+        themeProvider.setThemeMode(option);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      color: colors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: colors.primary, size: 20)
+            else
+              Icon(Icons.circle_outlined, color: colors.border, size: 20),
+          ],
+        ),
+      ),
+    );
   }
 
 }
