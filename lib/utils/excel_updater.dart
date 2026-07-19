@@ -159,7 +159,7 @@ class ExcelMetadataUpdater {
 
         if (bestRowIndex != -1 && highestScore >= 25) {
           // Extract Invoice No (Standard CAMS format regex)
-          final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
+          final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
           final invNoMatch = invNoRegex.firstMatch(text);
           final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
 

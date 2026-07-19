@@ -1,16 +1,23 @@
+// ignore_for_file: uri_does_not_exist
+// ignore_for_file: avoid_web_libraries_in_flutter
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
+import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
 import '../utils/excel_updater.dart';
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:async';
+import 'dart:js' as js;
 import 'package:archive/archive.dart' as archive;
+import 'package:http/http.dart' as http;
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -45,6 +52,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
     text: "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-01",
   );
 
+  // Fund Search and Details variables
+  final TextEditingController _fundSearchController = TextEditingController();
+  List<dynamic> _searchResults = [];
+  bool _searchingFunds = false;
+  bool _fetchingFundDetails = false;
+  Map<String, dynamic>? _selectedFundDetails;
+  String? _fundSearchError;
+  Timer? _debounceTimer;
+  String _selectedChartRange = "1Y";
+
   // Invoice Signer variables
   fph.PickedFileData? _selectedInvoicePdf;
   fph.PickedFileData? _selectedSignaturePng;
@@ -53,8 +70,97 @@ class _AdminDashboardState extends State<AdminDashboard> {
   double _stampY = 102;
   double _sigX = 420;
   double _sigY = 72;
+  double _stampW = 120;
+  double _stampH = 60;
+  double _sigW = 120;
+  double _sigH = 50;
   bool _signingInvoice = false;
   String _selectedPreset = "CAMS Distributor (Default)";
+  Uint8List? _pdfPreviewBytes;
+  bool _loadingPreview = false;
+
+  Future<void> _generatePdfPreview() async {
+    if (_selectedInvoicePdf == null) {
+      setState(() {
+        _pdfPreviewBytes = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingPreview = true;
+      _pdfPreviewBytes = null;
+    });
+
+    try {
+      Uint8List? rawBytes;
+      if (_selectedInvoicePdf!.bytes != null) {
+        rawBytes = _selectedInvoicePdf!.bytes;
+      } else if (_selectedInvoicePdf!.base64String != null) {
+        rawBytes = base64Decode(_selectedInvoicePdf!.base64String!);
+      }
+
+      if (rawBytes != null) {
+        Uint8List? pdfBytes;
+        final filename = _selectedInvoicePdf!.filename.toLowerCase();
+        if (filename.endsWith('.pdf')) {
+          pdfBytes = rawBytes;
+        } else if (filename.endsWith('.zip')) {
+          final dec = archive.ZipDecoder();
+          final archiveFile = dec.decodeBytes(rawBytes);
+          for (final entry in archiveFile.files) {
+            if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
+              if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
+                continue;
+              }
+              pdfBytes = Uint8List.fromList(entry.content as List<int>);
+              break;
+            }
+          }
+        }
+
+        if (pdfBytes != null) {
+          final preview = await _renderPdfPage(pdfBytes);
+          setState(() {
+            _pdfPreviewBytes = preview;
+          });
+        }
+      }
+    } catch (e) {
+      print("Failed to generate PDF preview: $e");
+    } finally {
+      setState(() {
+        _loadingPreview = false;
+      });
+    }
+  }
+
+  Future<Uint8List> _renderPdfPage(Uint8List pdfBytes) async {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    js.context.callMethod('renderPdfPageToImage', [pdfBytes, -1, id]);
+
+    final key = 'pdf_render_result_$id';
+    while (true) {
+      final res = js.context[key];
+      if (res != null) {
+        final error = res['error'];
+        final dataUrl = res['dataUrl'] as String?;
+
+        js.context[key] = null; // Cleanup
+
+        if (error != null) {
+          throw Exception(error);
+        }
+
+        if (dataUrl != null && dataUrl.startsWith("data:image/png;base64,")) {
+          final base64Str = dataUrl.substring("data:image/png;base64,".length);
+          return base64Decode(base64Str);
+        }
+        throw Exception("Invalid render image format");
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
 
   // Excel Metadata Ingestion & Updater variables
   fph.PickedFileData? _selectedExcelFile;
@@ -69,21 +175,37 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _stampY = 102;
         _sigX = 420;
         _sigY = 72;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       } else if (preset == "KFintech / Karvy Distributor") {
         _stampX = 430;
         _stampY = 120;
         _sigX = 450;
         _sigY = 80;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       } else if (preset == "Bottom Right Corner") {
         _stampX = 400;
         _stampY = 150;
         _sigX = 400;
         _sigY = 80;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       } else if (preset == "Bottom Left Corner") {
         _stampX = 60;
         _stampY = 150;
         _sigX = 60;
         _sigY = 80;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       }
     });
   }
@@ -261,6 +383,184 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  void _onSearchQueryChanged(String query) {
+    _debounceTimer?.cancel();
+    if (query.trim().length < 3) {
+      setState(() {
+        _searchResults = [];
+        _fundSearchError = null;
+      });
+      return;
+    }
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _performFundSearch(query.trim());
+    });
+  }
+
+  Future<void> _performFundSearch(String query) async {
+    final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final keywords = cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
+    if (keywords.isEmpty) return;
+
+    // Find the longest keyword of length >= 3 to query the API
+    final searchKeyword = keywords.firstWhere(
+      (k) => k.length >= 3,
+      orElse: () => keywords.first,
+    );
+
+    if (searchKeyword.length < 3) {
+      setState(() {
+        _searchResults = [];
+        _fundSearchError = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _searchingFunds = true;
+      _fundSearchError = null;
+    });
+
+    try {
+      final response = await _supabaseService.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          "action": "proxy-get",
+          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(searchKeyword)}",
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.status == 200 && response.data != null) {
+        final List<dynamic> results = response.data is String
+            ? jsonDecode(response.data as String)
+            : List<dynamic>.from(response.data as List);
+
+        // Perform client-side case-insensitive multi-keyword filtering
+        final filtered = results.where((item) {
+          final name = (item['schemeName'] as String? ?? '').toLowerCase();
+          return keywords.every((kw) => name.contains(kw));
+        }).toList();
+
+        setState(() {
+          _searchResults = filtered;
+          _searchingFunds = false;
+          if (filtered.isEmpty) {
+            _fundSearchError = "No funds found matching '$cleanQuery'.";
+          }
+        });
+      } else {
+        throw Exception("Failed to search funds through proxy.");
+      }
+    } catch (e) {
+      setState(() {
+        _searchResults = [];
+        _searchingFunds = false;
+        _fundSearchError = "Failed to search funds: Network error.";
+      });
+    }
+  }
+
+  String _getRangeLabel(String range) {
+    switch (range) {
+      case "YTD":
+        return "Year to Date";
+      case "1Y":
+        return "Last 1 Year";
+      case "2Y":
+        return "2 Years";
+      case "3Y":
+        return "3 Years";
+      case "5Y":
+        return "5 Years";
+      case "Since Launch":
+      default:
+        return "Since Launch";
+    }
+  }
+
+  DateTime? parseDate(String dateStr) {
+    final parts = dateStr.split('-');
+    if (parts.length == 3) {
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
+  }
+
+  List<dynamic> filterNavDataByRange(List<dynamic> allData, String rangeOption) {
+    if (allData.isEmpty) return [];
+    
+    final latestDateObj = parseDate(allData.first['date'] ?? '');
+    if (latestDateObj == null) return allData;
+    
+    DateTime cutoff;
+    switch (rangeOption) {
+      case "YTD":
+        cutoff = DateTime(latestDateObj.year, 1, 1);
+        break;
+      case "1Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 365));
+        break;
+      case "2Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 2 * 365));
+        break;
+      case "3Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 3 * 365));
+        break;
+      case "5Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 5 * 365));
+        break;
+      case "Since Launch":
+      default:
+        return allData;
+    }
+    
+    return allData.where((item) {
+      final d = parseDate(item['date'] ?? '');
+      return d != null && (d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff));
+    }).toList();
+  }
+
+  Future<void> _fetchFundDetails(String schemeCode) async {
+    setState(() {
+      _fetchingFundDetails = true;
+      _fundSearchError = null;
+      _searchResults = []; // Close the dropdown
+      _fundSearchController.clear(); // Clear search field
+    });
+
+    try {
+      final response = await _supabaseService.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          "action": "proxy-get",
+          "url": "https://api.mfapi.in/mf/$schemeCode",
+        },
+      ).timeout(const Duration(seconds: 20));
+
+      if (response.status == 200 && response.data != null) {
+        final Map<String, dynamic> details = response.data is String
+            ? jsonDecode(response.data as String)
+            : Map<String, dynamic>.from(response.data as Map);
+        setState(() {
+          _selectedFundDetails = details;
+          _fetchingFundDetails = false;
+        });
+      } else {
+        throw Exception("Failed to fetch fund details through proxy.");
+      }
+    } catch (e) {
+      setState(() {
+        _fetchingFundDetails = false;
+        _fundSearchError = "Failed to fetch fund details: Network error.";
+      });
+    }
+  }
+
   Future<void> _fetchFundsList() async {
     try {
       final client = Supabase.instance.client;
@@ -375,15 +675,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _factsheetManagersController.dispose();
     _factsheetTopHoldingsController.dispose();
     _factsheetMonthController.dispose();
+    _fundSearchController.dispose();
+    _debounceTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final languageProvider = Provider.of<LanguageProvider>(context);
+    final colors = AppThemeColors(isDark);
+    final t = languageProvider.translate;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0C20),
+      backgroundColor: colors.background,
       body: Row(
         children: [
           // Sidebar - Hidden on mobile viewports for responsiveness
@@ -393,9 +699,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             return Container(
               width: 260,
-              decoration: const BoxDecoration(
-                color: Color(0xFF151030),
-                border: Border(right: BorderSide(color: Colors.white10)),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                border: Border(right: BorderSide(color: colors.border)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -404,25 +710,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     padding: const EdgeInsets.all(24.0),
                     child: Row(
                       children: [
-                        const Icon(Icons.shield_outlined, color: Color(0xFFE94057), size: 28),
+                        Icon(Icons.shield_outlined, color: colors.primary, size: 28),
                         const SizedBox(width: 12),
                         Text(
-                          "Admin Central",
+                          t('admin_central'),
                           style: GoogleFonts.outfit(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: colors.textPrimary,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const Divider(color: Colors.white10, height: 1),
+                  Divider(color: colors.border, height: 1),
                   const SizedBox(height: 16),
-                  _buildSidebarItem(0, "Clients Management", Icons.people_outline),
-                  _buildSidebarItem(1, "Data Ingestion", Icons.cloud_upload_outlined),
-                  _buildSidebarItem(2, "Factsheets Manager", Icons.document_scanner_outlined),
-                  _buildSidebarItem(3, "Invoice Signer", Icons.draw_outlined),
+                  _buildSidebarItem(0, t('clients_management'), Icons.people_outline),
+                  _buildSidebarItem(1, t('data_ingestion'), Icons.cloud_upload_outlined),
+                  _buildSidebarItem(2, t('factsheets_manager'), Icons.document_scanner_outlined),
+                  _buildSidebarItem(3, t('invoice_signer'), Icons.draw_outlined),
+                  _buildSidebarItem(4, t('settings'), Icons.settings_outlined),
                   const Spacer(),
                   Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -431,9 +738,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       title: Text(
                         authProvider.user?.email ?? "Admin User",
                         overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.inter(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                       ),
-                      subtitle: Text("System Administrator", style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11)),
+                      subtitle: Text("System Administrator", style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11)),
                       trailing: IconButton(
                         icon: const Icon(Icons.logout, color: Colors.grey),
                         onPressed: () => authProvider.signOut(),
@@ -450,25 +757,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Scaffold(
               backgroundColor: Colors.transparent,
               appBar: AppBar(
-                backgroundColor: const Color(0xFF151030),
+                backgroundColor: colors.surface,
                 elevation: 0,
+                iconTheme: IconThemeData(color: colors.textPrimary),
                 title: Text(
                   _selectedTab == 0
-                      ? "Clients Directory"
+                      ? t('clients_directory')
                       : (_selectedTab == 1 
-                          ? "Data Ingestion Engine" 
-                          : (_selectedTab == 2 ? "Factsheets Manager" : "Invoice Signer")),
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white),
+                          ? t('data_ingestion_engine') 
+                          : (_selectedTab == 2 
+                              ? t('factsheets_manager') 
+                              : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
                 ),
                 actions: [
                   IconButton(
-                    icon: const Icon(Icons.refresh, color: Colors.grey),
+                    icon: Icon(Icons.refresh, color: colors.textSecondary),
                     onPressed: _refreshClients,
-                    tooltip: "Reload Profiles",
+                    tooltip: t('refresh_data'),
                   ),
                   if (MediaQuery.of(context).size.width <= 900)
                     IconButton(
-                      icon: const Icon(Icons.logout, color: Colors.grey),
+                      icon: Icon(Icons.logout, color: colors.textSecondary),
                       onPressed: () => authProvider.signOut(),
                     ),
                 ],
@@ -476,9 +786,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               bottomNavigationBar: MediaQuery.of(context).size.width <= 900
                   ? BottomNavigationBar(
                       currentIndex: _selectedTab,
-                      backgroundColor: const Color(0xFF151030),
-                      selectedItemColor: const Color(0xFFE94057),
-                      unselectedItemColor: Colors.grey,
+                      backgroundColor: colors.surface,
+                      selectedItemColor: colors.primary,
+                      unselectedItemColor: colors.textSecondary,
                       type: BottomNavigationBarType.fixed,
                       onTap: (index) {
                         setState(() {
@@ -488,11 +798,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           }
                         });
                       },
-                      items: const [
-                        BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: "Clients"),
-                        BottomNavigationBarItem(icon: Icon(Icons.cloud_upload_outlined), label: "Ingest"),
-                        BottomNavigationBarItem(icon: Icon(Icons.document_scanner_outlined), label: "Factsheets"),
-                        BottomNavigationBarItem(icon: Icon(Icons.draw_outlined), label: "Signer"),
+                      items: [
+                        BottomNavigationBarItem(icon: const Icon(Icons.people_outline), label: t('clients_directory').split(' ')[0]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.cloud_upload_outlined), label: t('data_ingestion').split(' ')[1]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: t('factsheets_manager').split(' ')[0]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.draw_outlined), label: t('invoice_signer').split(' ')[0]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
                       ],
                     )
                   : null,
@@ -505,6 +816,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildSidebarItem(int index, String label, IconData icon) {
+    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
     final isSelected = _selectedTab == index;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
@@ -521,17 +834,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFE94057).withOpacity(0.1) : Colors.transparent,
+            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
             children: [
-              Icon(icon, color: isSelected ? const Color(0xFFE94057) : Colors.grey, size: 22),
+              Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 22),
               const SizedBox(width: 16),
               Text(
                 label,
                 style: GoogleFonts.inter(
-                  color: isSelected ? Colors.white : Colors.grey.shade400,
+                  color: isSelected ? colors.textPrimary : colors.textSecondary,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   fontSize: 14,
                 ),
@@ -553,6 +866,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return _buildFactsheetsContent();
       case 3:
         return _buildInvoiceSignerContent();
+      case 4:
+        return _buildSettingsContent();
       default:
         return const SizedBox.shrink();
     }
@@ -826,159 +1141,586 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildFactsheetsContent() {
-    return _fundsList.isEmpty
-        ? const Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+    final languageProvider = Provider.of<LanguageProvider>(context);
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    final t = languageProvider.translate;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t('fund_facts_finder'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
             ),
-          )
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Factsheet & Holdings Editor",
-                  style: GoogleFonts.outfit(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            t('fund_facts_finder_sub'),
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+
+          // Search Bar Container
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: colors.border),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  "Select a mutual fund scheme to configure its monthly factsheet, managers, and top holdings.",
-                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-                ),
-                const SizedBox(height: 24),
-
-                // Dropdown Selector
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.08)),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _selectedFundId,
-                      dropdownColor: const Color(0xFF151030),
-                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
-                      isExpanded: true,
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedFundId = val;
-                          _loadFactsheetForSelectedFund();
-                        });
-                      },
-                      items: _fundsList.map((fund) {
-                        return DropdownMenuItem<String>(
-                          value: fund['id'],
-                          child: Text(
-                            "${fund['scheme_name']} (${fund['scheme_code']})",
-                            style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Edit Form Card
-                Container(
-                  padding: const EdgeInsets.all(24.0),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.02),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withOpacity(0.05)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Month Year Text field
-                      _buildLabel("Report Date (YYYY-MM-DD)"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetMonthController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. 2026-07-01"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // PDF Link Text field
-                      _buildLabel("Factsheet PDF Download URL"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetPdfController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. https://amc.com/factsheet.pdf"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Holdings URL Text field
-                      _buildLabel("AMC Portfolio Disclosures Web URL"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetHoldingsUrlController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. https://amc.com/disclosures"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Fund Managers (Comma separated)
-                      _buildLabel("Fund Managers (Comma separated)"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetManagersController,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. John Doe, Jane Smith"),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Top Holdings (Text Area format)
-                      _buildLabel("Top Holdings (Format: CompanyName: Weight, Company2: Weight)"),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _factsheetTopHoldingsController,
-                        maxLines: 3,
-                        style: GoogleFonts.inter(color: Colors.white),
-                        decoration: _buildInputDecoration("e.g. HDFC Bank: 9.5, Reliance: 8.2, TCS: 5.4"),
-                      ),
-                      const SizedBox(height: 32),
-
-                      // Save Button
-                      ElevatedButton(
-                        onPressed: _savingFactsheet ? null : _saveFactsheet,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE94057),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: _savingFactsheet
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Text(
-                                "Save Config",
-                                style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                child: TextFormField(
+                  controller: _fundSearchController,
+                  style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 14),
+                  onChanged: _onSearchQueryChanged,
+                  decoration: InputDecoration(
+                    hintText: t('search_funds_placeholder'),
+                    hintStyle: GoogleFonts.inter(color: colors.textMuted, fontSize: 13),
+                    prefixIcon: Icon(Icons.search, color: colors.textSecondary),
+                    suffixIcon: _searchingFunds
+                        ? const Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
                               ),
+                            ),
+                          )
+                        : (_fundSearchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, color: Colors.white54),
+                                onPressed: () {
+                                  setState(() {
+                                    _fundSearchController.clear();
+                                    _searchResults = [];
+                                    _fundSearchError = null;
+                                  });
+                                },
+                              )
+                            : null),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  ),
+                ),
+              ),
+
+              // Search Results Dropdown Overlay
+              if (_searchResults.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 250),
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: colors.border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: colors.cardShadow,
+                        blurRadius: 12,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                   ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const ClampingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final item = _searchResults[index];
+                      final schemeName = item['schemeName'] as String? ?? '';
+                      final schemeCode = (item['schemeCode'] ?? '').toString();
+
+                      return ListTile(
+                        title: Text(
+                          schemeName,
+                          style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(
+                          "Scheme Code: $schemeCode",
+                          style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                        ),
+                        hoverColor: colors.surfaceAccent,
+                        onTap: () => _fetchFundDetails(schemeCode),
+                      );
+                    },
+                    separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                  ),
                 ),
               ],
+            ],
+          ),
+
+          if (_fundSearchError != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.redAccent.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _fundSearchError!,
+                      style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          );
+          ],
+
+          const SizedBox(height: 24),
+
+          // Detail Display Card
+          if (_fetchingFundDetails) ...[
+            const SizedBox(height: 40),
+            const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+              ),
+            ),
+          ] else if (_selectedFundDetails != null) ...[
+            _buildSelectedFundCard(),
+          ] else ...[
+            // Default placeholder card
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.cardShadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      t('no_fund_selected'),
+                      style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      t('no_fund_selected_sub'),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedFundCard() {
+    final meta = _selectedFundDetails!['meta'] as Map<String, dynamic>? ?? {};
+    final data = _selectedFundDetails!['data'] as List<dynamic>? ?? [];
+
+    final fundHouse = meta['fund_house'] ?? 'N/A';
+    final schemeName = meta['scheme_name'] ?? 'N/A';
+    final schemeCode = (meta['scheme_code'] ?? 'N/A').toString();
+    final schemeType = meta['scheme_type'] ?? 'N/A';
+    final schemeCategory = meta['scheme_category'] ?? 'N/A';
+    final isin = meta['isin_div_payout'] ?? meta['isin_div_reinvestment'] ?? 'N/A';
+
+    String latestDate = 'N/A';
+    String latestNav = 'N/A';
+    if (data.isNotEmpty) {
+      latestDate = data[0]['date'] ?? 'N/A';
+      latestNav = data[0]['nav'] ?? 'N/A';
+    }
+
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    final t = Provider.of<LanguageProvider>(context).translate;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: colors.cardShadow,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(28.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fundHouse.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        color: colors.accent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      schemeName,
+                      style: GoogleFonts.outfit(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Scheme Code: $schemeCode",
+                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              // NAV Tag
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE94057).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE94057).withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "LATEST NAV",
+                      style: GoogleFonts.inter(
+                        color: const Color(0xFFE94057),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "₹$latestNav",
+                      style: GoogleFonts.outfit(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      latestDate,
+                      style: GoogleFonts.inter(
+                        color: colors.textSecondary,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          Divider(color: colors.border, height: 40),
+          
+          Text(
+            t('scheme_specifications'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Specifications Grid
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 600;
+              return GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: isWide ? 3 : 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: isWide ? 2.5 : 2.0,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildSpecTile("Scheme Type", schemeType),
+                  _buildSpecTile("Category", schemeCategory),
+                  _buildSpecTile("ISIN", isin),
+                ],
+              );
+            },
+          ),
+          
+          const Divider(color: Colors.white10, height: 40),
+
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 800;
+              
+              // Filter the data based on selection
+              final filteredData = filterNavDataByRange(data, _selectedChartRange);
+              
+              // Calculate growth percent
+              double growthPercent = 0.0;
+              if (filteredData.isNotEmpty) {
+                final double latest = double.tryParse(filteredData.first['nav'].toString()) ?? 0.0;
+                final double oldest = double.tryParse(filteredData.last['nav'].toString()) ?? 0.0;
+                growthPercent = oldest == 0.0 ? 0.0 : ((latest - oldest) / oldest) * 100;
+              }
+              
+              final chartCol = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "NAV Growth Trend (${_getRangeLabel(_selectedChartRange)})",
+                        style: GoogleFonts.outfit(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      // Growth Percent Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: growthPercent >= 0 
+                              ? Colors.green.withOpacity(0.15) 
+                              : Colors.redAccent.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: growthPercent >= 0 
+                                ? Colors.green.withOpacity(0.3) 
+                                : Colors.redAccent.withOpacity(0.3)
+                          ),
+                        ),
+                        child: Text(
+                          "${growthPercent >= 0 ? '+' : ''}${growthPercent.toStringAsFixed(2)}%",
+                          style: GoogleFonts.inter(
+                            color: growthPercent >= 0 ? Colors.green : Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  NavGrowthChart(navData: filteredData),
+                ],
+              );
+              
+              final selectorCol = Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.02),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withOpacity(0.04)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Time Range",
+                      style: GoogleFonts.outfit(
+                        color: Colors.grey.shade400,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...["YTD", "1Y", "2Y", "3Y", "5Y", "Since Launch"].map((range) {
+                      final isSelected = _selectedChartRange == range;
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedChartRange = range;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isSelected ? const Color(0xFFE94057) : Colors.grey.shade600,
+                                    width: isSelected ? 5 : 2,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _getRangeLabel(range),
+                                style: GoogleFonts.inter(
+                                  color: isSelected ? Colors.white : Colors.grey.shade400,
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              );
+              
+              if (isWide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: chartCol),
+                    const SizedBox(width: 24),
+                    SizedBox(width: 180, child: selectorCol),
+                  ],
+                );
+              } else {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    chartCol,
+                    const SizedBox(height: 20),
+                    selectorCol,
+                  ],
+                );
+              }
+            },
+          ),
+
+          const Divider(color: Colors.white10, height: 40),
+
+          Text(
+            "Recent Historical NAVs",
+            style: GoogleFonts.outfit(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Historical NAV list
+          if (data.isEmpty)
+            Text(
+              "No historical NAV details available.",
+              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.02),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: data.length > 5 ? 5 : data.length,
+                separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                itemBuilder: (context, index) {
+                  final navItem = data[index];
+                  final date = navItem['date'] ?? 'N/A';
+                  final navVal = navItem['nav'] ?? 'N/A';
+                  
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          date,
+                          style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                        ),
+                        Text(
+                          "₹$navVal",
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecTile(String label, String value) {
+    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surfaceAccent,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildLabel(String labelText) {
@@ -1072,6 +1814,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               setState(() {
                 _selectedInvoicePdf = file;
               });
+              _generatePdfPreview();
             }
           },
         ),
@@ -1194,6 +1937,221 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  Widget _buildPdfPreviewWidget() {
+    final previewHeight = 400.0;
+    final previewWidth = previewHeight * (595.0 / 842.0);
+
+    if (_selectedInvoicePdf == null) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.picture_as_pdf_outlined, color: Colors.grey.shade600, size: 40),
+              const SizedBox(height: 12),
+              Text(
+                "Upload a PDF or ZIP to see the placement preview",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_loadingPreview) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Generating visual placement preview...",
+                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_pdfPreviewBytes == null) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Center(
+          child: Text(
+            "Could not load PDF page preview",
+            style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+          ),
+        ),
+      );
+    }
+
+    // Size of overlays scaled to the preview container:
+    final stampW = (_stampW / 595.0) * previewWidth;
+    final stampH = (_stampH / 842.0) * previewHeight;
+    final stampL = (_stampX / 595.0) * previewWidth;
+    final stampT = ((842.0 - (_stampY + _stampH)) / 842.0) * previewHeight;
+
+    final sigW = (_sigW / 595.0) * previewWidth;
+    final sigH = (_sigH / 842.0) * previewHeight;
+    final sigL = (_sigX / 595.0) * previewWidth;
+    final sigT = ((842.0 - (_sigY + _sigH)) / 842.0) * previewHeight;
+
+    return Center(
+      child: Column(
+        children: [
+          Text(
+            "Visual Placement Preview (Last Page)",
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Drag the Stamp or Signature directly to adjust coordinates",
+            style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: previewWidth,
+            height: previewHeight,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Rendered PDF Page Image
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    _pdfPreviewBytes!,
+                    width: previewWidth,
+                    height: previewHeight,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+
+                // Stamp Overlay
+                Positioned(
+                  left: stampL,
+                  top: stampT,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
+                      final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
+                      setState(() {
+                        _stampX = (_stampX + pdfDeltaX).clamp(0.0, 595.0 - _stampW);
+                        _stampY = (_stampY + pdfDeltaY).clamp(0.0, 842.0 - _stampH);
+                        _selectedPreset = "Custom Placement";
+                      });
+                    },
+                    child: Container(
+                      width: stampW,
+                      height: stampH,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFF27121), width: 2),
+                        color: const Color(0xFFF27121).withOpacity(0.2),
+                      ),
+                      child: _selectedStampPng != null
+                          ? Image.memory(
+                              _selectedStampPng!.bytes ?? base64Decode(_selectedStampPng!.base64String!),
+                              fit: BoxFit.fill,
+                            )
+                          : const Center(
+                              child: Text(
+                                "STAMP",
+                                style: TextStyle(
+                                  color: Color(0xFFF27121),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 8,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+
+                // Signature Overlay
+                Positioned(
+                  left: sigL,
+                  top: sigT,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
+                      final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
+                      setState(() {
+                        _sigX = (_sigX + pdfDeltaX).clamp(0.0, 595.0 - _sigW);
+                        _sigY = (_sigY + pdfDeltaY).clamp(0.0, 842.0 - _sigH);
+                        _selectedPreset = "Custom Placement";
+                      });
+                    },
+                    child: Container(
+                      width: sigW,
+                      height: sigH,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFE94057), width: 2),
+                        color: const Color(0xFFE94057).withOpacity(0.2),
+                      ),
+                      child: _selectedSignaturePng != null
+                          ? Image.memory(
+                              _selectedSignaturePng!.bytes ?? base64Decode(_selectedSignaturePng!.base64String!),
+                              fit: BoxFit.fill,
+                            )
+                          : const Center(
+                              child: Text(
+                                "SIGNATURE",
+                                style: TextStyle(
+                                  color: Color(0xFFE94057),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 8,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildControlPanel() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1221,7 +2179,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               color: Colors.grey.shade500,
             ),
           ),
-           const SizedBox(height: 24),
+          const SizedBox(height: 20),
+          _buildPdfPreviewWidget(),
+          const SizedBox(height: 24),
           Text(
             "Overlay Location Preset",
             style: GoogleFonts.inter(
@@ -1294,6 +2254,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
               });
             },
           ),
+          _buildCoordinateSlider(
+            label: "Company Stamp Width",
+            value: _stampW,
+            min: 30,
+            max: 300,
+            onChanged: (val) {
+              setState(() {
+                _stampW = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Company Stamp Height",
+            value: _stampH,
+            min: 30,
+            max: 300,
+            onChanged: (val) {
+              setState(() {
+                _stampH = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
           const Divider(color: Colors.white10, height: 32),
           _buildCoordinateSlider(
             label: "Distributor Signature X (Horizontal)",
@@ -1315,6 +2299,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: (val) {
               setState(() {
                 _sigY = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Distributor Signature Width",
+            value: _sigW,
+            min: 30,
+            max: 300,
+            onChanged: (val) {
+              setState(() {
+                _sigW = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Distributor Signature Height",
+            value: _sigH,
+            min: 15,
+            max: 200,
+            onChanged: (val) {
+              setState(() {
+                _sigH = val;
                 _selectedPreset = "Custom Placement";
               });
             },
@@ -1453,6 +2461,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             "stampY": _stampY.round(),
             "sigX": _sigX.round(),
             "sigY": _sigY.round(),
+            "stampW": _stampW.round(),
+            "stampH": _stampH.round(),
+            "sigW": _sigW.round(),
+            "sigH": _sigH.round(),
           };
 
           final signResponse = await _supabaseService.client.functions.invoke(
@@ -1511,6 +2523,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
           "stampY": _stampY.round(),
           "sigX": _sigX.round(),
           "sigY": _sigY.round(),
+          "stampW": _stampW.round(),
+          "stampH": _stampH.round(),
+          "sigW": _sigW.round(),
+          "sigH": _sigH.round(),
         };
 
         final response = await _supabaseService.client.functions.invoke(
@@ -1630,4 +2646,432 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Widget _buildSettingsContent() {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final languageProvider = Provider.of<LanguageProvider>(context);
+    final isDark = themeProvider.isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    final t = languageProvider.translate;
+    
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(28.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Submenu 1: Theme Settings
+          Text(
+            t('display_settings'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            t('display_settings_sub'),
+            style: GoogleFonts.inter(
+              color: colors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.cardShadow,
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ]
+            ),
+            child: Column(
+              children: [
+                _buildThemeOptionTile(
+                  title: t('light_mode'),
+                  subtitle: t('light_mode_sub'),
+                  icon: Icons.light_mode_outlined,
+                  option: ThemeModeOption.light,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildThemeOptionTile(
+                  title: t('dark_mode'),
+                  subtitle: t('dark_mode_sub'),
+                  icon: Icons.dark_mode_outlined,
+                  option: ThemeModeOption.dark,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildThemeOptionTile(
+                  title: t('system_preference'),
+                  subtitle: t('system_preference_sub'),
+                  icon: Icons.brightness_auto_outlined,
+                  option: ThemeModeOption.system,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 36),
+
+          // Submenu 2: Language Settings
+          Text(
+            t('language_settings'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            t('language_settings_sub'),
+            style: GoogleFonts.inter(
+              color: colors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.cardShadow,
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ]
+            ),
+            child: Column(
+              children: [
+                _buildLanguageOptionTile(
+                  title: "English",
+                  subtitle: "Default interface language",
+                  langCode: "en",
+                  languageProvider: languageProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildLanguageOptionTile(
+                  title: "हिन्दी (Hindi)",
+                  subtitle: "हिन्दी इंटरफ़ेस भाषा",
+                  langCode: "hi",
+                  languageProvider: languageProvider,
+                  colors: colors,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemeOptionTile({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required ThemeModeOption option,
+    required ThemeProvider themeProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = themeProvider.themeModeOption == option;
+    return InkWell(
+      onTap: () {
+        themeProvider.setThemeMode(option);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      color: colors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: colors.primary, size: 20)
+            else
+              Icon(Icons.circle_outlined, color: colors.border, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageOptionTile({
+    required String title,
+    required String subtitle,
+    required String langCode,
+    required LanguageProvider languageProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = languageProvider.currentLanguage == langCode;
+    return InkWell(
+      onTap: () {
+        languageProvider.setLanguage(langCode);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Icon(Icons.language, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      color: colors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: colors.primary, size: 20)
+            else
+              Icon(Icons.circle_outlined, color: colors.border, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
 }
+
+class NavGrowthChart extends StatelessWidget {
+  final List<dynamic> navData;
+
+  const NavGrowthChart({super.key, required this.navData});
+
+  @override
+  Widget build(BuildContext context) {
+    if (navData.isEmpty) return const SizedBox.shrink();
+
+    // Reverse list to go in chronological order (left to right)
+    final pointsList = navData.reversed.toList();
+
+    List<double> navs = pointsList.map((item) {
+      return double.tryParse((item['nav'] ?? '0').toString()) ?? 0.0;
+    }).toList();
+
+    if (navs.isEmpty) return const SizedBox.shrink();
+
+    // Downsample if there are more than 100 points for smooth canvas rendering
+    if (navs.length > 100) {
+      navs = _downsample(navs, 100);
+    }
+
+    final double maxVal = navs.reduce((a, b) => a > b ? a : b);
+    final double minVal = navs.reduce((a, b) => a < b ? a : b);
+    final double range = maxVal - minVal == 0 ? 1.0 : maxVal - minVal;
+
+    final firstDate = pointsList.first['date'] ?? '';
+    final lastDate = pointsList.last['date'] ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          height: 180,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.01),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.03)),
+          ),
+          child: CustomPaint(
+            painter: LineChartPainter(
+              values: navs,
+              minVal: minVal,
+              maxVal: maxVal,
+              range: range,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              firstDate,
+              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
+            ),
+            Text(
+              "Range: ₹${minVal.toStringAsFixed(2)} - ₹${maxVal.toStringAsFixed(2)}",
+              style: GoogleFonts.inter(
+                color: const Color(0xFFF27121),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              lastDate,
+              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  List<double> _downsample(List<double> input, int maxPoints) {
+    if (input.length <= maxPoints) return input;
+    final List<double> result = [];
+    final double step = (input.length - 1) / (maxPoints - 1);
+    for (int i = 0; i < maxPoints; i++) {
+      final int index = (i * step).round().clamp(0, input.length - 1);
+      result.add(input[index]);
+    }
+    return result;
+  }
+}
+
+class LineChartPainter extends CustomPainter {
+  final List<double> values;
+  final double minVal;
+  final double maxVal;
+  final double range;
+
+  LineChartPainter({
+    required this.values,
+    required this.minVal,
+    required this.maxVal,
+    required this.range,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final double width = size.width;
+    final double height = size.height;
+    final double stepX = width / (values.length - 1);
+
+    // Draw horizontal grid lines
+    final Paint gridPaint = Paint()
+      ..color = Colors.white.withOpacity(0.04)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    for (int i = 1; i <= 3; i++) {
+      final double y = height * (i / 4.0);
+      canvas.drawLine(Offset(0, y), Offset(width, y), gridPaint);
+    }
+
+    // Prepare points
+    final List<Offset> points = [];
+    for (int i = 0; i < values.length; i++) {
+      final double x = i * stepX;
+      final double normalized = (values[i] - minVal) / range;
+      final double y = height - (normalized * (height - 30) + 15);
+      points.add(Offset(x, y));
+    }
+
+    // Draw area path (gradient fill below line)
+    final Path areaPath = Path()
+      ..moveTo(0, height);
+    for (final pt in points) {
+      areaPath.lineTo(pt.dx, pt.dy);
+    }
+    areaPath.lineTo(width, height);
+    areaPath.close();
+
+    final Paint areaPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          const Color(0xFFE94057).withOpacity(0.3),
+          const Color(0xFF8A2387).withOpacity(0.01),
+        ],
+      ).createShader(Rect.fromLTWH(0, 0, width, height));
+    canvas.drawPath(areaPath, areaPaint);
+
+    // Draw path line (smooth connecting curves)
+    final Path linePath = Path()
+      ..moveTo(points[0].dx, points[0].dy);
+    for (int i = 0; i < points.length - 1; i++) {
+      final p1 = points[i];
+      final p2 = points[i + 1];
+      final controlPoint1 = Offset(p1.dx + stepX / 2.0, p1.dy);
+      final controlPoint2 = Offset(p2.dx - stepX / 2.0, p2.dy);
+      linePath.cubicTo(
+        controlPoint1.dx, controlPoint1.dy,
+        controlPoint2.dx, controlPoint2.dy,
+        p2.dx, p2.dy,
+      );
+    }
+
+    final Paint linePaint = Paint()
+      ..color = const Color(0xFFE94057)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(linePath, linePaint);
+
+    // Draw circles at endpoints or critical points
+    final Paint dotPaint = Paint()
+      ..color = const Color(0xFFF27121)
+      ..style = PaintingStyle.fill;
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    final lastPt = points.last;
+    canvas.drawCircle(lastPt, 5.0, dotPaint);
+    canvas.drawCircle(lastPt, 5.0, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant LineChartPainter oldDelegate) {
+    return oldDelegate.values != values;
+  }
+}
+
