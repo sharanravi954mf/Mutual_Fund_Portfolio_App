@@ -254,6 +254,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     ),
                     const SizedBox(height: 12),
                     Autocomplete<Map<String, dynamic>>(
+                      initialValue: const TextEditingValue(text: ''),
                       displayStringForOption: (option) => option['scheme_name'] ?? '',
                       optionsBuilder: (TextEditingValue textEditingValue) {
                         if (textEditingValue.text.isEmpty || textEditingValue.text.length < 2) {
