@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
@@ -683,7 +684,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final languageProvider = Provider.of<LanguageProvider>(context);
     final colors = AppThemeColors(isDark);
+    final t = languageProvider.translate;
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -710,7 +713,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         Icon(Icons.shield_outlined, color: colors.primary, size: 28),
                         const SizedBox(width: 12),
                         Text(
-                          "Admin Central",
+                          t('admin_central'),
                           style: GoogleFonts.outfit(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -722,11 +725,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                   Divider(color: colors.border, height: 1),
                   const SizedBox(height: 16),
-                  _buildSidebarItem(0, "Clients Management", Icons.people_outline),
-                  _buildSidebarItem(1, "Data Ingestion", Icons.cloud_upload_outlined),
-                  _buildSidebarItem(2, "Factsheets Manager", Icons.document_scanner_outlined),
-                  _buildSidebarItem(3, "Invoice Signer", Icons.draw_outlined),
-                  _buildSidebarItem(4, "Settings", Icons.settings_outlined),
+                  _buildSidebarItem(0, t('clients_management'), Icons.people_outline),
+                  _buildSidebarItem(1, t('data_ingestion'), Icons.cloud_upload_outlined),
+                  _buildSidebarItem(2, t('factsheets_manager'), Icons.document_scanner_outlined),
+                  _buildSidebarItem(3, t('invoice_signer'), Icons.draw_outlined),
+                  _buildSidebarItem(4, t('settings'), Icons.settings_outlined),
                   const Spacer(),
                   Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -759,19 +762,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 iconTheme: IconThemeData(color: colors.textPrimary),
                 title: Text(
                   _selectedTab == 0
-                      ? "Clients Directory"
+                      ? t('clients_directory')
                       : (_selectedTab == 1 
-                          ? "Data Ingestion Engine" 
+                          ? t('data_ingestion_engine') 
                           : (_selectedTab == 2 
-                              ? "Factsheets Manager" 
-                              : (_selectedTab == 3 ? "Invoice Signer" : "Settings Console"))),
+                              ? t('factsheets_manager') 
+                              : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
                   style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
                 ),
                 actions: [
                   IconButton(
                     icon: Icon(Icons.refresh, color: colors.textSecondary),
                     onPressed: _refreshClients,
-                    tooltip: "Reload Profiles",
+                    tooltip: t('refresh_data'),
                   ),
                   if (MediaQuery.of(context).size.width <= 900)
                     IconButton(
@@ -795,12 +798,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           }
                         });
                       },
-                      items: const [
-                        BottomNavigationBarItem(icon: Icon(Icons.people_outline), label: "Clients"),
-                        BottomNavigationBarItem(icon: Icon(Icons.cloud_upload_outlined), label: "Ingest"),
-                        BottomNavigationBarItem(icon: Icon(Icons.document_scanner_outlined), label: "Factsheets"),
-                        BottomNavigationBarItem(icon: Icon(Icons.draw_outlined), label: "Signer"),
-                        BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: "Settings"),
+                      items: [
+                        BottomNavigationBarItem(icon: const Icon(Icons.people_outline), label: t('clients_directory').split(' ')[0]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.cloud_upload_outlined), label: t('data_ingestion').split(' ')[1]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: t('factsheets_manager').split(' ')[0]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.draw_outlined), label: t('invoice_signer').split(' ')[0]),
+                        BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
                       ],
                     )
                   : null,
@@ -1138,23 +1141,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildFactsheetsContent() {
+    final languageProvider = Provider.of<LanguageProvider>(context);
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    final t = languageProvider.translate;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "Fund Facts Finder",
+            t('fund_facts_finder'),
             style: GoogleFonts.outfit(
-              color: Colors.white,
+              color: colors.textPrimary,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            "Type a mutual fund name to lookup its real-time scheme classification, ISIN codes, and historical NAV data.",
-            style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+            t('fund_facts_finder_sub'),
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 24),
 
@@ -1164,18 +1172,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
             children: [
               Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF151030),
+                  color: colors.surface,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white10),
+                  border: Border.all(color: colors.border),
                 ),
                 child: TextFormField(
                   controller: _fundSearchController,
-                  style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+                  style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 14),
                   onChanged: _onSearchQueryChanged,
                   decoration: InputDecoration(
-                    hintText: "Type 3+ characters to search funds (e.g. Axis Bluechip, SBI Liquid)...",
-                    hintStyle: GoogleFonts.inter(color: Colors.grey.shade600, fontSize: 13),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                    hintText: t('search_funds_placeholder'),
+                    hintStyle: GoogleFonts.inter(color: colors.textMuted, fontSize: 13),
+                    prefixIcon: Icon(Icons.search, color: colors.textSecondary),
                     suffixIcon: _searchingFunds
                         ? const Padding(
                             padding: EdgeInsets.all(12.0),
@@ -1212,12 +1220,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Container(
                   constraints: const BoxConstraints(maxHeight: 250),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF151030),
+                    color: colors.surface,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white10),
+                    border: Border.all(color: colors.border),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
+                        color: colors.cardShadow,
                         blurRadius: 12,
                         offset: const Offset(0, 8),
                       ),
@@ -1228,7 +1236,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     physics: const ClampingScrollPhysics(),
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: _searchResults.length,
-                    separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
                     itemBuilder: (context, index) {
                       final item = _searchResults[index];
                       final schemeName = item['schemeName'] as String? ?? '';
@@ -1237,16 +1244,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       return ListTile(
                         title: Text(
                           schemeName,
-                          style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                          style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
                         ),
                         subtitle: Text(
                           "Scheme Code: $schemeCode",
-                          style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
+                          style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
                         ),
-                        hoverColor: Colors.white.withOpacity(0.04),
+                        hoverColor: colors.surfaceAccent,
                         onTap: () => _fetchFundDetails(schemeCode),
                       );
                     },
+                    separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
                   ),
                 ),
               ],
@@ -1294,24 +1302,31 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Container(
               padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.02),
+                color: colors.surface,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withOpacity(0.05)),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.cardShadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Center(
                 child: Column(
                   children: [
-                    Icon(Icons.search_outlined, color: Colors.grey.shade700, size: 48),
+                    Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
                     const SizedBox(height: 16),
                     Text(
-                      "No Fund Selected",
-                      style: GoogleFonts.outfit(color: Colors.grey.shade500, fontSize: 16, fontWeight: FontWeight.bold),
+                      t('no_fund_selected'),
+                      style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Search and select a mutual fund to view its meta information and historical NAV data.",
+                      t('no_fund_selected_sub'),
                       textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(color: Colors.grey.shade600, fontSize: 12),
+                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1341,11 +1356,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
       latestNav = data[0]['nav'] ?? 'N/A';
     }
 
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+    final t = Provider.of<LanguageProvider>(context).translate;
+
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF151030),
+        color: colors.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: colors.cardShadow,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       padding: const EdgeInsets.all(28.0),
       child: Column(
@@ -1361,7 +1387,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     Text(
                       fundHouse.toUpperCase(),
                       style: GoogleFonts.inter(
-                        color: const Color(0xFFF27121),
+                        color: colors.accent,
                         fontWeight: FontWeight.bold,
                         fontSize: 11,
                         letterSpacing: 1.2,
@@ -1371,7 +1397,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     Text(
                       schemeName,
                       style: GoogleFonts.outfit(
-                        color: Colors.white,
+                        color: colors.textPrimary,
                         fontWeight: FontWeight.bold,
                         fontSize: 20,
                       ),
@@ -1379,7 +1405,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     const SizedBox(height: 6),
                     Text(
                       "Scheme Code: $schemeCode",
-                      style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1409,7 +1435,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     Text(
                       "₹$latestNav",
                       style: GoogleFonts.outfit(
-                        color: Colors.white,
+                        color: colors.textPrimary,
                         fontWeight: FontWeight.bold,
                         fontSize: 22,
                       ),
@@ -1418,7 +1444,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     Text(
                       latestDate,
                       style: GoogleFonts.inter(
-                        color: Colors.grey.shade400,
+                        color: colors.textSecondary,
                         fontSize: 10,
                       ),
                     ),
@@ -1427,12 +1453,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ),
-          const Divider(color: Colors.white10, height: 40),
+          Divider(color: colors.border, height: 40),
           
           Text(
-            "Scheme Specifications",
+            t('scheme_specifications'),
             style: GoogleFonts.outfit(
-              color: Colors.white,
+              color: colors.textPrimary,
               fontWeight: FontWeight.bold,
               fontSize: 14,
             ),
@@ -1668,12 +1694,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildSpecTile(String label, String value) {
+    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
+        color: colors.surfaceAccent,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.04)),
+        border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1681,14 +1709,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           Text(
             label,
-            style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11, fontWeight: FontWeight.w500),
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 6),
           Text(
             value,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+            style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -2620,31 +2648,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Widget _buildSettingsContent() {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final languageProvider = Provider.of<LanguageProvider>(context);
     final isDark = themeProvider.isDarkMode(context);
     final colors = AppThemeColors(isDark);
+    final t = languageProvider.translate;
     
     return SingleChildScrollView(
       padding: const EdgeInsets.all(28.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Submenu 1: Theme Settings
           Text(
-            "Display Settings",
+            t('display_settings'),
             style: GoogleFonts.outfit(
               color: colors.textPrimary,
-              fontSize: 20,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
-            "Customize the application appearance to suit your preference.",
+            t('display_settings_sub'),
             style: GoogleFonts.inter(
               color: colors.textSecondary,
-              fontSize: 13,
+              fontSize: 12,
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
               color: colors.surface,
@@ -2661,8 +2692,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Column(
               children: [
                 _buildThemeOptionTile(
-                  title: "Light Mode",
-                  subtitle: "Clean, light-hearted appearance",
+                  title: t('light_mode'),
+                  subtitle: t('light_mode_sub'),
                   icon: Icons.light_mode_outlined,
                   option: ThemeModeOption.light,
                   themeProvider: themeProvider,
@@ -2670,8 +2701,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
                 Divider(color: colors.border, height: 1),
                 _buildThemeOptionTile(
-                  title: "Dark Mode",
-                  subtitle: "Classic deep space appearance",
+                  title: t('dark_mode'),
+                  subtitle: t('dark_mode_sub'),
                   icon: Icons.dark_mode_outlined,
                   option: ThemeModeOption.dark,
                   themeProvider: themeProvider,
@@ -2679,8 +2710,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
                 Divider(color: colors.border, height: 1),
                 _buildThemeOptionTile(
-                  title: "System Preference",
-                  subtitle: "Automatically match device settings",
+                  title: t('system_preference'),
+                  subtitle: t('system_preference_sub'),
                   icon: Icons.brightness_auto_outlined,
                   option: ThemeModeOption.system,
                   themeProvider: themeProvider,
@@ -2688,7 +2719,61 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          )
+          ),
+
+          const SizedBox(height: 36),
+
+          // Submenu 2: Language Settings
+          Text(
+            t('language_settings'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            t('language_settings_sub'),
+            style: GoogleFonts.inter(
+              color: colors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.cardShadow,
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ]
+            ),
+            child: Column(
+              children: [
+                _buildLanguageOptionTile(
+                  title: "English",
+                  subtitle: "Default interface language",
+                  langCode: "en",
+                  languageProvider: languageProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildLanguageOptionTile(
+                  title: "हिन्दी (Hindi)",
+                  subtitle: "हिन्दी इंटरफ़ेस भाषा",
+                  langCode: "hi",
+                  languageProvider: languageProvider,
+                  colors: colors,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -2722,7 +2807,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: GoogleFonts.inter(
                       color: colors.textPrimary,
                       fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: colors.primary, size: 20)
+            else
+              Icon(Icons.circle_outlined, color: colors.border, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageOptionTile({
+    required String title,
+    required String subtitle,
+    required String langCode,
+    required LanguageProvider languageProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = languageProvider.currentLanguage == langCode;
+    return InkWell(
+      onTap: () {
+        languageProvider.setLanguage(langCode);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Icon(Icons.language, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      color: colors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 4),

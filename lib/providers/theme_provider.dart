@@ -47,9 +47,9 @@ class AppThemeColors {
   Color get surfaceAccent => isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.015);
   
   Color get border => isDark ? Colors.white.withOpacity(0.05) : Colors.grey.shade200;
-  Color get textPrimary => isDark ? Colors.white : const Color(0xFF0F0C20);
-  Color get textSecondary => isDark ? Colors.grey.shade400 : Colors.grey.shade600;
-  Color get textMuted => isDark ? Colors.grey.shade600 : Colors.grey.shade400;
+  Color get textPrimary => isDark ? Colors.white : const Color(0xFF000000);
+  Color get textSecondary => isDark ? Colors.grey.shade400 : const Color(0xFF222233);
+  Color get textMuted => isDark ? Colors.grey.shade600 : const Color(0xFF555566);
   
   Color get cardShadow => isDark ? Colors.black.withOpacity(0.4) : Colors.black.withOpacity(0.04);
 }
