@@ -81,8 +81,27 @@ serve(async (req) => {
       stampH = 60,
       sigW = 120,
       sigH = 50,
+      url,
       action,          
     } = await req.json();
+
+    if (action === "proxy-get") {
+      if (!url) {
+        return new Response(
+          JSON.stringify({ error: "Missing target url for proxy" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      console.log(`Proxying GET request for URL: ${url}`);
+      const res = await fetch(url);
+      const resText = await res.text();
+      return new Response(resText, {
+        headers: { 
+          ...corsHeaders, 
+          "Content-Type": "application/json" 
+        }
+      });
+    }
 
     const fileBase64 = invoiceFile || invoicePdf;
 

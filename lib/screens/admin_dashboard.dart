@@ -401,12 +401,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      final response = await http.get(
-        Uri.parse("https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(query)}"),
-      ).timeout(const Duration(seconds: 10));
+      final response = await _supabaseService.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          "action": "proxy-get",
+          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(query)}",
+        },
+      ).timeout(const Duration(seconds: 15));
 
-      if (response.statusCode == 200) {
-        final List<dynamic> results = jsonDecode(response.body);
+      if (response.status == 200 && response.data != null) {
+        final List<dynamic> results = response.data is String
+            ? jsonDecode(response.data as String)
+            : List<dynamic>.from(response.data as List);
         setState(() {
           _searchResults = results;
           _searchingFunds = false;
@@ -415,7 +421,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           }
         });
       } else {
-        throw Exception("Server returned code ${response.statusCode}");
+        throw Exception("Failed to search funds through proxy.");
       }
     } catch (e) {
       setState(() {
@@ -435,18 +441,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      final response = await http.get(
-        Uri.parse("https://api.mfapi.in/mf/$schemeCode"),
-      ).timeout(const Duration(seconds: 10));
+      final response = await _supabaseService.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          "action": "proxy-get",
+          "url": "https://api.mfapi.in/mf/$schemeCode",
+        },
+      ).timeout(const Duration(seconds: 20));
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> details = jsonDecode(response.body);
+      if (response.status == 200 && response.data != null) {
+        final Map<String, dynamic> details = response.data is String
+            ? jsonDecode(response.data as String)
+            : Map<String, dynamic>.from(response.data as Map);
         setState(() {
           _selectedFundDetails = details;
           _fetchingFundDetails = false;
         });
       } else {
-        throw Exception("Server returned code ${response.statusCode}");
+        throw Exception("Failed to fetch fund details through proxy.");
       }
     } catch (e) {
       setState(() {
