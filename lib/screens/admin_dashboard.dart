@@ -883,6 +883,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 backgroundColor: colors.surface,
                 elevation: 0,
                 iconTheme: IconThemeData(color: colors.textPrimary),
+                leading: showSidebar
+                    ? null
+                    : Builder(
+                        builder: (context) => IconButton(
+                          icon: const Icon(Icons.menu),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                        ),
+                      ),
                 title: Text(
                   _selectedTab == 0
                       ? t('clients_directory')
@@ -1086,14 +1094,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 borderSide: const BorderSide(color: Color(0xFFE94057)),
               ),
             ),
-          ),
+          ).premiumReveal(index: 0),
           const SizedBox(height: 20),
 
           // Directory count
           Text(
             "Showing ${_filteredClients.length} of ${_allClients.length} registered clients",
             style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-          ),
+          ).premiumReveal(index: 1),
           const SizedBox(height: 16),
 
           // Client List Table / ListView
@@ -1169,7 +1177,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         );
                       },
                     ),
-            ),
+            ).premiumReveal(index: 2),
           ),
         ],
       ),
@@ -1182,15 +1190,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Advisor Automation Tools",
-            style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Manage connection states and execute manual file parsers.",
-            style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Advisor Automation Tools",
+                style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Manage connection states and execute manual file parsers.",
+                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 32),
 
           // Ingestion Action Card
@@ -1247,7 +1260,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 1),
           const SizedBox(height: 24),
 
           // NAV Sync Action Card
@@ -1304,7 +1317,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 2),
         ],
       ),
     );
@@ -1321,19 +1334,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            t('fund_facts_finder'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            t('fund_facts_finder_sub'),
-            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('fund_facts_finder'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t('fund_facts_finder_sub'),
+                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 24),
 
           // Search Bar Container
@@ -1429,7 +1447,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ],
-          ),
+          ).premiumReveal(index: 1),
 
           if (_fundSearchError != null) ...[
             const SizedBox(height: 16),
@@ -1457,52 +1475,50 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           const SizedBox(height: 24),
 
-          // Detail Display Card
-          if (_fetchingFundDetails) ...[
-            const SizedBox(height: 40),
-            const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
-              ),
-            ),
-          ] else if (_selectedFundDetails != null) ...[
-            _buildSelectedFundCard(),
-          ] else ...[
-            // Default placeholder card
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: colors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.cardShadow,
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+          (_fetchingFundDetails
+              ? const Padding(
+                  padding: EdgeInsets.only(top: 40.0),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+                    ),
                   ),
-                ],
-              ),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      t('no_fund_selected'),
-                      style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      t('no_fund_selected_sub'),
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+                )
+              : (_selectedFundDetails != null
+                  ? _buildSelectedFundCard()
+                  : Container(
+                      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+                      decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: colors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.cardShadow,
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
+                            const SizedBox(height: 16),
+                            Text(
+                              t('no_fund_selected'),
+                              style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              t('no_fund_selected_sub'),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ))).premiumReveal(index: 2),
         ],
       ),
     );
@@ -1923,22 +1939,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Distributor Invoice Signer & Excel Auto-Updater",
-            style: GoogleFonts.outfit(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: Colors.grey.shade400,
-            ),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Distributor Invoice Signer & Excel Auto-Updater",
+                style: GoogleFonts.outfit(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 24),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -1960,7 +1981,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ],
                     );
             },
-          ),
+          ).premiumReveal(index: 1),
         ],
       ),
     );
@@ -2829,22 +2850,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Submenu 1: Theme Settings
-          Text(
-            t('display_settings'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            t('display_settings_sub'),
-            style: GoogleFonts.inter(
-              color: colors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('display_settings'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                t('display_settings_sub'),
+                style: GoogleFonts.inter(
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
@@ -2889,27 +2915,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 1),
 
           const SizedBox(height: 36),
 
           // Submenu 2: Language Settings
-          Text(
-            t('language_settings'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            t('language_settings_sub'),
-            style: GoogleFonts.inter(
-              color: colors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('language_settings'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                t('language_settings_sub'),
+                style: GoogleFonts.inter(
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 2),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
@@ -2943,7 +2974,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 3),
         ],
       ),
     );
@@ -3242,6 +3273,15 @@ class LineChartPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant LineChartPainter oldDelegate) {
     return oldDelegate.values != values;
+  }
+}
+
+extension PremiumRevealExtension on Widget {
+  Widget premiumReveal({required int index, int staggerMs = 150}) {
+    return this.animate(delay: Duration(milliseconds: index * staggerMs))
+        .fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic)
+        .blur(begin: const Offset(10, 10), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic)
+        .slide(begin: const Offset(0, 0.2), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic);
   }
 }
 

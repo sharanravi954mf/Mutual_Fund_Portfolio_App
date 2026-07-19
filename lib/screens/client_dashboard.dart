@@ -621,6 +621,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     backgroundColor: colors.surface,
                     elevation: 0,
                     iconTheme: IconThemeData(color: colors.textPrimary),
+                    leading: showSidebar
+                        ? null
+                        : Builder(
+                            builder: (context) => IconButton(
+                              icon: const Icon(Icons.menu),
+                              onPressed: () => Scaffold.of(context).openDrawer(),
+                            ),
+                          ),
                     title: Text(
                       appBarTitle,
                       style: GoogleFonts.outfit(
