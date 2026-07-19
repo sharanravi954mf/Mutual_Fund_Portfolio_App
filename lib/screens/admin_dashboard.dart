@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
@@ -399,16 +400,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _performFundSearch(String query) async {
     final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (cleanQuery.isEmpty) return;
+
     final keywords = cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
-    if (keywords.isEmpty) return;
 
-    // Find the longest keyword of length >= 3 to query the API
-    final searchKeyword = keywords.firstWhere(
-      (k) => k.length >= 3,
-      orElse: () => keywords.first,
-    );
-
-    if (searchKeyword.length < 3) {
+    // Check if it's a numeric scheme code
+    final isNumeric = RegExp(r'^\d+$').hasMatch(cleanQuery);
+    
+    if (cleanQuery.length < 3 && !isNumeric) {
       setState(() {
         _searchResults = [];
         _fundSearchError = null;
@@ -422,35 +421,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      final response = await _supabaseService.client.functions.invoke(
-        'sign-stamp-invoice',
-        body: {
-          "action": "proxy-get",
-          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(searchKeyword)}",
-        },
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.status == 200 && response.data != null) {
-        final List<dynamic> results = response.data is String
-            ? jsonDecode(response.data as String)
-            : List<dynamic>.from(response.data as List);
-
-        // Perform client-side case-insensitive multi-keyword filtering
-        final filtered = results.where((item) {
-          final name = (item['schemeName'] as String? ?? '').toLowerCase();
-          return keywords.every((kw) => name.contains(kw));
-        }).toList();
-
-        setState(() {
-          _searchResults = filtered;
-          _searchingFunds = false;
-          if (filtered.isEmpty) {
-            _fundSearchError = "No funds found matching '$cleanQuery'.";
+      List<dynamic> results = [];
+      
+      // If it is numeric, construct a virtual search result directly
+      if (isNumeric && cleanQuery.length >= 5 && cleanQuery.length <= 6) {
+        results = [
+          {
+            "schemeCode": int.parse(cleanQuery),
+            "schemeName": "Fetch Scheme Code: $cleanQuery",
           }
-        });
+        ];
       } else {
-        throw Exception("Failed to search funds through proxy.");
+        // Query search API with the ENTIRE cleanQuery
+        final response = await _supabaseService.client.functions.invoke(
+          'sign-stamp-invoice',
+          body: {
+            "action": "proxy-get",
+            "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(cleanQuery)}",
+          },
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.status == 200 && response.data != null) {
+          results = response.data is String
+              ? jsonDecode(response.data as String)
+              : List<dynamic>.from(response.data as List);
+        } else {
+          throw Exception("Failed to search funds through proxy.");
+        }
       }
+
+      // Perform client-side case-insensitive multi-keyword filtering on name and code
+      final filtered = results.where((item) {
+        final name = (item['schemeName'] as String? ?? '').toLowerCase();
+        final code = (item['schemeCode'] ?? '').toString().toLowerCase();
+        return keywords.every((kw) => name.contains(kw) || code.contains(kw));
+      }).toList();
+
+      setState(() {
+        _searchResults = filtered;
+        _searchingFunds = false;
+        if (filtered.isEmpty) {
+          _fundSearchError = "No funds found matching '$cleanQuery'.";
+        }
+      });
     } catch (e) {
       setState(() {
         _searchResults = [];
@@ -459,6 +472,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
     }
   }
+
 
   String _getRangeLabel(String range) {
     switch (range) {
@@ -687,6 +701,184 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final languageProvider = Provider.of<LanguageProvider>(context);
     final colors = AppThemeColors(isDark);
     final t = languageProvider.translate;
+    final showSidebar = MediaQuery.of(context).size.width > 900;
+
+    final mainScaffold = Scaffold(
+      backgroundColor: showSidebar ? Colors.transparent : colors.background,
+      drawer: showSidebar
+          ? null
+          : Drawer(
+              backgroundColor: colors.background,
+              child: SafeArea(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 1. Profile Header
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundColor: colors.primary.withOpacity(0.15),
+                            child: Text(
+                              "A",
+                              style: GoogleFonts.outfit(
+                                color: colors.primary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 24,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            authProvider.user?.email ?? "Admin User",
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              color: colors.textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "System Administrator",
+                            style: GoogleFonts.inter(
+                              color: colors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ).animate()
+                      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+
+                    Divider(color: colors.border, height: 1),
+                    const SizedBox(height: 16),
+
+                    // 2. Navigation items
+                    Expanded(
+                      child: ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          _buildDrawerItem(0, t('clients_management'), Icons.people_outline, colors, context),
+                          _buildDrawerItem(1, t('data_ingestion'), Icons.cloud_upload_outlined, colors, context),
+                          _buildDrawerItem(2, t('factsheets_manager'), Icons.document_scanner_outlined, colors, context),
+                          _buildDrawerItem(3, t('invoice_signer'), Icons.draw_outlined, colors, context),
+                          _buildDrawerItem(4, t('settings'), Icons.settings_outlined, colors, context),
+                        ],
+                      ),
+                    ),
+
+                    Divider(color: colors.border, height: 1),
+
+                    // 3. Logout List Tile at the bottom
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pop(context); // Close the drawer
+                          authProvider.signOut();
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: colors.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.logout, color: colors.primary, size: 20),
+                              const SizedBox(width: 16),
+                              Text(
+                                t('logout'),
+                                style: GoogleFonts.inter(
+                                  color: colors.primary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ).animate(delay: const Duration(milliseconds: 6 * 80))
+                      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+                  ],
+                ),
+              ),
+            ),
+      appBar: AppBar(
+        backgroundColor: colors.surface,
+        elevation: 0,
+        iconTheme: IconThemeData(color: colors.textPrimary),
+        leading: showSidebar
+            ? null
+            : Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+        title: Text(
+          _selectedTab == 0
+              ? t('clients_directory')
+              : (_selectedTab == 1
+                  ? t('data_ingestion_engine')
+                  : (_selectedTab == 2
+                      ? t('factsheets_manager')
+                      : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh, color: colors.textSecondary),
+            onPressed: _refreshClients,
+            tooltip: t('refresh_data'),
+          ),
+          if (MediaQuery.of(context).size.width <= 900)
+            IconButton(
+              icon: Icon(Icons.logout, color: colors.textSecondary),
+              onPressed: () => authProvider.signOut(),
+            ),
+        ],
+      ),
+      bottomNavigationBar: MediaQuery.of(context).size.width <= 900
+          ? BottomNavigationBar(
+              currentIndex: _selectedTab,
+              backgroundColor: colors.surface,
+              selectedItemColor: colors.primary,
+              unselectedItemColor: colors.textSecondary,
+              type: BottomNavigationBarType.fixed,
+              onTap: (index) {
+                setState(() {
+                  _selectedTab = index;
+                  if (index == 2) {
+                    _fetchFundsList();
+                  }
+                });
+              },
+              items: [
+                BottomNavigationBarItem(icon: const Icon(Icons.people_outline), label: t('clients_directory').split(' ')[0]),
+                BottomNavigationBarItem(icon: const Icon(Icons.cloud_upload_outlined), label: t('data_ingestion').split(' ')[1]),
+                BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: t('factsheets_manager').split(' ')[0]),
+                BottomNavigationBarItem(icon: const Icon(Icons.draw_outlined), label: t('invoice_signer').split(' ')[0]),
+                BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
+              ],
+            )
+          : null,
+      body: _buildSelectedTabContent(),
+    );
+
+    if (!showSidebar) {
+      return mainScaffold;
+    }
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -694,7 +886,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           // Sidebar - Hidden on mobile viewports for responsiveness
           LayoutBuilder(builder: (context, constraints) {
-            final showSidebar = MediaQuery.of(context).size.width > 900;
             if (!showSidebar) return const SizedBox.shrink();
 
             return Container(
@@ -754,65 +945,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           // Main Pane
           Expanded(
-            child: Scaffold(
-              backgroundColor: Colors.transparent,
-              appBar: AppBar(
-                backgroundColor: colors.surface,
-                elevation: 0,
-                iconTheme: IconThemeData(color: colors.textPrimary),
-                title: Text(
-                  _selectedTab == 0
-                      ? t('clients_directory')
-                      : (_selectedTab == 1 
-                          ? t('data_ingestion_engine') 
-                          : (_selectedTab == 2 
-                              ? t('factsheets_manager') 
-                              : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: colors.textPrimary),
-                ),
-                actions: [
-                  IconButton(
-                    icon: Icon(Icons.refresh, color: colors.textSecondary),
-                    onPressed: _refreshClients,
-                    tooltip: t('refresh_data'),
-                  ),
-                  if (MediaQuery.of(context).size.width <= 900)
-                    IconButton(
-                      icon: Icon(Icons.logout, color: colors.textSecondary),
-                      onPressed: () => authProvider.signOut(),
-                    ),
-                ],
-              ),
-              bottomNavigationBar: MediaQuery.of(context).size.width <= 900
-                  ? BottomNavigationBar(
-                      currentIndex: _selectedTab,
-                      backgroundColor: colors.surface,
-                      selectedItemColor: colors.primary,
-                      unselectedItemColor: colors.textSecondary,
-                      type: BottomNavigationBarType.fixed,
-                      onTap: (index) {
-                        setState(() {
-                          _selectedTab = index;
-                          if (index == 2) {
-                            _fetchFundsList();
-                          }
-                        });
-                      },
-                      items: [
-                        BottomNavigationBarItem(icon: const Icon(Icons.people_outline), label: t('clients_directory').split(' ')[0]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.cloud_upload_outlined), label: t('data_ingestion').split(' ')[1]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.document_scanner_outlined), label: t('factsheets_manager').split(' ')[0]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.draw_outlined), label: t('invoice_signer').split(' ')[0]),
-                        BottomNavigationBarItem(icon: const Icon(Icons.settings_outlined), label: t('settings')),
-                      ],
-                    )
-                  : null,
-              body: _buildSelectedTabContent(),
-            ),
+            child: mainScaffold,
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildDrawerItem(int index, String label, IconData icon, AppThemeColors colors, BuildContext context) {
+    final isSelected = _selectedTab == index;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+      child: InkWell(
+        onTap: () {
+          Navigator.pop(context); // Close the drawer natively
+          setState(() {
+            _selectedTab = index;
+            if (index == 2) {
+              _fetchFundsList();
+            }
+          });
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          decoration: BoxDecoration(
+            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 22),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: isSelected ? colors.textPrimary : colors.textSecondary,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).animate(delay: Duration(milliseconds: (index + 1) * 80))
+      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic);
   }
 
   Widget _buildSidebarItem(int index, String label, IconData icon) {
@@ -916,14 +1100,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 borderSide: const BorderSide(color: Color(0xFFE94057)),
               ),
             ),
-          ),
+          ).premiumReveal(index: 0),
           const SizedBox(height: 20),
 
           // Directory count
           Text(
             "Showing ${_filteredClients.length} of ${_allClients.length} registered clients",
             style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-          ),
+          ).premiumReveal(index: 1),
           const SizedBox(height: 16),
 
           // Client List Table / ListView
@@ -999,7 +1183,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         );
                       },
                     ),
-            ),
+            ).premiumReveal(index: 2),
           ),
         ],
       ),
@@ -1012,15 +1196,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Advisor Automation Tools",
-            style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Manage connection states and execute manual file parsers.",
-            style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Advisor Automation Tools",
+                style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Manage connection states and execute manual file parsers.",
+                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 32),
 
           // Ingestion Action Card
@@ -1077,7 +1266,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 1),
           const SizedBox(height: 24),
 
           // NAV Sync Action Card
@@ -1134,7 +1323,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 2),
         ],
       ),
     );
@@ -1151,19 +1340,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            t('fund_facts_finder'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            t('fund_facts_finder_sub'),
-            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('fund_facts_finder'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t('fund_facts_finder_sub'),
+                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 24),
 
           // Search Bar Container
@@ -1259,7 +1453,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ],
-          ),
+          ).premiumReveal(index: 1),
 
           if (_fundSearchError != null) ...[
             const SizedBox(height: 16),
@@ -1287,52 +1481,50 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           const SizedBox(height: 24),
 
-          // Detail Display Card
-          if (_fetchingFundDetails) ...[
-            const SizedBox(height: 40),
-            const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
-              ),
-            ),
-          ] else if (_selectedFundDetails != null) ...[
-            _buildSelectedFundCard(),
-          ] else ...[
-            // Default placeholder card
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
-              decoration: BoxDecoration(
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: colors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.cardShadow,
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+          (_fetchingFundDetails
+              ? const Padding(
+                  padding: EdgeInsets.only(top: 40.0),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+                    ),
                   ),
-                ],
-              ),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      t('no_fund_selected'),
-                      style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      t('no_fund_selected_sub'),
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+                )
+              : (_selectedFundDetails != null
+                  ? _buildSelectedFundCard()
+                  : Container(
+                      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+                      decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: colors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.cardShadow,
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
+                            const SizedBox(height: 16),
+                            Text(
+                              t('no_fund_selected'),
+                              style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              t('no_fund_selected_sub'),
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ))).premiumReveal(index: 2),
         ],
       ),
     );
@@ -1452,38 +1644,41 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ),
             ],
-          ),
+          ).premiumReveal(index: 0),
           Divider(color: colors.border, height: 40),
           
-          Text(
-            t('scheme_specifications'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          // Specifications Grid
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth > 600;
-              return GridView.count(
-                shrinkWrap: true,
-                crossAxisCount: isWide ? 3 : 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: isWide ? 2.5 : 2.0,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _buildSpecTile("Scheme Type", schemeType),
-                  _buildSpecTile("Category", schemeCategory),
-                  _buildSpecTile("ISIN", isin),
-                ],
-              );
-            },
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('scheme_specifications'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 16),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth > 600;
+                  return GridView.count(
+                    shrinkWrap: true,
+                    crossAxisCount: isWide ? 3 : 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: isWide ? 2.5 : 2.0,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      _buildSpecTile("Scheme Type", schemeType),
+                      _buildSpecTile("Category", schemeCategory),
+                      _buildSpecTile("ISIN", isin),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ).premiumReveal(index: 1),
           
           const Divider(color: Colors.white10, height: 40),
 
@@ -1628,66 +1823,69 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 );
               }
             },
-          ),
+          ).premiumReveal(index: 2),
 
           const Divider(color: Colors.white10, height: 40),
 
-          Text(
-            "Recent Historical NAVs",
-            style: GoogleFonts.outfit(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          // Historical NAV list
-          if (data.isEmpty)
-            Text(
-              "No historical NAV details available.",
-              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
-            )
-          else
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.02),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.05)),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Recent Historical NAVs",
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: data.length > 5 ? 5 : data.length,
-                separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
-                itemBuilder: (context, index) {
-                  final navItem = data[index];
-                  final date = navItem['date'] ?? 'N/A';
-                  final navVal = navItem['nav'] ?? 'N/A';
-                  
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          date,
-                          style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+              const SizedBox(height: 16),
+              if (data.isEmpty)
+                Text(
+                  "No historical NAV details available.",
+                  style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
+                )
+              else
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.02),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: data.length > 5 ? 5 : data.length,
+                    separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                    itemBuilder: (context, index) {
+                      final navItem = data[index];
+                      final date = navItem['date'] ?? 'N/A';
+                      final navVal = navItem['nav'] ?? 'N/A';
+                      
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              date,
+                              style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                            ),
+                            Text(
+                              "₹$navVal",
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          "₹$navVal",
-                          style: GoogleFonts.inter(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ).premiumReveal(index: 3),
         ],
       ),
     );
@@ -1753,22 +1951,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Distributor Invoice Signer & Excel Auto-Updater",
-            style: GoogleFonts.outfit(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: Colors.grey.shade400,
-            ),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Distributor Invoice Signer & Excel Auto-Updater",
+                style: GoogleFonts.outfit(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 24),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -1790,7 +1993,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ],
                     );
             },
-          ),
+          ).premiumReveal(index: 1),
         ],
       ),
     );
@@ -2659,22 +2862,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Submenu 1: Theme Settings
-          Text(
-            t('display_settings'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            t('display_settings_sub'),
-            style: GoogleFonts.inter(
-              color: colors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('display_settings'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                t('display_settings_sub'),
+                style: GoogleFonts.inter(
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 0),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
@@ -2719,27 +2927,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 1),
 
           const SizedBox(height: 36),
 
           // Submenu 2: Language Settings
-          Text(
-            t('language_settings'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            t('language_settings_sub'),
-            style: GoogleFonts.inter(
-              color: colors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('language_settings'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                t('language_settings_sub'),
+                style: GoogleFonts.inter(
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 2),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
@@ -2773,7 +2986,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-          ),
+          ).premiumReveal(index: 3),
         ],
       ),
     );
@@ -3072,6 +3285,15 @@ class LineChartPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant LineChartPainter oldDelegate) {
     return oldDelegate.values != values;
+  }
+}
+
+extension PremiumRevealExtension on Widget {
+  Widget premiumReveal({required int index, int staggerMs = 150}) {
+    return this.animate(delay: Duration(milliseconds: index * staggerMs))
+        .fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic)
+        .blur(begin: const Offset(10, 10), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic)
+        .slide(begin: const Offset(0, 0.2), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic);
   }
 }
 
