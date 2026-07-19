@@ -58,6 +58,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Map<String, dynamic>? _selectedFundDetails;
   String? _fundSearchError;
   Timer? _debounceTimer;
+  String _selectedChartRange = "1Y";
 
   // Invoice Signer variables
   fph.PickedFileData? _selectedInvoicePdf;
@@ -455,6 +456,71 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _fundSearchError = "Failed to search funds: Network error.";
       });
     }
+  }
+
+  String _getRangeLabel(String range) {
+    switch (range) {
+      case "YTD":
+        return "Year to Date";
+      case "1Y":
+        return "Last 1 Year";
+      case "2Y":
+        return "2 Years";
+      case "3Y":
+        return "3 Years";
+      case "5Y":
+        return "5 Years";
+      case "Since Launch":
+      default:
+        return "Since Launch";
+    }
+  }
+
+  DateTime? parseDate(String dateStr) {
+    final parts = dateStr.split('-');
+    if (parts.length == 3) {
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
+  }
+
+  List<dynamic> filterNavDataByRange(List<dynamic> allData, String rangeOption) {
+    if (allData.isEmpty) return [];
+    
+    final latestDateObj = parseDate(allData.first['date'] ?? '');
+    if (latestDateObj == null) return allData;
+    
+    DateTime cutoff;
+    switch (rangeOption) {
+      case "YTD":
+        cutoff = DateTime(latestDateObj.year, 1, 1);
+        break;
+      case "1Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 365));
+        break;
+      case "2Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 2 * 365));
+        break;
+      case "3Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 3 * 365));
+        break;
+      case "5Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 5 * 365));
+        break;
+      case "Since Launch":
+      default:
+        return allData;
+    }
+    
+    return allData.where((item) {
+      final d = parseDate(item['date'] ?? '');
+      return d != null && (d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff));
+    }).toList();
   }
 
   Future<void> _fetchFundDetails(String schemeCode) async {
@@ -1383,7 +1449,148 @@ class _AdminDashboardState extends State<AdminDashboard> {
           
           const Divider(color: Colors.white10, height: 40),
 
-          NavGrowthChart(navData: data),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 800;
+              
+              // Filter the data based on selection
+              final filteredData = filterNavDataByRange(data, _selectedChartRange);
+              
+              // Calculate growth percent
+              double growthPercent = 0.0;
+              if (filteredData.isNotEmpty) {
+                final double latest = double.tryParse(filteredData.first['nav'].toString()) ?? 0.0;
+                final double oldest = double.tryParse(filteredData.last['nav'].toString()) ?? 0.0;
+                growthPercent = oldest == 0.0 ? 0.0 : ((latest - oldest) / oldest) * 100;
+              }
+              
+              final chartCol = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "NAV Growth Trend (${_getRangeLabel(_selectedChartRange)})",
+                        style: GoogleFonts.outfit(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      // Growth Percent Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: growthPercent >= 0 
+                              ? Colors.green.withOpacity(0.15) 
+                              : Colors.redAccent.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: growthPercent >= 0 
+                                ? Colors.green.withOpacity(0.3) 
+                                : Colors.redAccent.withOpacity(0.3)
+                          ),
+                        ),
+                        child: Text(
+                          "${growthPercent >= 0 ? '+' : ''}${growthPercent.toStringAsFixed(2)}%",
+                          style: GoogleFonts.inter(
+                            color: growthPercent >= 0 ? Colors.green : Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  NavGrowthChart(navData: filteredData),
+                ],
+              );
+              
+              final selectorCol = Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.02),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withOpacity(0.04)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Time Range",
+                      style: GoogleFonts.outfit(
+                        color: Colors.grey.shade400,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...["YTD", "1Y", "2Y", "3Y", "5Y", "Since Launch"].map((range) {
+                      final isSelected = _selectedChartRange == range;
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedChartRange = range;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isSelected ? const Color(0xFFE94057) : Colors.grey.shade600,
+                                    width: isSelected ? 5 : 2,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _getRangeLabel(range),
+                                style: GoogleFonts.inter(
+                                  color: isSelected ? Colors.white : Colors.grey.shade400,
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              );
+              
+              if (isWide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: chartCol),
+                    const SizedBox(width: 24),
+                    SizedBox(width: 180, child: selectorCol),
+                  ],
+                );
+              } else {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    chartCol,
+                    const SizedBox(height: 20),
+                    selectorCol,
+                  ],
+                );
+              }
+            },
+          ),
 
           const Divider(color: Colors.white10, height: 40),
 
@@ -2410,15 +2617,19 @@ class NavGrowthChart extends StatelessWidget {
   Widget build(BuildContext context) {
     if (navData.isEmpty) return const SizedBox.shrink();
 
-    // Take the last 30 data points (or fewer if not available)
-    final int count = navData.length > 30 ? 30 : navData.length;
-    final pointsList = navData.take(count).toList().reversed.toList();
+    // Reverse list to go in chronological order (left to right)
+    final pointsList = navData.reversed.toList();
 
-    final List<double> navs = pointsList.map((item) {
+    List<double> navs = pointsList.map((item) {
       return double.tryParse((item['nav'] ?? '0').toString()) ?? 0.0;
     }).toList();
 
     if (navs.isEmpty) return const SizedBox.shrink();
+
+    // Downsample if there are more than 100 points for smooth canvas rendering
+    if (navs.length > 100) {
+      navs = _downsample(navs, 100);
+    }
 
     final double maxVal = navs.reduce((a, b) => a > b ? a : b);
     final double minVal = navs.reduce((a, b) => a < b ? a : b);
@@ -2428,33 +2639,10 @@ class NavGrowthChart extends StatelessWidget {
     final lastDate = pointsList.last['date'] ?? '';
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              "NAV Growth Trend (Last 30 Days)",
-              style: GoogleFonts.outfit(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-            Text(
-              "Range: ₹${minVal.toStringAsFixed(2)} - ₹${maxVal.toStringAsFixed(2)}",
-              style: GoogleFonts.inter(
-                color: const Color(0xFFF27121),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         Container(
           height: 180,
-          width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             color: Colors.white.withOpacity(0.01),
@@ -2479,6 +2667,14 @@ class NavGrowthChart extends StatelessWidget {
               style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
             ),
             Text(
+              "Range: ₹${minVal.toStringAsFixed(2)} - ₹${maxVal.toStringAsFixed(2)}",
+              style: GoogleFonts.inter(
+                color: const Color(0xFFF27121),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
               lastDate,
               style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
             ),
@@ -2486,6 +2682,17 @@ class NavGrowthChart extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  List<double> _downsample(List<double> input, int maxPoints) {
+    if (input.length <= maxPoints) return input;
+    final List<double> result = [];
+    final double step = (input.length - 1) / (maxPoints - 1);
+    for (int i = 0; i < maxPoints; i++) {
+      final int index = (i * step).round().clamp(0, input.length - 1);
+      result.add(input[index]);
+    }
+    return result;
   }
 }
 
