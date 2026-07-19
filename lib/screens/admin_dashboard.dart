@@ -56,6 +56,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
   double _stampY = 102;
   double _sigX = 420;
   double _sigY = 72;
+  double _stampW = 120;
+  double _stampH = 60;
+  double _sigW = 120;
+  double _sigH = 50;
   bool _signingInvoice = false;
   String _selectedPreset = "CAMS Distributor (Default)";
   Uint8List? _pdfPreviewBytes;
@@ -157,21 +161,37 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _stampY = 102;
         _sigX = 420;
         _sigY = 72;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       } else if (preset == "KFintech / Karvy Distributor") {
         _stampX = 430;
         _stampY = 120;
         _sigX = 450;
         _sigY = 80;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       } else if (preset == "Bottom Right Corner") {
         _stampX = 400;
         _stampY = 150;
         _sigX = 400;
         _sigY = 80;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       } else if (preset == "Bottom Left Corner") {
         _stampX = 60;
         _stampY = 150;
         _sigX = 60;
         _sigY = 80;
+        _stampW = 120;
+        _stampH = 60;
+        _sigW = 120;
+        _sigH = 50;
       }
     });
   }
@@ -1356,15 +1376,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     // Size of overlays scaled to the preview container:
-    final stampW = (100.0 / 595.0) * previewWidth;
-    final stampH = (100.0 / 842.0) * previewHeight;
+    final stampW = (_stampW / 595.0) * previewWidth;
+    final stampH = (_stampH / 842.0) * previewHeight;
     final stampL = (_stampX / 595.0) * previewWidth;
-    final stampT = ((842.0 - (_stampY + 100.0)) / 842.0) * previewHeight;
+    final stampT = ((842.0 - (_stampY + _stampH)) / 842.0) * previewHeight;
 
-    final sigW = (120.0 / 595.0) * previewWidth;
-    final sigH = (60.0 / 842.0) * previewHeight;
+    final sigW = (_sigW / 595.0) * previewWidth;
+    final sigH = (_sigH / 842.0) * previewHeight;
     final sigL = (_sigX / 595.0) * previewWidth;
-    final sigT = ((842.0 - (_sigY + 60.0)) / 842.0) * previewHeight;
+    final sigT = ((842.0 - (_sigY + _sigH)) / 842.0) * previewHeight;
 
     return Center(
       child: Column(
@@ -1420,8 +1440,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
                       final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
                       setState(() {
-                        _stampX = (_stampX + pdfDeltaX).clamp(0.0, 495.0);
-                        _stampY = (_stampY + pdfDeltaY).clamp(0.0, 742.0);
+                        _stampX = (_stampX + pdfDeltaX).clamp(0.0, 595.0 - _stampW);
+                        _stampY = (_stampY + pdfDeltaY).clamp(0.0, 842.0 - _stampH);
                         _selectedPreset = "Custom Placement";
                       });
                     },
@@ -1460,8 +1480,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
                       final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
                       setState(() {
-                        _sigX = (_sigX + pdfDeltaX).clamp(0.0, 475.0);
-                        _sigY = (_sigY + pdfDeltaY).clamp(0.0, 782.0);
+                        _sigX = (_sigX + pdfDeltaX).clamp(0.0, 595.0 - _sigW);
+                        _sigY = (_sigY + pdfDeltaY).clamp(0.0, 842.0 - _sigH);
                         _selectedPreset = "Custom Placement";
                       });
                     },
@@ -1600,6 +1620,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
               });
             },
           ),
+          _buildCoordinateSlider(
+            label: "Company Stamp Width",
+            value: _stampW,
+            min: 30,
+            max: 300,
+            onChanged: (val) {
+              setState(() {
+                _stampW = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Company Stamp Height",
+            value: _stampH,
+            min: 30,
+            max: 300,
+            onChanged: (val) {
+              setState(() {
+                _stampH = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
           const Divider(color: Colors.white10, height: 32),
           _buildCoordinateSlider(
             label: "Distributor Signature X (Horizontal)",
@@ -1621,6 +1665,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onChanged: (val) {
               setState(() {
                 _sigY = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Distributor Signature Width",
+            value: _sigW,
+            min: 30,
+            max: 300,
+            onChanged: (val) {
+              setState(() {
+                _sigW = val;
+                _selectedPreset = "Custom Placement";
+              });
+            },
+          ),
+          _buildCoordinateSlider(
+            label: "Distributor Signature Height",
+            value: _sigH,
+            min: 15,
+            max: 200,
+            onChanged: (val) {
+              setState(() {
+                _sigH = val;
                 _selectedPreset = "Custom Placement";
               });
             },
@@ -1759,6 +1827,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             "stampY": _stampY.round(),
             "sigX": _sigX.round(),
             "sigY": _sigY.round(),
+            "stampW": _stampW.round(),
+            "stampH": _stampH.round(),
+            "sigW": _sigW.round(),
+            "sigH": _sigH.round(),
           };
 
           final signResponse = await _supabaseService.client.functions.invoke(
@@ -1817,6 +1889,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
           "stampY": _stampY.round(),
           "sigX": _sigX.round(),
           "sigY": _sigY.round(),
+          "stampW": _stampW.round(),
+          "stampH": _stampH.round(),
+          "sigW": _sigW.round(),
+          "sigH": _sigH.round(),
         };
 
         final response = await _supabaseService.client.functions.invoke(
