@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/language_provider.dart';
 import '../utils/finance.dart';
 import 'factsheet_dialog.dart';
 
@@ -206,6 +207,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
               padding: const EdgeInsets.all(24.0),
               child: LayoutBuilder(builder: (context, constraints) {
                 final isDesktop = constraints.maxWidth > 800;
+                final languageProvider = Provider.of<LanguageProvider>(context);
+                final t = languageProvider.translate;
+                final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+                final colors = AppThemeColors(isDark);
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -214,30 +219,30 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     isDesktop
                         ? Row(
                             children: [
-                              Expanded(child: _buildMetricCard("Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, const Color(0xFF8A2387))),
+                              Expanded(child: _buildMetricCard(t('total_invested'), currencyFormat.format(invested), Icons.account_balance_wallet_outlined, const Color(0xFF8A2387))),
                               const SizedBox(width: 16),
-                              Expanded(child: _buildMetricCard("Current Valuation", currencyFormat.format(current), Icons.trending_up, const Color(0xFFE94057))),
+                              Expanded(child: _buildMetricCard(t('current_valuation'), currencyFormat.format(current), Icons.trending_up, const Color(0xFFE94057))),
                               const SizedBox(width: 16),
-                              Expanded(child: _buildMetricCard("Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, const Color(0xFFF27121), isReturn: true, returnValue: absReturn)),
+                              Expanded(child: _buildMetricCard(t('absolute_return'), "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, const Color(0xFFF27121), isReturn: true, returnValue: absReturn)),
                               const SizedBox(width: 16),
-                              Expanded(child: _buildMetricCard("Annualized Return (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, const Color(0xFF00C853), isReturn: true, returnValue: xirrVal)),
+                              Expanded(child: _buildMetricCard(t('annualized_return'), "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, const Color(0xFF00C853), isReturn: true, returnValue: xirrVal)),
                             ],
                           )
                         : Column(
                             children: [
                               Row(
                                 children: [
-                                  Expanded(child: _buildMetricCard("Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, const Color(0xFF8A2387))),
+                                  Expanded(child: _buildMetricCard(t('total_invested'), currencyFormat.format(invested), Icons.account_balance_wallet_outlined, const Color(0xFF8A2387))),
                                   const SizedBox(width: 12),
-                                  Expanded(child: _buildMetricCard("Current Valuation", currencyFormat.format(current), Icons.trending_up, const Color(0xFFE94057))),
+                                  Expanded(child: _buildMetricCard(t('current_valuation'), currencyFormat.format(current), Icons.trending_up, const Color(0xFFE94057))),
                                 ],
                               ),
                               const SizedBox(height: 12),
                               Row(
                                 children: [
-                                  Expanded(child: _buildMetricCard("Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, const Color(0xFFF27121), isReturn: true, returnValue: absReturn)),
+                                  Expanded(child: _buildMetricCard(t('absolute_return'), "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, const Color(0xFFF27121), isReturn: true, returnValue: absReturn)),
                                   const SizedBox(width: 12),
-                                  Expanded(child: _buildMetricCard("Annualized (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, const Color(0xFF00C853), isReturn: true, returnValue: xirrVal)),
+                                  Expanded(child: _buildMetricCard(t('annualized_return').split(' ')[0], "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, const Color(0xFF00C853), isReturn: true, returnValue: xirrVal)),
                                 ],
                               ),
                             ],
@@ -246,9 +251,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                     // Search Mutual Funds section
                     Text(
-                      "Search & Explore Fund Factsheets",
+                      t('search_explore_factsheets'),
                       style: GoogleFonts.outfit(
-                        color: Colors.white,
+                        color: colors.textPrimary,
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
@@ -287,28 +292,28 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         return TextField(
                           controller: textEditingController,
                           focusNode: focusNode,
-                          style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                          style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13),
                           decoration: InputDecoration(
-                            hintText: "Enter at least 2 characters to search funds...",
-                            hintStyle: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
-                            prefixIcon: const Icon(Icons.search, color: Colors.grey, size: 20),
+                            hintText: t('search_funds_placeholder_client'),
+                            hintStyle: GoogleFonts.inter(color: colors.textMuted, fontSize: 13),
+                            prefixIcon: Icon(Icons.search, color: colors.textSecondary, size: 20),
                             suffixIcon: textEditingController.text.isNotEmpty
                                 ? IconButton(
-                                    icon: const Icon(Icons.clear, color: Colors.grey, size: 18),
+                                    icon: Icon(Icons.clear, color: colors.textSecondary, size: 18),
                                     onPressed: () {
                                       textEditingController.clear();
                                     },
                                   )
                                 : null,
                             filled: true,
-                            fillColor: Colors.white.withOpacity(0.03),
+                            fillColor: colors.surfaceAccent,
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.06)),
+                              borderSide: BorderSide(color: colors.border),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: Color(0xFFE94057)),
+                              borderSide: BorderSide(color: colors.primary),
                             ),
                             contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                           ),
@@ -318,11 +323,11 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         return Align(
                           alignment: Alignment.topLeft,
                           child: Material(
-                            color: const Color(0xFF151030),
+                            color: colors.surface,
                             borderRadius: BorderRadius.circular(12),
                             elevation: 4,
                             shape: RoundedRectangleBorder(
-                              side: BorderSide(color: Colors.white.withOpacity(0.08)),
+                              side: BorderSide(color: colors.border),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Container(
@@ -337,13 +342,13 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                   return ListTile(
                                     title: Text(
                                       option['scheme_name'] ?? '',
-                                      style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                                      style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                     subtitle: Text(
                                       "Code: ${option['scheme_code']} | ${option['category'] ?? 'N/A'}",
-                                      style: GoogleFonts.inter(color: Colors.grey, fontSize: 11),
+                                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
                                     ),
                                     onTap: () => onSelected(option),
                                   );
@@ -358,9 +363,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                     // Holdings Header
                     Text(
-                      "Your Portfolio Holdings",
+                      t('active_portfolio_holdings'),
                       style: GoogleFonts.outfit(
-                        color: Colors.white,
+                        color: colors.textPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -377,15 +382,22 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     else
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.015),
+                          color: colors.surface,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withOpacity(0.05)),
+                          border: Border.all(color: colors.border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: colors.cardShadow,
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            )
+                          ],
                         ),
                         child: ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: activeHoldings.length,
-                          separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                          separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
                           itemBuilder: (context, index) {
                             final h = activeHoldings[index];
                             final units = h['units'] as double;
@@ -408,14 +420,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
                               ),
                               title: Text(
                                 h['name'],
-                                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
                               ),
                               subtitle: Padding(
-                                padding: const EdgeInsets.only(top: 4.0),
-                                child: Text(
-                                  "${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
-                                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
-                                ),
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Text(
+                                    "${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
+                                    style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                                  ),
                               ),
                               trailing: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -423,12 +435,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                 children: [
                                   Text(
                                     currencyFormat.format(curVal),
-                                    style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                    style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
                                     h['code'],
-                                    style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
+                                    style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
                                   ),
                                 ],
                               ),
@@ -451,9 +463,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                     // Transactions List
                     Text(
-                      "Recent Transactions Log",
+                      t('transaction_history'),
                       style: GoogleFonts.outfit(
-                        color: Colors.white,
+                        color: colors.textPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -469,15 +481,22 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     else
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.015),
+                          color: colors.surface,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withOpacity(0.05)),
+                          border: Border.all(color: colors.border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: colors.cardShadow,
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            )
+                          ],
                         ),
                         child: ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: transactions.length,
-                          separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                          separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
                           itemBuilder: (context, index) {
                             final tx = transactions[index];
                             final fund = tx['mutual_funds'] as Map<String, dynamic>?;
@@ -507,14 +526,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
                               ),
                               title: Text(
                                 fund?['scheme_name'] ?? 'Unknown Fund',
-                                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                                 overflow: TextOverflow.ellipsis,
                               ),
                               subtitle: Padding(
                                 padding: const EdgeInsets.only(top: 4.0),
                                 child: Text(
                                   "${dateFormat.format(date)}  •  ${units.toStringAsFixed(4)} Units",
-                                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 11),
+                                  style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
                                 ),
                               ),
                               trailing: Text(
@@ -529,6 +548,147 @@ class _ClientDashboardState extends State<ClientDashboard> {
                           },
                         ),
                       ),
+                    
+                    const SizedBox(height: 48),
+
+                    // Premium Footer: About Us & Contact Us
+                    Container(
+                      padding: const EdgeInsets.all(28.0),
+                      decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: colors.border),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.cardShadow,
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          )
+                        ],
+                      ),
+                      child: LayoutBuilder(
+                        builder: (context, footerConstraints) {
+                          final isFooterWide = footerConstraints.maxWidth > 700;
+                          
+                          final aboutWidget = Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.info_outline, color: colors.primary, size: 22),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    t('about_us'),
+                                    style: GoogleFonts.outfit(
+                                      color: colors.textPrimary,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                t('about_us_content'),
+                                style: GoogleFonts.inter(
+                                  color: colors.textSecondary,
+                                  fontSize: 13,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          );
+
+                          final contactWidget = Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.contact_support_outlined, color: colors.primary, size: 22),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    t('contact_us'),
+                                    style: GoogleFonts.outfit(
+                                      color: colors.textPrimary,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(Icons.location_on_outlined, color: colors.accent, size: 18),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      "Corporate Office, Kankarbagh,\nPatna - 800020, Bihar",
+                                      style: GoogleFonts.inter(
+                                        color: colors.textSecondary,
+                                        fontSize: 13,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Icon(Icons.phone_android_outlined, color: colors.accent, size: 18),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    "+91 9876543210",
+                                    style: GoogleFonts.inter(
+                                      color: colors.textSecondary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Icon(Icons.mail_outline, color: colors.accent, size: 18),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    "support@sharanfincorp.com",
+                                    style: GoogleFonts.inter(
+                                      color: colors.textSecondary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          );
+
+                          if (isFooterWide) {
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(child: aboutWidget),
+                                const SizedBox(width: 40),
+                                Expanded(child: contactWidget),
+                              ],
+                            );
+                          } else {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                aboutWidget,
+                                const SizedBox(height: 32),
+                                Divider(color: colors.border, height: 1),
+                                const SizedBox(height: 32),
+                                contactWidget,
+                              ],
+                            );
+                          }
+                        },
+                      ),
+                    ),
                   ],
                 );
               }),
@@ -661,45 +821,77 @@ class _ClientDashboardState extends State<ClientDashboard> {
       context: context,
       builder: (context) {
         final themeProvider = Provider.of<ThemeProvider>(context);
+        final languageProvider = Provider.of<LanguageProvider>(context);
         final isDark = themeProvider.isDarkMode(context);
         final colors = AppThemeColors(isDark);
+        final t = languageProvider.translate;
 
         return AlertDialog(
           backgroundColor: colors.surface,
           title: Text(
-            "Display Settings",
+            t('settings'),
             style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildThemeOptionRadio(
-                context: context,
-                title: "Light Mode",
-                option: ThemeModeOption.light,
-                themeProvider: themeProvider,
-                colors: colors,
-              ),
-              _buildThemeOptionRadio(
-                context: context,
-                title: "Dark Mode",
-                option: ThemeModeOption.dark,
-                themeProvider: themeProvider,
-                colors: colors,
-              ),
-              _buildThemeOptionRadio(
-                context: context,
-                title: "System Preference",
-                option: ThemeModeOption.system,
-                themeProvider: themeProvider,
-                colors: colors,
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t('display_settings'),
+                  style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                _buildThemeOptionRadio(
+                  context: context,
+                  title: t('light_mode'),
+                  option: ThemeModeOption.light,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                _buildThemeOptionRadio(
+                  context: context,
+                  title: t('dark_mode'),
+                  option: ThemeModeOption.dark,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                _buildThemeOptionRadio(
+                  context: context,
+                  title: t('system_preference'),
+                  option: ThemeModeOption.system,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                const SizedBox(height: 16),
+                Divider(color: colors.border),
+                const SizedBox(height: 16),
+                Text(
+                  t('language_settings'),
+                  style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                _buildLanguageOptionRadio(
+                  context: context,
+                  title: "English",
+                  langCode: "en",
+                  languageProvider: languageProvider,
+                  colors: colors,
+                ),
+                _buildLanguageOptionRadio(
+                  context: context,
+                  title: "हिन्दी (Hindi)",
+                  langCode: "hi",
+                  languageProvider: languageProvider,
+                  colors: colors,
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: Text("Close", style: GoogleFonts.inter(color: colors.primary, fontWeight: FontWeight.bold)),
+              child: Text(t('logout') == 'लॉगआउट' ? 'बंद करें' : 'Close', style: GoogleFonts.inter(color: colors.primary, fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -738,8 +930,50 @@ class _ClientDashboardState extends State<ClientDashboard> {
             Text(
               title,
               style: GoogleFonts.inter(
-                color: isSelected ? colors.textPrimary : colors.textSecondary,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: colors.textPrimary,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageOptionRadio({
+    required BuildContext context,
+    required String title,
+    required String langCode,
+    required LanguageProvider languageProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = languageProvider.currentLanguage == langCode;
+    return InkWell(
+      onTap: () {
+        languageProvider.setLanguage(langCode);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10.0),
+        child: Row(
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? colors.primary : colors.textSecondary,
+                  width: isSelected ? 5.5 : 2,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Text(
+              title,
+              style: GoogleFonts.inter(
+                color: colors.textPrimary,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                 fontSize: 13,
               ),
             ),

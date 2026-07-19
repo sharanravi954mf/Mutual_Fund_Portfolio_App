@@ -60,6 +60,9 @@ class LanguageProvider extends ChangeNotifier {
       'dark_mode_sub': 'Classic deep space appearance',
       'system_preference': 'System Preference',
       'system_preference_sub': 'Automatically match device settings',
+      'about_us': 'About Sharan Fincorp',
+      'about_us_content': 'Sharan Fincorp deals in Mutual Funds with more than 15 years of experience, delivering the best customer experience in the market.',
+      'contact_us': 'Contact Us',
     },
     'hi': {
       'admin_central': 'एडमिन सेंट्रल',
@@ -107,6 +110,9 @@ class LanguageProvider extends ChangeNotifier {
       'dark_mode_sub': 'क्लासिक डार्क स्पेस स्वरूप',
       'system_preference': 'सिस्टम वरीयता',
       'system_preference_sub': 'स्वचालित रूप से डिवाइस सेटिंग्स से मेल खाएं',
+      'about_us': 'शरण फिनकॉर्प के बारे में',
+      'about_us_content': 'शरण फिनकॉर्प म्यूचुअल फंड के क्षेत्र में 15 से अधिक वर्षों के अनुभव के साथ काम करता है, जो बाजार में सर्वोत्तम ग्राहक अनुभव प्रदान करता है।',
+      'contact_us': 'संपर्क करें',
     }
   };
 
