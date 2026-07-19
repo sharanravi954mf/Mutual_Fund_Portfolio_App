@@ -1357,7 +1357,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           
           const Divider(color: Colors.white10, height: 40),
-          
+
+          NavGrowthChart(navData: data),
+
+          const Divider(color: Colors.white10, height: 40),
+
           Text(
             "Recent Historical NAVs",
             style: GoogleFonts.outfit(
@@ -2371,3 +2375,195 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
 }
+
+class NavGrowthChart extends StatelessWidget {
+  final List<dynamic> navData;
+
+  const NavGrowthChart({super.key, required this.navData});
+
+  @override
+  Widget build(BuildContext context) {
+    if (navData.isEmpty) return const SizedBox.shrink();
+
+    // Take the last 30 data points (or fewer if not available)
+    final int count = navData.length > 30 ? 30 : navData.length;
+    final pointsList = navData.take(count).toList().reversed.toList();
+
+    final List<double> navs = pointsList.map((item) {
+      return double.tryParse((item['nav'] ?? '0').toString()) ?? 0.0;
+    }).toList();
+
+    if (navs.isEmpty) return const SizedBox.shrink();
+
+    final double maxVal = navs.reduce((a, b) => a > b ? a : b);
+    final double minVal = navs.reduce((a, b) => a < b ? a : b);
+    final double range = maxVal - minVal == 0 ? 1.0 : maxVal - minVal;
+
+    final firstDate = pointsList.first['date'] ?? '';
+    final lastDate = pointsList.last['date'] ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              "NAV Growth Trend (Last 30 Days)",
+              style: GoogleFonts.outfit(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            Text(
+              "Range: ₹${minVal.toStringAsFixed(2)} - ₹${maxVal.toStringAsFixed(2)}",
+              style: GoogleFonts.inter(
+                color: const Color(0xFFF27121),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          height: 180,
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.01),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.03)),
+          ),
+          child: CustomPaint(
+            painter: LineChartPainter(
+              values: navs,
+              minVal: minVal,
+              maxVal: maxVal,
+              range: range,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              firstDate,
+              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
+            ),
+            Text(
+              lastDate,
+              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class LineChartPainter extends CustomPainter {
+  final List<double> values;
+  final double minVal;
+  final double maxVal;
+  final double range;
+
+  LineChartPainter({
+    required this.values,
+    required this.minVal,
+    required this.maxVal,
+    required this.range,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final double width = size.width;
+    final double height = size.height;
+    final double stepX = width / (values.length - 1);
+
+    // Draw horizontal grid lines
+    final Paint gridPaint = Paint()
+      ..color = Colors.white.withOpacity(0.04)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    for (int i = 1; i <= 3; i++) {
+      final double y = height * (i / 4.0);
+      canvas.drawLine(Offset(0, y), Offset(width, y), gridPaint);
+    }
+
+    // Prepare points
+    final List<Offset> points = [];
+    for (int i = 0; i < values.length; i++) {
+      final double x = i * stepX;
+      final double normalized = (values[i] - minVal) / range;
+      final double y = height - (normalized * (height - 30) + 15);
+      points.add(Offset(x, y));
+    }
+
+    // Draw area path (gradient fill below line)
+    final Path areaPath = Path()
+      ..moveTo(0, height);
+    for (final pt in points) {
+      areaPath.lineTo(pt.dx, pt.dy);
+    }
+    areaPath.lineTo(width, height);
+    areaPath.close();
+
+    final Paint areaPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          const Color(0xFFE94057).withOpacity(0.3),
+          const Color(0xFF8A2387).withOpacity(0.01),
+        ],
+      ).createShader(Rect.fromLTWH(0, 0, width, height));
+    canvas.drawPath(areaPath, areaPaint);
+
+    // Draw path line (smooth connecting curves)
+    final Path linePath = Path()
+      ..moveTo(points[0].dx, points[0].dy);
+    for (int i = 0; i < points.length - 1; i++) {
+      final p1 = points[i];
+      final p2 = points[i + 1];
+      final controlPoint1 = Offset(p1.dx + stepX / 2.0, p1.dy);
+      final controlPoint2 = Offset(p2.dx - stepX / 2.0, p2.dy);
+      linePath.cubicTo(
+        controlPoint1.dx, controlPoint1.dy,
+        controlPoint2.dx, controlPoint2.dy,
+        p2.dx, p2.dy,
+      );
+    }
+
+    final Paint linePaint = Paint()
+      ..color = const Color(0xFFE94057)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(linePath, linePaint);
+
+    // Draw circles at endpoints or critical points
+    final Paint dotPaint = Paint()
+      ..color = const Color(0xFFF27121)
+      ..style = PaintingStyle.fill;
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    final lastPt = points.last;
+    canvas.drawCircle(lastPt, 5.0, dotPaint);
+    canvas.drawCircle(lastPt, 5.0, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant LineChartPainter oldDelegate) {
+    return oldDelegate.values != values;
+  }
+}
+
