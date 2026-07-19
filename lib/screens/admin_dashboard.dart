@@ -1644,38 +1644,41 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ),
             ],
-          ),
+          ).premiumReveal(index: 0),
           Divider(color: colors.border, height: 40),
           
-          Text(
-            t('scheme_specifications'),
-            style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          // Specifications Grid
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth > 600;
-              return GridView.count(
-                shrinkWrap: true,
-                crossAxisCount: isWide ? 3 : 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: isWide ? 2.5 : 2.0,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _buildSpecTile("Scheme Type", schemeType),
-                  _buildSpecTile("Category", schemeCategory),
-                  _buildSpecTile("ISIN", isin),
-                ],
-              );
-            },
-          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t('scheme_specifications'),
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 16),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth > 600;
+                  return GridView.count(
+                    shrinkWrap: true,
+                    crossAxisCount: isWide ? 3 : 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: isWide ? 2.5 : 2.0,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      _buildSpecTile("Scheme Type", schemeType),
+                      _buildSpecTile("Category", schemeCategory),
+                      _buildSpecTile("ISIN", isin),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ).premiumReveal(index: 1),
           
           const Divider(color: Colors.white10, height: 40),
 
@@ -1820,66 +1823,69 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 );
               }
             },
-          ),
+          ).premiumReveal(index: 2),
 
           const Divider(color: Colors.white10, height: 40),
 
-          Text(
-            "Recent Historical NAVs",
-            style: GoogleFonts.outfit(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          // Historical NAV list
-          if (data.isEmpty)
-            Text(
-              "No historical NAV details available.",
-              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
-            )
-          else
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.02),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.05)),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Recent Historical NAVs",
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: data.length > 5 ? 5 : data.length,
-                separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
-                itemBuilder: (context, index) {
-                  final navItem = data[index];
-                  final date = navItem['date'] ?? 'N/A';
-                  final navVal = navItem['nav'] ?? 'N/A';
-                  
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          date,
-                          style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+              const SizedBox(height: 16),
+              if (data.isEmpty)
+                Text(
+                  "No historical NAV details available.",
+                  style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
+                )
+              else
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.02),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: data.length > 5 ? 5 : data.length,
+                    separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                    itemBuilder: (context, index) {
+                      final navItem = data[index];
+                      final date = navItem['date'] ?? 'N/A';
+                      final navVal = navItem['nav'] ?? 'N/A';
+                      
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              date,
+                              style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                            ),
+                            Text(
+                              "₹$navVal",
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          "₹$navVal",
-                          style: GoogleFonts.inter(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ).premiumReveal(index: 3),
         ],
       ),
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/auth_provider.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -111,29 +112,34 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: Colors.white,
                           ),
                         ),
-                      ),
+                      ).premiumReveal(index: 0),
                       const SizedBox(height: 24),
                       
                       // Heading
-                      Text(
-                        "Sharan Fincorp",
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.outfit(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Enter credentials to manage your investments",
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          color: Colors.grey.shade400,
-                        ),
-                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            "Sharan Fincorp",
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.outfit(
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            "Enter credentials to manage your investments",
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: Colors.grey.shade400,
+                            ),
+                          ),
+                        ],
+                      ).premiumReveal(index: 1),
                       const SizedBox(height: 40),
 
                       // Glassmorphism Login Card
@@ -297,7 +303,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ],
                         ),
-                      ),
+                      ).premiumReveal(index: 2),
                     ],
                   ),
                 ),
@@ -307,5 +313,14 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+}
+
+extension PremiumRevealExtension on Widget {
+  Widget premiumReveal({required int index, int staggerMs = 150}) {
+    return this.animate(delay: Duration(milliseconds: index * staggerMs))
+        .fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic)
+        .blur(begin: const Offset(10, 10), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic)
+        .slide(begin: const Offset(0, 0.2), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic);
   }
 }
