@@ -75,29 +75,38 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      Uint8List? pdfBytes;
-      final filename = _selectedInvoicePdf!.filename.toLowerCase();
-      if (filename.endsWith('.pdf')) {
-        pdfBytes = _selectedInvoicePdf!.bytes;
-      } else if (filename.endsWith('.zip')) {
-        final dec = archive.ZipDecoder();
-        final archiveFile = dec.decodeBytes(_selectedInvoicePdf!.bytes!);
-        for (final entry in archiveFile.files) {
-          if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
-            if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
-              continue;
-            }
-            pdfBytes = Uint8List.fromList(entry.content as List<int>);
-            break;
-          }
-        }
+      Uint8List? rawBytes;
+      if (_selectedInvoicePdf!.bytes != null) {
+        rawBytes = _selectedInvoicePdf!.bytes;
+      } else if (_selectedInvoicePdf!.base64String != null) {
+        rawBytes = base64Decode(_selectedInvoicePdf!.base64String!);
       }
 
-      if (pdfBytes != null) {
-        final preview = await _renderPdfPage(pdfBytes);
-        setState(() {
-          _pdfPreviewBytes = preview;
-        });
+      if (rawBytes != null) {
+        Uint8List? pdfBytes;
+        final filename = _selectedInvoicePdf!.filename.toLowerCase();
+        if (filename.endsWith('.pdf')) {
+          pdfBytes = rawBytes;
+        } else if (filename.endsWith('.zip')) {
+          final dec = archive.ZipDecoder();
+          final archiveFile = dec.decodeBytes(rawBytes);
+          for (final entry in archiveFile.files) {
+            if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
+              if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
+                continue;
+              }
+              pdfBytes = Uint8List.fromList(entry.content as List<int>);
+              break;
+            }
+          }
+        }
+
+        if (pdfBytes != null) {
+          final preview = await _renderPdfPage(pdfBytes);
+          setState(() {
+            _pdfPreviewBytes = preview;
+          });
+        }
       }
     } catch (e) {
       print("Failed to generate PDF preview: $e");
@@ -1424,7 +1433,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         color: const Color(0xFFF27121).withOpacity(0.2),
                       ),
                       child: _selectedStampPng != null
-                          ? Image.memory(_selectedStampPng!.bytes!, fit: BoxFit.fill)
+                          ? Image.memory(
+                              _selectedStampPng!.bytes ?? base64Decode(_selectedStampPng!.base64String!),
+                              fit: BoxFit.fill,
+                            )
                           : const Center(
                               child: Text(
                                 "STAMP",
@@ -1461,7 +1473,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         color: const Color(0xFFE94057).withOpacity(0.2),
                       ),
                       child: _selectedSignaturePng != null
-                          ? Image.memory(_selectedSignaturePng!.bytes!, fit: BoxFit.fill)
+                          ? Image.memory(
+                              _selectedSignaturePng!.bytes ?? base64Decode(_selectedSignaturePng!.base64String!),
+                              fit: BoxFit.fill,
+                            )
                           : const Center(
                               child: Text(
                                 "SIGNATURE",
