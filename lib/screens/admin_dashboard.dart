@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
@@ -700,6 +701,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final languageProvider = Provider.of<LanguageProvider>(context);
     final colors = AppThemeColors(isDark);
     final t = languageProvider.translate;
+    final showSidebar = MediaQuery.of(context).size.width > 900;
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -707,7 +709,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           // Sidebar - Hidden on mobile viewports for responsiveness
           LayoutBuilder(builder: (context, constraints) {
-            final showSidebar = MediaQuery.of(context).size.width > 900;
             if (!showSidebar) return const SizedBox.shrink();
 
             return Container(
@@ -769,6 +770,115 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Expanded(
             child: Scaffold(
               backgroundColor: Colors.transparent,
+              drawer: showSidebar
+                  ? null
+                  : Drawer(
+                      backgroundColor: colors.background,
+                      child: SafeArea(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 1. Profile Header
+                            Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  CircleAvatar(
+                                    radius: 28,
+                                    backgroundColor: colors.primary.withOpacity(0.15),
+                                    child: Text(
+                                      "A",
+                                      style: GoogleFonts.outfit(
+                                        color: colors.primary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 24,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    authProvider.user?.email ?? "Admin User",
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.outfit(
+                                      color: colors.textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    "System Administrator",
+                                    style: GoogleFonts.inter(
+                                      color: colors.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ).animate()
+                              .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                              .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                              .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+
+                            Divider(color: colors.border, height: 1),
+                            const SizedBox(height: 16),
+
+                            // 2. Navigation items
+                            Expanded(
+                              child: ListView(
+                                padding: EdgeInsets.zero,
+                                children: [
+                                  _buildDrawerItem(0, t('clients_management'), Icons.people_outline, colors, context),
+                                  _buildDrawerItem(1, t('data_ingestion'), Icons.cloud_upload_outlined, colors, context),
+                                  _buildDrawerItem(2, t('factsheets_manager'), Icons.document_scanner_outlined, colors, context),
+                                  _buildDrawerItem(3, t('invoice_signer'), Icons.draw_outlined, colors, context),
+                                  _buildDrawerItem(4, t('settings'), Icons.settings_outlined, colors, context),
+                                ],
+                              ),
+                            ),
+
+                            Divider(color: colors.border, height: 1),
+
+                            // 3. Logout List Tile at the bottom
+                            Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: InkWell(
+                                onTap: () {
+                                  Navigator.pop(context); // Close the drawer
+                                  authProvider.signOut();
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: colors.primary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.logout, color: colors.primary, size: 20),
+                                      const SizedBox(width: 16),
+                                      Text(
+                                        t('logout'),
+                                        style: GoogleFonts.inter(
+                                          color: colors.primary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ).animate(delay: const Duration(milliseconds: 6 * 80))
+                              .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                              .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                              .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+                          ],
+                        ),
+                      ),
+                    ),
               appBar: AppBar(
                 backgroundColor: colors.surface,
                 elevation: 0,
@@ -826,6 +936,53 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ],
       ),
     );
+  }
+
+  Widget _buildDrawerItem(int index, String label, IconData icon, AppThemeColors colors, BuildContext context) {
+    final isSelected = _selectedTab == index;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+      child: InkWell(
+        onTap: () {
+          Navigator.pop(context); // Close the drawer natively
+          setState(() {
+            _selectedTab = index;
+            if (index == 2) {
+              _fetchFundsList();
+            }
+          });
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          decoration: BoxDecoration(
+            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 22),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    color: isSelected ? colors.textPrimary : colors.textSecondary,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).animate(delay: Duration(milliseconds: (index + 1) * 80))
+      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic);
   }
 
   Widget _buildSidebarItem(int index, String label, IconData icon) {
