@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
+import 'dart:convert';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
@@ -20,13 +22,29 @@ class _ClientDashboardState extends State<ClientDashboard> {
   late Future<Map<String, dynamic>> _portfolioDataFuture;
   final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
-  TextEditingController? _autocompleteTextController;
   int _selectedTab = 0; // 0: Portfolio, 1: Factsheets, 2: Settings, 3: About Us, 4: Contact Us
+
+  // Real-time factsheet search state variables
+  final TextEditingController _fundSearchController = TextEditingController();
+  List<dynamic> _searchResults = [];
+  bool _searchingFunds = false;
+  bool _fetchingFundDetails = false;
+  Map<String, dynamic>? _selectedFundDetails;
+  String? _fundSearchError;
+  String _selectedChartRange = "1Y"; // default 1 Year
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
     _refreshData();
+  }
+
+  @override
+  void dispose() {
+    _fundSearchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
   }
 
   void _refreshData() {
@@ -79,6 +97,177 @@ class _ClientDashboardState extends State<ClientDashboard> {
       'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
       'profile': profileRes,
     };
+  }
+
+  void _onSearchQueryChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      _performFundSearch(query.trim());
+    });
+  }
+
+  Future<void> _performFundSearch(String query) async {
+    final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final keywords = cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
+    if (keywords.isEmpty) return;
+
+    // Find the longest keyword of length >= 3 to query the API
+    final searchKeyword = keywords.firstWhere(
+      (k) => k.length >= 3,
+      orElse: () => keywords.first,
+    );
+
+    if (searchKeyword.length < 3) {
+      setState(() {
+        _searchResults = [];
+        _fundSearchError = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _searchingFunds = true;
+      _fundSearchError = null;
+    });
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          "action": "proxy-get",
+          "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(searchKeyword)}",
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.status == 200 && response.data != null) {
+        final List<dynamic> results = response.data is String
+            ? jsonDecode(response.data as String)
+            : List<dynamic>.from(response.data as List);
+
+        // Perform client-side case-insensitive multi-keyword filtering
+        final filtered = results.where((item) {
+          final name = (item['schemeName'] as String? ?? '').toLowerCase();
+          return keywords.every((kw) => name.contains(kw));
+        }).toList();
+
+        setState(() {
+          _searchResults = filtered;
+          _searchingFunds = false;
+          if (filtered.isEmpty) {
+            _fundSearchError = "No funds found matching '$cleanQuery'.";
+          }
+        });
+      } else {
+        throw Exception("Failed to search funds through proxy.");
+      }
+    } catch (e) {
+      setState(() {
+        _searchResults = [];
+        _searchingFunds = false;
+        _fundSearchError = "Failed to search funds: Network error.";
+      });
+    }
+  }
+
+  String _getRangeLabel(String range) {
+    switch (range) {
+      case "YTD":
+        return "Year to Date";
+      case "1Y":
+        return "Last 1 Year";
+      case "2Y":
+        return "2 Years";
+      case "3Y":
+        return "3 Years";
+      case "5Y":
+        return "5 Years";
+      case "Since Launch":
+      default:
+        return "Since Launch";
+    }
+  }
+
+  DateTime? parseDate(String dateStr) {
+    final parts = dateStr.split('-');
+    if (parts.length == 3) {
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
+  }
+
+  List<dynamic> filterNavDataByRange(List<dynamic> allData, String rangeOption) {
+    if (allData.isEmpty) return [];
+    
+    final latestDateObj = parseDate(allData.first['date'] ?? '');
+    if (latestDateObj == null) return allData;
+    
+    DateTime cutoff;
+    switch (rangeOption) {
+      case "YTD":
+        cutoff = DateTime(latestDateObj.year, 1, 1);
+        break;
+      case "1Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 365));
+        break;
+      case "2Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 2 * 365));
+        break;
+      case "3Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 3 * 365));
+        break;
+      case "5Y":
+        cutoff = latestDateObj.subtract(const Duration(days: 5 * 365));
+        break;
+      case "Since Launch":
+      default:
+        return allData;
+    }
+    
+    return allData.where((item) {
+      final d = parseDate(item['date'] ?? '');
+      return d != null && (d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff));
+    }).toList();
+  }
+
+  Future<void> _fetchFundDetails(String schemeCode) async {
+    setState(() {
+      _fetchingFundDetails = true;
+      _fundSearchError = null;
+      _searchResults = []; // Close the dropdown
+      _fundSearchController.clear(); // Clear search field
+    });
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          "action": "proxy-get",
+          "url": "https://api.mfapi.in/mf/$schemeCode",
+        },
+      ).timeout(const Duration(seconds: 20));
+
+      if (response.status == 200 && response.data != null) {
+        final Map<String, dynamic> details = response.data is String
+            ? jsonDecode(response.data as String)
+            : Map<String, dynamic>.from(response.data as Map);
+        setState(() {
+          _selectedFundDetails = details;
+          _fetchingFundDetails = false;
+        });
+      } else {
+        throw Exception("Failed to fetch fund details through proxy.");
+      }
+    } catch (e) {
+      setState(() {
+        _fetchingFundDetails = false;
+        _fundSearchError = "Failed to fetch fund details: Network error.";
+      });
+    }
   }
 
   @override
@@ -732,131 +921,556 @@ class _ClientDashboardState extends State<ClientDashboard> {
     required String Function(String) t,
     required bool showSidebar,
   }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t('fund_facts_finder'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            t('fund_facts_finder_sub'),
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+
+          // Search Bar Container
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                t('search_explore_factsheets'),
-                style: GoogleFonts.outfit(
-                  color: colors.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+              Container(
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: colors.border),
+                ),
+                child: TextFormField(
+                  controller: _fundSearchController,
+                  style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 14),
+                  onChanged: _onSearchQueryChanged,
+                  decoration: InputDecoration(
+                    hintText: t('search_funds_placeholder'),
+                    hintStyle: GoogleFonts.inter(color: colors.textMuted, fontSize: 13),
+                    prefixIcon: Icon(Icons.search, color: colors.textSecondary),
+                    suffixIcon: _searchingFunds
+                        ? const Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+                            ),
+                          )
+                        : (_fundSearchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: Icon(Icons.clear, color: colors.textSecondary),
+                                onPressed: () {
+                                  _fundSearchController.clear();
+                                  setState(() {
+                                    _searchResults = [];
+                                  });
+                                },
+                              )
+                            : null),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                t('fund_facts_finder_sub'),
-                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 24),
 
-              // Search Bar block
-              RawAutocomplete<Map<String, dynamic>>(
-                optionsBuilder: (TextEditingValue textEditingValue) {
-                  if (textEditingValue.text.length < 2) {
-                    return const Iterable<Map<String, dynamic>>.empty();
-                  }
-                  return allFunds.where((Map<String, dynamic> fund) {
-                    final name = (fund['scheme_name'] ?? '').toString().toLowerCase();
-                    final code = (fund['scheme_code'] ?? '').toString().toLowerCase();
-                    final query = textEditingValue.text.toLowerCase();
-                    return name.contains(query) || code.contains(query);
-                  });
-                },
-                onSelected: (Map<String, dynamic> selection) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _autocompleteTextController?.clear();
-                  });
-                  showDialog(
-                    context: context,
-                    builder: (context) => FactsheetDialog(
-                      fundId: selection['id'],
-                      schemeName: selection['scheme_name'],
-                      category: selection['category'] ?? 'Mutual Fund',
-                      fundHouse: selection['fund_house'] ?? 'Sharan Fincorp',
-                    ),
-                  );
-                },
-                fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                  _autocompleteTextController = textEditingController;
-                  return TextField(
-                    controller: textEditingController,
-                    focusNode: focusNode,
-                    style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: t('search_funds_placeholder_client'),
-                      hintStyle: GoogleFonts.inter(color: colors.textMuted, fontSize: 13),
-                      prefixIcon: Icon(Icons.search, color: colors.textSecondary, size: 20),
-                      suffixIcon: textEditingController.text.isNotEmpty
-                          ? IconButton(
-                              icon: Icon(Icons.clear, color: colors.textSecondary, size: 18),
-                              onPressed: () {
-                                textEditingController.clear();
-                              },
-                            )
-                          : null,
-                      filled: true,
-                      fillColor: colors.surfaceAccent,
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: colors.border),
+              if (_searchResults.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 250),
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: colors.border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: colors.cardShadow,
+                        blurRadius: 12,
+                        offset: const Offset(0, 8),
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: colors.primary),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                    ),
-                  );
-                },
-                optionsViewBuilder: (context, onSelected, options) {
-                  return Align(
-                    alignment: Alignment.topLeft,
-                    child: Material(
-                      color: colors.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        side: BorderSide(color: colors.border),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Container(
-                        width: showSidebar ? 600 : constraints.maxWidth - 48,
-                        constraints: const BoxConstraints(maxHeight: 200),
-                        child: ListView.builder(
-                          padding: EdgeInsets.zero,
-                          shrinkWrap: true,
-                          itemCount: options.length,
-                          itemBuilder: (BuildContext context, int index) {
-                            final option = options.elementAt(index);
-                            return ListTile(
-                              title: Text(
-                                option['scheme_name'] ?? '',
-                                style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                "Code: ${option['scheme_code']} | ${option['category'] ?? 'N/A'}",
-                                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
-                              ),
-                              onTap: () => onSelected(option),
-                            );
-                          },
+                    ],
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    physics: const ClampingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final item = _searchResults[index];
+                      final schemeName = item['schemeName'] as String? ?? '';
+                      final schemeCode = (item['schemeCode'] ?? '').toString();
+
+                      return ListTile(
+                        title: Text(
+                          schemeName,
+                          style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
                         ),
+                        subtitle: Text(
+                          "Scheme Code: $schemeCode",
+                          style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                        ),
+                        hoverColor: colors.surfaceAccent,
+                        onTap: () => _fetchFundDetails(schemeCode),
+                      );
+                    },
+                    separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          if (_fundSearchError != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.redAccent.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _fundSearchError!,
+                      style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          // Detail Display Card
+          if (_fetchingFundDetails) ...[
+            const SizedBox(height: 40),
+            Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+              ),
+            ),
+          ] else if (_selectedFundDetails != null) ...[
+            _buildSelectedFundCard(colors, t),
+          ] else ...[
+            // Default placeholder card
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.cardShadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      t('no_fund_selected'),
+                      style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      t('no_fund_selected_sub'),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedFundCard(AppThemeColors colors, String Function(String) t) {
+    final meta = _selectedFundDetails!['meta'] as Map<String, dynamic>? ?? {};
+    final data = _selectedFundDetails!['data'] as List<dynamic>? ?? [];
+
+    final fundHouse = meta['fund_house'] ?? 'N/A';
+    final schemeName = meta['scheme_name'] ?? 'N/A';
+    final schemeCode = (meta['scheme_code'] ?? 'N/A').toString();
+    final schemeType = meta['scheme_type'] ?? 'N/A';
+    final schemeCategory = meta['scheme_category'] ?? 'N/A';
+    final isin = meta['isin_div_payout'] ?? meta['isin_div_reinvestment'] ?? 'N/A';
+
+    String latestDate = 'N/A';
+    String latestNav = 'N/A';
+    if (data.isNotEmpty) {
+      latestDate = data[0]['date'] ?? 'N/A';
+      latestNav = data[0]['nav'] ?? 'N/A';
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: colors.cardShadow,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(28.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fundHouse.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        color: colors.accent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        letterSpacing: 1.2,
                       ),
                     ),
-                  );
-                },
+                    const SizedBox(height: 6),
+                    Text(
+                      schemeName,
+                      style: GoogleFonts.outfit(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Scheme Code: $schemeCode",
+                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+              // NAV Tag
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE94057).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE94057).withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "LATEST NAV",
+                      style: GoogleFonts.inter(
+                        color: const Color(0xFFE94057),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "₹$latestNav",
+                      style: GoogleFonts.outfit(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      latestDate,
+                      style: GoogleFonts.inter(
+                        color: colors.textSecondary,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-        );
-      }
+          Divider(color: colors.border, height: 40),
+          
+          Text(
+            t('scheme_specifications'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Specifications Grid
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 600;
+              return GridView.count(
+                shrinkWrap: true,
+                crossAxisCount: isWide ? 3 : 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: isWide ? 2.5 : 2.0,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildSpecTile(colors, "Scheme Type", schemeType),
+                  _buildSpecTile(colors, "Category", schemeCategory),
+                  _buildSpecTile(colors, "ISIN", isin),
+                ],
+              );
+            },
+          ),
+          
+          Divider(color: colors.border, height: 40),
+
+          // Custom Timeline Chart
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 800;
+              final filteredData = filterNavDataByRange(data, _selectedChartRange);
+              
+              double growthPercent = 0.0;
+              if (filteredData.isNotEmpty) {
+                final double latest = double.tryParse(filteredData.first['nav'].toString()) ?? 0.0;
+                final double oldest = double.tryParse(filteredData.last['nav'].toString()) ?? 0.0;
+                growthPercent = oldest == 0.0 ? 0.0 : ((latest - oldest) / oldest) * 100;
+              }
+              
+              final chartCol = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "${t('nav_growth_trend')} (${_getRangeLabel(_selectedChartRange)})",
+                        style: GoogleFonts.outfit(
+                          color: colors.textPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      // Growth Percent Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: growthPercent >= 0 
+                              ? Colors.green.withOpacity(0.15) 
+                              : Colors.redAccent.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: growthPercent >= 0 
+                                ? Colors.green.withOpacity(0.3) 
+                                : Colors.redAccent.withOpacity(0.3)
+                          ),
+                        ),
+                        child: Text(
+                          "${growthPercent >= 0 ? '+' : ''}${growthPercent.toStringAsFixed(2)}%",
+                          style: GoogleFonts.inter(
+                            color: growthPercent >= 0 ? Colors.green : Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  NavGrowthChart(navData: filteredData),
+                ],
+              );
+              
+              final selectorCol = Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colors.surfaceAccent,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      t('time_range'),
+                      style: GoogleFonts.outfit(
+                        color: colors.textSecondary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...["YTD", "1Y", "2Y", "3Y", "5Y", "Since Launch"].map((range) {
+                      final isSelected = _selectedChartRange == range;
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedChartRange = range;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isSelected ? colors.primary : colors.textSecondary,
+                                    width: isSelected ? 5 : 2,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _getRangeLabel(range),
+                                style: GoogleFonts.inter(
+                                  color: isSelected ? colors.textPrimary : colors.textSecondary,
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                ),
+              );
+              
+              if (isWide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: chartCol),
+                    const SizedBox(width: 24),
+                    SizedBox(width: 180, child: selectorCol),
+                  ],
+                );
+              } else {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    chartCol,
+                    const SizedBox(height: 20),
+                    selectorCol,
+                  ],
+                );
+              }
+            },
+          ),
+          
+          Divider(color: colors.border, height: 40),
+
+          Text(
+            t('recent_historical_navs'),
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Historical NAV list
+          if (data.isEmpty)
+            Text(
+              "No historical NAV details available.",
+              style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: colors.border),
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: data.length > 10 ? 10 : data.length, // show last 10 points
+                separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                itemBuilder: (context, index) {
+                  final row = data[index];
+                  final date = row['date'] ?? 'N/A';
+                  final nav = row['nav'] ?? 'N/A';
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    title: Text(
+                      date,
+                      style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    trailing: Text(
+                      "₹$nav",
+                      style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecTile(AppThemeColors colors, String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surfaceAccent,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1347,5 +1961,199 @@ class _ClientDashboardState extends State<ClientDashboard> {
         ],
       ),
     );
+  }
+}
+
+class NavGrowthChart extends StatelessWidget {
+  final List<dynamic> navData;
+
+  const NavGrowthChart({super.key, required this.navData});
+
+  @override
+  Widget build(BuildContext context) {
+    if (navData.isEmpty) return const SizedBox.shrink();
+
+    // Reverse list to go in chronological order (left to right)
+    final pointsList = navData.reversed.toList();
+
+    List<double> navs = pointsList.map((item) {
+      return double.tryParse((item['nav'] ?? '0').toString()) ?? 0.0;
+    }).toList();
+
+    if (navs.isEmpty) return const SizedBox.shrink();
+
+    // Downsample if there are more than 100 points for smooth canvas rendering
+    if (navs.length > 100) {
+      navs = _downsample(navs, 100);
+    }
+
+    final double maxVal = navs.reduce((a, b) => a > b ? a : b);
+    final double minVal = navs.reduce((a, b) => a < b ? a : b);
+    final double range = maxVal - minVal == 0 ? 1.0 : maxVal - minVal;
+
+    final firstDate = pointsList.first['date'] ?? '';
+    final lastDate = pointsList.last['date'] ?? '';
+
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          height: 180,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: colors.surfaceAccent,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.border),
+          ),
+          child: CustomPaint(
+            painter: LineChartPainter(
+              values: navs,
+              minVal: minVal,
+              maxVal: maxVal,
+              range: range,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              firstDate,
+              style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 10),
+            ),
+            Text(
+              "Range: ₹${minVal.toStringAsFixed(2)} - ₹${maxVal.toStringAsFixed(2)}",
+              style: GoogleFonts.inter(
+                color: const Color(0xFFF27121),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            Text(
+              lastDate,
+              style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 10),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  List<double> _downsample(List<double> input, int maxPoints) {
+    if (input.length <= maxPoints) return input;
+    final List<double> result = [];
+    final double step = (input.length - 1) / (maxPoints - 1);
+    for (int i = 0; i < maxPoints; i++) {
+      final int index = (i * step).round().clamp(0, input.length - 1);
+      result.add(input[index]);
+    }
+    return result;
+  }
+}
+
+class LineChartPainter extends CustomPainter {
+  final List<double> values;
+  final double minVal;
+  final double maxVal;
+  final double range;
+
+  LineChartPainter({
+    required this.values,
+    required this.minVal,
+    required this.maxVal,
+    required this.range,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final double width = size.width;
+    final double height = size.height;
+    final double stepX = width / (values.length - 1);
+
+    // Draw horizontal grid lines
+    final Paint gridPaint = Paint()
+      ..color = Colors.grey.withOpacity(0.05)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+
+    for (int i = 1; i <= 3; i++) {
+      final double y = height * (i / 4.0);
+      canvas.drawLine(Offset(0, y), Offset(width, y), gridPaint);
+    }
+
+    // Prepare points
+    final List<Offset> points = [];
+    for (int i = 0; i < values.length; i++) {
+      final double x = i * stepX;
+      final double normalized = (values[i] - minVal) / range;
+      final double y = height - (normalized * (height - 30) + 15);
+      points.add(Offset(x, y));
+    }
+
+    // Draw area path (gradient fill below line)
+    final Path areaPath = Path()
+      ..moveTo(0, height);
+    for (final pt in points) {
+      areaPath.lineTo(pt.dx, pt.dy);
+    }
+    areaPath.lineTo(width, height);
+    areaPath.close();
+
+    final Paint areaPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          const Color(0xFFE94057).withOpacity(0.2),
+          const Color(0xFF8A2387).withOpacity(0.01),
+        ],
+      ).createShader(Rect.fromLTWH(0, 0, width, height));
+    canvas.drawPath(areaPath, areaPaint);
+
+    // Draw path line (smooth connecting curves)
+    final Path linePath = Path()
+      ..moveTo(points[0].dx, points[0].dy);
+    for (int i = 0; i < points.length - 1; i++) {
+      final p1 = points[i];
+      final p2 = points[i + 1];
+      final controlPoint1 = Offset(p1.dx + stepX / 2.0, p1.dy);
+      final controlPoint2 = Offset(p2.dx - stepX / 2.0, p2.dy);
+      linePath.cubicTo(
+        controlPoint1.dx, controlPoint1.dy,
+        controlPoint2.dx, controlPoint2.dy,
+        p2.dx, p2.dy,
+      );
+    }
+
+    final Paint linePaint = Paint()
+      ..color = const Color(0xFFE94057)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(linePath, linePaint);
+
+    // Draw circles at endpoints or critical points
+    final Paint dotPaint = Paint()
+      ..color = const Color(0xFFF27121)
+      ..style = PaintingStyle.fill;
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    final lastPt = points.last;
+    canvas.drawCircle(lastPt, 5.0, dotPaint);
+    canvas.drawCircle(lastPt, 5.0, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant LineChartPainter oldDelegate) {
+    return oldDelegate.values != values;
   }
 }
