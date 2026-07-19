@@ -1,3 +1,5 @@
+// ignore_for_file: uri_does_not_exist
+// ignore_for_file: avoid_web_libraries_in_flutter
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +12,7 @@ import '../utils/file_picker_helper.dart' as fph;
 import '../utils/excel_updater.dart';
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:js' as js;
 import 'package:archive/archive.dart' as archive;
 
 class AdminDashboard extends StatefulWidget {
@@ -55,6 +58,82 @@ class _AdminDashboardState extends State<AdminDashboard> {
   double _sigY = 72;
   bool _signingInvoice = false;
   String _selectedPreset = "CAMS Distributor (Default)";
+  Uint8List? _pdfPreviewBytes;
+  bool _loadingPreview = false;
+
+  Future<void> _generatePdfPreview() async {
+    if (_selectedInvoicePdf == null) {
+      setState(() {
+        _pdfPreviewBytes = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingPreview = true;
+      _pdfPreviewBytes = null;
+    });
+
+    try {
+      Uint8List? pdfBytes;
+      final filename = _selectedInvoicePdf!.filename.toLowerCase();
+      if (filename.endsWith('.pdf')) {
+        pdfBytes = _selectedInvoicePdf!.bytes;
+      } else if (filename.endsWith('.zip')) {
+        final dec = archive.ZipDecoder();
+        final archiveFile = dec.decodeBytes(_selectedInvoicePdf!.bytes!);
+        for (final entry in archiveFile.files) {
+          if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
+            if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
+              continue;
+            }
+            pdfBytes = Uint8List.fromList(entry.content as List<int>);
+            break;
+          }
+        }
+      }
+
+      if (pdfBytes != null) {
+        final preview = await _renderPdfPage(pdfBytes);
+        setState(() {
+          _pdfPreviewBytes = preview;
+        });
+      }
+    } catch (e) {
+      print("Failed to generate PDF preview: $e");
+    } finally {
+      setState(() {
+        _loadingPreview = false;
+      });
+    }
+  }
+
+  Future<Uint8List> _renderPdfPage(Uint8List pdfBytes) async {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    js.context.callMethod('renderPdfPageToImage', [pdfBytes, -1, id]);
+
+    final key = 'pdf_render_result_$id';
+    while (true) {
+      final res = js.context[key];
+      if (res != null) {
+        final error = res['error'];
+        final dataUrl = res['dataUrl'] as String?;
+
+        js.context[key] = null; // Cleanup
+
+        if (error != null) {
+          throw Exception(error);
+        }
+
+        if (dataUrl != null && dataUrl.startsWith("data:image/png;base64,")) {
+          final base64Str = dataUrl.substring("data:image/png;base64,".length);
+          return base64Decode(base64Str);
+        }
+        throw Exception("Invalid render image format");
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
 
   // Excel Metadata Ingestion & Updater variables
   fph.PickedFileData? _selectedExcelFile;
@@ -1072,6 +1151,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               setState(() {
                 _selectedInvoicePdf = file;
               });
+              _generatePdfPreview();
             }
           },
         ),
@@ -1194,6 +1274,215 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  Widget _buildPdfPreviewWidget() {
+    final previewHeight = 400.0;
+    final previewWidth = previewHeight * (595.0 / 842.0);
+
+    if (_selectedInvoicePdf == null) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.picture_as_pdf_outlined, color: Colors.grey.shade600, size: 40),
+              const SizedBox(height: 12),
+              Text(
+                "Upload a PDF or ZIP to see the placement preview",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_loadingPreview) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Generating visual placement preview...",
+                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_pdfPreviewBytes == null) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Center(
+          child: Text(
+            "Could not load PDF page preview",
+            style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+          ),
+        ),
+      );
+    }
+
+    // Size of overlays scaled to the preview container:
+    final stampW = (100.0 / 595.0) * previewWidth;
+    final stampH = (100.0 / 842.0) * previewHeight;
+    final stampL = (_stampX / 595.0) * previewWidth;
+    final stampT = ((842.0 - (_stampY + 100.0)) / 842.0) * previewHeight;
+
+    final sigW = (120.0 / 595.0) * previewWidth;
+    final sigH = (60.0 / 842.0) * previewHeight;
+    final sigL = (_sigX / 595.0) * previewWidth;
+    final sigT = ((842.0 - (_sigY + 60.0)) / 842.0) * previewHeight;
+
+    return Center(
+      child: Column(
+        children: [
+          Text(
+            "Visual Placement Preview (Last Page)",
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Drag the Stamp or Signature directly to adjust coordinates",
+            style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: previewWidth,
+            height: previewHeight,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Rendered PDF Page Image
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    _pdfPreviewBytes!,
+                    width: previewWidth,
+                    height: previewHeight,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+
+                // Stamp Overlay
+                Positioned(
+                  left: stampL,
+                  top: stampT,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
+                      final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
+                      setState(() {
+                        _stampX = (_stampX + pdfDeltaX).clamp(0.0, 495.0);
+                        _stampY = (_stampY + pdfDeltaY).clamp(0.0, 742.0);
+                        _selectedPreset = "Custom Placement";
+                      });
+                    },
+                    child: Container(
+                      width: stampW,
+                      height: stampH,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFF27121), width: 2),
+                        color: const Color(0xFFF27121).withOpacity(0.2),
+                      ),
+                      child: _selectedStampPng != null
+                          ? Image.memory(_selectedStampPng!.bytes!, fit: BoxFit.fill)
+                          : const Center(
+                              child: Text(
+                                "STAMP",
+                                style: TextStyle(
+                                  color: Color(0xFFF27121),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 8,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+
+                // Signature Overlay
+                Positioned(
+                  left: sigL,
+                  top: sigT,
+                  child: GestureDetector(
+                    onPanUpdate: (details) {
+                      final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
+                      final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
+                      setState(() {
+                        _sigX = (_sigX + pdfDeltaX).clamp(0.0, 475.0);
+                        _sigY = (_sigY + pdfDeltaY).clamp(0.0, 782.0);
+                        _selectedPreset = "Custom Placement";
+                      });
+                    },
+                    child: Container(
+                      width: sigW,
+                      height: sigH,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFE94057), width: 2),
+                        color: const Color(0xFFE94057).withOpacity(0.2),
+                      ),
+                      child: _selectedSignaturePng != null
+                          ? Image.memory(_selectedSignaturePng!.bytes!, fit: BoxFit.fill)
+                          : const Center(
+                              child: Text(
+                                "SIGNATURE",
+                                style: TextStyle(
+                                  color: Color(0xFFE94057),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 8,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildControlPanel() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1221,7 +1510,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               color: Colors.grey.shade500,
             ),
           ),
-           const SizedBox(height: 24),
+          const SizedBox(height: 20),
+          _buildPdfPreviewWidget(),
+          const SizedBox(height: 24),
           Text(
             "Overlay Location Preset",
             style: GoogleFonts.inter(

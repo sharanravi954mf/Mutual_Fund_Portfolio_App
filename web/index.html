@@ -63,6 +63,47 @@
         window['pdf_result_' + id] = { text: null, error: err.toString() };
       }
     };
+
+    window.renderPdfPageToImage = function(pdfBytes, pageNum, id) {
+      try {
+        let bytes = pdfBytes;
+        if (pdfBytes && pdfBytes.buffer) {
+          bytes = new Uint8Array(pdfBytes.buffer);
+        } else if (pdfBytes && pdfBytes.bytes) {
+          bytes = new Uint8Array(pdfBytes.bytes);
+        } else {
+          bytes = new Uint8Array(pdfBytes);
+        }
+
+        pdfjsLib.getDocument({ data: bytes }).promise.then(async function(pdf) {
+          let targetPage = pageNum;
+          if (pageNum === -1 || pageNum > pdf.numPages) {
+            targetPage = pdf.numPages;
+          }
+          const page = await pdf.getPage(targetPage);
+          
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+
+          await page.render({
+            canvasContext: context,
+            viewport: viewport
+          }).promise;
+
+          const dataUrl = canvas.toDataURL('image/png');
+          window['pdf_render_result_' + id] = { dataUrl: dataUrl, error: null };
+        }).catch(function(err) {
+          console.error("PDFJS render failed:", err);
+          window['pdf_render_result_' + id] = { dataUrl: null, error: err.toString() };
+        });
+      } catch (err) {
+        console.error("PDFJS render failed synchronously:", err);
+        window['pdf_render_result_' + id] = { dataUrl: null, error: err.toString() };
+      }
+    };
   </script>
 </head>
 <body style="background-color: #0F0C20;">
