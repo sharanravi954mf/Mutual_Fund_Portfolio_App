@@ -42,7 +42,8 @@ class AppThemeColors {
   Color get primary => isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
   Color get primaryHover => isDark ? AppColors.darkPrimary : AppColors.lightPrimaryHover;
   Color get secondary => isDark ? AppColors.darkSecondary : AppColors.lightSecondary;
-  Color get accent => isDark ? AppColors.darkAccent : AppColors.lightInfo;
+  Color get accent => isDark ? AppColors.darkAccent : AppColors.lightPrimary;
+  Color get activeBackground => isDark ? AppColors.darkPrimary.withValues(alpha: 0.15) : AppColors.lightActiveBackground;
   
   Color get background => isDark ? AppColors.darkBackground : AppColors.lightBackground;
   Color get surface => isDark ? AppColors.darkSurface : AppColors.lightSurface;
@@ -53,6 +54,7 @@ class AppThemeColors {
   Color get border => isDark ? AppColors.darkDivider : AppColors.lightDivider;
   Color get textPrimary => isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
   Color get textSecondary => isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
+  Color get placeholder => isDark ? AppColors.darkPlaceholder : AppColors.lightPlaceholder;
   Color get textMuted => isDark ? AppColors.darkDisabled : AppColors.lightDisabled;
   Color get disabled => isDark ? AppColors.darkDisabled : AppColors.lightDisabled;
   

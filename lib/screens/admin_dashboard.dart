@@ -1108,10 +1108,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isSelected ? colors.primary.withOpacity(0.12) : Colors.transparent,
+                color: isSelected ? colors.activeBackground : Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
                 border: isSelected
-                    ? Border.all(color: colors.primary.withOpacity(0.3), width: 1)
+                    ? Border.all(color: colors.border, width: 1)
                     : null,
               ),
               child: Center(
@@ -1142,10 +1142,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? colors.primary.withOpacity(0.12) : Colors.transparent,
+            color: isSelected ? colors.activeBackground : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
             border: isSelected
-                ? Border.all(color: colors.primary.withOpacity(0.3), width: 1)
+                ? Border.all(color: colors.border, width: 1)
                 : null,
           ),
           child: Row(
@@ -1162,8 +1162,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    color: isSelected ? colors.primary : colors.textPrimary,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected ? colors.textPrimary : colors.textPrimary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 13,
                   ),
                 ),
@@ -1193,8 +1193,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           decoration: BoxDecoration(
-            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
+            color: isSelected ? colors.activeBackground : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
+            border: isSelected ? Border.all(color: colors.border, width: 1) : null,
           ),
           child: Row(
             children: [
@@ -1207,7 +1208,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
                     color: isSelected ? colors.textPrimary : colors.textSecondary,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 14,
                   ),
                 ),
@@ -1240,10 +1241,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildClientsListContent() {
+    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+
     if (_isLoading) {
-      return const Center(
+      return Center(
         child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+          valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
         ),
       );
     }
@@ -1257,14 +1261,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
           TextField(
             controller: _searchController,
             onChanged: _onSearchChanged,
-            style: GoogleFonts.inter(color: Colors.white),
+            style: GoogleFonts.inter(color: colors.textPrimary),
             decoration: InputDecoration(
               hintText: "Search clients by full name or PAN code...",
-              hintStyle: GoogleFonts.inter(color: Colors.grey.shade600),
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              hintStyle: GoogleFonts.inter(color: colors.placeholder),
+              prefixIcon: Icon(Icons.search, color: colors.textSecondary),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.clear, color: Colors.grey),
+                      icon: Icon(Icons.clear, color: colors.textSecondary),
                       onPressed: () {
                         _searchController.clear();
                         _onSearchChanged("");
@@ -1272,14 +1276,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     )
                   : null,
               filled: true,
-              fillColor: Colors.white.withOpacity(0.02),
+              fillColor: colors.surface,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Colors.white10),
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colors.border),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFE94057)),
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: colors.primary, width: 1.5),
               ),
             ),
           ).premiumReveal(index: 0),
@@ -1288,7 +1296,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           // Directory count
           Text(
             "Showing ${_filteredClients.length} of ${_allClients.length} registered clients",
-            style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
           ).premiumReveal(index: 1),
           const SizedBox(height: 16),
 
@@ -1296,20 +1304,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.015),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withOpacity(0.05)),
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.border, width: 1),
               ),
               child: _filteredClients.isEmpty
                   ? Center(
                       child: Text(
                         "No matching client profiles found.",
-                        style: GoogleFonts.inter(color: Colors.grey),
+                        style: GoogleFonts.inter(color: colors.textSecondary),
                       ),
                     )
                   : ListView.separated(
                       itemCount: _filteredClients.length,
-                      separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                      separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
                       itemBuilder: (context, index) {
                         final client = _filteredClients[index];
                         final name = client['full_name'] ?? 'Unnamed Client';
@@ -1323,43 +1331,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           marketVal = (portfolios.first['current_market_value'] as num).toDouble();
                         }
 
-                        return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => ClientDetailScreen(
-                                  clientId: client['id'] as String,
-                                  clientName: name,
-                                  clientPan: pan,
+                        return Container(
+                          color: index % 2 == 1 ? colors.tableRowAlt : colors.surface,
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) => ClientDetailScreen(
+                                    clientId: client['id'] as String,
+                                    clientName: name,
+                                    clientPan: pan,
+                                  ),
                                 ),
+                              );
+                            },
+                            leading: CircleAvatar(
+                              backgroundColor: colors.activeBackground,
+                              child: Text(
+                                name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'C',
+                                style: GoogleFonts.outfit(color: colors.primary, fontWeight: FontWeight.bold),
                               ),
-                            );
-                          },
-                          leading: CircleAvatar(
-                            backgroundColor: const Color(0xFFE94057).withOpacity(0.1),
-                            child: Text(
-                              name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'C',
-                              style: GoogleFonts.outfit(color: const Color(0xFFE94057), fontWeight: FontWeight.bold),
                             ),
-                          ),
-                          title: Text(
-                            name,
-                            style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              "PAN: ${pan.toUpperCase()}  •  ID: $id",
-                              style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
+                            title: Text(
+                              name,
+                              style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
                             ),
-                          ),
-                          trailing: Text(
-                            currencyFormat.format(marketVal),
-                            style: GoogleFonts.outfit(
-                              color: marketVal > 0 ? const Color(0xFF00C853) : Colors.grey,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 4.0),
+                              child: Text(
+                                "PAN: ${pan.toUpperCase()}  •  ID: $id",
+                                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                            trailing: Text(
+                              currencyFormat.format(marketVal),
+                              style: GoogleFonts.outfit(
+                                color: marketVal > 0 ? colors.profit : colors.textSecondary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
                             ),
                           ),
                         );

@@ -971,10 +971,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isSelected ? colors.primary.withOpacity(0.12) : Colors.transparent,
+                color: isSelected ? colors.activeBackground : Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
                 border: isSelected
-                    ? Border.all(color: colors.primary.withOpacity(0.3), width: 1)
+                    ? Border.all(color: colors.border, width: 1)
                     : null,
               ),
               child: Center(
@@ -1002,10 +1002,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? colors.primary.withOpacity(0.12) : Colors.transparent,
+            color: isSelected ? colors.activeBackground : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
             border: isSelected
-                ? Border.all(color: colors.primary.withOpacity(0.3), width: 1)
+                ? Border.all(color: colors.border, width: 1)
                 : null,
           ),
           child: Row(
@@ -1022,8 +1022,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    color: isSelected ? colors.primary : colors.textPrimary,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected ? colors.textPrimary : colors.textPrimary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 13,
                   ),
                 ),

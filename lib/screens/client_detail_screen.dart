@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/theme_provider.dart';
 import '../utils/finance.dart';
 import 'factsheet_dialog.dart';
 
@@ -70,21 +72,25 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
+    final colors = AppThemeColors(isDark);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0C20),
+      backgroundColor: colors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF151030),
+        backgroundColor: colors.surface,
         elevation: 0,
+        iconTheme: IconThemeData(color: colors.textPrimary),
         title: Text(
           widget.clientName,
           style: GoogleFonts.outfit(
             fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: colors.textPrimary,
           ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.grey),
+            icon: Icon(Icons.refresh, color: colors.textSecondary),
             tooltip: "Refresh Data",
             onPressed: _refreshData,
           ),
@@ -95,9 +101,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           future: _portfolioDataFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(
+              return Center(
                 child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
                 ),
               );
             }
@@ -108,7 +114,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                   padding: const EdgeInsets.all(24.0),
                   child: Text(
                     "Error loading portfolio: ${snapshot.error}",
-                    style: GoogleFonts.inter(color: Colors.redAccent),
+                    style: GoogleFonts.inter(color: colors.error),
                   ),
                 ),
               );
@@ -185,7 +191,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               onRefresh: () async {
                 _refreshData();
               },
-              color: const Color(0xFFE94057),
+              color: colors.primary,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(24.0),
@@ -204,15 +210,15 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                             children: [
                               Text(
                                 "PAN: ${widget.clientPan.toUpperCase()}",
-                                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 "Client Portfolio Analysis",
                                 style: GoogleFonts.outfit(
-                                  color: Colors.grey.shade300,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
+                                  color: colors.textPrimary,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ],
@@ -220,14 +226,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFE94057).withOpacity(0.1),
+                              color: colors.activeBackground,
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: const Color(0xFFE94057).withOpacity(0.3)),
+                              border: Border.all(color: colors.border),
                             ),
                             child: Text(
                               "Active Portfolio",
                               style: GoogleFonts.inter(
-                                color: const Color(0xFFE94057),
+                                color: colors.primary,
                                 fontWeight: FontWeight.w600,
                                 fontSize: 11,
                               ),
@@ -241,30 +247,30 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       isDesktop
                           ? Row(
                               children: [
-                                Expanded(child: _buildMetricCard("Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, const Color(0xFF8A2387))),
+                                Expanded(child: _buildMetricCard(colors, "Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, colors.primary)),
                                 const SizedBox(width: 16),
-                                Expanded(child: _buildMetricCard("Current Valuation", currencyFormat.format(current), Icons.trending_up, const Color(0xFFE94057))),
+                                Expanded(child: _buildMetricCard(colors, "Current Valuation", currencyFormat.format(current), Icons.trending_up, colors.primary)),
                                 const SizedBox(width: 16),
-                                Expanded(child: _buildMetricCard("Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, const Color(0xFFF27121), isReturn: true, returnValue: absReturn)),
+                                Expanded(child: _buildMetricCard(colors, "Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, colors.profit, isReturn: true, returnValue: absReturn)),
                                 const SizedBox(width: 16),
-                                Expanded(child: _buildMetricCard("Annualized Return (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, const Color(0xFF00C853), isReturn: true, returnValue: xirrVal)),
+                                Expanded(child: _buildMetricCard(colors, "Annualized (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, colors.profit, isReturn: true, returnValue: xirrVal)),
                               ],
                             )
                           : Column(
                               children: [
                                 Row(
                                   children: [
-                                    Expanded(child: _buildMetricCard("Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, const Color(0xFF8A2387))),
+                                    Expanded(child: _buildMetricCard(colors, "Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, colors.primary)),
                                     const SizedBox(width: 12),
-                                    Expanded(child: _buildMetricCard("Current Valuation", currencyFormat.format(current), Icons.trending_up, const Color(0xFFE94057))),
+                                    Expanded(child: _buildMetricCard(colors, "Current Valuation", currencyFormat.format(current), Icons.trending_up, colors.primary)),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
                                 Row(
                                   children: [
-                                    Expanded(child: _buildMetricCard("Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, const Color(0xFFF27121), isReturn: true, returnValue: absReturn)),
+                                    Expanded(child: _buildMetricCard(colors, "Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, colors.profit, isReturn: true, returnValue: absReturn)),
                                     const SizedBox(width: 12),
-                                    Expanded(child: _buildMetricCard("Annualized (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, const Color(0xFF00C853), isReturn: true, returnValue: xirrVal)),
+                                    Expanded(child: _buildMetricCard(colors, "Annualized (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, colors.profit, isReturn: true, returnValue: xirrVal)),
                                   ],
                                 ),
                               ],
@@ -275,7 +281,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       Text(
                         "Portfolio Holdings",
                         style: GoogleFonts.outfit(
-                          color: Colors.white,
+                          color: colors.textPrimary,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
@@ -285,6 +291,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       // Holdings list/empty states
                       if (activeHoldings.isEmpty)
                         _buildEmptyStateCard(
+                          colors,
                           "No Active Holdings",
                           "This client does not have any active fund units logged yet.",
                           Icons.folder_open_outlined,
@@ -292,83 +299,86 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       else
                         Container(
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.015),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white.withOpacity(0.05)),
+                            color: colors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.border, width: 1),
                           ),
                           child: ListView.separated(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: activeHoldings.length,
-                            separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                            separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
                             itemBuilder: (context, index) {
                               final h = activeHoldings[index];
                               final units = h['units'] as double;
                               final nav = h['nav'] as double;
                               final curVal = units * nav;
 
-                              return ListTile(
-                                 contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                 leading: Container(
-                                   padding: const EdgeInsets.all(8),
-                                   decoration: BoxDecoration(
-                                     color: const Color(0xFFE94057).withOpacity(0.1),
-                                     shape: BoxShape.circle,
-                                   ),
-                                   child: const Icon(
-                                     Icons.insert_chart_outlined_rounded,
-                                     color: Color(0xFFE94057),
-                                     size: 20,
-                                   ),
-                                 ),
-                                 title: Text(
-                                   h['name'],
-                                   style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                 ),
-                                 subtitle: Padding(
-                                   padding: const EdgeInsets.only(top: 4.0),
-                                   child: Text(
-                                     "${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
-                                     style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
-                                   ),
-                                 ),
-                                 trailing: Column(
-                                   mainAxisAlignment: MainAxisAlignment.center,
-                                   crossAxisAlignment: CrossAxisAlignment.end,
-                                   children: [
-                                     Text(
-                                       currencyFormat.format(curVal),
-                                       style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                     ),
-                                     const SizedBox(height: 4),
-                                     Text(
-                                       h['code'],
-                                       style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 11),
-                                     ),
-                                   ],
-                                 ),
-                                 onTap: () {
-                                   showDialog(
-                                     context: context,
-                                     builder: (context) => FactsheetDialog(
-                                       fundId: h['id'],
-                                       schemeName: h['name'],
-                                       category: h['category'],
-                                       fundHouse: h['fund_house'],
-                                     ),
-                                   );
-                                 },
-                               );
+                              return Container(
+                                color: index % 2 == 1 ? colors.tableRowAlt : colors.surface,
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: colors.activeBackground,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.insert_chart_outlined_rounded,
+                                      color: colors.primary,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  title: Text(
+                                    h['name'] as String,
+                                    style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                                  subtitle: Padding(
+                                    padding: const EdgeInsets.only(top: 4.0),
+                                    child: Text(
+                                      "Code: ${h['code']}  •  ${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
+                                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                                    ),
+                                  ),
+                                  trailing: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        currencyFormat.format(curVal),
+                                        style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        "Invested: ${currencyFormat.format(h['invested'])}",
+                                        style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                  onTap: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (context) => FactsheetDialog(
+                                        fundId: h['id'] as String,
+                                        schemeName: h['name'] as String,
+                                        category: h['category'] as String,
+                                        fundHouse: h['fund_house'] as String,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
                             },
                           ),
                         ),
                       const SizedBox(height: 36),
 
-                      // Transactions List
+                      // Transactions Header
                       Text(
                         "Transaction History",
                         style: GoogleFonts.outfit(
-                          color: Colors.white,
+                          color: colors.textPrimary,
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
@@ -377,6 +387,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
                       if (transactions.isEmpty)
                         _buildEmptyStateCard(
+                          colors,
                           "No Transactions",
                           "We haven't found any historical transaction logs under this portfolio yet.",
                           Icons.history,
@@ -384,15 +395,15 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       else
                         Container(
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.015),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white.withOpacity(0.05)),
+                            color: colors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.border, width: 1),
                           ),
                           child: ListView.separated(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: transactions.length,
-                            separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                            separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
                             itemBuilder: (context, index) {
                               final tx = transactions[index];
                               final fund = tx['mutual_funds'] as Map<String, dynamic>?;
@@ -404,40 +415,43 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
                               final isBuy = type == 'BUY';
 
-                              return ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                leading: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: isBuy
-                                        ? const Color(0xFF00C853).withOpacity(0.1)
-                                        : const Color(0xFFFF1744).withOpacity(0.1),
-                                    shape: BoxShape.circle,
+                              return Container(
+                                color: index % 2 == 1 ? colors.tableRowAlt : colors.surface,
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: isBuy
+                                          ? colors.profit.withValues(alpha: 0.1)
+                                          : colors.error.withValues(alpha: 0.1),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      isBuy ? Icons.add_shopping_cart : Icons.sell_outlined,
+                                      color: isBuy ? colors.profit : colors.error,
+                                      size: 18,
+                                    ),
                                   ),
-                                  child: Icon(
-                                    isBuy ? Icons.add_shopping_cart : Icons.sell_outlined,
-                                    color: isBuy ? const Color(0xFF00C853) : const Color(0xFFFF1744),
-                                    size: 18,
+                                  title: Text(
+                                    fund?['scheme_name'] ?? 'Unknown Fund',
+                                    style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ),
-                                title: Text(
-                                  fund?['scheme_name'] ?? 'Unknown Fund',
-                                  style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Text(
-                                    "${dateFormat.format(date)}  •  ${units.toStringAsFixed(4)} Units",
-                                    style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 11),
+                                  subtitle: Padding(
+                                    padding: const EdgeInsets.only(top: 4.0),
+                                    child: Text(
+                                      "${dateFormat.format(date)}  •  ${units.toStringAsFixed(4)} Units",
+                                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                                    ),
                                   ),
-                                ),
-                                trailing: Text(
-                                  "${isBuy ? '+' : '-'}${currencyFormat.format(amt)}",
-                                  style: GoogleFonts.outfit(
-                                    color: isBuy ? const Color(0xFF00C853) : const Color(0xFFFF1744),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
+                                  trailing: Text(
+                                    "${isBuy ? '+' : '-'}${currencyFormat.format(amt)}",
+                                    style: GoogleFonts.outfit(
+                                      color: isBuy ? colors.profit : colors.error,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
                                   ),
                                 ),
                               );
@@ -455,21 +469,21 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     );
   }
 
-  Widget _buildMetricCard(String label, String value, IconData icon, Color accentColor, {bool isReturn = false, double returnValue = 0.0}) {
+  Widget _buildMetricCard(AppThemeColors colors, String label, String value, IconData icon, Color accentColor, {bool isReturn = false, double returnValue = 0.0}) {
     return Container(
       padding: const EdgeInsets.all(18.0),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border, width: 1),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(14),
+              color: colors.activeBackground,
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: accentColor, size: 22),
           ),
@@ -480,15 +494,15 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               children: [
                 Text(
                   label,
-                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 11),
+                  style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   value,
                   style: GoogleFonts.outfit(
                     color: isReturn
-                        ? (returnValue >= 0 ? const Color(0xFF00C853) : const Color(0xFFFF1744))
-                        : Colors.white,
+                        ? (returnValue >= 0 ? colors.profit : colors.error)
+                        : colors.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
@@ -501,28 +515,28 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     );
   }
 
-  Widget _buildEmptyStateCard(String title, String description, IconData icon) {
+  Widget _buildEmptyStateCard(AppThemeColors colors, String title, String description, IconData icon) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.02),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border, width: 1),
       ),
       child: Column(
         children: [
-          Icon(icon, color: Colors.grey.shade600, size: 36),
+          Icon(icon, color: colors.textSecondary, size: 36),
           const SizedBox(height: 12),
           Text(
             title,
-            style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
           ),
           const SizedBox(height: 8),
           Text(
             description,
             textAlign: TextAlign.center,
-            style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13, height: 1.4),
+            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13, height: 1.4),
           ),
         ],
       ),
