@@ -32,6 +32,7 @@ class ExcelMetadataUpdater {
   static Future<Map<String, dynamic>> updateExcelMetadata({
     required Uint8List excelBytes,
     required Uint8List zipBytes,
+    required String fileExtension,
   }) async {
     // 1. Extract PDFs from ZIP or single PDF
     final pdfFiles = <Map<String, String>>[];
@@ -64,172 +65,199 @@ class ExcelMetadataUpdater {
       });
     }
 
-    // 2. Load Excel workbook (.xlsx, .xls, .csv support)
-    Excel? excel;
     try {
-      excel = Excel.decodeBytes(excelBytes);
-    } catch (_) {
-      excel = null;
-    }
+      // 2. Try SheetJS (web runtime)
+      final id = DateTime.now().microsecondsSinceEpoch.toString();
+      js.context.callMethod('updateExcelMetadataJS', [excelBytes, pdfFiles, fileExtension, id]);
 
-    int updatedCount = 0;
+      final key = 'excel_result_$id';
+      while (true) {
+        final res = js.context[key];
+        if (res != null) {
+          final error = res['error'];
+          final bytes = res['bytes'] as List<dynamic>?;
+          final count = res['count'] as int? ?? 0;
+          
+          js.context[key] = null; // Clean up window object reference
 
-    if (excel != null) {
-      for (final table in excel.tables.keys) {
-        final sheet = excel.tables[table]!;
-        if (sheet.maxRows == 0) continue;
-
-        // Identify headers
-        final headers = <String>[];
-        final firstRow = sheet.rows[0];
-        for (final cell in firstRow) {
-          headers.add((cell?.value?.toString() ?? '').toLowerCase().trim());
+          if (error != null) {
+            throw Exception(error);
+          }
+          return {
+            'updatedExcel': bytes != null ? Uint8List.fromList(bytes.cast<int>()) : excelBytes,
+            'updatedCount': count,
+          };
         }
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+    } catch (_) {
+      // 3. Fallback to standard Dart Excel parser (for mobile/unit tests)
+      Excel? excel;
+      try {
+        excel = Excel.decodeBytes(excelBytes);
+      } catch (_) {
+        excel = null;
+      }
 
-        // Map header columns
-        final gstrIndex = _findHeaderIndex(headers, ["amc gstr number", "gstr number", "gstin", "amcgstrnumber"]);
-        final refNoIndex = _findHeaderIndex(headers, ["invoice reference no", "invoice ref no", "ref no", "invoicereferenceno"]);
-        final amcIndex = _findHeaderIndex(headers, ["amc", "amc name", "fund house"]);
-        final fundCodeIndex = _findHeaderIndex(headers, ["fund code", "fundcode"]);
-        final taxableIndex = _findHeaderIndex(headers, ["taxable income", "taxable income amt", "taxable amt"]);
-        final gstAmtIndex = _findHeaderIndex(headers, ["gst amt", "gst amount", "gstamt"]);
+      int updatedCount = 0;
 
-        final invoiceNoIndex = _findHeaderIndex(headers, ["invoice no", "invoiceno", "invoice number"]);
-        final invoiceDateIndex = _findHeaderIndex(headers, ["invoice date", "invoicedate"]);
-        final fileNameIndex = _findHeaderIndex(headers, ["file name", "filename"]);
+      if (excel != null) {
+        for (final table in excel.tables.keys) {
+          final sheet = excel.tables[table]!;
+          if (sheet.maxRows == 0) continue;
 
-        // If we don't have place to write output, skip
-        if (invoiceNoIndex == -1 || invoiceDateIndex == -1) continue;
+          // Identify headers
+          final headers = <String>[];
+          final firstRow = sheet.rows[0];
+          for (final cell in firstRow) {
+            headers.add((cell?.value?.toString() ?? '').toLowerCase().trim());
+          }
 
-        // Match each PDF
-        for (final pdfFile in pdfFiles) {
-          final text = pdfFile['text']!;
-          final textLower = text.toLowerCase();
-          final filename = pdfFile['filename']!;
+          // Map header columns
+          final gstrIndex = _findHeaderIndex(headers, ["amc gstr number", "gstr number", "gstin", "amcgstrnumber"]);
+          final refNoIndex = _findHeaderIndex(headers, ["invoice reference no", "invoice ref no", "ref no", "invoicereferenceno"]);
+          final amcIndex = _findHeaderIndex(headers, ["amc", "amc name", "fund house"]);
+          final fundCodeIndex = _findHeaderIndex(headers, ["fund code", "fundcode"]);
+          final taxableIndex = _findHeaderIndex(headers, ["taxable income", "taxable income amt", "taxable amt"]);
+          final gstAmtIndex = _findHeaderIndex(headers, ["gst amt", "gst amount", "gstamt"]);
 
-          int bestRowIndex = -1;
-          double highestScore = 0;
+          final invoiceNoIndex = _findHeaderIndex(headers, ["invoice no", "invoiceno", "invoice number"]);
+          final invoiceDateIndex = _findHeaderIndex(headers, ["invoice date", "invoicedate"]);
+          final fileNameIndex = _findHeaderIndex(headers, ["file name", "filename"]);
 
-          for (int r = 1; r < sheet.maxRows; r++) {
-            final row = sheet.rows[r];
-            double score = 0;
+          // If we don't have place to write output, skip
+          if (invoiceNoIndex == -1 || invoiceDateIndex == -1) continue;
 
-            // GSTR Match
-            if (gstrIndex != -1 && gstrIndex < row.length) {
-              final val = row[gstrIndex]?.value?.toString().toLowerCase().trim() ?? '';
-              if (val.isNotEmpty && textLower.contains(val)) score += 100;
-            }
+          // Match each PDF
+          for (final pdfFile in pdfFiles) {
+            final text = pdfFile['text']!;
+            final textLower = text.toLowerCase();
+            final filename = pdfFile['filename']!;
 
-            // Invoice Ref No Match
-            if (refNoIndex != -1 && refNoIndex < row.length) {
-              final val = row[refNoIndex]?.value?.toString().toLowerCase().trim() ?? '';
-              if (val.isNotEmpty && textLower.contains(val)) score += 100;
-            }
+            int bestRowIndex = -1;
+            double highestScore = 0;
 
-            // AMC Name Match
-            if (amcIndex != -1 && amcIndex < row.length) {
-              final val = row[amcIndex]?.value?.toString().toLowerCase().trim() ?? '';
-              if (val.isNotEmpty) {
-                final parts = val.split(RegExp(r'\s+')).where((p) => p.length > 2);
-                double amcMatchCount = 0;
-                for (final part in parts) {
-                  if (textLower.contains(part)) amcMatchCount++;
+            for (int r = 1; r < sheet.maxRows; r++) {
+              final row = sheet.rows[r];
+              double score = 0;
+
+              // GSTR Match
+              if (gstrIndex != -1 && gstrIndex < row.length) {
+                final val = row[gstrIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                if (val.isNotEmpty && textLower.contains(val)) score += 100;
+              }
+
+              // Invoice Ref No Match
+              if (refNoIndex != -1 && refNoIndex < row.length) {
+                final val = row[refNoIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                if (val.isNotEmpty && textLower.contains(val)) score += 100;
+              }
+
+              // AMC Name Match
+              if (amcIndex != -1 && amcIndex < row.length) {
+                final val = row[amcIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                if (val.isNotEmpty) {
+                  final parts = val.split(RegExp(r'\s+')).where((p) => p.length > 2);
+                  double amcMatchCount = 0;
+                  for (final part in parts) {
+                    if (textLower.contains(part)) amcMatchCount++;
+                  }
+                  if (amcMatchCount > 0) score += amcMatchCount * 15;
+                  if (filename.toLowerCase().contains(val)) score += 40;
                 }
-                if (amcMatchCount > 0) score += amcMatchCount * 15;
-                if (filename.toLowerCase().contains(val)) score += 40;
+              }
+
+              // Fund Code Match
+              if (fundCodeIndex != -1 && fundCodeIndex < row.length) {
+                final val = row[fundCodeIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                if (val.isNotEmpty && textLower.contains(val)) score += 30;
+              }
+
+              // Taxable Match
+              if (taxableIndex != -1 && taxableIndex < row.length) {
+                final val = row[taxableIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                if (val.isNotEmpty && textLower.contains(val)) score += 15;
+              }
+
+              // GST Match
+              if (gstAmtIndex != -1 && gstAmtIndex < row.length) {
+                final val = row[gstAmtIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                if (val.isNotEmpty && textLower.contains(val)) score += 15;
+              }
+
+              if (score > highestScore) {
+                highestScore = score;
+                bestRowIndex = r;
               }
             }
 
-            // Fund Code Match
-            if (fundCodeIndex != -1 && fundCodeIndex < row.length) {
-              final val = row[fundCodeIndex]?.value?.toString().toLowerCase().trim() ?? '';
-              if (val.isNotEmpty && textLower.contains(val)) score += 30;
+            if (bestRowIndex != -1 && highestScore >= 25) {
+              // Extract Invoice No (Standard CAMS format regex)
+              final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
+              final invNoMatch = invNoRegex.firstMatch(text);
+              final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
+
+              // Extract Invoice Date
+              final dateRegex = RegExp(r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})', caseSensitive: false);
+              final dateMatch = dateRegex.firstMatch(text);
+              final invoiceDate = dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
+
+              // Update cells
+              _updateCell(sheet, bestRowIndex, invoiceNoIndex, invoiceNo);
+              _updateCell(sheet, bestRowIndex, invoiceDateIndex, invoiceDate);
+              if (fileNameIndex != -1) {
+                _updateCell(sheet, bestRowIndex, fileNameIndex, filename);
+              }
+              updatedCount++;
             }
-
-            // Taxable Match
-            if (taxableIndex != -1 && taxableIndex < row.length) {
-              final val = row[taxableIndex]?.value?.toString().toLowerCase().trim() ?? '';
-              if (val.isNotEmpty && textLower.contains(val)) score += 15;
-            }
-
-            // GST Match
-            if (gstAmtIndex != -1 && gstAmtIndex < row.length) {
-              final val = row[gstAmtIndex]?.value?.toString().toLowerCase().trim() ?? '';
-              if (val.isNotEmpty && textLower.contains(val)) score += 15;
-            }
-
-            if (score > highestScore) {
-              highestScore = score;
-              bestRowIndex = r;
-            }
-          }
-
-          if (bestRowIndex != -1 && highestScore >= 25) {
-            // Extract Invoice No (Standard CAMS format regex)
-            final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
-            final invNoMatch = invNoRegex.firstMatch(text);
-            final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
-
-            // Extract Invoice Date
-            final dateRegex = RegExp(r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})', caseSensitive: false);
-            final dateMatch = dateRegex.firstMatch(text);
-            final invoiceDate = dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
-
-            // Update cells
-            _updateCell(sheet, bestRowIndex, invoiceNoIndex, invoiceNo);
-            _updateCell(sheet, bestRowIndex, invoiceDateIndex, invoiceDate);
-            if (fileNameIndex != -1) {
-              _updateCell(sheet, bestRowIndex, fileNameIndex, filename);
-            }
-            updatedCount++;
           }
         }
-      }
 
-      final updatedExcelBytes = excel.encode();
-      return {
-        'updatedExcel': updatedExcelBytes != null ? Uint8List.fromList(updatedExcelBytes) : excelBytes,
-        'updatedCount': updatedCount,
-      };
-    } else {
-      // Legacy .xls / CSV Fallback Processor
-      final newExcel = Excel.createExcel();
-      final sheetName = newExcel.sheets.keys.first;
-      final sheet = newExcel[sheetName];
-
-      sheet.appendRow([
-        TextCellValue("AMC Name / Reference"),
-        TextCellValue("Invoice No"),
-        TextCellValue("Invoice Date"),
-        TextCellValue("Filename"),
-      ]);
-
-      for (final pdfFile in pdfFiles) {
-        final text = pdfFile['text']!;
-        final filename = pdfFile['filename']!;
-
-        final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
-        final invNoMatch = invNoRegex.firstMatch(text);
-        final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
-
-        final dateRegex = RegExp(r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})', caseSensitive: false);
-        final dateMatch = dateRegex.firstMatch(text);
-        final invoiceDate = dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
+        final updatedExcelBytes = excel.encode();
+        return {
+          'updatedExcel': updatedExcelBytes != null ? Uint8List.fromList(updatedExcelBytes) : excelBytes,
+          'updatedCount': updatedCount,
+        };
+      } else {
+        // Legacy .xls / CSV Fallback Processor
+        final newExcel = Excel.createExcel();
+        final sheetName = newExcel.sheets.keys.first;
+        final sheet = newExcel[sheetName];
 
         sheet.appendRow([
-          TextCellValue(filename.split('.').first),
-          TextCellValue(invoiceNo),
-          TextCellValue(invoiceDate),
-          TextCellValue(filename),
+          TextCellValue("AMC Name / Reference"),
+          TextCellValue("Invoice No"),
+          TextCellValue("Invoice Date"),
+          TextCellValue("Filename"),
         ]);
-        updatedCount++;
-      }
 
-      final encoded = newExcel.encode();
-      return {
-        'updatedExcel': encoded != null ? Uint8List.fromList(encoded) : excelBytes,
-        'updatedCount': updatedCount,
-      };
+        for (final pdfFile in pdfFiles) {
+          final text = pdfFile['text']!;
+          final filename = pdfFile['filename']!;
+
+          final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
+          final invNoMatch = invNoRegex.firstMatch(text);
+          final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
+
+          final dateRegex = RegExp(r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})', caseSensitive: false);
+          final dateMatch = dateRegex.firstMatch(text);
+          final invoiceDate = dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
+
+          sheet.appendRow([
+            TextCellValue(filename.split('.').first),
+            TextCellValue(invoiceNo),
+            TextCellValue(invoiceDate),
+            TextCellValue(filename),
+          ]);
+          updatedCount++;
+        }
+
+        final encoded = newExcel.encode();
+        return {
+          'updatedExcel': encoded != null ? Uint8List.fromList(encoded) : excelBytes,
+          'updatedCount': updatedCount,
+        };
+      }
     }
   }
 

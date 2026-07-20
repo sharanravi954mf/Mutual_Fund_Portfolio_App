@@ -3064,17 +3064,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final excelBytes = base64Decode(_selectedExcelFile!.base64String!);
       final zipBytes = base64Decode(_selectedInvoicePdf!.base64String!);
 
+      final extIndex = originalExcelName.lastIndexOf('.');
+      final baseName = extIndex != -1 ? originalExcelName.substring(0, extIndex) : originalExcelName;
+      final ext = extIndex != -1 ? originalExcelName.substring(extIndex).toLowerCase() : '.xlsx';
+
       final result = await ExcelMetadataUpdater.updateExcelMetadata(
         excelBytes: excelBytes,
         zipBytes: zipBytes,
+        fileExtension: ext,
       );
 
       final uint8Bytes = result['updatedExcel'] as Uint8List;
       final updatedCount = result['updatedCount'] as int;
-
-      final extIndex = originalExcelName.lastIndexOf('.');
-      final baseName = extIndex != -1 ? originalExcelName.substring(0, extIndex) : originalExcelName;
-      final ext = extIndex != -1 ? originalExcelName.substring(extIndex) : '.xlsx';
       final outputName = "${baseName}_UPDATED$ext";
 
       await fph.saveFileBytes(uint8Bytes, outputName);
