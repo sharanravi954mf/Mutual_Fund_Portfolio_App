@@ -502,69 +502,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                           ),
                         ),
                         Divider(color: colors.sidebarBorder, height: 1),
-
-                        // 1. User Profile Header
-                        Padding(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: colors.sidebarSurface,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: colors.sidebarBorder),
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 22,
-                                  backgroundColor: colors.sidebarActive,
-                                  child: Text(
-                                    clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
-                                    style: GoogleFonts.outfit(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        clientName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.outfit(
-                                          color: colors.sidebarTextPrimary,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        user?.email ?? '',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.inter(
-                                          color: colors.sidebarTextSecondary,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ).animate()
-                          .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                          .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                          .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-
-                        Divider(color: colors.sidebarBorder, height: 1),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
 
                         // 2. Navigation items
                         Expanded(
@@ -1019,84 +957,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
             ),
           ),
           Divider(color: colors.sidebarBorder, height: 1),
-          const SizedBox(height: 16),
-
-          // 2. Profile Section
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0),
-            child: _isSidebarExpanded
-                ? Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: colors.sidebarSurface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.sidebarBorder),
-                    ),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: colors.sidebarActive,
-                          child: Text(
-                            clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
-                            style: GoogleFonts.outfit(
-                              color: colors.sidebarTextPrimary,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                clientName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.outfit(
-                                  color: colors.sidebarTextPrimary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              Text(
-                                user?.email ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.inter(
-                                  color: colors.sidebarTextSecondary,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Center(
-                    child: Tooltip(
-                      message: clientName,
-                      child: CircleAvatar(
-                        radius: 18,
-                        backgroundColor: colors.sidebarActive,
-                        child: Text(
-                          clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
-                          style: GoogleFonts.outfit(
-                            color: colors.sidebarTextPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-          ),
-          const SizedBox(height: 16),
-          Divider(color: colors.sidebarBorder, height: 1),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // 3. Navigation Items
           Expanded(
