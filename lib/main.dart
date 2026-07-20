@@ -9,6 +9,7 @@ import 'providers/language_provider.dart';
 import 'screens/admin_dashboard.dart';
 import 'screens/client_dashboard.dart';
 import 'screens/login_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,30 +60,8 @@ class MyApp extends StatelessWidget {
       title: 'Sharan Fincorp',
       debugShowCheckedModeBanner: false,
       themeMode: themeProvider.getThemeMode(),
-      theme: ThemeData(
-        brightness: Brightness.light,
-        primaryColor: colors.primary,
-        scaffoldBackgroundColor: colors.background,
-        colorScheme: ColorScheme.light(
-          primary: colors.primary,
-          secondary: colors.secondary,
-          background: colors.background,
-          surface: colors.surface,
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        primaryColor: colors.primary,
-        scaffoldBackgroundColor: const Color(0xFF0F0C20),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFFE94057),
-          secondary: Color(0xFF8A2387),
-          background: Color(0xFF0F0C20),
-          surface: Color(0xFF151030),
-        ),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
       home: const AuthWrapper(),
     );
   }
@@ -97,7 +76,7 @@ class AuthWrapper extends StatelessWidget {
 
     // 1. Unauthenticated -> Show Login Screen
     if (!authProvider.isAuthenticated) {
-      return const LoginScreen();
+      return LoginScreen();
     }
 
     // 2. Loading Session/Role -> Show Premium Spinner

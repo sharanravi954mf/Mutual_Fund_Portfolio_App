@@ -1,7 +1,9 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/theme_provider.dart';
 
-class RupeeParticle {
+class MoneyParticle {
   double x;
   double y;
   double speed;
@@ -9,8 +11,10 @@ class RupeeParticle {
   double opacity;
   double rotation;
   double rotationSpeed;
+  String symbol;
+  Color color;
 
-  RupeeParticle({
+  MoneyParticle({
     required this.x,
     required this.y,
     required this.speed,
@@ -18,13 +22,35 @@ class RupeeParticle {
     required this.opacity,
     required this.rotation,
     required this.rotationSpeed,
+    required this.symbol,
+    required this.color,
+  });
+}
+
+class WealthOrb {
+  double x;
+  double y;
+  double radius;
+  double dx;
+  double dy;
+  double opacity;
+  Color color;
+
+  WealthOrb({
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.dx,
+    required this.dy,
+    required this.opacity,
+    required this.color,
   });
 }
 
 class RupeeRainBackground extends StatefulWidget {
   final Widget child;
 
-  const RupeeRainBackground({Key? key, required this.child}) : super(key: key);
+  const RupeeRainBackground({super.key, required this.child});
 
   @override
   State<RupeeRainBackground> createState() => _RupeeRainBackgroundState();
@@ -32,67 +58,112 @@ class RupeeRainBackground extends StatefulWidget {
 
 class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  final List<RupeeParticle> _particles = [];
+  final List<MoneyParticle> _moneyParticles = [];
+  final List<WealthOrb> _wealthOrbs = [];
   final Random _random = Random();
-  final int _maxParticles = 30;
+  final int _maxParticles = 35;
+  final int _maxOrbs = 12;
+
+  final List<String> _symbols = ['₹', '\$', '€', '£', '%', '📈', '✨', '💰'];
 
   @override
   void initState() {
     super.initState();
 
-    // Loop animation to update particles positions
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 10),
     )..addListener(() {
-        _updateParticles();
+        _updateAnimation();
       })..repeat();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_particles.isEmpty) {
-      _initParticles();
+    if (_moneyParticles.isEmpty) {
+      _initMoneyParticles();
+    }
+    if (_wealthOrbs.isEmpty) {
+      _initWealthOrbs();
     }
   }
 
-  void _initParticles() {
+  void _initMoneyParticles() {
     final size = MediaQuery.of(context).size;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final colors = isDark
+        ? [const Color(0xFFC9B4BC), const Color(0xFF00E676), const Color(0xFFFFD54F), const Color(0xFF81D4FA)]
+        : [const Color(0xFF7D5C69), const Color(0xFF059669), const Color(0xFFD97706), const Color(0xFF0284C7)];
+
     for (int i = 0; i < _maxParticles; i++) {
-      _particles.add(
-        RupeeParticle(
+      _moneyParticles.add(
+        MoneyParticle(
           x: _random.nextDouble() * size.width,
           y: _random.nextDouble() * size.height,
-          speed: 1.0 + _random.nextDouble() * 2.0,
-          size: 14.0 + _random.nextDouble() * 22.0,
-          opacity: 0.05 + _random.nextDouble() * 0.15, // Keep it subtle so it stays in background
+          speed: 0.8 + _random.nextDouble() * 2.0,
+          size: 14.0 + _random.nextDouble() * 20.0,
+          opacity: 0.08 + _random.nextDouble() * 0.18,
           rotation: _random.nextDouble() * pi * 2,
           rotationSpeed: (_random.nextDouble() - 0.5) * 0.02,
+          symbol: _symbols[_random.nextInt(_symbols.length)],
+          color: colors[_random.nextInt(colors.length)],
         ),
       );
     }
   }
 
-  void _updateParticles() {
-    if (!mounted || _particles.isEmpty) return;
+  void _initWealthOrbs() {
+    final size = MediaQuery.of(context).size;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final colors = isDark
+        ? [const Color(0xFFC9B4BC), const Color(0xFF00C853), const Color(0xFFFFB300)]
+        : [const Color(0xFF7D5C69), const Color(0xFF10B981), const Color(0xFFF59E0B)];
+
+    for (int i = 0; i < _maxOrbs; i++) {
+      _wealthOrbs.add(
+        WealthOrb(
+          x: _random.nextDouble() * size.width,
+          y: _random.nextDouble() * size.height,
+          radius: 30.0 + _random.nextDouble() * 70.0,
+          dx: (_random.nextDouble() - 0.5) * 0.6,
+          dy: (_random.nextDouble() - 0.5) * 0.6,
+          opacity: 0.05 + _random.nextDouble() * 0.12,
+          color: colors[_random.nextInt(colors.length)],
+        ),
+      );
+    }
+  }
+
+  void _updateAnimation() {
+    if (!mounted) return;
     final size = MediaQuery.of(context).size;
 
     setState(() {
-      for (var particle in _particles) {
+      // Update falling currency particles
+      for (var particle in _moneyParticles) {
         particle.y += particle.speed;
+        particle.x += sin(particle.y * 0.01) * 0.5;
         particle.rotation += particle.rotationSpeed;
 
-        // Reset particle to top if it falls off screen
         if (particle.y > size.height) {
           particle.y = -particle.size;
           particle.x = _random.nextDouble() * size.width;
-          particle.speed = 1.0 + _random.nextDouble() * 2.0;
-          particle.size = 14.0 + _random.nextDouble() * 22.0;
-          particle.opacity = 0.05 + _random.nextDouble() * 0.15;
-          particle.rotation = _random.nextDouble() * pi * 2;
-          particle.rotationSpeed = (_random.nextDouble() - 0.5) * 0.02;
+          particle.speed = 0.8 + _random.nextDouble() * 2.0;
+          particle.size = 14.0 + _random.nextDouble() * 20.0;
+          particle.symbol = _symbols[_random.nextInt(_symbols.length)];
         }
+      }
+
+      // Update floating wealth orbs
+      for (var orb in _wealthOrbs) {
+        orb.x += orb.dx;
+        orb.y += orb.dy;
+
+        if (orb.x < -orb.radius || orb.x > size.width + orb.radius) orb.dx = -orb.dx;
+        if (orb.y < -orb.radius || orb.y > size.height + orb.radius) orb.dy = -orb.dy;
       }
     });
   }
@@ -105,39 +176,63 @@ class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTi
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final option = themeProvider.wallpaperOption;
+
+    if (option == MoneyWallpaperOption.disabled) {
+      return widget.child;
+    }
+
     return Stack(
       children: [
-        // Dark background base color
-        Container(
-          color: const Color(0xFF0F0C20),
-        ),
-        // Custom paint layer drawing falling Rupees
+        // Live Money Wallpaper Canvas Layer
         Positioned.fill(
           child: CustomPaint(
-            painter: RupeeRainPainter(particles: _particles),
+            painter: MoneyWallpaperPainter(
+              option: option,
+              particles: _moneyParticles,
+              orbs: _wealthOrbs,
+              animValue: _controller.value,
+            ),
           ),
         ),
-        // Child content on top
+        // Child Content (Dashboard / View UI)
         widget.child,
       ],
     );
   }
 }
 
-class RupeeRainPainter extends CustomPainter {
-  final List<RupeeParticle> particles;
+class MoneyWallpaperPainter extends CustomPainter {
+  final MoneyWallpaperOption option;
+  final List<MoneyParticle> particles;
+  final List<WealthOrb> orbs;
+  final double animValue;
 
-  RupeeRainPainter({required this.particles});
+  MoneyWallpaperPainter({
+    required this.option,
+    required this.particles,
+    required this.orbs,
+    required this.animValue,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (option == MoneyWallpaperOption.rupeeRain) {
+      _paintRupeeRain(canvas, size);
+    } else if (option == MoneyWallpaperOption.goldenWealth) {
+      _paintGoldenWealth(canvas, size);
+    }
+  }
+
+  void _paintRupeeRain(Canvas canvas, Size size) {
     for (var particle in particles) {
       final textPainter = TextPainter(
         text: TextSpan(
-          text: "₹",
+          text: particle.symbol,
           style: TextStyle(
             fontSize: particle.size,
-            color: const Color(0xFFF27121).withOpacity(particle.opacity), // Use themed orange accent for particles
+            color: particle.color.withValues(alpha: particle.opacity),
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -147,11 +242,41 @@ class RupeeRainPainter extends CustomPainter {
       canvas.save();
       canvas.translate(particle.x, particle.y);
       canvas.rotate(particle.rotation);
-      
-      // Paint centered
       textPainter.paint(canvas, Offset(-textPainter.width / 2, -textPainter.height / 2));
       canvas.restore();
     }
+  }
+
+  void _paintGoldenWealth(Canvas canvas, Size size) {
+    // 1. Draw glowing ambient wealth orbs
+    for (var orb in orbs) {
+      final paint = Paint()
+        ..shader = RadialGradient(
+          colors: [
+            orb.color.withValues(alpha: orb.opacity),
+            orb.color.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromCircle(center: Offset(orb.x, orb.y), radius: orb.radius));
+
+      canvas.drawCircle(Offset(orb.x, orb.y), orb.radius, paint);
+    }
+
+    // 2. Draw subtle wave curve representing financial growth
+    final path = Path();
+    final waveY = size.height * 0.75;
+    path.moveTo(0, waveY);
+
+    for (double x = 0; x <= size.width; x += 20) {
+      final y = waveY + sin((x / size.width * 2 * pi) + (animValue * 2 * pi)) * 25.0;
+      path.lineTo(x, y);
+    }
+
+    final wavePaint = Paint()
+      ..color = const Color(0xFFC9B4BC).withValues(alpha: 0.12)
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawPath(path, wavePaint);
   }
 
   @override

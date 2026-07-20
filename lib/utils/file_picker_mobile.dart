@@ -11,12 +11,27 @@ class PickedFileData {
 }
 
 Future<PickedFileData?> pickFile(String accept) async {
-  final type = accept == '.pdf' ? fp.FileType.custom : fp.FileType.image;
-  final allowedExtensions = accept == '.pdf' ? ['pdf'] : ['png', 'jpg', 'jpeg'];
-  
+  final List<String> allowed = [];
+  final acceptLower = accept.toLowerCase();
+  if (acceptLower.contains('.pdf')) allowed.add('pdf');
+  if (acceptLower.contains('.zip')) allowed.add('zip');
+  if (acceptLower.contains('.xlsx')) allowed.add('xlsx');
+  if (acceptLower.contains('.xls')) allowed.add('xls');
+  if (acceptLower.contains('.csv')) allowed.add('csv');
+  if (acceptLower.contains('.png')) allowed.add('png');
+  if (acceptLower.contains('.jpg') || acceptLower.contains('.jpeg')) {
+    allowed.addAll(['jpg', 'jpeg']);
+  }
+  if (allowed.isEmpty) {
+    allowed.addAll(['pdf', 'zip', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg']);
+  }
+
+  final isImageOnly = (allowed.contains('png') || allowed.contains('jpg') || allowed.contains('jpeg')) &&
+      allowed.every((ext) => ['png', 'jpg', 'jpeg'].contains(ext));
+
   final result = await fp.FilePicker.platform.pickFiles(
-    type: type,
-    allowedExtensions: allowedExtensions,
+    type: isImageOnly ? fp.FileType.image : fp.FileType.custom,
+    allowedExtensions: isImageOnly ? null : allowed,
     withData: true,
   );
 
