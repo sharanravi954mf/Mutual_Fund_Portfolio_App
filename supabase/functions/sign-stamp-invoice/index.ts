@@ -115,10 +115,9 @@ serve(async (req) => {
     const fileBytes = base64ToUint8Array(fileBase64);
 
     if (action === "decrypt") {
-      console.log("ZIP archive detected for decryption only...");
       const zipReader = new zip.ZipReader(
         new zip.Uint8ArrayReader(fileBytes),
-        { password: "cams123" }
+        { password: Deno.env.get("RTA_DECRYPTION_PASSWORD") || "cams123" }
       );
       const entries = await zipReader.getEntries();
       
@@ -160,10 +159,9 @@ serve(async (req) => {
                   fileBytes[3] === 0x04;
 
     if (isZip) {
-      console.log("ZIP archive detected. Decompressing and signing concurrently...");
       const zipReader = new zip.ZipReader(
         new zip.Uint8ArrayReader(fileBytes),
-        { password: "cams123" }
+        { password: Deno.env.get("RTA_DECRYPTION_PASSWORD") || "cams123" }
       );
       const entries = await zipReader.getEntries();
       const zipWriter = new zip.ZipWriter(new zip.Uint8ArrayWriter());
@@ -175,7 +173,8 @@ serve(async (req) => {
                !entry.filename.split("/").pop()?.startsWith("._");
       });
 
-      const results = await Promise.all(pdfEntries.map(async (entry) => {
+      const results = [];
+      for (const entry of pdfEntries) {
         try {
           const writer = new zip.Uint8ArrayWriter();
           const rawPdfBytes = await (entry as any).getData(writer);
@@ -192,12 +191,12 @@ serve(async (req) => {
             sigW,
             sigH
           );
-          return { filename: entry.filename, bytes: signedPdfBytes, success: true };
+          results.push({ filename: entry.filename, bytes: signedPdfBytes, success: true });
         } catch (err) {
           console.error(`Failed to process PDF entry ${entry.filename}:`, err);
-          return { filename: entry.filename, bytes: null, success: false, entry };
+          results.push({ filename: entry.filename, bytes: null, success: false, entry });
         }
-      }));
+      }
 
       for (const res of results) {
         if (res.success && res.bytes) {

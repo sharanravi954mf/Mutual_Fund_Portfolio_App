@@ -40,7 +40,15 @@ Future<PickedFileData?> pickFile(String accept) async {
 }
 
 Future<void> saveFileBytes(Uint8List bytes, String filename) async {
-  final blob = html.Blob([bytes], 'application/pdf');
+  String mimeType = 'application/octet-stream';
+  final lowerName = filename.toLowerCase();
+  if (lowerName.endsWith('.pdf')) mimeType = 'application/pdf';
+  else if (lowerName.endsWith('.zip')) mimeType = 'application/zip';
+  else if (lowerName.endsWith('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  else if (lowerName.endsWith('.xls')) mimeType = 'application/vnd.ms-excel';
+  else if (lowerName.endsWith('.csv')) mimeType = 'text/csv';
+
+  final blob = html.Blob([bytes], mimeType);
   final url = html.Url.createObjectUrlFromBlob(blob);
   html.AnchorElement(href: url)
     ..setAttribute("download", filename)
