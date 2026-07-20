@@ -2268,12 +2268,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
         const SizedBox(height: 16),
         _buildUploadCard(
-          title: "Excel Invoice Tracker (.xlsx)",
-          subtitle: _selectedExcelFile != null ? _selectedExcelFile!.filename : "Select Excel Tracker File",
+          title: "Excel Invoice Tracker (.xlsx, .xls, .csv)",
+          subtitle: _selectedExcelFile != null ? _selectedExcelFile!.filename : "Select Excel Tracker File (Optional)",
           icon: Icons.table_chart_outlined,
           isSelected: _selectedExcelFile != null,
           onTap: () async {
-            final file = await fph.pickFile('.xlsx');
+            final file = await fph.pickFile('.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv');
             if (file != null) {
               setState(() {
                 _selectedExcelFile = file;
@@ -2781,7 +2781,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             height: 50,
             child: ElevatedButton(
               onPressed: _selectedInvoicePdf == null ||
-                      _selectedExcelFile == null ||
                       _selectedSignaturePng == null ||
                       _selectedStampPng == null ||
                       _processingAll
@@ -2804,7 +2803,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ),
                     )
                   : Text(
-                      "Sign, Stamp & Update Tracker",
+                      _selectedExcelFile != null
+                          ? "Sign, Stamp & Update Tracker"
+                          : "Sign & Stamp Invoices",
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
@@ -3032,7 +3033,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     try {
       await _signInvoiceProcess();
-      await _updateExcelProcess();
+      if (_selectedExcelFile != null) {
+        await _updateExcelProcess();
+      }
     } catch (e) {
       // Individual sub-methods catch errors and show snackbars
     } finally {
@@ -3045,6 +3048,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _updateExcelProcess() async {
+    if (_selectedExcelFile == null) return;
+
     setState(() {
       _updatingExcel = true;
     });
@@ -3062,9 +3067,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final uint8Bytes = result['updatedExcel'] as Uint8List;
       final updatedCount = result['updatedCount'] as int;
 
-      final outputName = originalExcelName.toLowerCase().endsWith(".xlsx")
-          ? "${originalExcelName.substring(0, originalExcelName.length - 5)}_UPDATED.xlsx"
-          : "${originalExcelName}_UPDATED.xlsx";
+      final extIndex = originalExcelName.lastIndexOf('.');
+      final baseName = extIndex != -1 ? originalExcelName.substring(0, extIndex) : originalExcelName;
+      final ext = extIndex != -1 ? originalExcelName.substring(extIndex) : '.xlsx';
+      final outputName = "${baseName}_UPDATED$ext";
 
       await fph.saveFileBytes(uint8Bytes, outputName);
 
