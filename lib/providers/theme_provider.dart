@@ -2,14 +2,22 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 enum ThemeModeOption { light, dark, system }
+enum MoneyWallpaperOption { rupeeRain, goldenWealth, disabled }
 
 class ThemeProvider extends ChangeNotifier {
   ThemeModeOption _themeModeOption = ThemeModeOption.light; // Light mode by default!
+  MoneyWallpaperOption _wallpaperOption = MoneyWallpaperOption.rupeeRain; // Live Money Wallpaper enabled by default!
 
   ThemeModeOption get themeModeOption => _themeModeOption;
+  MoneyWallpaperOption get wallpaperOption => _wallpaperOption;
 
   void setThemeMode(ThemeModeOption mode) {
     _themeModeOption = mode;
+    notifyListeners();
+  }
+
+  void setWallpaperOption(MoneyWallpaperOption option) {
+    _wallpaperOption = option;
     notifyListeners();
   }
 

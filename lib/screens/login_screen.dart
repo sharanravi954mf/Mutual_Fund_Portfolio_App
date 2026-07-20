@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../theme/app_radius.dart';
 import '../theme/app_shadows.dart';
+import 'rupee_rain_background.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -46,7 +47,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    authProvider.errorMessage ?? "Invalid credentials. Please try again.",
+                    authProvider.errorMessage ?? 'Authentication failed',
                     style: GoogleFonts.inter(color: Colors.white),
                   ),
                 ),
@@ -69,37 +70,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: colors.background,
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          color: colors.background,
-          gradient: isDark
-              ? const LinearGradient(
-                  colors: [
-                    Color(0xFF0F0C20),
-                    Color(0xFF151030),
-                    Color(0xFF1E1747),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                )
-              : const LinearGradient(
-                  colors: [
-                    Color(0xFFF8F6F2),
-                    Color(0xFFF2EEE7),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Form(
+      body: RupeeRainBackground(
+        child: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: colors.background,
+            gradient: isDark
+                ? const LinearGradient(
+                    colors: [
+                      Color(0xFF0F0C20),
+                      Color(0xFF151030),
+                      Color(0xFF1E1747),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : const LinearGradient(
+                    colors: [
+                      Color(0xFFF8F6F2),
+                      Color(0xFFF2EEE7),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+          ),
+          child: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Form(
                   key: _formKey,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -348,7 +350,8 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 }
 

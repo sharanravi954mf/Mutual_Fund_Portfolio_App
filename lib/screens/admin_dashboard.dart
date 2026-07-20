@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
+import 'rupee_rain_background.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
 import '../utils/excel_updater.dart';
@@ -876,7 +877,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ],
       ),
-      body: _buildSelectedTabContent().animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
+      body: RupeeRainBackground(
+        child: _buildSelectedTabContent().animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
+      ),
     );
 
     if (!showSidebar) {
@@ -885,23 +888,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     return Scaffold(
       backgroundColor: colors.background,
-      body: Column(
-        children: [
-          // Full-Width Top Header Bar on Top of Everything
-          _buildTopHeaderBar(colors, t, authProvider),
-          Expanded(
-            child: Row(
-              children: [
-                _buildDesktopSidebar(colors, t, authProvider),
-                Expanded(
-                  child: SafeArea(
-                    child: _buildSelectedTabContent(),
-                  ).animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
-                ),
-              ],
+      body: RupeeRainBackground(
+        child: Column(
+          children: [
+            // Full-Width Top Header Bar on Top of Everything
+            _buildTopHeaderBar(colors, t, authProvider),
+            Expanded(
+              child: Row(
+                children: [
+                  _buildDesktopSidebar(colors, t, authProvider),
+                  Expanded(
+                    child: SafeArea(
+                      child: _buildSelectedTabContent(),
+                    ).animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3182,6 +3187,76 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
           const SizedBox(height: 36),
 
+          // Live Money Wallpaper Settings
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Live Money Wallpaper",
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Customize live animated financial backgrounds across the application.",
+                style: GoogleFonts.inter(
+                  color: colors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ).premiumReveal(index: 2),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.cardShadow,
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ]
+            ),
+            child: Column(
+              children: [
+                _buildWallpaperOptionTile(
+                  title: "Currency Rain (Rupees & Gains)",
+                  subtitle: "Floating animated ₹, \$, €, %, 📈 money particles",
+                  icon: Icons.attach_money_outlined,
+                  option: MoneyWallpaperOption.rupeeRain,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildWallpaperOptionTile(
+                  title: "Golden Wealth Orbs",
+                  subtitle: "Ambient glowing wealth circles and growth trend curves",
+                  icon: Icons.auto_awesome_outlined,
+                  option: MoneyWallpaperOption.goldenWealth,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+                Divider(color: colors.border, height: 1),
+                _buildWallpaperOptionTile(
+                  title: "Disabled",
+                  subtitle: "Plain solid canvas background",
+                  icon: Icons.hide_image_outlined,
+                  option: MoneyWallpaperOption.disabled,
+                  themeProvider: themeProvider,
+                  colors: colors,
+                ),
+              ],
+            ),
+          ).premiumReveal(index: 3),
+
+          const SizedBox(height: 36),
+
           // Submenu 2: Language Settings
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3255,6 +3330,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return InkWell(
       onTap: () {
         themeProvider.setThemeMode(option);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      color: colors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: colors.primary, size: 20)
+            else
+              Icon(Icons.circle_outlined, color: colors.border, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWallpaperOptionTile({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required MoneyWallpaperOption option,
+    required ThemeProvider themeProvider,
+    required AppThemeColors colors,
+  }) {
+    final isSelected = themeProvider.wallpaperOption == option;
+    return InkWell(
+      onTap: () {
+        themeProvider.setWallpaperOption(option);
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
