@@ -79,42 +79,59 @@ serve(async (req) => {
     const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as any[];
     console.log(`Loaded ${jsonRows.length} rows from Excel sheet.`);
 
-    // 2. Unzip and parse PDF files
-    console.log("Decompressing ZIP archive...");
-    const zipReader = new zip.ZipReader(
-      new zip.Uint8ArrayReader(zipBytes),
-      { password: "cams123" } // Decrypt with cams123 password
-    );
-    const entries = await zipReader.getEntries();
-    
-    const pdfEntries = entries.filter(entry => {
-      const lowerName = entry.filename.toLowerCase();
-      return lowerName.endsWith(".pdf") && 
-             !lowerName.includes("__macosx") && 
-             !entry.filename.split("/").pop()?.startsWith("._");
-    });
-
-    console.log(`Found ${pdfEntries.length} PDFs to extract text from.`);
-
+    // 2. Unzip or parse PDF files
     const pdfFiles: Array<{ filename: string; text: string }> = [];
+    const isZip = zipBytes.length > 4 && 
+                  zipBytes[0] === 0x50 && 
+                  zipBytes[1] === 0x4B && 
+                  zipBytes[2] === 0x03 && 
+                  zipBytes[3] === 0x04;
 
-    // Extract text from each PDF sequentially to prevent CPU worker timeouts
-    for (const entry of pdfEntries) {
+    if (isZip) {
+      console.log("Decompressing ZIP archive...");
+      const zipReader = new zip.ZipReader(
+        new zip.Uint8ArrayReader(zipBytes),
+        { password: "cams123" }
+      );
+      const entries = await zipReader.getEntries();
+      
+      const pdfEntries = entries.filter(entry => {
+        const lowerName = entry.filename.toLowerCase();
+        return lowerName.endsWith(".pdf") && 
+               !lowerName.includes("__macosx") && 
+               !entry.filename.split("/").pop()?.startsWith("._");
+      });
+
+      console.log(`Found ${pdfEntries.length} PDFs to extract text from.`);
+
+      for (const entry of pdfEntries) {
+        try {
+          const writer = new zip.Uint8ArrayWriter();
+          const rawPdfBytes = await (entry as any).getData(writer);
+          const pdfDoc = await getDocumentProxy(rawPdfBytes);
+          const { text } = await extractText(pdfDoc);
+          const fullText = text ? text.join("\n") : "";
+
+          pdfFiles.push({
+            filename: entry.filename.split("/").pop() || entry.filename,
+            text: fullText,
+          });
+        } catch (err) {
+          console.error(`Failed to parse text from PDF ${entry.filename}:`, err);
+        }
+      }
+    } else {
+      console.log("Single PDF file uploaded. Parsing directly...");
       try {
-        const writer = new zip.Uint8ArrayWriter();
-        const rawPdfBytes = await (entry as any).getData(writer);
-        
-        // Extract text using unpdf
-        const pdfDoc = await getDocumentProxy(rawPdfBytes);
+        const pdfDoc = await getDocumentProxy(zipBytes);
         const { text } = await extractText(pdfDoc);
         const fullText = text ? text.join("\n") : "";
-
         pdfFiles.push({
-          filename: entry.filename.split("/").pop() || entry.filename,
+          filename: "Uploaded_Invoice.pdf",
           text: fullText,
         });
       } catch (err) {
-        console.error(`Failed to parse text from PDF ${entry.filename}:`, err);
+        console.error(`Failed to parse text from single PDF:`, err);
       }
     }
 

@@ -63,6 +63,8 @@ class LanguageProvider extends ChangeNotifier {
       'about_us': 'About Sharan Fincorp',
       'about_us_content': 'Sharan Fincorp deals in Mutual Funds with more than 15 years of experience, delivering the best customer experience in the market.',
       'contact_us': 'Contact Us',
+      'portfolio': 'My Portfolio',
+      'about_us_nav': 'About Us',
     },
     'hi': {
       'admin_central': 'एडमिन सेंट्रल',
@@ -113,6 +115,8 @@ class LanguageProvider extends ChangeNotifier {
       'about_us': 'शरण फिनकॉर्प के बारे में',
       'about_us_content': 'शरण फिनकॉर्प म्यूचुअल फंड के क्षेत्र में 15 से अधिक वर्षों के अनुभव के साथ काम करता है, जो बाजार में सर्वोत्तम ग्राहक अनुभव प्रदान करता है।',
       'contact_us': 'संपर्क करें',
+      'portfolio': 'मेरा पोर्टफोलियो',
+      'about_us_nav': 'हमारे बारे में',
     }
   };
 

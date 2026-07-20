@@ -24,7 +24,7 @@ Future<PickedFileData?> pickFile(String accept) async {
     
     final file = files[0];
     final reader = html.FileReader();
-    reader.readAsDataURL(file);
+    reader.readAsDataUrl(file);
     
     reader.onLoadEnd.listen((e) {
       final result = reader.result as String;
