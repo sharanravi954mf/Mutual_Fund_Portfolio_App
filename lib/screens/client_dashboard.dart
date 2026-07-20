@@ -24,6 +24,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
   final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
   int _selectedTab = 0; // 0: Portfolio, 1: Factsheets, 2: Settings, 3: About Us, 4: Contact Us
+  bool _isSidebarExpanded = true;
 
   // Real-time factsheet search state variables
   final TextEditingController _fundSearchController = TextEditingController();
@@ -454,155 +455,159 @@ class _ClientDashboardState extends State<ClientDashboard> {
           );
         }
 
-        return Scaffold(
-          backgroundColor: colors.background,
-          drawer: Drawer(
-            backgroundColor: colors.background,
-            child: SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Close row
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 12, 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.shield_outlined, color: colors.primary, size: 24),
-                            const SizedBox(width: 8),
-                            Text(
-                              "Sharan Fincorp",
-                              style: GoogleFonts.outfit(
-                                color: colors.textPrimary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 18,
-                              ),
-                            ),
-                          ],
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back),
-                          color: colors.textPrimary,
-                          tooltip: "Close Menu",
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(color: colors.border, height: 1),
-
-                  // 1. User Profile Header
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
+        final mainScaffold = Scaffold(
+          backgroundColor: showSidebar ? Colors.transparent : colors.background,
+          drawer: showSidebar
+              ? null
+              : Drawer(
+                  backgroundColor: colors.background,
+                  child: SafeArea(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 28,
-                          backgroundColor: colors.primary.withOpacity(0.15),
-                          child: Text(
-                            clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
-                            style: GoogleFonts.outfit(
-                              color: colors.primary,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 24,
+                        // Close row
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 16, 12, 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.shield_outlined, color: colors.primary, size: 24),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "Sharan Fincorp",
+                                    style: GoogleFonts.outfit(
+                                      color: colors.textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.arrow_back),
+                                color: colors.textPrimary,
+                                tooltip: "Close Menu",
+                                onPressed: () => Navigator.pop(context),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Divider(color: colors.border, height: 1),
+
+                        // 1. User Profile Header
+                        Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 28,
+                                backgroundColor: colors.primary.withOpacity(0.15),
+                                child: Text(
+                                  clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                                  style: GoogleFonts.outfit(
+                                    color: colors.primary,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 24,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                clientName,
+                                style: GoogleFonts.outfit(
+                                  color: colors.textPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                user?.email ?? '',
+                                style: GoogleFonts.inter(
+                                  color: colors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ).animate()
+                          .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                          .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                          .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+
+                        Divider(color: colors.border, height: 1),
+                        const SizedBox(height: 16),
+
+                        // 2. Navigation items
+                        Expanded(
+                          child: ListView(
+                            padding: EdgeInsets.zero,
+                            children: [
+                              _buildDrawerItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors, context),
+                              _buildDrawerItem(1, "Factsheets", Icons.document_scanner_outlined, colors, context),
+                              _buildDrawerItem(2, t('settings'), Icons.settings_outlined, colors, context),
+                              _buildDrawerItem(3, t('about_us_nav'), Icons.info_outline, colors, context),
+                              _buildDrawerItem(4, t('contact_us'), Icons.contact_support_outlined, colors, context),
+                            ],
+                          ),
+                        ),
+
+                        Divider(color: colors.border, height: 1),
+
+                        // 3. Logout List Tile at the bottom
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pop(context); // Close the drawer
+                              authProvider.signOut();
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.logout, color: colors.primary, size: 20),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    t('logout'),
+                                    style: GoogleFonts.inter(
+                                      color: colors.primary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          clientName,
-                          style: GoogleFonts.outfit(
-                            color: colors.textPrimary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          user?.email ?? '',
-                          style: GoogleFonts.inter(
-                            color: colors.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ).animate()
-                    .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                    .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                    .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-
-                  Divider(color: colors.border, height: 1),
-                  const SizedBox(height: 16),
-
-                  // 2. Navigation items
-                  Expanded(
-                    child: ListView(
-                      padding: EdgeInsets.zero,
-                      children: [
-                        _buildDrawerItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors, context),
-                        _buildDrawerItem(1, "Factsheets", Icons.document_scanner_outlined, colors, context),
-                        _buildDrawerItem(2, t('settings'), Icons.settings_outlined, colors, context),
-                        _buildDrawerItem(3, t('about_us_nav'), Icons.info_outline, colors, context),
-                        _buildDrawerItem(4, t('contact_us'), Icons.contact_support_outlined, colors, context),
+                        ).animate(delay: const Duration(milliseconds: 6 * 80))
+                          .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                          .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
+                          .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
                       ],
                     ),
                   ),
-
-                  Divider(color: colors.border, height: 1),
-
-                  // 3. Logout List Tile at the bottom
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: InkWell(
-                      onTap: () {
-                        Navigator.pop(context); // Close the drawer
-                        authProvider.signOut();
-                      },
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: colors.primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.logout, color: colors.primary, size: 20),
-                            const SizedBox(width: 16),
-                            Text(
-                              t('logout'),
-                              style: GoogleFonts.inter(
-                                color: colors.primary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ).animate(delay: const Duration(milliseconds: 6 * 80))
-                    .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                    .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                    .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
-                ],
-              ),
-            ),
-          ),
+                ),
           appBar: AppBar(
             backgroundColor: colors.surface,
             elevation: 0,
             iconTheme: IconThemeData(color: colors.textPrimary),
-            leading: Builder(
-              builder: (context) => IconButton(
-                icon: const Icon(Icons.menu),
-                onPressed: () => Scaffold.of(context).openDrawer(),
-              ),
-            ),
+            leading: showSidebar
+                ? null
+                : Builder(
+                    builder: (context) => IconButton(
+                      icon: const Icon(Icons.menu),
+                      onPressed: () => Scaffold.of(context).openDrawer(),
+                    ),
+                  ),
             title: Text(
               appBarTitle,
               style: GoogleFonts.outfit(
@@ -693,6 +698,22 @@ class _ClientDashboardState extends State<ClientDashboard> {
             child: tabContent,
           ).animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
         );
+
+        if (!showSidebar) {
+          return mainScaffold;
+        }
+
+        return Scaffold(
+          backgroundColor: colors.background,
+          body: Row(
+            children: [
+              _buildDesktopSidebar(colors, t, clientName, user, authProvider),
+              Expanded(
+                child: mainScaffold,
+              ),
+            ],
+          ),
+        );
       },
     );
   }
@@ -745,10 +766,232 @@ class _ClientDashboardState extends State<ClientDashboard> {
       .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic);
   }
 
+  Widget _buildDesktopSidebar(AppThemeColors colors, String Function(String) t, String clientName, User? user, AuthProvider authProvider) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      width: _isSidebarExpanded ? 260 : 72,
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(right: BorderSide(color: colors.border)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1. Header Row (Title/Logo + Toggle Arrow/Menu Button)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 12, 20),
+            child: Row(
+              mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.spaceBetween : MainAxisAlignment.center,
+              children: [
+                if (_isSidebarExpanded)
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(Icons.shield_outlined, color: colors.primary, size: 24),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "Sharan Fincorp",
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              color: colors.textPrimary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                IconButton(
+                  icon: Icon(_isSidebarExpanded ? Icons.arrow_back : Icons.menu),
+                  color: colors.textPrimary,
+                  tooltip: _isSidebarExpanded ? "Shrink Menu" : "Expand Menu",
+                  onPressed: () {
+                    setState(() {
+                      _isSidebarExpanded = !_isSidebarExpanded;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+          Divider(color: colors.border, height: 1),
+          const SizedBox(height: 16),
+
+          // 2. Profile Section
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0),
+            child: _isSidebarExpanded
+                ? Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colors.background.withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: colors.border.withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: colors.primary.withOpacity(0.15),
+                          child: Text(
+                            clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                            style: GoogleFonts.outfit(
+                              color: colors.primary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                clientName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.outfit(
+                                  color: colors.textPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                user?.email ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  color: colors.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Center(
+                    child: Tooltip(
+                      message: clientName,
+                      child: CircleAvatar(
+                        radius: 20,
+                        backgroundColor: colors.primary.withOpacity(0.15),
+                        child: Text(
+                          clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                          style: GoogleFonts.outfit(
+                            color: colors.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 16),
+          Divider(color: colors.border, height: 1),
+          const SizedBox(height: 16),
+
+          // 3. Navigation Items
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                _buildSidebarItem(0, t('portfolio'), Icons.account_balance_wallet_outlined, colors),
+                _buildSidebarItem(1, "Factsheets", Icons.document_scanner_outlined, colors),
+                _buildSidebarItem(2, t('settings'), Icons.settings_outlined, colors),
+                _buildSidebarItem(3, t('about_us_nav'), Icons.info_outline, colors),
+                _buildSidebarItem(4, t('contact_us'), Icons.contact_support_outlined, colors),
+              ],
+            ),
+          ),
+
+          Divider(color: colors.border, height: 1),
+
+          // 4. Logout Tile
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Tooltip(
+              message: _isSidebarExpanded ? '' : t('logout'),
+              child: InkWell(
+                onTap: () => authProvider.signOut(),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.logout, color: colors.primary, size: 20),
+                      if (_isSidebarExpanded) ...[
+                        const SizedBox(width: 12),
+                        Text(
+                          t('logout'),
+                          style: GoogleFonts.inter(
+                            color: colors.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSidebarItem(int index, String title, IconData icon, AppThemeColors colors) {
     final isSelected = _selectedTab == index;
+
+    if (!_isSidebarExpanded) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Tooltip(
+          message: title,
+          child: InkWell(
+            onTap: () {
+              setState(() {
+                _selectedTab = index;
+              });
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isSelected ? colors.primary.withOpacity(0.12) : Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
+                border: isSelected
+                    ? Border.all(color: colors.primary.withOpacity(0.3), width: 1)
+                    : null,
+              ),
+              child: Center(
+                child: Icon(
+                  icon,
+                  color: isSelected ? colors.primary : colors.textSecondary,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: InkWell(
         onTap: () {
           setState(() {
@@ -757,10 +1000,13 @@ class _ClientDashboardState extends State<ClientDashboard> {
         },
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
+            color: isSelected ? colors.primary.withOpacity(0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
+            border: isSelected
+                ? Border.all(color: colors.primary.withOpacity(0.3), width: 1)
+                : null,
           ),
           child: Row(
             children: [
@@ -769,7 +1015,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 color: isSelected ? colors.primary : colors.textSecondary,
                 size: 20,
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   title,
