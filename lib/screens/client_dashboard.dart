@@ -761,16 +761,182 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
         return Scaffold(
           backgroundColor: colors.background,
-          body: Row(
+          body: Column(
             children: [
-              _buildDesktopSidebar(colors, t, clientName, user, authProvider),
+              // Full-Width Top Header Bar on Top of Everything
+              _buildTopHeaderBar(colors, t, appBarTitle, clientName, user, authProvider),
               Expanded(
-                child: mainScaffold,
+                child: Row(
+                  children: [
+                    _buildDesktopSidebar(colors, t, clientName, user, authProvider),
+                    Expanded(
+                      child: SafeArea(
+                        child: tabContent,
+                      ).animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildTopHeaderBar(AppThemeColors colors, String Function(String) t, String appBarTitle, String clientName, User? user, AuthProvider authProvider) {
+    final hour = DateTime.now().hour;
+    String timeGreeting;
+    if (hour < 12) {
+      timeGreeting = "Good Morning";
+    } else if (hour < 17) {
+      timeGreeting = "Good Afternoon";
+    } else {
+      timeGreeting = "Good Evening";
+    }
+    final greeting = clientName.isNotEmpty ? "$timeGreeting, $clientName!" : "$timeGreeting!";
+
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Left: App Logo + Sharan Fincorp Title + Section Breadcrumb
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: colors.primary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.shield_outlined, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                "Sharan Fincorp",
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                  color: colors.textPrimary,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                child: Text(
+                  "/",
+                  style: GoogleFonts.inter(color: colors.border, fontSize: 20),
+                ),
+              ),
+              Text(
+                appBarTitle,
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                  color: colors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+
+          // Right: Refresh Action, Time-based Greeting, and Profile Avatar with Logout Menu
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.refresh, color: colors.textSecondary),
+                tooltip: t('refresh_data'),
+                onPressed: _refreshData,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                greeting,
+                style: GoogleFonts.outfit(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                  color: colors.textPrimary,
+                ),
+              ),
+              const SizedBox(width: 14),
+
+              PopupMenuButton<int>(
+                tooltip: "Account Settings",
+                icon: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: colors.primary.withValues(alpha: 0.15),
+                  child: Text(
+                    clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                    style: GoogleFonts.outfit(
+                      color: colors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                offset: const Offset(0, 48),
+                color: colors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: colors.border),
+                ),
+                onSelected: (val) {
+                  if (val == 1) {
+                    authProvider.signOut();
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem<int>(
+                    enabled: false,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          clientName,
+                          style: GoogleFonts.outfit(
+                            color: colors.textPrimary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user?.email ?? '',
+                          style: GoogleFonts.inter(
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  PopupMenuItem<int>(
+                    value: 1,
+                    child: Row(
+                      children: [
+                        Icon(Icons.logout, color: colors.error, size: 18),
+                        const SizedBox(width: 10),
+                        Text(
+                          t('logout'),
+                          style: GoogleFonts.inter(
+                            color: colors.error,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -808,7 +974,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   style: GoogleFonts.inter(
                     color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    fontSize: 13,
+                    fontSize: 15,
                   ),
                 ),
               ),
@@ -816,10 +982,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
           ),
         ),
       ),
-    ).animate(delay: Duration(milliseconds: (index + 1) * 80))
-      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic);
+    );
   }
 
   Widget _buildDesktopSidebar(AppThemeColors colors, String Function(String) t, String clientName, User? user, AuthProvider authProvider) {
@@ -834,30 +997,21 @@ class _ClientDashboardState extends State<ClientDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Header Row (App Logo + Brand Name)
+          // 1. Top of Left Panel: Icons.menu (Three Horizontal Lines Menu Icon)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
             child: Row(
+              mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: colors.sidebarActive,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.shield_outlined, color: colors.sidebarTextPrimary, size: 20),
-                ),
+                Icon(Icons.menu, color: colors.sidebarTextPrimary, size: 22),
                 if (_isSidebarExpanded) ...[
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      "Sharan Fincorp",
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.outfit(
-                        color: colors.sidebarTextPrimary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
+                  Text(
+                    "Navigation",
+                    style: GoogleFonts.outfit(
+                      color: colors.sidebarTextPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
                   ),
                 ],
@@ -960,12 +1114,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
           Divider(color: colors.sidebarBorder, height: 1),
 
-          // 4. Bottom Footer: Collapse Toggle (arrow_back) & Logout Tile
+          // 4. Bottom Right of Left Panel: arrow_back Icon Button to Shrink/Expand Left Panel
           Padding(
             padding: const EdgeInsets.all(12.0),
-            child: Column(
+            child: Row(
+              mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.end : MainAxisAlignment.center,
               children: [
-                // Collapse Toggle
                 Tooltip(
                   message: _isSidebarExpanded ? 'Shrink Menu' : 'Expand Menu',
                   child: InkWell(
@@ -974,67 +1128,18 @@ class _ClientDashboardState extends State<ClientDashboard> {
                         _isSidebarExpanded = !_isSidebarExpanded;
                       });
                     },
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: colors.sidebarSurface,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: colors.sidebarBorder),
                       ),
-                      child: Row(
-                        mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            _isSidebarExpanded ? Icons.arrow_back : Icons.menu,
-                            color: colors.sidebarTextSecondary,
-                            size: 20,
-                          ),
-                          if (_isSidebarExpanded) ...[
-                            const SizedBox(width: 12),
-                            Text(
-                              "Collapse Menu",
-                              style: GoogleFonts.inter(
-                                color: colors.sidebarTextSecondary,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Logout Tile
-                Tooltip(
-                  message: _isSidebarExpanded ? '' : t('logout'),
-                  child: InkWell(
-                    onTap: () => authProvider.signOut(),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: colors.error.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.logout, color: colors.error, size: 20),
-                          if (_isSidebarExpanded) ...[
-                            const SizedBox(width: 12),
-                            Text(
-                              t('logout'),
-                              style: GoogleFonts.inter(
-                                color: colors.error,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ],
+                      child: Icon(
+                        _isSidebarExpanded ? Icons.arrow_back : Icons.menu,
+                        color: colors.sidebarTextSecondary,
+                        size: 20,
                       ),
                     ),
                   ),
