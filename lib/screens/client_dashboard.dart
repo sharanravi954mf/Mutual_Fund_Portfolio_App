@@ -460,7 +460,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
           drawer: showSidebar
               ? null
               : Drawer(
-                  backgroundColor: colors.background,
+                  backgroundColor: colors.sidebarBackground,
                   child: SafeArea(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -473,12 +473,19 @@ class _ClientDashboardState extends State<ClientDashboard> {
                             children: [
                               Row(
                                 children: [
-                                  Icon(Icons.shield_outlined, color: colors.primary, size: 24),
-                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: colors.sidebarActive,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(Icons.shield_outlined, color: Colors.white, size: 18),
+                                  ),
+                                  const SizedBox(width: 10),
                                   Text(
                                     "Sharan Fincorp",
                                     style: GoogleFonts.outfit(
-                                      color: colors.textPrimary,
+                                      color: colors.sidebarTextPrimary,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 18,
                                     ),
@@ -487,58 +494,76 @@ class _ClientDashboardState extends State<ClientDashboard> {
                               ),
                               IconButton(
                                 icon: const Icon(Icons.arrow_back),
-                                color: colors.textPrimary,
+                                color: colors.sidebarTextSecondary,
                                 tooltip: "Close Menu",
                                 onPressed: () => Navigator.pop(context),
                               ),
                             ],
                           ),
                         ),
-                        Divider(color: colors.border, height: 1),
+                        Divider(color: colors.sidebarBorder, height: 1),
 
                         // 1. User Profile Header
                         Padding(
-                          padding: const EdgeInsets.all(24.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              CircleAvatar(
-                                radius: 28,
-                                backgroundColor: colors.primary.withOpacity(0.15),
-                                child: Text(
-                                  clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
-                                  style: GoogleFonts.outfit(
-                                    color: colors.primary,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 24,
+                          padding: const EdgeInsets.all(20.0),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: colors.sidebarSurface,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: colors.sidebarBorder),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 22,
+                                  backgroundColor: colors.sidebarActive,
+                                  child: Text(
+                                    clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
+                                    style: GoogleFonts.outfit(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                clientName,
-                                style: GoogleFonts.outfit(
-                                  color: colors.textPrimary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        clientName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.outfit(
+                                          color: colors.sidebarTextPrimary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        user?.email ?? '',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(
+                                          color: colors.sidebarTextSecondary,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                user?.email ?? '',
-                                style: GoogleFonts.inter(
-                                  color: colors.textSecondary,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ).animate()
                           .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
                           .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
                           .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
 
-                        Divider(color: colors.border, height: 1),
+                        Divider(color: colors.sidebarBorder, height: 1),
                         const SizedBox(height: 16),
 
                         // 2. Navigation items
@@ -733,14 +758,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? colors.primary.withOpacity(0.1) : Colors.transparent,
+            color: isSelected ? colors.sidebarActive : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
               Icon(
                 icon,
-                color: isSelected ? colors.primary : colors.textSecondary,
+                color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
                 size: 20,
               ),
               const SizedBox(width: 16),
@@ -750,8 +775,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    color: isSelected ? colors.primary : colors.textPrimary,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 13,
                   ),
                 ),
@@ -772,8 +797,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
       curve: Curves.easeInOut,
       width: _isSidebarExpanded ? 260 : 72,
       decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border(right: BorderSide(color: colors.border)),
+        color: colors.sidebarBackground,
+        border: Border(right: BorderSide(color: colors.sidebarBorder)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -788,14 +813,21 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   Expanded(
                     child: Row(
                       children: [
-                        Icon(Icons.shield_outlined, color: colors.primary, size: 24),
-                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: colors.sidebarActive,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.shield_outlined, color: Colors.white, size: 18),
+                        ),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             "Sharan Fincorp",
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.outfit(
-                              color: colors.textPrimary,
+                              color: colors.sidebarTextPrimary,
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),
@@ -806,7 +838,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   ),
                 IconButton(
                   icon: Icon(_isSidebarExpanded ? Icons.arrow_back : Icons.menu),
-                  color: colors.textPrimary,
+                  color: colors.sidebarTextSecondary,
                   tooltip: _isSidebarExpanded ? "Shrink Menu" : "Expand Menu",
                   onPressed: () {
                     setState(() {
@@ -817,7 +849,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
               ],
             ),
           ),
-          Divider(color: colors.border, height: 1),
+          Divider(color: colors.sidebarBorder, height: 1),
           const SizedBox(height: 16),
 
           // 2. Profile Section
@@ -827,25 +859,25 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 ? Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: colors.background.withOpacity(0.4),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border.withOpacity(0.5)),
+                      color: colors.sidebarSurface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: colors.sidebarBorder),
                     ),
                     child: Row(
                       children: [
                         CircleAvatar(
-                          radius: 20,
-                          backgroundColor: colors.primary.withOpacity(0.15),
+                          radius: 18,
+                          backgroundColor: colors.sidebarActive,
                           child: Text(
                             clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
                             style: GoogleFonts.outfit(
-                              color: colors.primary,
+                              color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                              fontSize: 14,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -855,9 +887,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.outfit(
-                                  color: colors.textPrimary,
+                                  color: colors.sidebarTextPrimary,
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 14,
+                                  fontSize: 13,
                                 ),
                               ),
                               Text(
@@ -865,7 +897,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.inter(
-                                  color: colors.textSecondary,
+                                  color: colors.sidebarTextSecondary,
                                   fontSize: 11,
                                 ),
                               ),
@@ -879,14 +911,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     child: Tooltip(
                       message: clientName,
                       child: CircleAvatar(
-                        radius: 20,
-                        backgroundColor: colors.primary.withOpacity(0.15),
+                        radius: 18,
+                        backgroundColor: colors.sidebarActive,
                         child: Text(
                           clientName.isNotEmpty ? clientName[0].toUpperCase() : 'U',
                           style: GoogleFonts.outfit(
-                            color: colors.primary,
+                            color: Colors.white,
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                            fontSize: 14,
                           ),
                         ),
                       ),
@@ -894,7 +926,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   ),
           ),
           const SizedBox(height: 16),
-          Divider(color: colors.border, height: 1),
+          Divider(color: colors.sidebarBorder, height: 1),
           const SizedBox(height: 16),
 
           // 3. Navigation Items
@@ -911,7 +943,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
             ),
           ),
 
-          Divider(color: colors.border, height: 1),
+          Divider(color: colors.sidebarBorder, height: 1),
 
           // 4. Logout Tile
           Padding(
@@ -924,19 +956,19 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: colors.primary.withOpacity(0.1),
+                    color: colors.error.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.logout, color: colors.primary, size: 20),
+                      Icon(Icons.logout, color: colors.error, size: 20),
                       if (_isSidebarExpanded) ...[
                         const SizedBox(width: 12),
                         Text(
                           t('logout'),
                           style: GoogleFonts.inter(
-                            color: colors.primary,
+                            color: colors.error,
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
                           ),
@@ -971,16 +1003,13 @@ class _ClientDashboardState extends State<ClientDashboard> {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isSelected ? colors.activeBackground : Colors.transparent,
+                color: isSelected ? colors.sidebarActive : Colors.transparent,
                 borderRadius: BorderRadius.circular(12),
-                border: isSelected
-                    ? Border.all(color: colors.border, width: 1)
-                    : null,
               ),
               child: Center(
                 child: Icon(
                   icon,
-                  color: isSelected ? colors.primary : colors.textSecondary,
+                  color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
                   size: 20,
                 ),
               ),
@@ -1002,17 +1031,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected ? colors.activeBackground : Colors.transparent,
+            color: isSelected ? colors.sidebarActive : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
-            border: isSelected
-                ? Border.all(color: colors.border, width: 1)
-                : null,
           ),
           child: Row(
             children: [
               Icon(
                 icon,
-                color: isSelected ? colors.primary : colors.textSecondary,
+                color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
                 size: 20,
               ),
               const SizedBox(width: 12),
@@ -1022,7 +1048,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    color: isSelected ? colors.textPrimary : colors.textPrimary,
+                    color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 13,
                   ),

@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Light Mode Palette (Slate Grey Base Color System)
+  // Light Mode Palette (Slate Grey Base Color System with Deep Navy Sidebar)
   static const Color lightBackground = Color(0xFFF1F5F9); // Slate-100 Canvas
   static const Color lightSurface = Color(0xFFFFFFFF); // Pure White Surface
-  static const Color lightSidebar = Color(0xFFF8FAFC); // Slate-50 Sidebar
-  static const Color lightPrimary = Color(0xFF475569); // Slate-600 Primary Accent
-  static const Color lightPrimaryHover = Color(0xFF334155); // Slate-700 Primary Hover
+  static const Color lightSidebar = Color(0xFF0F172A); // Deep Navy Slate Left Panel
+  static const Color lightSidebarSurface = Color(0xFF1E293B); // Slate-800 Sub-surface
+  static const Color lightSidebarActive = Color(0xFF2563EB); // Royal Blue Active Pill
+  static const Color lightSidebarTextPrimary = Color(0xFFFFFFFF); // Pure White Sidebar Text
+  static const Color lightSidebarTextSecondary = Color(0xFF94A3B8); // Cool Grey Sidebar Text
+  static const Color lightSidebarBorder = Color(0xFF1E293B); // Dark Navy Border
+  
+  static const Color lightPrimary = Color(0xFF2563EB); // Royal Blue Primary Accent
+  static const Color lightPrimaryHover = Color(0xFF1D4ED8); // Royal Blue Primary Hover
   static const Color lightActiveBackground = Color(0xFFE2E8F0); // Slate-200 Active Fill
   static const Color lightSecondary = Color(0xFF64748B); // Slate-500 Secondary
   static const Color lightSuccess = Color(0xFF16A34A); // Success Green
@@ -26,6 +32,12 @@ class AppColors {
   static const Color darkBackground = Color(0xFF0F0C20);
   static const Color darkSurface = Color(0xFF151030);
   static const Color darkSidebar = Color(0xFF151030);
+  static const Color darkSidebarSurface = Color(0xFF1F1A40);
+  static const Color darkSidebarActive = Color(0xFFE94057);
+  static const Color darkSidebarTextPrimary = Color(0xFFFFFFFF);
+  static const Color darkSidebarTextSecondary = Color(0xFF94A3B8);
+  static const Color darkSidebarBorder = Color(0x0DFFFFFF);
+
   static const Color darkPrimary = Color(0xFFE94057); // Crimson Red
   static const Color darkSecondary = Color(0xFF8A2387); // Indigo Purple
   static const Color darkAccent = Color(0xFFF27121); // Glowing Orange

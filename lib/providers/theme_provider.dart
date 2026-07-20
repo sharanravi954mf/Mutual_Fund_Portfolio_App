@@ -45,9 +45,17 @@ class AppThemeColors {
   Color get accent => isDark ? AppColors.darkAccent : AppColors.lightPrimary;
   Color get activeBackground => isDark ? AppColors.darkPrimary.withValues(alpha: 0.15) : AppColors.lightActiveBackground;
   
+  // Dedicated Left Panel (Sidebar & Drawer) Tokens
+  Color get sidebarBackground => isDark ? AppColors.darkSidebar : AppColors.lightSidebar;
+  Color get sidebarSurface => isDark ? AppColors.darkSidebarSurface : AppColors.lightSidebarSurface;
+  Color get sidebarActive => isDark ? AppColors.darkSidebarActive : AppColors.lightSidebarActive;
+  Color get sidebarTextPrimary => isDark ? AppColors.darkSidebarTextPrimary : AppColors.lightSidebarTextPrimary;
+  Color get sidebarTextSecondary => isDark ? AppColors.darkSidebarTextSecondary : AppColors.lightSidebarTextSecondary;
+  Color get sidebarBorder => isDark ? AppColors.darkSidebarBorder : AppColors.lightSidebarBorder;
+
   Color get background => isDark ? AppColors.darkBackground : AppColors.lightBackground;
   Color get surface => isDark ? AppColors.darkSurface : AppColors.lightSurface;
-  Color get sidebar => isDark ? AppColors.darkSidebar : AppColors.lightSidebar;
+  Color get sidebar => sidebarBackground; // Alias for backward compatibility
   Color get surfaceAccent => isDark ? AppColors.darkSurfaceAccent : AppColors.lightSurfaceAccent;
   Color get tableRowAlt => isDark ? AppColors.darkTableRowAlt : AppColors.lightTableRowAlt;
   
