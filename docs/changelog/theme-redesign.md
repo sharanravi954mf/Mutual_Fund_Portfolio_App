@@ -1,25 +1,16 @@
-# Changelog: Slate Grey Light Mode Theme Refactor
+# Changelog: Material 3 Design Integration (`Color(0xFFC9B4BC)`)
 
-## Version Release: Slate Grey Design System & Readability Refactor
+## Version Release: Material 3 Seed Color Migration
 
 ### Summary of Changes
-Refactored the Light Mode Theme across Sharan Fincorp to implement the **Slate Grey Color System**, fixing all text legibility issues for client names ("Hariom Sharan"), replacing pink active highlights with Slate accents (`#475569` text on `#E2E8F0` fill), and enforcing 1px `#CBD5E1` borders around all UI components.
+Migrated the entire design system to **Material 3 (`useMaterial3: true`)** using **`Color(0xFFC9B4BC)`** (Dusty Rose Gold / Soft Mauve) as the primary seed color for generating color schemes, M3 card containers, navigation drawers, form controls, and button themes.
 
 ### Changed
 - **`lib/theme/app_colors.dart`**:
-  - Main Canvas: `#F1F5F9` (Slate-100)
-  - Surface: `#FFFFFF` (Pure White)
-  - Primary Text: `#0F172A` (Deep Slate - Slate-900)
-  - Secondary Text: `#334155` (Medium Dark Slate - Slate-700)
-  - Placeholder: `#64748B` (Muted Slate - Slate-500)
-  - Primary Accent: `#475569` (Slate-600)
-  - Active Fill Tint: `#E2E8F0` (Slate-200)
-  - Defined Border: `#CBD5E1` (Slate-300)
-- **`lib/screens/admin_dashboard.dart`**:
-  - Fixed client directory names ("Hariom Sharan") and IDs to display in `#0F172A` Deep Slate text.
-  - Replaced pink active sidebar fills with `#E2E8F0` background and `#475569` accent text.
-  - Added 1px `#CBD5E1` borders around client tables and search inputs.
-- **`lib/screens/client_dashboard.dart`**:
-  - Refactored sidebar navigation, metric cards, holdings panels, and transaction tables with 1px `#CBD5E1` borders and Slate Grey typography.
-- **`lib/screens/client_detail_screen.dart`**:
-  - Refactored client detail screen headers, holdings lists, and transaction cards to use `#0F172A` primary text and `#CBD5E1` defined borders.
+  - Defined `seedColor: Color(0xFFC9B4BC)`.
+  - Configured M3 Dusty Rose Light & Dark palettes (`#FBF8F9` canvas, `#FFFFFF` surfaces, `#3B2B32` left panel, `#C9B4BC` active navigation fill, `#7D5C69` primary accent, `#23181C` primary text).
+- **`lib/theme/app_theme.dart`**:
+  - Enabled `useMaterial3: true`.
+  - Configured `ColorScheme.fromSeed(seedColor: AppColors.seedColor)` for Light and Dark modes.
+- **`lib/screens/client_dashboard.dart` & `lib/screens/admin_dashboard.dart`**:
+  - Applied Material 3 Dusty Rose Gold theme to sidebars, drawers, metric cards, holdings panels, and transaction tables.

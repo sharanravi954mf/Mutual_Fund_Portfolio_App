@@ -5,17 +5,18 @@ import 'app_radius.dart';
 
 class AppTheme {
   static ThemeData get lightTheme {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.seedColor,
+      brightness: Brightness.light,
+      primary: AppColors.lightPrimary,
+      surface: AppColors.lightSurface,
+    );
+
     return ThemeData(
+      useMaterial3: true,
       brightness: Brightness.light,
       scaffoldBackgroundColor: AppColors.lightBackground,
-      colorScheme: const ColorScheme.light(
-        primary: AppColors.lightPrimary,
-        secondary: AppColors.lightSecondary,
-        surface: AppColors.lightSurface,
-        error: AppColors.lightError,
-        onPrimary: Colors.white,
-        onSurface: AppColors.lightTextPrimary,
-      ),
+      colorScheme: colorScheme,
       textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme),
       dividerTheme: const DividerThemeData(
         color: AppColors.lightDivider,
@@ -28,6 +29,10 @@ class AppTheme {
           borderRadius: AppRadius.cardBorder,
           side: const BorderSide(color: AppColors.lightDivider, width: 1),
         ),
+      ),
+      navigationDrawerTheme: const NavigationDrawerThemeData(
+        backgroundColor: AppColors.lightSidebar,
+        indicatorColor: AppColors.lightSidebarActive,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -63,17 +68,18 @@ class AppTheme {
   }
 
   static ThemeData get darkTheme {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.seedColor,
+      brightness: Brightness.dark,
+      primary: AppColors.darkPrimary,
+      surface: AppColors.darkSurface,
+    );
+
     return ThemeData(
+      useMaterial3: true,
       brightness: Brightness.dark,
       scaffoldBackgroundColor: AppColors.darkBackground,
-      colorScheme: const ColorScheme.dark(
-        primary: AppColors.darkPrimary,
-        secondary: AppColors.darkSecondary,
-        surface: AppColors.darkSurface,
-        error: AppColors.darkError,
-        onPrimary: Colors.white,
-        onSurface: AppColors.darkTextPrimary,
-      ),
+      colorScheme: colorScheme,
       textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
       dividerTheme: const DividerThemeData(
         color: AppColors.darkDivider,
