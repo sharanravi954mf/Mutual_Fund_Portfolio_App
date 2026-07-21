@@ -13,12 +13,16 @@ class PickedFileData {
 Future<PickedFileData?> pickFile(String accept) async {
   final completer = Completer<PickedFileData?>();
   final uploadInput = html.FileUploadInputElement()..accept = accept;
-  uploadInput.click();
+  
+  // Important for Safari/macOS: The input must be in the DOM to trigger a click
+  uploadInput.style.display = 'none';
+  html.document.body?.append(uploadInput);
 
   uploadInput.onChange.listen((e) {
     final files = uploadInput.files;
     if (files == null || files.isEmpty) {
       completer.complete(null);
+      uploadInput.remove();
       return;
     }
     
@@ -33,8 +37,11 @@ Future<PickedFileData?> pickFile(String accept) async {
         filename: file.name,
         base64String: base64String,
       ));
+      uploadInput.remove();
     });
   });
+
+  uploadInput.click();
 
   return completer.future;
 }

@@ -74,10 +74,7 @@ class AuthWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
 
-    // 1. Temporarily Bypassing Authentication for Testing Admin Dashboard
-    return const AdminDashboard();
-
-    /*
+    // 1. Unauthenticated -> Show Login Screen
     if (!authProvider.isAuthenticated) {
       return LoginScreen();
     }
@@ -97,7 +94,6 @@ class AuthWrapper extends StatelessWidget {
 
     // 4. Authenticated but Role not found/registered yet
     return const UnrecognizedRoleScreen();
-    */
   }
 }
 

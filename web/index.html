@@ -107,8 +107,9 @@
       }
     };
 
-    window.updateExcelMetadataJS = function(excelBytes, pdfFiles, bookType, id) {
+    window.updateExcelMetadataJS = function(excelBytes, pdfFilesJson, bookType, id) {
       try {
+        let pdfFiles = JSON.parse(pdfFilesJson);
         let bytes = excelBytes;
         if (excelBytes && excelBytes.buffer) {
           bytes = new Uint8Array(excelBytes.buffer);
@@ -118,142 +119,54 @@
           bytes = new Uint8Array(excelBytes);
         }
 
-        // 1. Read workbook using SheetJS (supports .xlsx, .xls, .csv, etc.)
         const workbook = XLSX.read(bytes, { type: 'array' });
         let updatedCount = 0;
 
-        // Helper to find header column index
-        function findHeaderIndex(headers, targets) {
-          for (let target of targets) {
-            let idx = headers.indexOf(target.toLowerCase().trim());
-            if (idx !== -1) return idx;
-          }
-          return -1;
-        }
-
-        // Helper to calculate match score
-        function matchScore(row, headers, textLower, filenameLower, indices) {
-          let score = 0;
-          
-          // GSTR match
-          if (indices.gstr !== -1 && row[indices.gstr]) {
-            let val = String(row[indices.gstr]).toLowerCase().trim();
-            if (val && textLower.indexOf(val) !== -1) score += 100;
-          }
-          
-          // Ref No match
-          if (indices.refNo !== -1 && row[indices.refNo]) {
-            let val = String(row[indices.refNo]).toLowerCase().trim();
-            if (val && textLower.indexOf(val) !== -1) score += 100;
-          }
-          
-          // AMC Match
-          if (indices.amc !== -1 && row[indices.amc]) {
-            let val = String(row[indices.amc]).toLowerCase().trim();
-            if (val) {
-              let parts = val.split(/\s+/).filter(p => p.length > 2);
-              let matchCount = 0;
-              for (let p of parts) {
-                if (textLower.indexOf(p) !== -1) matchCount++;
-              }
-              if (matchCount > 0) score += matchCount * 15;
-              if (filenameLower.indexOf(val) !== -1) score += 40;
-            }
-          }
-          
-          // Fund Code
-          if (indices.fundCode !== -1 && row[indices.fundCode]) {
-            let val = String(row[indices.fundCode]).toLowerCase().trim();
-            if (val && textLower.indexOf(val) !== -1) score += 30;
-          }
-          
-          return score;
-        }
-
-        // Process each sheet
         for (let sheetName of workbook.SheetNames) {
           const sheet = workbook.Sheets[sheetName];
-          const ref = sheet['!ref'];
-          if (!ref) continue;
-          const range = XLSX.utils.decode_range(ref);
-          
-          // Extract rows as raw arrays for scoring
-          const rows = [];
-          for (let R = range.s.r; R <= range.e.r; ++R) {
-            const row = [];
-            for (let C = range.s.c; C <= range.e.c; ++C) {
-              const cell_ref = XLSX.utils.encode_cell({ c: C, r: R });
-              const cell = sheet[cell_ref];
-              row.push(cell ? (cell.v !== undefined ? cell.v : cell.w) : null);
-            }
-            rows.push(row);
-          }
-          
-          if (rows.length === 0) continue;
-          
-          // Get headers from first row
+          if (!sheet['!ref']) continue;
+
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+          if (rows.length < 2) continue;
+
           const headers = rows[0].map(h => String(h || '').toLowerCase().trim());
-          
-          const indices = {
-            gstr: findHeaderIndex(headers, ["amc gstr number", "gstr number", "gstin", "amcgstrnumber"]),
-            refNo: findHeaderIndex(headers, ["invoice reference no", "invoice ref no", "ref no", "invoicereferenceno"]),
-            amc: findHeaderIndex(headers, ["amc", "amc name", "fund house"]),
-            fundCode: findHeaderIndex(headers, ["fund code", "fundcode"]),
-            invoiceNo: findHeaderIndex(headers, ["invoice no", "invoiceno", "invoice number"]),
-            invoiceDate: findHeaderIndex(headers, ["invoice date", "invoicedate"]),
-            filename: findHeaderIndex(headers, ["file name", "filename"])
-          };
-          
-          if (indices.invoiceNo === -1 || indices.invoiceDate === -1) continue;
-          
-          // For each PDF file
-          for (let pdf of pdfFiles) {
-            const textLower = String(pdf.text || '').toLowerCase();
-            const filenameLower = String(pdf.filename || '').toLowerCase();
-            
-            let bestRowIndex = -1;
-            let highestScore = 0;
-            
-            for (let r = 1; r < rows.length; r++) {
-              const score = matchScore(rows[r], headers, textLower, filenameLower, indices);
-              if (score > highestScore) {
-                highestScore = score;
-                bestRowIndex = r;
+
+          const filenameColIndex = headers.findIndex(h => h.includes('file name') || h.includes('filename'));
+          if (filenameColIndex === -1) continue;
+
+          const invoiceNoColIndex = headers.findIndex(h => h.includes('cams invoi'));
+          if (invoiceNoColIndex === -1) continue;
+
+          for (let r = 1; r < rows.length; r++) {
+            const row = rows[r];
+            const invoiceNo = String(row[invoiceNoColIndex] || '').trim();
+            if (!invoiceNo) continue;
+
+            const cleanInvoiceNo = invoiceNo.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (!cleanInvoiceNo) continue;
+
+            let bestMatchPdf = null;
+            for (const pdf of pdfFiles) {
+              const cleanFilename = pdf.filename.toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (cleanFilename.includes(cleanInvoiceNo)) {
+                bestMatchPdf = pdf;
+                break;
               }
             }
-            
-            if (bestRowIndex !== -1 && highestScore >= 25) {
-              // Extract Invoice No (Standard CAMS format regex)
-              const invNoRegex = /(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)/i;
-              const invNoMatch = String(pdf.text).match(invNoRegex);
-              const invoiceNo = invNoMatch ? invNoMatch[1].trim() : '';
-              
-              // Extract Invoice Date
-              const dateRegex = /(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})/i;
-              const dateMatch = String(pdf.text).match(dateRegex);
-              const invoiceDate = dateMatch ? dateMatch[1].trim() : '';
-              
-              // Update SheetJS cells in place
-              function updateCell(r, c, val) {
-                const cell_ref = XLSX.utils.encode_cell({ c: c, r: r });
-                sheet[cell_ref] = { t: 's', v: val };
-              }
-              
-              updateCell(bestRowIndex, indices.invoiceNo, invoiceNo);
-              updateCell(bestRowIndex, indices.invoiceDate, invoiceDate);
-              if (indices.filename !== -1) {
-                updateCell(bestRowIndex, indices.filename, pdf.filename);
+
+            if (bestMatchPdf) {
+              const cell_ref = XLSX.utils.encode_cell({ c: filenameColIndex, r: r });
+              if (sheet[cell_ref]) {
+                sheet[cell_ref].v = bestMatchPdf.filename;
+              } else {
+                sheet[cell_ref] = { t: 's', v: bestMatchPdf.filename };
               }
               updatedCount++;
             }
           }
         }
 
-        // Determine proper export output format
         let exportType = 'xlsx';
-        if (bookType === '.xls') exportType = 'biff8';
-        else if (bookType === '.csv') exportType = 'csv';
-
         const updatedBytes = XLSX.write(workbook, { type: 'array', bookType: exportType });
         window['excel_result_' + id] = { 
           bytes: Array.from(new Uint8Array(updatedBytes)), 

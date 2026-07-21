@@ -2866,6 +2866,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  List<Map<String, dynamic>> _lastDecryptedPdfs = [];
+
   Future<void> _signInvoiceProcess() async {
     setState(() {
       _signingInvoice = true;
@@ -2876,50 +2878,98 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final isZip = originalName.toLowerCase().endsWith(".zip");
 
       if (isZip) {
-        final payload = {
+        final decryptPayload = {
           "invoiceFile": _selectedInvoicePdf!.base64String,
-          "signaturePng": _selectedSignaturePng!.base64String,
-          "stampPng": _selectedStampPng!.base64String,
-          "stampX": _stampX.round(),
-          "stampY": _stampY.round(),
-          "sigX": _sigX.round(),
-          "sigY": _sigY.round(),
-          "stampW": _stampW.round(),
-          "stampH": _stampH.round(),
-          "sigW": _sigW.round(),
-          "sigH": _sigH.round(),
+          "action": "decrypt",
         };
 
-        final response = await _supabaseService.client.functions.invoke(
+        final decryptResponse = await _supabaseService.client.functions.invoke(
           'sign-stamp-invoice',
-          body: payload,
+          body: decryptPayload,
         );
 
-        if (response.status == 200 && response.data != null) {
-          final Map<String, dynamic> responseData = response.data is String 
-              ? jsonDecode(response.data as String) 
-              : Map<String, dynamic>.from(response.data as Map);
-          
-          if (responseData.containsKey('error')) {
-             throw Exception(responseData['error']);
-          }
+        if (decryptResponse.status != 200 || decryptResponse.data == null) {
+          throw Exception(decryptResponse.data?["error"] ?? "Failed to decrypt CAMS zip. Status: ${decryptResponse.status}");
+        }
 
-          final base64SignedZip = responseData['signedPdf'] as String;
-          final uint8Bytes = base64Decode(base64SignedZip);
-          
-          final outputName = "${originalName.substring(0, originalName.length - 4)}_SIGNED.zip";
-          await fph.saveFileBytes(uint8Bytes, outputName);
+        final Map<String, dynamic> responseData = decryptResponse.data is String 
+            ? jsonDecode(decryptResponse.data as String) 
+            : Map<String, dynamic>.from(decryptResponse.data as Map);
+        
+        final List<dynamic> pdfFiles = responseData['files'] ?? [];
+        if (pdfFiles.isEmpty) {
+          throw Exception("No valid PDF invoices found inside the ZIP archive.");
+        }
+        
+        _lastDecryptedPdfs = pdfFiles.cast<Map<String, dynamic>>().toList();
 
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text("Batch ZIP signing complete! Download started."),
-                backgroundColor: Colors.green,
-              ),
-            );
+        final outArchive = archive.Archive();
+        final encoder = archive.ZipEncoder(level: archive.Deflate.BEST_COMPRESSION);
+        int signedCount = 0;
+
+        for (final pdfFile in pdfFiles) {
+          final filename = pdfFile['name'] as String;
+          final base64Content = pdfFile['content'] as String;
+
+          final signPayload = {
+            "invoiceFile": base64Content,
+            "signaturePng": _selectedSignaturePng!.base64String,
+            "stampPng": _selectedStampPng!.base64String,
+            "stampX": _stampX.round(),
+            "stampY": _stampY.round(),
+            "sigX": _sigX.round(),
+            "sigY": _sigY.round(),
+            "stampW": _stampW.round(),
+            "stampH": _stampH.round(),
+            "sigW": _sigW.round(),
+            "sigH": _sigH.round(),
+          };
+
+          final signResponse = await _supabaseService.client.functions.invoke(
+            'sign-stamp-invoice',
+            body: signPayload,
+          );
+
+          if (signResponse.status == 200 && signResponse.data != null) {
+            final Map<String, dynamic> signResponseData = signResponse.data is String 
+                ? jsonDecode(signResponse.data as String) 
+                : Map<String, dynamic>.from(signResponse.data as Map);
+            final base64SignedPdf = signResponseData['signedPdf'] as String;
+            final signedBytes = base64Decode(base64SignedPdf);
+            
+            outArchive.addFile(archive.ArchiveFile(
+              filename,
+              signedBytes.length,
+              signedBytes,
+            )..compression = archive.Deflate.BEST_COMPRESSION);
+            signedCount++;
+          } else {
+            final rawBytes = base64Decode(base64Content);
+            outArchive.addFile(archive.ArchiveFile(
+              filename,
+              rawBytes.length,
+              rawBytes,
+            )..compression = archive.Deflate.STORE); // No need to re-compress
           }
-        } else {
-           throw Exception(response.data?["error"] ?? "Failed to process ZIP. Status: ${response.status}");
+        }
+
+        final outputBytes = encoder.encode(outArchive);
+        if (outputBytes == null) {
+          throw Exception("Failed to package signed files into output ZIP.");
+        }
+
+        final uint8Bytes = Uint8List.fromList(outputBytes);
+        final outputName = "${originalName.substring(0, originalName.length - 4)}_SIGNED.zip";
+
+        await fph.saveFileBytes(uint8Bytes, outputName);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Batch signing complete! Signed $signedCount of ${pdfFiles.length} PDFs. Download started."),
+              backgroundColor: Colors.green,
+            ),
+          );
         }
 
       } else {
@@ -3026,6 +3076,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         excelBytes: excelBytes,
         zipBytes: zipBytes,
         fileExtension: ext,
+        preDecryptedPdfs: _lastDecryptedPdfs,
       );
 
       final uint8Bytes = result['updatedExcel'] as Uint8List;
