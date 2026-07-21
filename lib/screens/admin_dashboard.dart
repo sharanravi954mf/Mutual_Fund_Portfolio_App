@@ -13,7 +13,9 @@ import 'client_detail_screen.dart';
 import 'rupee_rain_background.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
-import '../utils/excel_updater.dart';
+import '../features/invoice_signer/invoice_signer_job_controller.dart';
+import '../features/invoice_signer/models/invoice_document.dart';
+import '../features/invoice_signer/models/invoice_job.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
@@ -35,24 +37,31 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isIngesting = false;
   bool _isSyncingNAV = false;
   bool _isLoading = true;
-  
+
   final TextEditingController _searchController = TextEditingController();
-  final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
+  final currencyFormat =
+      NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
 
   List<Map<String, dynamic>> _allClients = [];
   List<Map<String, dynamic>> _filteredClients = [];
 
   // Factsheet Management variables
   final SupabaseService _supabaseService = SupabaseService();
+  final InvoiceSignerJobController _invoiceSignerJobController =
+      InvoiceSignerJobController(SupabaseService());
   List<Map<String, dynamic>> _fundsList = [];
   String? _selectedFundId;
   bool _savingFactsheet = false;
   final TextEditingController _factsheetPdfController = TextEditingController();
-  final TextEditingController _factsheetHoldingsUrlController = TextEditingController();
-  final TextEditingController _factsheetManagersController = TextEditingController();
-  final TextEditingController _factsheetTopHoldingsController = TextEditingController();
+  final TextEditingController _factsheetHoldingsUrlController =
+      TextEditingController();
+  final TextEditingController _factsheetManagersController =
+      TextEditingController();
+  final TextEditingController _factsheetTopHoldingsController =
+      TextEditingController();
   final TextEditingController _factsheetMonthController = TextEditingController(
-    text: "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-01",
+    text:
+        "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-01",
   );
 
   // Fund Search and Details variables
@@ -113,7 +122,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           final archiveFile = dec.decodeBytes(rawBytes);
           for (final entry in archiveFile.files) {
             if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
-              if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
+              if (entry.name.contains('__MACOSX') ||
+                  entry.name.split('/').last.startsWith('._')) {
                 continue;
               }
               pdfBytes = Uint8List.fromList(entry.content as List<int>);
@@ -232,8 +242,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .select('*, portfolios(total_invested_value, current_market_value)')
           .eq('role', 'client');
 
-      final List<Map<String, dynamic>> loaded = List<Map<String, dynamic>>.from(response ?? []);
-      
+      final List<Map<String, dynamic>> loaded =
+          List<Map<String, dynamic>>.from(response ?? []);
+
       setState(() {
         _allClients = loaded;
         _applyFilter(_searchQuery);
@@ -266,11 +277,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
         final q = query.toLowerCase();
         _filteredClients = _allClients.where((client) {
           final name = (client['full_name'] ?? '').toString().toLowerCase();
-          final email = (client['email'] ?? '').toString().toLowerCase(); // fallback email
+          final email = (client['email'] ?? '')
+              .toString()
+              .toLowerCase(); // fallback email
           final pan = (client['pan'] ?? '').toString().toLowerCase();
           final id = (client['id'] ?? '').toString().toLowerCase();
 
-          return name.contains(q) || email.contains(q) || pan.contains(q) || id.contains(q);
+          return name.contains(q) ||
+              email.contains(q) ||
+              pan.contains(q) ||
+              id.contains(q);
         }).toList();
       }
     });
@@ -306,7 +322,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      
+
       // Reload updated portfolio values
       await _refreshClients();
     } catch (e) {
@@ -318,7 +334,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const Icon(Icons.error_outline, color: Colors.white),
               const SizedBox(width: 12),
               Expanded(
-                child: Text("Ingestion trigger failed: $e", style: GoogleFonts.inter()),
+                child: Text("Ingestion trigger failed: $e",
+                    style: GoogleFonts.inter()),
               ),
             ],
           ),
@@ -351,7 +368,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const Icon(Icons.check_circle_outline, color: Colors.white),
               const SizedBox(width: 12),
               Expanded(
-                child: Text("NAV sync complete! Response: ${response.data}", style: GoogleFonts.inter()),
+                child: Text("NAV sync complete! Response: ${response.data}",
+                    style: GoogleFonts.inter()),
               ),
             ],
           ),
@@ -371,7 +389,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const Icon(Icons.error_outline, color: Colors.white),
               const SizedBox(width: 12),
               Expanded(
-                child: Text("NAV sync trigger failed: $e", style: GoogleFonts.inter()),
+                child: Text("NAV sync trigger failed: $e",
+                    style: GoogleFonts.inter()),
               ),
             ],
           ),
@@ -404,11 +423,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final cleanQuery = query.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (cleanQuery.isEmpty) return;
 
-    final keywords = cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
+    final keywords =
+        cleanQuery.toLowerCase().split(' ').where((k) => k.isNotEmpty).toList();
 
     // Check if it's a numeric scheme code
     final isNumeric = RegExp(r'^\d+$').hasMatch(cleanQuery);
-    
+
     if (cleanQuery.length < 3 && !isNumeric) {
       setState(() {
         _searchResults = [];
@@ -424,7 +444,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     try {
       List<dynamic> results = [];
-      
+
       // If it is numeric, construct a virtual search result directly
       if (isNumeric && cleanQuery.length >= 5 && cleanQuery.length <= 6) {
         results = [
@@ -439,7 +459,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           'sign-stamp-invoice',
           body: {
             "action": "proxy-get",
-            "url": "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(cleanQuery)}",
+            "url":
+                "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(cleanQuery)}",
           },
         ).timeout(const Duration(seconds: 15));
 
@@ -475,7 +496,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-
   String _getRangeLabel(String range) {
     switch (range) {
       case "YTD":
@@ -507,12 +527,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return null;
   }
 
-  List<dynamic> filterNavDataByRange(List<dynamic> allData, String rangeOption) {
+  List<dynamic> filterNavDataByRange(
+      List<dynamic> allData, String rangeOption) {
     if (allData.isEmpty) return [];
-    
+
     final latestDateObj = parseDate(allData.first['date'] ?? '');
     if (latestDateObj == null) return allData;
-    
+
     DateTime cutoff;
     switch (rangeOption) {
       case "YTD":
@@ -534,7 +555,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       default:
         return allData;
     }
-    
+
     return allData.where((item) {
       final d = parseDate(item['date'] ?? '');
       return d != null && (d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff));
@@ -584,7 +605,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .from('mutual_funds')
           .select('id, scheme_name, scheme_code, category, fund_house')
           .order('scheme_name', ascending: true);
-      
+
       setState(() {
         _fundsList = List<Map<String, dynamic>>.from(response ?? []);
         if (_fundsList.isNotEmpty && _selectedFundId == null) {
@@ -599,20 +620,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _loadFactsheetForSelectedFund() async {
     if (_selectedFundId == null) return;
-    
+
     final data = await _supabaseService.getLatestFactsheet(_selectedFundId!);
     setState(() {
       if (data != null) {
         _factsheetPdfController.text = data['factsheet_url'] ?? '';
-        _factsheetHoldingsUrlController.text = data['portfolio_holdings_url'] ?? '';
+        _factsheetHoldingsUrlController.text =
+            data['portfolio_holdings_url'] ?? '';
         _factsheetMonthController.text = data['month_year'] ?? '';
-        
+
         final managersList = data['managers'] as List?;
         _factsheetManagersController.text = managersList?.join(', ') ?? '';
-        
+
         final holdingsList = data['top_holdings'] as List?;
         if (holdingsList != null) {
-          final lines = holdingsList.map((h) => "${h['company']}: ${h['weight']}");
+          final lines =
+              holdingsList.map((h) => "${h['company']}: ${h['weight']}");
           _factsheetTopHoldingsController.text = lines.join(', ');
         } else {
           _factsheetTopHoldingsController.text = '';
@@ -628,17 +651,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> _saveFactsheet() async {
     if (_selectedFundId == null) return;
-    
+
     setState(() {
       _savingFactsheet = true;
     });
-    
+
     final managers = _factsheetManagersController.text
         .split(',')
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
         .toList();
-        
+
     final topHoldings = <Map<String, dynamic>>[];
     final holdingsStr = _factsheetTopHoldingsController.text.trim();
     if (holdingsStr.isNotEmpty) {
@@ -657,7 +680,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         }
       }
     }
-    
+
     final payload = {
       'mutual_fund_id': _selectedFundId,
       'month_year': _factsheetMonthController.text.trim(),
@@ -666,17 +689,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
       'managers': managers,
       'top_holdings': topHoldings,
     };
-    
+
     final success = await _supabaseService.upsertFactsheet(payload);
-    
+
     setState(() {
       _savingFactsheet = false;
     });
-    
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? "Factsheet updated successfully!" : "Failed to update factsheet."),
+          content: Text(success
+              ? "Factsheet updated successfully!"
+              : "Failed to update factsheet."),
           backgroundColor: success ? Colors.green : Colors.redAccent,
         ),
       );
@@ -729,7 +754,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                   color: colors.sidebarActive,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: const Icon(Icons.shield_outlined, color: Colors.white, size: 18),
+                                child: const Icon(Icons.shield_outlined,
+                                    color: Colors.white, size: 18),
                               ),
                               const SizedBox(width: 10),
                               Text(
@@ -759,11 +785,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       child: ListView(
                         padding: EdgeInsets.zero,
                         children: [
-                          _buildDrawerItem(0, t('clients_management'), Icons.people_outline, colors, context),
-                          _buildDrawerItem(1, t('data_ingestion'), Icons.cloud_upload_outlined, colors, context),
-                          _buildDrawerItem(2, t('factsheets_manager'), Icons.document_scanner_outlined, colors, context),
-                          _buildDrawerItem(3, t('invoice_signer'), Icons.draw_outlined, colors, context),
-                          _buildDrawerItem(4, t('settings'), Icons.settings_outlined, colors, context),
+                          _buildDrawerItem(0, t('clients_management'),
+                              Icons.people_outline, colors, context),
+                          _buildDrawerItem(1, t('data_ingestion'),
+                              Icons.cloud_upload_outlined, colors, context),
+                          _buildDrawerItem(2, t('factsheets_manager'),
+                              Icons.document_scanner_outlined, colors, context),
+                          _buildDrawerItem(3, t('invoice_signer'),
+                              Icons.draw_outlined, colors, context),
+                          _buildDrawerItem(4, t('settings'),
+                              Icons.settings_outlined, colors, context),
                         ],
                       ),
                     ),
@@ -780,14 +811,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         },
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
                             color: colors.primary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.logout, color: colors.primary, size: 20),
+                              Icon(Icons.logout,
+                                  color: colors.primary, size: 20),
                               const SizedBox(width: 16),
                               Text(
                                 t('logout'),
@@ -801,10 +834,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           ),
                         ),
                       ),
-                    ).animate(delay: const Duration(milliseconds: 6 * 80))
-                      .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
-                      .blur(begin: const Offset(8, 8), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic)
-                      .slide(begin: const Offset(-0.15, 0), end: Offset.zero, duration: 800.ms, curve: Curves.easeOutCubic),
+                    )
+                        .animate(delay: const Duration(milliseconds: 6 * 80))
+                        .fadeIn(duration: 800.ms, curve: Curves.easeOutCubic)
+                        .blur(
+                            begin: const Offset(8, 8),
+                            end: Offset.zero,
+                            duration: 800.ms,
+                            curve: Curves.easeOutCubic)
+                        .slide(
+                            begin: const Offset(-0.15, 0),
+                            end: Offset.zero,
+                            duration: 800.ms,
+                            curve: Curves.easeOutCubic),
                   ],
                 ),
               ),
@@ -830,7 +872,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   color: colors.primary,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.shield_outlined, color: Colors.white, size: 20),
+                child: const Icon(Icons.shield_outlined,
+                    color: Colors.white, size: 20),
               ),
               const SizedBox(width: 10),
               Text(
@@ -856,7 +899,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ? t('data_ingestion_engine')
                       : (_selectedTab == 2
                           ? t('factsheets_manager')
-                          : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console')))),
+                          : (_selectedTab == 3
+                              ? t('invoice_signer')
+                              : t('settings_console')))),
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.w600,
                 fontSize: 18,
@@ -878,7 +923,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ],
       ),
       body: RupeeRainBackground(
-        child: _buildSelectedTabContent().animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
+        child: _buildSelectedTabContent()
+            .animate()
+            .fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
       ),
     );
 
@@ -900,7 +947,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   Expanded(
                     child: SafeArea(
                       child: _buildSelectedTabContent(),
-                    ).animate().fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic),
+                    ).animate().fadeIn(
+                        duration: 1000.ms, curve: Curves.easeInOutCubic),
                   ),
                 ],
               ),
@@ -911,14 +959,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildTopHeaderBar(AppThemeColors colors, String Function(String) t, AuthProvider authProvider) {
+  Widget _buildTopHeaderBar(AppThemeColors colors, String Function(String) t,
+      AuthProvider authProvider) {
     final sectionTitle = _selectedTab == 0
         ? t('clients_directory')
         : (_selectedTab == 1
             ? t('data_ingestion_engine')
             : (_selectedTab == 2
                 ? t('factsheets_manager')
-                : (_selectedTab == 3 ? t('invoice_signer') : t('settings_console'))));
+                : (_selectedTab == 3
+                    ? t('invoice_signer')
+                    : t('settings_console'))));
 
     return Container(
       height: 64,
@@ -939,7 +990,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   color: colors.primary,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.shield_outlined, color: Colors.white, size: 20),
+                child: const Icon(Icons.shield_outlined,
+                    color: Colors.white, size: 20),
               ),
               const SizedBox(width: 10),
               Text(
@@ -986,7 +1038,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ),
               const SizedBox(width: 14),
-
               PopupMenuButton<int>(
                 tooltip: "Admin Account Settings",
                 icon: CircleAvatar(
@@ -1064,7 +1115,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildDesktopSidebar(AppThemeColors colors, String Function(String) t, AuthProvider authProvider) {
+  Widget _buildDesktopSidebar(AppThemeColors colors, String Function(String) t,
+      AuthProvider authProvider) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
@@ -1080,7 +1132,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
             child: Row(
-              mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
+              mainAxisAlignment: _isSidebarExpanded
+                  ? MainAxisAlignment.start
+                  : MainAxisAlignment.center,
               children: [
                 Icon(Icons.menu, color: colors.sidebarTextPrimary, size: 22),
                 if (_isSidebarExpanded) ...[
@@ -1105,11 +1159,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                _buildSidebarItem(0, t('clients_management'), Icons.people_outline, colors),
-                _buildSidebarItem(1, t('data_ingestion'), Icons.cloud_upload_outlined, colors),
-                _buildSidebarItem(2, t('factsheets_manager'), Icons.document_scanner_outlined, colors),
-                _buildSidebarItem(3, t('invoice_signer'), Icons.draw_outlined, colors),
-                _buildSidebarItem(4, t('settings'), Icons.settings_outlined, colors),
+                _buildSidebarItem(
+                    0, t('clients_management'), Icons.people_outline, colors),
+                _buildSidebarItem(1, t('data_ingestion'),
+                    Icons.cloud_upload_outlined, colors),
+                _buildSidebarItem(2, t('factsheets_manager'),
+                    Icons.document_scanner_outlined, colors),
+                _buildSidebarItem(
+                    3, t('invoice_signer'), Icons.draw_outlined, colors),
+                _buildSidebarItem(
+                    4, t('settings'), Icons.settings_outlined, colors),
               ],
             ),
           ),
@@ -1120,7 +1179,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: Row(
-              mainAxisAlignment: _isSidebarExpanded ? MainAxisAlignment.end : MainAxisAlignment.center,
+              mainAxisAlignment: _isSidebarExpanded
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.center,
               children: [
                 Tooltip(
                   message: _isSidebarExpanded ? 'Shrink Menu' : 'Expand Menu',
@@ -1154,7 +1215,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildSidebarItem(int index, String title, IconData icon, AppThemeColors colors) {
+  Widget _buildSidebarItem(
+      int index, String title, IconData icon, AppThemeColors colors) {
     final isSelected = _selectedTab == index;
 
     if (!_isSidebarExpanded) {
@@ -1181,7 +1243,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               child: Center(
                 child: Icon(
                   icon,
-                  color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
+                  color: isSelected
+                      ? colors.sidebarTextPrimary
+                      : colors.sidebarTextSecondary,
                   size: 22,
                 ),
               ),
@@ -1213,7 +1277,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
             children: [
               Icon(
                 icon,
-                color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
+                color: isSelected
+                    ? colors.sidebarTextPrimary
+                    : colors.sidebarTextSecondary,
                 size: 22,
               ),
               const SizedBox(width: 12),
@@ -1223,8 +1289,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected
+                        ? colors.sidebarTextPrimary
+                        : colors.sidebarTextSecondary,
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 15,
                   ),
                 ),
@@ -1236,7 +1305,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildDrawerItem(int index, String label, IconData icon, AppThemeColors colors, BuildContext context) {
+  Widget _buildDrawerItem(int index, String label, IconData icon,
+      AppThemeColors colors, BuildContext context) {
     final isSelected = _selectedTab == index;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
@@ -1259,7 +1329,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           child: Row(
             children: [
-              Icon(icon, color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary, size: 22),
+              Icon(icon,
+                  color: isSelected
+                      ? colors.sidebarTextPrimary
+                      : colors.sidebarTextSecondary,
+                  size: 22),
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
@@ -1267,8 +1341,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
-                    color: isSelected ? colors.sidebarTextPrimary : colors.sidebarTextSecondary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected
+                        ? colors.sidebarTextPrimary
+                        : colors.sidebarTextSecondary,
+                    fontWeight:
+                        isSelected ? FontWeight.w600 : FontWeight.normal,
                     fontSize: 15,
                   ),
                 ),
@@ -1298,7 +1375,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildClientsListContent() {
-    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final isDark =
+        Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
     final colors = AppThemeColors(isDark);
 
     if (_isLoading) {
@@ -1374,7 +1452,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     )
                   : ListView.separated(
                       itemCount: _filteredClients.length,
-                      separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                      separatorBuilder: (context, index) =>
+                          Divider(color: colors.border, height: 1),
                       itemBuilder: (context, index) {
                         final client = _filteredClients[index];
                         final name = client['full_name'] ?? 'Unnamed Client';
@@ -1382,16 +1461,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         final id = client['id'].toString().substring(0, 8);
 
                         // Extract market value from portfolio lists
-                        final portfolios = client['portfolios'] as List<dynamic>?;
+                        final portfolios =
+                            client['portfolios'] as List<dynamic>?;
                         double marketVal = 0.0;
                         if (portfolios != null && portfolios.isNotEmpty) {
-                          marketVal = (portfolios.first['current_market_value'] as num).toDouble();
+                          marketVal =
+                              (portfolios.first['current_market_value'] as num)
+                                  .toDouble();
                         }
 
-                        return Container(
-                          color: index % 2 == 1 ? colors.tableRowAlt : colors.surface,
+                        return Material(
+                          color: index % 2 == 1
+                              ? colors.tableRowAlt
+                              : colors.surface,
                           child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 10),
                             onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
@@ -1406,25 +1491,37 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             leading: CircleAvatar(
                               backgroundColor: colors.activeBackground,
                               child: Text(
-                                name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'C',
-                                style: GoogleFonts.outfit(color: colors.primary, fontWeight: FontWeight.bold),
+                                name.isNotEmpty
+                                    ? name.substring(0, 1).toUpperCase()
+                                    : 'C',
+                                style: GoogleFonts.outfit(
+                                    color: colors.primary,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                             title: Text(
                               name,
-                              style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
+                              style: GoogleFonts.outfit(
+                                  color: colors.textPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15),
                             ),
                             subtitle: Padding(
                               padding: const EdgeInsets.only(top: 4.0),
                               child: Text(
                                 "PAN: ${pan.toUpperCase()}  •  ID: $id",
-                                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12, fontWeight: FontWeight.w500),
+                                style: GoogleFonts.inter(
+                                    color: colors.textSecondary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500),
                               ),
                             ),
                             trailing: Text(
                               currencyFormat.format(marketVal),
                               style: GoogleFonts.outfit(
-                                color: marketVal > 0 ? colors.profit : colors.textSecondary,
+                                color: marketVal > 0
+                                    ? colors.profit
+                                    : colors.textSecondary,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
                               ),
@@ -1451,12 +1548,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
             children: [
               Text(
                 "Advisor Automation Tools",
-                style: GoogleFonts.outfit(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                style: GoogleFonts.outfit(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               Text(
                 "Manage connection states and execute manual file parsers.",
-                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                style: GoogleFonts.inter(
+                    color: Colors.grey.shade400, fontSize: 13),
               ),
             ],
           ).premiumReveal(index: 0),
@@ -1475,18 +1576,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.sync_alt, color: Color(0xFFE94057), size: 24),
+                    const Icon(Icons.sync_alt,
+                        color: Color(0xFFE94057), size: 24),
                     const SizedBox(width: 12),
                     Text(
                       "Force RTA Statement Sync",
-                      style: GoogleFonts.outfit(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: GoogleFonts.outfit(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 Text(
                   "Triggering this command immediately establishes secure IMAP tunnels, fetches new CAMS/KFintech mailbacks, runs decryptions, parses transactions, and logs outputs without waiting for midnight.",
-                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13, height: 1.4),
+                  style: GoogleFonts.inter(
+                      color: Colors.grey.shade400, fontSize: 13, height: 1.4),
                 ),
                 const SizedBox(height: 28),
                 SizedBox(
@@ -1498,19 +1604,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
                             ),
                           )
-                        : const Icon(Icons.cloud_download_outlined, color: Colors.white),
+                        : const Icon(Icons.cloud_download_outlined,
+                            color: Colors.white),
                     label: Text(
-                      _isIngesting ? "Syncing Mailbox..." : "Execute Manual Ingestion Now",
-                      style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                      _isIngesting
+                          ? "Syncing Mailbox..."
+                          : "Execute Manual Ingestion Now",
+                      style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.white),
                     ),
                     onPressed: _isIngesting ? null : _triggerManualIngestion,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFE94057),
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -1532,18 +1646,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.currency_rupee, color: Color(0xFFF27121), size: 24),
+                    const Icon(Icons.currency_rupee,
+                        color: Color(0xFFF27121), size: 24),
                     const SizedBox(width: 12),
                     Text(
                       "Force Daily NAV Price Sync",
-                      style: GoogleFonts.outfit(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: GoogleFonts.outfit(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 Text(
                   "Queries the mfapi.in API database for all registered mutual funds to fetch today's latest Net Asset Values and updates client portfolio valuations.",
-                  style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13, height: 1.4),
+                  style: GoogleFonts.inter(
+                      color: Colors.grey.shade400, fontSize: 13, height: 1.4),
                 ),
                 const SizedBox(height: 28),
                 SizedBox(
@@ -1555,19 +1674,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
                             ),
                           )
                         : const Icon(Icons.trending_up, color: Colors.white),
                     label: Text(
-                      _isSyncingNAV ? "Syncing NAV Prices..." : "Sync Daily NAV Prices Now",
-                      style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                      _isSyncingNAV
+                          ? "Syncing NAV Prices..."
+                          : "Sync Daily NAV Prices Now",
+                      style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.white),
                     ),
                     onPressed: _isSyncingNAV ? null : _triggerNAVUpdateSync,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFF27121),
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -1604,7 +1730,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const SizedBox(height: 8),
               Text(
                 t('fund_facts_finder_sub'),
-                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+                style: GoogleFonts.inter(
+                    color: colors.textSecondary, fontSize: 13),
               ),
             ],
           ).premiumReveal(index: 0),
@@ -1622,11 +1749,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
                 child: TextFormField(
                   controller: _fundSearchController,
-                  style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 14),
+                  style: GoogleFonts.inter(
+                      color: colors.textPrimary, fontSize: 14),
                   onChanged: _onSearchQueryChanged,
                   decoration: InputDecoration(
                     hintText: t('search_funds_placeholder'),
-                    hintStyle: GoogleFonts.inter(color: colors.textMuted, fontSize: 13),
+                    hintStyle: GoogleFonts.inter(
+                        color: colors.textMuted, fontSize: 13),
                     prefixIcon: Icon(Icons.search, color: colors.textSecondary),
                     suffixIcon: _searchingFunds
                         ? const Padding(
@@ -1636,13 +1765,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               height: 16,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    Color(0xFFE94057)),
                               ),
                             ),
                           )
                         : (_fundSearchController.text.isNotEmpty
                             ? IconButton(
-                                icon: const Icon(Icons.clear, color: Colors.white54),
+                                icon: const Icon(Icons.clear,
+                                    color: Colors.white54),
                                 onPressed: () {
                                   setState(() {
                                     _fundSearchController.clear();
@@ -1653,7 +1784,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               )
                             : null),
                     border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 16),
                   ),
                 ),
               ),
@@ -1688,17 +1820,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       return ListTile(
                         title: Text(
                           schemeName,
-                          style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                          style: GoogleFonts.inter(
+                              color: colors.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600),
                         ),
                         subtitle: Text(
                           "Scheme Code: $schemeCode",
-                          style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                          style: GoogleFonts.inter(
+                              color: colors.textSecondary, fontSize: 11),
                         ),
                         hoverColor: colors.surfaceAccent,
                         onTap: () => _fetchFundDetails(schemeCode),
                       );
                     },
-                    separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                    separatorBuilder: (context, index) =>
+                        Divider(color: colors.border, height: 1),
                   ),
                 ),
               ],
@@ -1716,12 +1853,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 20),
+                  const Icon(Icons.error_outline,
+                      color: Colors.redAccent, size: 20),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       _fundSearchError!,
-                      style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13),
+                      style: GoogleFonts.inter(
+                          color: Colors.redAccent, fontSize: 13),
                     ),
                   ),
                 ],
@@ -1732,49 +1871,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 24),
 
           (_fetchingFundDetails
-              ? const Padding(
-                  padding: EdgeInsets.only(top: 40.0),
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
-                    ),
-                  ),
-                )
-              : (_selectedFundDetails != null
-                  ? _buildSelectedFundCard()
-                  : Container(
-                      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
-                      decoration: BoxDecoration(
-                        color: colors.surface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: colors.border),
-                        boxShadow: [
-                          BoxShadow(
-                            color: colors.cardShadow,
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
+                  ? const Padding(
+                      padding: EdgeInsets.only(top: 40.0),
                       child: Center(
-                        child: Column(
-                          children: [
-                            Icon(Icons.search_outlined, color: colors.textMuted, size: 48),
-                            const SizedBox(height: 16),
-                            Text(
-                              t('no_fund_selected'),
-                              style: GoogleFonts.outfit(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              t('no_fund_selected_sub'),
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
-                            ),
-                          ],
+                        child: CircularProgressIndicator(
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Color(0xFFE94057)),
                         ),
                       ),
-                    ))).premiumReveal(index: 2),
+                    )
+                  : (_selectedFundDetails != null
+                      ? _buildSelectedFundCard()
+                      : Container(
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 60, horizontal: 24),
+                          decoration: BoxDecoration(
+                            color: colors.surface,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: colors.border),
+                            boxShadow: [
+                              BoxShadow(
+                                color: colors.cardShadow,
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Column(
+                              children: [
+                                Icon(Icons.search_outlined,
+                                    color: colors.textMuted, size: 48),
+                                const SizedBox(height: 16),
+                                Text(
+                                  t('no_fund_selected'),
+                                  style: GoogleFonts.outfit(
+                                      color: colors.textPrimary,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  t('no_fund_selected_sub'),
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.inter(
+                                      color: colors.textSecondary,
+                                      fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )))
+              .premiumReveal(index: 2),
         ],
       ),
     );
@@ -1789,7 +1937,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final schemeCode = (meta['scheme_code'] ?? 'N/A').toString();
     final schemeType = meta['scheme_type'] ?? 'N/A';
     final schemeCategory = meta['scheme_category'] ?? 'N/A';
-    final isin = meta['isin_div_payout'] ?? meta['isin_div_reinvestment'] ?? 'N/A';
+    final isin =
+        meta['isin_div_payout'] ?? meta['isin_div_reinvestment'] ?? 'N/A';
 
     String latestDate = 'N/A';
     String latestNav = 'N/A';
@@ -1847,7 +1996,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     const SizedBox(height: 6),
                     Text(
                       "Scheme Code: $schemeCode",
-                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                      style: GoogleFonts.inter(
+                          color: colors.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1855,11 +2005,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const SizedBox(width: 20),
               // NAV Tag
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   color: const Color(0xFFE94057).withOpacity(0.15),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFE94057).withOpacity(0.3)),
+                  border: Border.all(
+                      color: const Color(0xFFE94057).withOpacity(0.3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -1896,7 +2048,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ],
           ).premiumReveal(index: 0),
           Divider(color: colors.border, height: 40),
-          
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1929,24 +2080,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ).premiumReveal(index: 1),
-          
           const Divider(color: Colors.white10, height: 40),
-
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth > 800;
-              
+
               // Filter the data based on selection
-              final filteredData = filterNavDataByRange(data, _selectedChartRange);
-              
+              final filteredData =
+                  filterNavDataByRange(data, _selectedChartRange);
+
               // Calculate growth percent
               double growthPercent = 0.0;
               if (filteredData.isNotEmpty) {
-                final double latest = double.tryParse(filteredData.first['nav'].toString()) ?? 0.0;
-                final double oldest = double.tryParse(filteredData.last['nav'].toString()) ?? 0.0;
-                growthPercent = oldest == 0.0 ? 0.0 : ((latest - oldest) / oldest) * 100;
+                final double latest =
+                    double.tryParse(filteredData.first['nav'].toString()) ??
+                        0.0;
+                final double oldest =
+                    double.tryParse(filteredData.last['nav'].toString()) ?? 0.0;
+                growthPercent =
+                    oldest == 0.0 ? 0.0 : ((latest - oldest) / oldest) * 100;
               }
-              
+
               final chartCol = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1963,22 +2117,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ),
                       // Growth Percent Badge
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: growthPercent >= 0 
-                              ? Colors.green.withOpacity(0.15) 
+                          color: growthPercent >= 0
+                              ? Colors.green.withOpacity(0.15)
                               : Colors.redAccent.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: growthPercent >= 0 
-                                ? Colors.green.withOpacity(0.3) 
-                                : Colors.redAccent.withOpacity(0.3)
-                          ),
+                              color: growthPercent >= 0
+                                  ? Colors.green.withOpacity(0.3)
+                                  : Colors.redAccent.withOpacity(0.3)),
                         ),
                         child: Text(
                           "${growthPercent >= 0 ? '+' : ''}${growthPercent.toStringAsFixed(2)}%",
                           style: GoogleFonts.inter(
-                            color: growthPercent >= 0 ? Colors.green : Colors.redAccent,
+                            color: growthPercent >= 0
+                                ? Colors.green
+                                : Colors.redAccent,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1990,7 +2146,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   NavGrowthChart(navData: filteredData),
                 ],
               );
-              
+
               final selectorCol = Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -2012,7 +2168,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    ...["YTD", "1Y", "2Y", "3Y", "5Y", "Since Launch"].map((range) {
+                    ...["YTD", "1Y", "2Y", "3Y", "5Y", "Since Launch"]
+                        .map((range) {
                       final isSelected = _selectedChartRange == range;
                       return InkWell(
                         onTap: () {
@@ -2030,7 +2187,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isSelected ? const Color(0xFFE94057) : Colors.grey.shade600,
+                                    color: isSelected
+                                        ? const Color(0xFFE94057)
+                                        : Colors.grey.shade600,
                                     width: isSelected ? 5 : 2,
                                   ),
                                 ),
@@ -2039,9 +2198,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               Text(
                                 _getRangeLabel(range),
                                 style: GoogleFonts.inter(
-                                  color: isSelected ? Colors.white : Colors.grey.shade400,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.grey.shade400,
                                   fontSize: 12,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
                                 ),
                               ),
                             ],
@@ -2052,7 +2215,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ],
                 ),
               );
-              
+
               if (isWide) {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2074,9 +2237,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               }
             },
           ).premiumReveal(index: 2),
-
           const Divider(color: Colors.white10, height: 40),
-
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2092,7 +2253,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               if (data.isEmpty)
                 Text(
                   "No historical NAV details available.",
-                  style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 13),
+                  style: GoogleFonts.inter(
+                      color: Colors.grey.shade500, fontSize: 13),
                 )
               else
                 Container(
@@ -2105,20 +2267,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: data.length > 5 ? 5 : data.length,
-                    separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 1),
+                    separatorBuilder: (context, index) =>
+                        const Divider(color: Colors.white10, height: 1),
                     itemBuilder: (context, index) {
                       final navItem = data[index];
                       final date = navItem['date'] ?? 'N/A';
                       final navVal = navItem['nav'] ?? 'N/A';
-                      
+
                       return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 14),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
                               date,
-                              style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 13),
+                              style: GoogleFonts.inter(
+                                  color: Colors.grey.shade400, fontSize: 13),
                             ),
                             Text(
                               "₹$navVal",
@@ -2142,7 +2307,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildSpecTile(String label, String value) {
-    final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+    final isDark =
+        Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
     final colors = AppThemeColors(isDark);
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2157,14 +2323,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
         children: [
           Text(
             label,
-            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
+            style: GoogleFonts.inter(
+                color: colors.textSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 6),
           Text(
             value,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(color: colors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+            style: GoogleFonts.inter(
+                color: colors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -2195,6 +2367,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
+
   Widget _buildInvoiceSignerContent() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
@@ -2253,16 +2426,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Column(
       children: [
         _buildUploadCard(
-          title: _selectedInvoicePdf != null && _selectedInvoicePdf!.filename.toLowerCase().endsWith(".zip") 
-              ? "Distributor Invoice ZIP Archive" 
+          title: _selectedInvoicePdf != null &&
+                  _selectedInvoicePdf!.filename.toLowerCase().endsWith(".zip")
+              ? "Distributor Invoice ZIP Archive"
               : "Distributor Invoice PDF / ZIP",
-          subtitle: _selectedInvoicePdf != null ? _selectedInvoicePdf!.filename : "Select PDF Invoice or ZIP Archive",
-          icon: _selectedInvoicePdf != null && _selectedInvoicePdf!.filename.toLowerCase().endsWith(".zip") 
-              ? Icons.archive_outlined 
+          subtitle: _selectedInvoicePdf != null
+              ? _selectedInvoicePdf!.filename
+              : "Select PDF Invoice or ZIP Archive",
+          icon: _selectedInvoicePdf != null &&
+                  _selectedInvoicePdf!.filename.toLowerCase().endsWith(".zip")
+              ? Icons.archive_outlined
               : Icons.picture_as_pdf_outlined,
           isSelected: _selectedInvoicePdf != null,
           onTap: () async {
-            final file = await fph.pickFile('.pdf,.zip,application/pdf,application/zip,application/x-zip-compressed');
+            final file = await fph.pickFile(
+                '.pdf,.zip,application/pdf,application/zip,application/x-zip-compressed');
             if (file != null) {
               setState(() {
                 _selectedInvoicePdf = file;
@@ -2274,11 +2452,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
         const SizedBox(height: 16),
         _buildUploadCard(
           title: "Excel Invoice Tracker (.xlsx, .xls, .csv)",
-          subtitle: _selectedExcelFile != null ? _selectedExcelFile!.filename : "Select Excel Tracker File (Optional)",
+          subtitle: _selectedExcelFile != null
+              ? _selectedExcelFile!.filename
+              : "Select Excel Tracker File (Optional)",
           icon: Icons.table_chart_outlined,
           isSelected: _selectedExcelFile != null,
           onTap: () async {
-            final file = await fph.pickFile('.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv');
+            final file = await fph.pickFile(
+                '.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv');
             if (file != null) {
               setState(() {
                 _selectedExcelFile = file;
@@ -2289,7 +2470,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         const SizedBox(height: 16),
         _buildUploadCard(
           title: "Transparent Signature PNG",
-          subtitle: _selectedSignaturePng != null ? _selectedSignaturePng!.filename : "Select signature_transparent.png",
+          subtitle: _selectedSignaturePng != null
+              ? _selectedSignaturePng!.filename
+              : "Select signature_transparent.png",
           icon: Icons.draw_outlined,
           isSelected: _selectedSignaturePng != null,
           onTap: () async {
@@ -2304,7 +2487,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         const SizedBox(height: 16),
         _buildUploadCard(
           title: "Transparent Company Stamp PNG",
-          subtitle: _selectedStampPng != null ? _selectedStampPng!.filename : "Select stamp_transparent.png",
+          subtitle: _selectedStampPng != null
+              ? _selectedStampPng!.filename
+              : "Select stamp_transparent.png",
           icon: Icons.qr_code_scanner_outlined,
           isSelected: _selectedStampPng != null,
           onTap: () async {
@@ -2345,7 +2530,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFFE94057).withOpacity(0.1) : Colors.black26,
+                color: isSelected
+                    ? const Color(0xFFE94057).withOpacity(0.1)
+                    : Colors.black26,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -2372,7 +2559,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     subtitle,
                     style: GoogleFonts.inter(
                       fontSize: 12,
-                      color: isSelected ? Colors.grey.shade300 : Colors.grey.shade600,
+                      color: isSelected
+                          ? Colors.grey.shade300
+                          : Colors.grey.shade600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2381,7 +2570,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
             Icon(
               isSelected ? Icons.check_circle : Icons.arrow_forward_ios,
-              color: isSelected ? const Color(0xFFE94057) : Colors.grey.shade700,
+              color:
+                  isSelected ? const Color(0xFFE94057) : Colors.grey.shade700,
               size: isSelected ? 22 : 14,
             ),
           ],
@@ -2406,12 +2596,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.picture_as_pdf_outlined, color: Colors.grey.shade600, size: 40),
+              Icon(Icons.picture_as_pdf_outlined,
+                  color: Colors.grey.shade600, size: 40),
               const SizedBox(height: 12),
               Text(
                 "Upload a PDF or ZIP to see the placement preview",
                 textAlign: TextAlign.center,
-                style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
+                style: GoogleFonts.inter(
+                    color: Colors.grey.shade500, fontSize: 12),
               ),
             ],
           ),
@@ -2437,7 +2629,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               const SizedBox(height: 16),
               Text(
                 "Generating visual placement preview...",
-                style: GoogleFonts.inter(color: Colors.grey.shade400, fontSize: 12),
+                style: GoogleFonts.inter(
+                    color: Colors.grey.shade400, fontSize: 12),
               ),
             ],
           ),
@@ -2524,11 +2717,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   top: stampT,
                   child: GestureDetector(
                     onPanUpdate: (details) {
-                      final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
-                      final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
+                      final pdfDeltaX =
+                          (details.delta.dx / previewWidth) * 595.0;
+                      final pdfDeltaY =
+                          -(details.delta.dy / previewHeight) * 842.0;
                       setState(() {
-                        _stampX = (_stampX + pdfDeltaX).clamp(0.0, 595.0 - _stampW);
-                        _stampY = (_stampY + pdfDeltaY).clamp(0.0, 842.0 - _stampH);
+                        _stampX =
+                            (_stampX + pdfDeltaX).clamp(0.0, 595.0 - _stampW);
+                        _stampY =
+                            (_stampY + pdfDeltaY).clamp(0.0, 842.0 - _stampH);
                         _selectedPreset = "Custom Placement";
                       });
                     },
@@ -2536,12 +2733,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       width: stampW,
                       height: stampH,
                       decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFFF27121), width: 2),
+                        border: Border.all(
+                            color: const Color(0xFFF27121), width: 2),
                         color: const Color(0xFFF27121).withOpacity(0.2),
                       ),
                       child: _selectedStampPng != null
                           ? Image.memory(
-                              _selectedStampPng!.bytes ?? base64Decode(_selectedStampPng!.base64String!),
+                              _selectedStampPng!.bytes ??
+                                  base64Decode(
+                                      _selectedStampPng!.base64String!),
                               fit: BoxFit.fill,
                             )
                           : const Center(
@@ -2564,8 +2764,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   top: sigT,
                   child: GestureDetector(
                     onPanUpdate: (details) {
-                      final pdfDeltaX = (details.delta.dx / previewWidth) * 595.0;
-                      final pdfDeltaY = -(details.delta.dy / previewHeight) * 842.0;
+                      final pdfDeltaX =
+                          (details.delta.dx / previewWidth) * 595.0;
+                      final pdfDeltaY =
+                          -(details.delta.dy / previewHeight) * 842.0;
                       setState(() {
                         _sigX = (_sigX + pdfDeltaX).clamp(0.0, 595.0 - _sigW);
                         _sigY = (_sigY + pdfDeltaY).clamp(0.0, 842.0 - _sigH);
@@ -2576,12 +2778,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       width: sigW,
                       height: sigH,
                       decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFFE94057), width: 2),
+                        border: Border.all(
+                            color: const Color(0xFFE94057), width: 2),
                         color: const Color(0xFFE94057).withOpacity(0.2),
                       ),
                       child: _selectedSignaturePng != null
                           ? Image.memory(
-                              _selectedSignaturePng!.bytes ?? base64Decode(_selectedSignaturePng!.base64String!),
+                              _selectedSignaturePng!.bytes ??
+                                  base64Decode(
+                                      _selectedSignaturePng!.base64String!),
                               fit: BoxFit.fill,
                             )
                           : const Center(
@@ -2866,7 +3071,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  List<Map<String, dynamic>> _lastDecryptedPdfs = [];
+  List<InvoiceDocument> _lastInvoiceDocuments = [];
+  bool _lastSigningSourceWasZip = false;
 
   Future<void> _signInvoiceProcess() async {
     setState(() {
@@ -2874,148 +3080,40 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      final originalName = _selectedInvoicePdf!.filename;
-      final isZip = originalName.toLowerCase().endsWith(".zip");
+      final result = await _invoiceSignerJobController.sign(
+        sourceFileName: _selectedInvoicePdf!.filename,
+        sourceBase64: _selectedInvoicePdf!.base64String!,
+        signatureBase64: _selectedSignaturePng!.base64String!,
+        stampBase64: _selectedStampPng!.base64String!,
+        placement: SignaturePlacement(
+          stampX: _stampX,
+          stampY: _stampY,
+          signatureX: _sigX,
+          signatureY: _sigY,
+          stampWidth: _stampW,
+          stampHeight: _stampH,
+          signatureWidth: _sigW,
+          signatureHeight: _sigH,
+        ),
+      );
+      _lastInvoiceDocuments = result.documents;
+      _lastSigningSourceWasZip = result.isZip;
+      await fph.saveFileBytes(result.outputBytes, result.outputFileName);
 
-      if (isZip) {
-        final decryptPayload = {
-          "invoiceFile": _selectedInvoicePdf!.base64String,
-          "action": "decrypt",
-        };
-
-        final decryptResponse = await _supabaseService.client.functions.invoke(
-          'sign-stamp-invoice',
-          body: decryptPayload,
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          result.isZip
+              ? SnackBar(
+                  content: Text(
+                      'Batch signing complete! Signed ${result.signedCount} of ${result.documents.length} PDFs. Download started.'),
+                  backgroundColor: Colors.green,
+                )
+              : const SnackBar(
+                  content:
+                      Text('Invoice signed successfully! Download started.'),
+                  backgroundColor: Colors.green,
+                ),
         );
-
-        if (decryptResponse.status != 200 || decryptResponse.data == null) {
-          throw Exception(decryptResponse.data?["error"] ?? "Failed to decrypt CAMS zip. Status: ${decryptResponse.status}");
-        }
-
-        final Map<String, dynamic> responseData = decryptResponse.data is String 
-            ? jsonDecode(decryptResponse.data as String) 
-            : Map<String, dynamic>.from(decryptResponse.data as Map);
-        
-        final List<dynamic> pdfFiles = responseData['files'] ?? [];
-        if (pdfFiles.isEmpty) {
-          throw Exception("No valid PDF invoices found inside the ZIP archive.");
-        }
-        
-        _lastDecryptedPdfs = pdfFiles.cast<Map<String, dynamic>>().toList();
-
-        final outArchive = archive.Archive();
-        final encoder = archive.ZipEncoder(level: archive.Deflate.BEST_COMPRESSION);
-        int signedCount = 0;
-
-        for (final pdfFile in pdfFiles) {
-          final filename = pdfFile['name'] as String;
-          final base64Content = pdfFile['content'] as String;
-
-          final signPayload = {
-            "invoiceFile": base64Content,
-            "signaturePng": _selectedSignaturePng!.base64String,
-            "stampPng": _selectedStampPng!.base64String,
-            "stampX": _stampX.round(),
-            "stampY": _stampY.round(),
-            "sigX": _sigX.round(),
-            "sigY": _sigY.round(),
-            "stampW": _stampW.round(),
-            "stampH": _stampH.round(),
-            "sigW": _sigW.round(),
-            "sigH": _sigH.round(),
-          };
-
-          final signResponse = await _supabaseService.client.functions.invoke(
-            'sign-stamp-invoice',
-            body: signPayload,
-          );
-
-          if (signResponse.status == 200 && signResponse.data != null) {
-            final Map<String, dynamic> signResponseData = signResponse.data is String 
-                ? jsonDecode(signResponse.data as String) 
-                : Map<String, dynamic>.from(signResponse.data as Map);
-            final base64SignedPdf = signResponseData['signedPdf'] as String;
-            final signedBytes = base64Decode(base64SignedPdf);
-            
-            outArchive.addFile(archive.ArchiveFile(
-              filename,
-              signedBytes.length,
-              signedBytes,
-            )..compression = archive.Deflate.BEST_COMPRESSION);
-            signedCount++;
-          } else {
-            final rawBytes = base64Decode(base64Content);
-            outArchive.addFile(archive.ArchiveFile(
-              filename,
-              rawBytes.length,
-              rawBytes,
-            )..compression = archive.Deflate.STORE); // No need to re-compress
-          }
-        }
-
-        final outputBytes = encoder.encode(outArchive);
-        if (outputBytes == null) {
-          throw Exception("Failed to package signed files into output ZIP.");
-        }
-
-        final uint8Bytes = Uint8List.fromList(outputBytes);
-        final outputName = "${originalName.substring(0, originalName.length - 4)}_SIGNED.zip";
-
-        await fph.saveFileBytes(uint8Bytes, outputName);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("Batch signing complete! Signed $signedCount of ${pdfFiles.length} PDFs. Download started."),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-
-      } else {
-        final payload = {
-          "invoiceFile": _selectedInvoicePdf!.base64String,
-          "signaturePng": _selectedSignaturePng!.base64String,
-          "stampPng": _selectedStampPng!.base64String,
-          "stampX": _stampX.round(),
-          "stampY": _stampY.round(),
-          "sigX": _sigX.round(),
-          "sigY": _sigY.round(),
-          "stampW": _stampW.round(),
-          "stampH": _stampH.round(),
-          "sigW": _sigW.round(),
-          "sigH": _sigH.round(),
-        };
-
-        final response = await _supabaseService.client.functions.invoke(
-          'sign-stamp-invoice',
-          body: payload,
-        );
-
-        if (response.status == 200 && response.data != null) {
-          final Map<String, dynamic> responseData = response.data is String 
-              ? jsonDecode(response.data as String) 
-              : Map<String, dynamic>.from(response.data as Map);
-          final base64SignedPdf = responseData['signedPdf'] as String;
-          final uint8Bytes = base64Decode(base64SignedPdf);
-
-          final outputName = originalName.toLowerCase().endsWith(".pdf")
-              ? "${originalName.substring(0, originalName.length - 4)}_SIGNED.pdf"
-              : "${originalName}_SIGNED.pdf";
-
-          await fph.saveFileBytes(uint8Bytes, outputName);
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text("Invoice signed successfully! Download started."),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        } else {
-          throw Exception(response.data?["error"] ?? "Failed to sign invoice. Server returned status code ${response.status}");
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -3066,21 +3164,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
     try {
       final originalExcelName = _selectedExcelFile!.filename;
       final excelBytes = base64Decode(_selectedExcelFile!.base64String!);
-      final zipBytes = base64Decode(_selectedInvoicePdf!.base64String!);
 
       final extIndex = originalExcelName.lastIndexOf('.');
-      final baseName = extIndex != -1 ? originalExcelName.substring(0, extIndex) : originalExcelName;
-      final ext = extIndex != -1 ? originalExcelName.substring(extIndex).toLowerCase() : '.xlsx';
+      final baseName = extIndex != -1
+          ? originalExcelName.substring(0, extIndex)
+          : originalExcelName;
+      final ext = extIndex != -1
+          ? originalExcelName.substring(extIndex).toLowerCase()
+          : '.xlsx';
 
-      final result = await ExcelMetadataUpdater.updateExcelMetadata(
-        excelBytes: excelBytes,
-        zipBytes: zipBytes,
+      final result = await _invoiceSignerJobController.updateCamsTracker(
+        trackerBytes: excelBytes,
         fileExtension: ext,
-        preDecryptedPdfs: _lastDecryptedPdfs,
+        documents: _lastInvoiceDocuments,
+        sourceWasZip: _lastSigningSourceWasZip,
       );
 
-      final uint8Bytes = result['updatedExcel'] as Uint8List;
-      final updatedCount = result['updatedCount'] as int;
+      final uint8Bytes = result.updatedBytes;
+      final updatedCount = result.updatedCount;
       final outputName = "${baseName}_UPDATED$ext";
 
       await fph.saveFileBytes(uint8Bytes, outputName);
@@ -3088,7 +3189,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Excel updated successfully! Populated $updatedCount invoice records. Download started."),
+            content: Text(
+                "Excel updated successfully! Populated $updatedCount invoice records. Download started."),
             backgroundColor: Colors.green,
           ),
         );
@@ -3117,7 +3219,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final isDark = themeProvider.isDarkMode(context);
     final colors = AppThemeColors(isDark);
     final t = languageProvider.translate;
-    
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(28.0),
       child: Column(
@@ -3148,17 +3250,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.cardShadow,
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ]
-            ),
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.cardShadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  )
+                ]),
             child: Column(
               children: [
                 _buildThemeOptionTile(
@@ -3218,17 +3319,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.cardShadow,
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ]
-            ),
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.cardShadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  )
+                ]),
             child: Column(
               children: [
                 _buildWallpaperOptionTile(
@@ -3242,7 +3342,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Divider(color: colors.border, height: 1),
                 _buildWallpaperOptionTile(
                   title: "Golden Wealth Orbs",
-                  subtitle: "Ambient glowing wealth circles and growth trend curves",
+                  subtitle:
+                      "Ambient glowing wealth circles and growth trend curves",
                   icon: Icons.auto_awesome_outlined,
                   option: MoneyWallpaperOption.goldenWealth,
                   themeProvider: themeProvider,
@@ -3288,17 +3389,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              color: colors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colors.border),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.cardShadow,
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                )
-              ]
-            ),
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: colors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.cardShadow,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  )
+                ]),
             child: Column(
               children: [
                 _buildLanguageOptionTile(
@@ -3341,7 +3441,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
-            Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            Icon(icon,
+                color: isSelected ? colors.primary : colors.textSecondary,
+                size: 24),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -3352,7 +3454,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: GoogleFonts.inter(
                       color: colors.textPrimary,
                       fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -3393,7 +3496,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
-            Icon(icon, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            Icon(icon,
+                color: isSelected ? colors.primary : colors.textSecondary,
+                size: 24),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -3404,7 +3509,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: GoogleFonts.inter(
                       color: colors.textPrimary,
                       fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -3444,7 +3550,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           children: [
-            Icon(Icons.language, color: isSelected ? colors.primary : colors.textSecondary, size: 24),
+            Icon(Icons.language,
+                color: isSelected ? colors.primary : colors.textSecondary,
+                size: 24),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -3455,7 +3563,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: GoogleFonts.inter(
                       color: colors.textPrimary,
                       fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -3478,7 +3587,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
   }
-
 }
 
 class NavGrowthChart extends StatelessWidget {
@@ -3537,7 +3645,8 @@ class NavGrowthChart extends StatelessWidget {
           children: [
             Text(
               firstDate,
-              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
+              style:
+                  GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
             ),
             Text(
               "Range: ₹${minVal.toStringAsFixed(2)} - ₹${maxVal.toStringAsFixed(2)}",
@@ -3549,7 +3658,8 @@ class NavGrowthChart extends StatelessWidget {
             ),
             Text(
               lastDate,
-              style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
+              style:
+                  GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 10),
             ),
           ],
         ),
@@ -3611,8 +3721,7 @@ class LineChartPainter extends CustomPainter {
     }
 
     // Draw area path (gradient fill below line)
-    final Path areaPath = Path()
-      ..moveTo(0, height);
+    final Path areaPath = Path()..moveTo(0, height);
     for (final pt in points) {
       areaPath.lineTo(pt.dx, pt.dy);
     }
@@ -3631,17 +3740,19 @@ class LineChartPainter extends CustomPainter {
     canvas.drawPath(areaPath, areaPaint);
 
     // Draw path line (smooth connecting curves)
-    final Path linePath = Path()
-      ..moveTo(points[0].dx, points[0].dy);
+    final Path linePath = Path()..moveTo(points[0].dx, points[0].dy);
     for (int i = 0; i < points.length - 1; i++) {
       final p1 = points[i];
       final p2 = points[i + 1];
       final controlPoint1 = Offset(p1.dx + stepX / 2.0, p1.dy);
       final controlPoint2 = Offset(p2.dx - stepX / 2.0, p2.dy);
       linePath.cubicTo(
-        controlPoint1.dx, controlPoint1.dy,
-        controlPoint2.dx, controlPoint2.dy,
-        p2.dx, p2.dy,
+        controlPoint1.dx,
+        controlPoint1.dy,
+        controlPoint2.dx,
+        controlPoint2.dy,
+        p2.dx,
+        p2.dy,
       );
     }
 
@@ -3674,10 +3785,18 @@ class LineChartPainter extends CustomPainter {
 
 extension PremiumRevealExtension on Widget {
   Widget premiumReveal({required int index, int staggerMs = 150}) {
-    return this.animate(delay: Duration(milliseconds: index * staggerMs))
+    return this
+        .animate(delay: Duration(milliseconds: index * staggerMs))
         .fadeIn(duration: 1000.ms, curve: Curves.easeInOutCubic)
-        .blur(begin: const Offset(10, 10), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic)
-        .slide(begin: const Offset(0, 0.2), end: Offset.zero, duration: 1000.ms, curve: Curves.easeInOutCubic);
+        .blur(
+            begin: const Offset(10, 10),
+            end: Offset.zero,
+            duration: 1000.ms,
+            curve: Curves.easeInOutCubic)
+        .slide(
+            begin: const Offset(0, 0.2),
+            end: Offset.zero,
+            duration: 1000.ms,
+            curve: Curves.easeInOutCubic);
   }
 }
-

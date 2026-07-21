@@ -107,7 +107,7 @@
       }
     };
 
-    window.updateExcelMetadataJS = function(excelBytes, pdfFilesJson, bookType, id) {
+    window.updateExcelMetadataJS = function(excelBytes, pdfFilesJson, fileExtension, id) {
       try {
         let pdfFiles = JSON.parse(pdfFilesJson);
         let bytes = excelBytes;
@@ -166,7 +166,11 @@
           }
         }
 
-        let exportType = 'xlsx';
+        // SheetJS uses `biff8` for the Excel 97-2003 binary workbook format.
+        // Preserve the uploaded tracker format so an `.xls` download contains
+        // a real `.xls` workbook rather than `.xlsx` bytes with an `.xls` name.
+        const normalizedExtension = String(fileExtension || '.xlsx').toLowerCase();
+        const exportType = normalizedExtension === '.xls' ? 'biff8' : 'xlsx';
         const updatedBytes = XLSX.write(workbook, { type: 'array', bookType: exportType });
         window['excel_result_' + id] = { 
           bytes: Array.from(new Uint8Array(updatedBytes)), 

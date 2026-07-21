@@ -32,6 +32,22 @@
 * **In-Memory ZIP Processing**: Extends Deno Edge Function to dynamically extract PDF entries from ZIP archives in-memory, sign/stamp them with configurable placement offsets, compress them back to a new ZIP archive, and return the zipped binary.
 * **Auto Cache-Busting**: Added cache unregistration to `index.html` to prevent Safari and Chrome from serving cached Service Worker builds.
 
+### 1.8 CAMS Invoice Signer Processing Boundary
+* **Shared processing**: ZIP decryption, PDF signing/stamping, repackaging,
+  naming, and downloads are coordinated by the Invoice Signer job controller.
+* **CAMS-only registrar implementation**: CAMS metadata extraction and tracker
+  updates are isolated without changing dashboard controls, Edge Function
+  payloads, or output behavior.
+* **Fixture gate**: Real redacted CAMS tracker/PDF fixtures are required before
+  characterization assertions can be enabled.
+
+### 1.9 CAMS Excel 97-2003 and Open XML Trackers
+* **Format-preserving web updates**: CAMS tracker updates now retain the
+  selected workbook format: `.xls` writes BIFF8 and `.xlsx` writes Open XML.
+* **Unchanged CAMS matching**: The existing `CAMS INVOICE NUMBER` to PDF file
+  name matching, duplicate ordering, unmatched handling, and `FILE NAME`
+  updates share one SheetJS processing loop for both formats.
+
 ---
 
 ## 2. Database Migration Deployment Instructions
