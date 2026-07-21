@@ -28,7 +28,18 @@ For CAMS ZIP jobs, PDF text is extracted once per document and retained for the
 tracker update. The existing tracker matching receives the same ordered
 filename/text inputs without a second PDF.js extraction pass.
 
-KFintech/Karvy is not implemented, selectable, or auto-detected.
+KFintech parsing and tracker-update support are available behind the
+registrar-processor boundary. Progressive internal detection now validates the
+tracker headers, the archive structure, then one sample invoice before a
+registrar is confirmed. The normal workflow routes confirmed CAMS and
+KFintech uploads automatically and reports the source in business-friendly
+language. It does not expose a registrar selector.
+
+For readable ZIP uploads, signing uses the archive manifest to retain archive
+hierarchy, entry order, and non-PDF companion files while replacing only PDFs
+that sign successfully. Password-protected CAMS ZIPs retain the existing
+decryption fallback. A tracker with zero matching invoices does not download an
+unchanged workbook and instead reports that no matching invoices were found.
 
 ## 5. CAMS Tracker Formats
 

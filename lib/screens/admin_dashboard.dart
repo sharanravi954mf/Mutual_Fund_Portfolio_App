@@ -16,9 +16,14 @@ import '../utils/file_picker_helper.dart' as fph;
 import '../features/invoice_signer/invoice_signer_job_controller.dart';
 import '../features/invoice_signer/models/invoice_document.dart';
 import '../features/invoice_signer/models/invoice_job.dart';
+import '../features/invoice_signer/models/processing_report.dart';
+import '../features/invoice_signer/models/registrar_detection_result.dart';
+import '../features/invoice_signer/processors/registrar_processor.dart';
+import '../features/invoice_signer/services/registrar_detection_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:js' as js;
 import 'package:archive/archive.dart' as archive;
 import 'package:http/http.dart' as http;
@@ -2985,6 +2990,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
               });
             },
           ),
+          if (_lastProcessingReport != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _lastProcessingReport!.errors.isNotEmpty
+                  ? 'Invoice source could not be confirmed.'
+                  : 'Invoice source: ${_lastProcessingReport!.invoiceSourceLabel} • ${_lastProcessingReport!.detection.invoicesFound} invoices found',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: _lastProcessingReport!.errors.isNotEmpty
+                    ? Colors.redAccent
+                    : Colors.greenAccent,
+              ),
+            ),
+          ],
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
@@ -3073,8 +3092,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   List<InvoiceDocument> _lastInvoiceDocuments = [];
   bool _lastSigningSourceWasZip = false;
+  final RegistrarDetectionService _registrarDetectionService =
+      RegistrarDetectionService();
+  ProcessingReport? _lastProcessingReport;
 
-  Future<void> _signInvoiceProcess() async {
+  Future<SigningJobResult?> _signInvoiceProcess() async {
     setState(() {
       _signingInvoice = true;
     });
@@ -3115,6 +3137,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
         );
       }
+      return result;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3124,6 +3147,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         );
       }
+      return null;
     } finally {
       if (mounted) {
         setState(() {
@@ -3138,13 +3162,92 @@ class _AdminDashboardState extends State<AdminDashboard> {
       _processingAll = true;
     });
 
+    RegistrarDetectionResult? detection;
     try {
-      await _signInvoiceProcess();
       if (_selectedExcelFile != null) {
-        await _updateExcelProcess();
+        detection = await _detectRegistrar();
+        if (!detection.isConfirmed || detection.registrar == null) {
+          _publishProcessingReport(
+            ProcessingReport(
+              detection: detection,
+              invoicesSigned: 0,
+              trackerRowsUpdated: 0,
+              unmatchedInvoices: 0,
+              errors: const ['Invoice source could not be confirmed.'],
+            ),
+          );
+          return;
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Invoice source: ${_invoiceSourceLabel(detection.registrar!)}. ${detection.invoicesFound} invoices found. Processing invoices…',
+              ),
+            ),
+          );
+        }
       }
-    } catch (e) {
-      // Individual sub-methods catch errors and show snackbars
+
+      final signing = await _signInvoiceProcess();
+      if (signing == null) {
+        if (detection != null) {
+          _publishProcessingReport(
+            ProcessingReport(
+              detection: detection,
+              invoicesSigned: 0,
+              trackerRowsUpdated: 0,
+              unmatchedInvoices: 0,
+              errors: const ['Invoice signing did not complete.'],
+            ),
+          );
+        }
+        return;
+      }
+
+      if (detection != null) {
+        final trackerUpdate = await _updateExcelProcess(detection.registrar!);
+        if (trackerUpdate == null) {
+          _publishProcessingReport(
+            ProcessingReport(
+              detection: detection,
+              invoicesSigned: signing.signedCount,
+              trackerRowsUpdated: 0,
+              unmatchedInvoices: detection.invoicesFound,
+              errors: const ['Tracker update did not complete.'],
+            ),
+          );
+          return;
+        }
+        _publishProcessingReport(
+          ProcessingReport(
+            detection: detection,
+            invoicesSigned: signing.signedCount,
+            trackerRowsUpdated: trackerUpdate.updatedCount,
+            unmatchedInvoices: math.max(
+              0,
+              detection.invoicesFound - trackerUpdate.updatedCount,
+            ),
+            warnings: signing.signedCount < signing.documents.length
+                ? const ['Some invoices could not be signed.']
+                : const [],
+          ),
+        );
+      }
+    } catch (error) {
+      _publishProcessingReport(
+        ProcessingReport(
+          detection: detection ??
+              RegistrarDetectionResult.unknown(
+                reason: 'Unexpected Invoice Signer error: $error',
+              ),
+          invoicesSigned: 0,
+          trackerRowsUpdated: 0,
+          unmatchedInvoices: 0,
+          errors: const ['Invoice processing did not complete.'],
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -3154,8 +3257,39 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  Future<void> _updateExcelProcess() async {
-    if (_selectedExcelFile == null) return;
+  Future<RegistrarDetectionResult> _detectRegistrar() async {
+    return _registrarDetectionService.detect(
+      trackerBytes: base64Decode(_selectedExcelFile!.base64String!),
+      archiveBytes: base64Decode(_selectedInvoicePdf!.base64String!),
+    );
+  }
+
+  String _invoiceSourceLabel(RegistrarType registrar) => switch (registrar) {
+        RegistrarType.cams => 'CAMS',
+        RegistrarType.kfintech => 'KFintech',
+      };
+
+  void _publishProcessingReport(ProcessingReport report) {
+    if (!mounted) return;
+    setState(() => _lastProcessingReport = report);
+    final hasErrors = report.errors.isNotEmpty;
+    final summary = hasErrors
+        ? 'We could not confirm the invoice source. Please upload matching invoice and tracker files.'
+        : report.trackerRowsUpdated == 0 && report.detection.invoicesFound > 0
+            ? 'Invoice source: ${report.invoiceSourceLabel}. No matching invoices found.'
+            : 'Invoice source: ${report.invoiceSourceLabel}. Signed ${report.invoicesSigned} invoices and updated ${report.trackerRowsUpdated} tracker rows.'
+                '${report.unmatchedInvoices > 0 ? ' ${report.unmatchedInvoices} invoices had no tracker match.' : ''}';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(summary),
+        backgroundColor: hasErrors ? Colors.redAccent : Colors.green,
+      ),
+    );
+  }
+
+  Future<ExcelUpdateResult?> _updateExcelProcess(
+      RegistrarType registrar) async {
+    if (_selectedExcelFile == null) return null;
 
     setState(() {
       _updatingExcel = true;
@@ -3173,7 +3307,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ? originalExcelName.substring(extIndex).toLowerCase()
           : '.xlsx';
 
-      final result = await _invoiceSignerJobController.updateCamsTracker(
+      final result = await _invoiceSignerJobController.updateTracker(
+        registrar: registrar,
         trackerBytes: excelBytes,
         fileExtension: ext,
         documents: _lastInvoiceDocuments,
@@ -3183,6 +3318,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final uint8Bytes = result.updatedBytes;
       final updatedCount = result.updatedCount;
       final outputName = "${baseName}_UPDATED$ext";
+
+      if (updatedCount == 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No matching invoices found.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return result;
+      }
 
       await fph.saveFileBytes(uint8Bytes, outputName);
 
@@ -3195,6 +3342,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         );
       }
+      return result;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3204,6 +3352,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         );
       }
+      return null;
     } finally {
       if (mounted) {
         setState(() {

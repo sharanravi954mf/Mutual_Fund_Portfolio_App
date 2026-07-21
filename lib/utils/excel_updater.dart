@@ -7,6 +7,8 @@ import 'dart:js' as js;
 import 'package:excel/excel.dart';
 import 'package:archive/archive.dart' as archive;
 
+import '../features/invoice_signer/models/invoice_metadata.dart';
+
 class ExcelMetadataUpdater {
   static Future<String> extractPdfText(Uint8List pdfBytes) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
@@ -25,6 +27,35 @@ class ExcelMetadataUpdater {
           throw Exception(error);
         }
         return text as String;
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
+  /// Reads only worksheet headers and row counts for progressive detection.
+  /// The browser path deliberately supports both BIFF8 `.xls` and `.xlsx`.
+  static Future<List<Map<String, dynamic>>> readTrackerSummary(
+    Uint8List excelBytes,
+  ) async {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    js.context.callMethod('readTrackerSummaryJS', [excelBytes, id]);
+
+    final key = 'tracker_summary_$id';
+    while (true) {
+      final result = js.context[key];
+      if (result != null) {
+        final error = result['error'];
+        final sheets = result['sheets'] as List<dynamic>? ?? const [];
+        js.context[key] = null;
+        if (error != null) throw Exception(error);
+        return sheets
+            .map(
+              (sheet) => <String, dynamic>{
+                'headers': List<String>.from(sheet['headers'] as List),
+                'dataRowCount': sheet['dataRowCount'] as int? ?? 0,
+              },
+            )
+            .toList();
       }
       await Future.delayed(const Duration(milliseconds: 50));
     }
@@ -305,6 +336,45 @@ class ExcelMetadataUpdater {
         throw Exception(
             "Unsupported Excel format (likely .xls). Please save it as .xlsx and try again, or run the app in a web browser for SheetJS support.");
       }
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateKfintechMetadata({
+    required Uint8List excelBytes,
+    required List<InvoiceMetadata> invoiceMetadata,
+    required String fileExtension,
+  }) async {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final metadataJson = jsonEncode(invoiceMetadata
+        .map((metadata) => {
+              'sourceFileName': metadata.sourceFileName,
+              'invoiceNumber': metadata.invoiceNumber,
+              'invoiceReferenceNumber': metadata.invoiceReferenceNumber,
+              'invoiceDate': metadata.invoiceDate,
+            })
+        .toList());
+    js.context.callMethod('updateKfintechMetadataJS',
+        [excelBytes, metadataJson, fileExtension, id]);
+
+    final key = 'kfintech_excel_result_$id';
+    while (true) {
+      final result = js.context[key];
+      if (result != null) {
+        final error = result['error'];
+        final bytes = result['bytes'] as List<dynamic>?;
+        final count = result['count'] as int? ?? 0;
+        js.context[key] = null;
+        if (error != null) {
+          throw Exception(error);
+        }
+        return {
+          'updatedExcel': bytes == null
+              ? excelBytes
+              : Uint8List.fromList(bytes.cast<int>()),
+          'updatedCount': count,
+        };
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
     }
   }
 

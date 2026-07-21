@@ -182,6 +182,86 @@
         window['excel_result_' + id] = { bytes: null, count: 0, error: err.toString() };
       }
     };
+
+    window.updateKfintechMetadataJS = function(excelBytes, metadataJson, fileExtension, id) {
+      try {
+        const metadata = JSON.parse(metadataJson);
+        const bytes = excelBytes && excelBytes.buffer
+          ? new Uint8Array(excelBytes.buffer)
+          : new Uint8Array(excelBytes);
+        const workbook = XLSX.read(bytes, { type: 'array' });
+        const byReference = new Map();
+        for (const invoice of metadata) {
+          const reference = String(invoice.invoiceReferenceNumber || '').trim().toUpperCase();
+          if (reference && !byReference.has(reference)) byReference.set(reference, invoice);
+        }
+
+        let updatedCount = 0;
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          if (!sheet['!ref']) continue;
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+          if (rows.length < 2) continue;
+          const headers = rows[0].map(value => String(value || '').toLowerCase().trim());
+          const referenceIndex = headers.indexOf('invoice reference no');
+          const invoiceNumberIndex = headers.indexOf('invoice no');
+          const invoiceDateIndex = headers.indexOf('invoice date');
+          const fileNameIndex = headers.indexOf('file name');
+          if ([referenceIndex, invoiceNumberIndex, invoiceDateIndex, fileNameIndex].some(index => index === -1)) continue;
+
+          for (let rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+            const reference = String(rows[rowIndex][referenceIndex] || '').trim().toUpperCase();
+            const invoice = byReference.get(reference);
+            if (!invoice) continue;
+            const setCell = (column, value) => {
+              const cell = XLSX.utils.encode_cell({ c: column, r: rowIndex });
+              sheet[cell] = { t: 's', v: value || '' };
+            };
+            setCell(invoiceNumberIndex, invoice.invoiceNumber);
+            setCell(invoiceDateIndex, invoice.invoiceDate);
+            setCell(fileNameIndex, invoice.sourceFileName);
+            updatedCount++;
+          }
+        }
+
+        const extension = String(fileExtension || '.xlsx').toLowerCase();
+        const bookType = extension === '.xls' ? 'biff8' : 'xlsx';
+        const updatedBytes = XLSX.write(workbook, { type: 'array', bookType });
+        window['kfintech_excel_result_' + id] = {
+          bytes: Array.from(new Uint8Array(updatedBytes)),
+          count: updatedCount,
+          error: null
+        };
+      } catch (err) {
+        console.error('KFintech SheetJS failed:', err);
+        window['kfintech_excel_result_' + id] = { bytes: null, count: 0, error: err.toString() };
+      }
+    };
+
+    window.readTrackerSummaryJS = function(excelBytes, id) {
+      try {
+        const bytes = excelBytes && excelBytes.buffer
+          ? new Uint8Array(excelBytes.buffer)
+          : new Uint8Array(excelBytes);
+        const workbook = XLSX.read(bytes, { type: 'array' });
+        const sheets = [];
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          if (!sheet || !sheet['!ref']) continue;
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+          sheets.push({
+            headers: rows.length === 0
+              ? []
+              : rows[0].map(value => String(value || '').trim()),
+            dataRowCount: Math.max(0, rows.length - 1),
+          });
+        }
+        window['tracker_summary_' + id] = { sheets, error: null };
+      } catch (err) {
+        console.error('SheetJS tracker inspection failed:', err);
+        window['tracker_summary_' + id] = { sheets: [], error: err.toString() };
+      }
+    };
   </script>
 </head>
 <body style="background-color: #0F0C20;">
