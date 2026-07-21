@@ -1,6 +1,7 @@
 // ignore_for_file: uri_does_not_exist
 // ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:js' as js;
 import 'package:excel/excel.dart';
@@ -33,42 +34,65 @@ class ExcelMetadataUpdater {
     required Uint8List excelBytes,
     required Uint8List zipBytes,
     required String fileExtension,
+    List<Map<String, dynamic>>? preDecryptedPdfs,
   }) async {
     // 1. Extract PDFs from ZIP or single PDF
     final pdfFiles = <Map<String, String>>[];
-    final isZip = zipBytes.length > 4 &&
-        zipBytes[0] == 0x50 &&
-        zipBytes[1] == 0x4B &&
-        zipBytes[2] == 0x03 &&
-        zipBytes[3] == 0x04;
-
-    if (isZip) {
-      final dec = archive.ZipDecoder();
-      final archiveFile = dec.decodeBytes(zipBytes);
-      for (final entry in archiveFile.files) {
-        if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
-          if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
-            continue;
-          }
-          final text = await extractPdfText(Uint8List.fromList(entry.content as List<int>));
-          pdfFiles.add({
-            'filename': entry.name.split('/').last,
-            'text': text,
-          });
+    
+    if (preDecryptedPdfs != null && preDecryptedPdfs.isNotEmpty) {
+      for (final pdfFile in preDecryptedPdfs) {
+        final filename = (pdfFile['name'] ?? pdfFile['filename'] ?? '').split('/').last;
+        final base64Content = pdfFile['content'] ?? pdfFile['base64'];
+        if (base64Content != null) {
+           final bytes = base64Decode(base64Content);
+           try {
+             final text = await extractPdfText(bytes);
+             pdfFiles.add({'filename': filename, 'text': text});
+           } catch (e) {
+             // Skip if pdf.js fails on a specific file
+           }
         }
       }
     } else {
-      final text = await extractPdfText(zipBytes);
-      pdfFiles.add({
-        'filename': 'Uploaded_Invoice.pdf',
-        'text': text,
-      });
+      final isZip = zipBytes.length > 4 &&
+          zipBytes[0] == 0x50 &&
+          zipBytes[1] == 0x4B &&
+          zipBytes[2] == 0x03 &&
+          zipBytes[3] == 0x04;
+
+      if (isZip) {
+        final dec = archive.ZipDecoder();
+        try {
+          final archiveFile = dec.decodeBytes(zipBytes);
+          for (final entry in archiveFile.files) {
+            if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
+              if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
+                continue;
+              }
+              final text = await extractPdfText(Uint8List.fromList(entry.content as List<int>));
+              pdfFiles.add({
+                'filename': entry.name.split('/').last,
+                'text': text,
+              });
+            }
+          }
+        } catch (_) {
+          // Fails if password protected and we didn't have preDecryptedPdfs
+        }
+      } else {
+        final text = await extractPdfText(zipBytes);
+        pdfFiles.add({
+          'filename': 'Uploaded_Invoice.pdf',
+          'text': text,
+        });
+      }
     }
 
     try {
       // 2. Try SheetJS (web runtime)
       final id = DateTime.now().microsecondsSinceEpoch.toString();
-      js.context.callMethod('updateExcelMetadataJS', [excelBytes, pdfFiles, fileExtension, id]);
+      final pdfFilesJson = jsonEncode(pdfFiles);
+      js.context.callMethod('updateExcelMetadataJS', [excelBytes, pdfFilesJson, fileExtension, id]);
 
       final key = 'excel_result_$id';
       while (true) {
@@ -90,7 +114,7 @@ class ExcelMetadataUpdater {
         }
         await Future.delayed(const Duration(milliseconds: 50));
       }
-    } catch (_) {
+    } catch (e) {
       // 3. Fallback to standard Dart Excel parser (for mobile/unit tests)
       Excel? excel;
       try {
@@ -121,12 +145,12 @@ class ExcelMetadataUpdater {
           final taxableIndex = _findHeaderIndex(headers, ["taxable income", "taxable income amt", "taxable amt"]);
           final gstAmtIndex = _findHeaderIndex(headers, ["gst amt", "gst amount", "gstamt"]);
 
-          final invoiceNoIndex = _findHeaderIndex(headers, ["invoice no", "invoiceno", "invoice number"]);
-          final invoiceDateIndex = _findHeaderIndex(headers, ["invoice date", "invoicedate"]);
-          final fileNameIndex = _findHeaderIndex(headers, ["file name", "filename"]);
+          final invoiceNoIndex = _findHeaderIndex(headers, ["invoice no", "invoiceno", "invoice number", "cams invoice no", "broker invoice no", "invoice"]);
+          final invoiceDateIndex = _findHeaderIndex(headers, ["invoice date", "invoicedate", "payment month", "month", "date"]);
+          final fileNameIndex = _findHeaderIndex(headers, ["file name", "filename", "file_name"]);
 
           // If we don't have place to write output, skip
-          if (invoiceNoIndex == -1 || invoiceDateIndex == -1) continue;
+          if (invoiceNoIndex == -1 && invoiceDateIndex == -1 && fileNameIndex == -1) continue;
 
           // Match each PDF
           for (final pdfFile in pdfFiles) {
@@ -219,44 +243,7 @@ class ExcelMetadataUpdater {
           'updatedCount': updatedCount,
         };
       } else {
-        // Legacy .xls / CSV Fallback Processor
-        final newExcel = Excel.createExcel();
-        final sheetName = newExcel.sheets.keys.first;
-        final sheet = newExcel[sheetName];
-
-        sheet.appendRow([
-          TextCellValue("AMC Name / Reference"),
-          TextCellValue("Invoice No"),
-          TextCellValue("Invoice Date"),
-          TextCellValue("Filename"),
-        ]);
-
-        for (final pdfFile in pdfFiles) {
-          final text = pdfFile['text']!;
-          final filename = pdfFile['filename']!;
-
-          final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
-          final invNoMatch = invNoRegex.firstMatch(text);
-          final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
-
-          final dateRegex = RegExp(r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})', caseSensitive: false);
-          final dateMatch = dateRegex.firstMatch(text);
-          final invoiceDate = dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
-
-          sheet.appendRow([
-            TextCellValue(filename.split('.').first),
-            TextCellValue(invoiceNo),
-            TextCellValue(invoiceDate),
-            TextCellValue(filename),
-          ]);
-          updatedCount++;
-        }
-
-        final encoded = newExcel.encode();
-        return {
-          'updatedExcel': encoded != null ? Uint8List.fromList(encoded) : excelBytes,
-          'updatedCount': updatedCount,
-        };
+        throw Exception("Unsupported Excel format (likely .xls). Please save it as .xlsx and try again, or run the app in a web browser for SheetJS support.");
       }
     }
   }
@@ -270,6 +257,7 @@ class ExcelMetadataUpdater {
   }
 
   static void _updateCell(Sheet sheet, int row, int col, String value) {
+    if (col == -1) return;
     sheet.updateCell(
       CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row),
       TextCellValue(value),
