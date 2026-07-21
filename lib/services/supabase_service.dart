@@ -29,21 +29,6 @@ class SupabaseService {
   /// Get the current authenticated user metadata
   User? get currentUser => client.auth.currentUser;
 
-  /// Retrieve user role from profiles database table
-  Future<String?> getUserRole(String uid) async {
-    try {
-      final response = await client
-          .from('profiles')
-          .select('role')
-          .eq('user_id', uid)
-          .maybeSingle();
-      if (response == null) return null;
-      return response['role'] as String?;
-    } catch (e) {
-      return null;
-    }
-  }
-
   /// Fetch the latest factsheet for a given mutual fund scheme
   Future<Map<String, dynamic>?> getLatestFactsheet(String fundId) async {
     try {
