@@ -9,6 +9,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
+import '../features/portfolio/data/portfolio_repository.dart';
+import '../features/portfolio/data/supabase_portfolio_repository.dart';
 import '../utils/finance.dart';
 import 'factsheet_dialog.dart';
 import 'rupee_rain_background.dart';
@@ -21,7 +23,9 @@ class ClientDashboard extends StatefulWidget {
 }
 
 class _ClientDashboardState extends State<ClientDashboard> {
-  late Future<Map<String, dynamic>> _portfolioDataFuture;
+  late Future<InvestorPortfolioData> _portfolioDataFuture;
+  final PortfolioRepository _portfolioRepository =
+      SupabasePortfolioRepository(Supabase.instance.client);
   final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
   int _selectedTab = 0; // 0: Portfolio, 1: Factsheets, 2: Settings, 3: About Us, 4: Contact Us
@@ -51,55 +55,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
   }
 
   void _refreshData() {
-    final userId = Provider.of<AuthProvider>(context, listen: false).user?.id;
     setState(() {
-      _portfolioDataFuture = _fetchClientPortfolioData(userId ?? '');
+      _portfolioDataFuture = _portfolioRepository.loadCurrentInvestorPortfolio();
     });
-  }
-
-  Future<Map<String, dynamic>> _fetchClientPortfolioData(String userId) async {
-    final client = Supabase.instance.client;
-
-    // 1. Fetch portfolio metrics
-    final portfolioRes = await client
-        .from('portfolios')
-        .select()
-        .eq('client_id', userId)
-        .maybeSingle();
-
-    final allFundsRes = await client
-        .from('mutual_funds')
-        .select()
-        .order('scheme_name', ascending: true);
-
-    final profileRes = await client
-        .from('profiles')
-        .select()
-        .eq('id', userId)
-        .maybeSingle();
-
-    if (portfolioRes == null) {
-      return {
-        'portfolio': null,
-        'transactions': <Map<String, dynamic>>[],
-        'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
-        'profile': profileRes,
-      };
-    }
-
-    // 2. Fetch transactions joined with mutual_funds
-    final transactionsRes = await client
-        .from('transactions')
-        .select('*, mutual_funds(*)')
-        .eq('portfolio_id', portfolioRes['id'])
-        .order('execution_date', ascending: false);
-
-    return {
-      'portfolio': portfolioRes,
-      'transactions': List<Map<String, dynamic>>.from(transactionsRes ?? []),
-      'all_funds': List<Map<String, dynamic>>.from(allFundsRes ?? []),
-      'profile': profileRes,
-    };
   }
 
   void _onSearchQueryChanged(String query) {
@@ -295,7 +253,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     final colors = AppThemeColors(isDark);
     final t = languageProvider.translate;
 
-    return FutureBuilder<Map<String, dynamic>>(
+    return FutureBuilder<InvestorPortfolioData>(
       future: _portfolioDataFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -323,10 +281,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
         }
 
         final data = snapshot.data;
-        final portfolio = data?['portfolio'] as Map<String, dynamic>?;
-        final transactions = data?['transactions'] as List<Map<String, dynamic>>? ?? [];
-        final allFunds = data?['all_funds'] as List<Map<String, dynamic>>? ?? [];
-        final profile = data?['profile'] as Map<String, dynamic>?;
+        final portfolio = data?.portfolio;
+        final transactions = data?.transactions ?? [];
+        final allFunds = data?.allFunds ?? [];
+        final profile = data?.profile;
         
         final clientName = profile != null && profile['full_name'] != null && (profile['full_name'] as String).trim().isNotEmpty
             ? profile['full_name'] as String
