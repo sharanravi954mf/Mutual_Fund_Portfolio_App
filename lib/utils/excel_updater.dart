@@ -7,6 +7,8 @@ import 'dart:js' as js;
 import 'package:excel/excel.dart';
 import 'package:archive/archive.dart' as archive;
 
+import '../features/invoice_signer/models/invoice_metadata.dart';
+
 class ExcelMetadataUpdater {
   static Future<String> extractPdfText(Uint8List pdfBytes) async {
     final id = DateTime.now().microsecondsSinceEpoch.toString();
@@ -18,7 +20,7 @@ class ExcelMetadataUpdater {
       if (res != null) {
         final error = res['error'];
         final text = res['text'];
-        
+
         js.context[key] = null; // Clean up window object reference
 
         if (error != null) {
@@ -30,27 +32,60 @@ class ExcelMetadataUpdater {
     }
   }
 
+  /// Reads only worksheet headers and row counts for progressive detection.
+  /// The browser path deliberately supports both BIFF8 `.xls` and `.xlsx`.
+  static Future<List<Map<String, dynamic>>> readTrackerSummary(
+    Uint8List excelBytes,
+  ) async {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    js.context.callMethod('readTrackerSummaryJS', [excelBytes, id]);
+
+    final key = 'tracker_summary_$id';
+    while (true) {
+      final result = js.context[key];
+      if (result != null) {
+        final error = result['error'];
+        final sheets = result['sheets'] as List<dynamic>? ?? const [];
+        js.context[key] = null;
+        if (error != null) throw Exception(error);
+        return sheets
+            .map(
+              (sheet) => <String, dynamic>{
+                'headers': List<String>.from(sheet['headers'] as List),
+                'dataRowCount': sheet['dataRowCount'] as int? ?? 0,
+              },
+            )
+            .toList();
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
   static Future<Map<String, dynamic>> updateExcelMetadata({
     required Uint8List excelBytes,
     required Uint8List zipBytes,
     required String fileExtension,
     List<Map<String, dynamic>>? preDecryptedPdfs,
+    List<Map<String, String>>? preExtractedPdfText,
   }) async {
     // 1. Extract PDFs from ZIP or single PDF
     final pdfFiles = <Map<String, String>>[];
-    
-    if (preDecryptedPdfs != null && preDecryptedPdfs.isNotEmpty) {
+
+    if (preExtractedPdfText != null) {
+      pdfFiles.addAll(preExtractedPdfText);
+    } else if (preDecryptedPdfs != null && preDecryptedPdfs.isNotEmpty) {
       for (final pdfFile in preDecryptedPdfs) {
-        final filename = (pdfFile['name'] ?? pdfFile['filename'] ?? '').split('/').last;
+        final filename =
+            (pdfFile['name'] ?? pdfFile['filename'] ?? '').split('/').last;
         final base64Content = pdfFile['content'] ?? pdfFile['base64'];
         if (base64Content != null) {
-           final bytes = base64Decode(base64Content);
-           try {
-             final text = await extractPdfText(bytes);
-             pdfFiles.add({'filename': filename, 'text': text});
-           } catch (e) {
-             // Skip if pdf.js fails on a specific file
-           }
+          final bytes = base64Decode(base64Content);
+          try {
+            final text = await extractPdfText(bytes);
+            pdfFiles.add({'filename': filename, 'text': text});
+          } catch (e) {
+            // Skip if pdf.js fails on a specific file
+          }
         }
       }
     } else {
@@ -66,10 +101,13 @@ class ExcelMetadataUpdater {
           final archiveFile = dec.decodeBytes(zipBytes);
           for (final entry in archiveFile.files) {
             if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
-              if (entry.name.contains('__MACOSX') || entry.name.split('/').last.startsWith('._')) {
+              if (entry.name.contains('__MACOSX') ||
+                  entry.name.split('/').last.startsWith('._')) {
                 continue;
               }
-              final text = await extractPdfText(Uint8List.fromList(entry.content as List<int>));
+              final text = await extractPdfText(
+                Uint8List.fromList(entry.content as List<int>),
+              );
               pdfFiles.add({
                 'filename': entry.name.split('/').last,
                 'text': text,
@@ -92,7 +130,8 @@ class ExcelMetadataUpdater {
       // 2. Try SheetJS (web runtime)
       final id = DateTime.now().microsecondsSinceEpoch.toString();
       final pdfFilesJson = jsonEncode(pdfFiles);
-      js.context.callMethod('updateExcelMetadataJS', [excelBytes, pdfFilesJson, fileExtension, id]);
+      js.context.callMethod('updateExcelMetadataJS',
+          [excelBytes, pdfFilesJson, fileExtension, id]);
 
       final key = 'excel_result_$id';
       while (true) {
@@ -101,14 +140,16 @@ class ExcelMetadataUpdater {
           final error = res['error'];
           final bytes = res['bytes'] as List<dynamic>?;
           final count = res['count'] as int? ?? 0;
-          
+
           js.context[key] = null; // Clean up window object reference
 
           if (error != null) {
             throw Exception(error);
           }
           return {
-            'updatedExcel': bytes != null ? Uint8List.fromList(bytes.cast<int>()) : excelBytes,
+            'updatedExcel': bytes != null
+                ? Uint8List.fromList(bytes.cast<int>())
+                : excelBytes,
             'updatedCount': count,
           };
         }
@@ -138,19 +179,45 @@ class ExcelMetadataUpdater {
           }
 
           // Map header columns
-          final gstrIndex = _findHeaderIndex(headers, ["amc gstr number", "gstr number", "gstin", "amcgstrnumber"]);
-          final refNoIndex = _findHeaderIndex(headers, ["invoice reference no", "invoice ref no", "ref no", "invoicereferenceno"]);
-          final amcIndex = _findHeaderIndex(headers, ["amc", "amc name", "fund house"]);
-          final fundCodeIndex = _findHeaderIndex(headers, ["fund code", "fundcode"]);
-          final taxableIndex = _findHeaderIndex(headers, ["taxable income", "taxable income amt", "taxable amt"]);
-          final gstAmtIndex = _findHeaderIndex(headers, ["gst amt", "gst amount", "gstamt"]);
+          final gstrIndex = _findHeaderIndex(headers,
+              ["amc gstr number", "gstr number", "gstin", "amcgstrnumber"]);
+          final refNoIndex = _findHeaderIndex(headers, [
+            "invoice reference no",
+            "invoice ref no",
+            "ref no",
+            "invoicereferenceno"
+          ]);
+          final amcIndex =
+              _findHeaderIndex(headers, ["amc", "amc name", "fund house"]);
+          final fundCodeIndex =
+              _findHeaderIndex(headers, ["fund code", "fundcode"]);
+          final taxableIndex = _findHeaderIndex(
+              headers, ["taxable income", "taxable income amt", "taxable amt"]);
+          final gstAmtIndex =
+              _findHeaderIndex(headers, ["gst amt", "gst amount", "gstamt"]);
 
-          final invoiceNoIndex = _findHeaderIndex(headers, ["invoice no", "invoiceno", "invoice number", "cams invoice no", "broker invoice no", "invoice"]);
-          final invoiceDateIndex = _findHeaderIndex(headers, ["invoice date", "invoicedate", "payment month", "month", "date"]);
-          final fileNameIndex = _findHeaderIndex(headers, ["file name", "filename", "file_name"]);
+          final invoiceNoIndex = _findHeaderIndex(headers, [
+            "invoice no",
+            "invoiceno",
+            "invoice number",
+            "cams invoice no",
+            "broker invoice no",
+            "invoice"
+          ]);
+          final invoiceDateIndex = _findHeaderIndex(headers, [
+            "invoice date",
+            "invoicedate",
+            "payment month",
+            "month",
+            "date"
+          ]);
+          final fileNameIndex =
+              _findHeaderIndex(headers, ["file name", "filename", "file_name"]);
 
           // If we don't have place to write output, skip
-          if (invoiceNoIndex == -1 && invoiceDateIndex == -1 && fileNameIndex == -1) continue;
+          if (invoiceNoIndex == -1 &&
+              invoiceDateIndex == -1 &&
+              fileNameIndex == -1) continue;
 
           // Match each PDF
           for (final pdfFile in pdfFiles) {
@@ -167,21 +234,27 @@ class ExcelMetadataUpdater {
 
               // GSTR Match
               if (gstrIndex != -1 && gstrIndex < row.length) {
-                final val = row[gstrIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                final val =
+                    row[gstrIndex]?.value?.toString().toLowerCase().trim() ??
+                        '';
                 if (val.isNotEmpty && textLower.contains(val)) score += 100;
               }
 
               // Invoice Ref No Match
               if (refNoIndex != -1 && refNoIndex < row.length) {
-                final val = row[refNoIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                final val =
+                    row[refNoIndex]?.value?.toString().toLowerCase().trim() ??
+                        '';
                 if (val.isNotEmpty && textLower.contains(val)) score += 100;
               }
 
               // AMC Name Match
               if (amcIndex != -1 && amcIndex < row.length) {
-                final val = row[amcIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                final val =
+                    row[amcIndex]?.value?.toString().toLowerCase().trim() ?? '';
                 if (val.isNotEmpty) {
-                  final parts = val.split(RegExp(r'\s+')).where((p) => p.length > 2);
+                  final parts =
+                      val.split(RegExp(r'\s+')).where((p) => p.length > 2);
                   double amcMatchCount = 0;
                   for (final part in parts) {
                     if (textLower.contains(part)) amcMatchCount++;
@@ -193,19 +266,28 @@ class ExcelMetadataUpdater {
 
               // Fund Code Match
               if (fundCodeIndex != -1 && fundCodeIndex < row.length) {
-                final val = row[fundCodeIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                final val = row[fundCodeIndex]
+                        ?.value
+                        ?.toString()
+                        .toLowerCase()
+                        .trim() ??
+                    '';
                 if (val.isNotEmpty && textLower.contains(val)) score += 30;
               }
 
               // Taxable Match
               if (taxableIndex != -1 && taxableIndex < row.length) {
-                final val = row[taxableIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                final val =
+                    row[taxableIndex]?.value?.toString().toLowerCase().trim() ??
+                        '';
                 if (val.isNotEmpty && textLower.contains(val)) score += 15;
               }
 
               // GST Match
               if (gstAmtIndex != -1 && gstAmtIndex < row.length) {
-                final val = row[gstAmtIndex]?.value?.toString().toLowerCase().trim() ?? '';
+                final val =
+                    row[gstAmtIndex]?.value?.toString().toLowerCase().trim() ??
+                        '';
                 if (val.isNotEmpty && textLower.contains(val)) score += 15;
               }
 
@@ -217,14 +299,20 @@ class ExcelMetadataUpdater {
 
             if (bestRowIndex != -1 && highestScore >= 25) {
               // Extract Invoice No (Standard CAMS format regex)
-              final invNoRegex = RegExp(r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)', caseSensitive: false);
+              final invNoRegex = RegExp(
+                  r'(?:invoice|inv|bill)\s*(?:serial\s*)?(?:no|number|ref\s*no)?\.?\s*[:\-\s]\s*([a-zA-Z0-9/\-_]+)',
+                  caseSensitive: false);
               final invNoMatch = invNoRegex.firstMatch(text);
-              final invoiceNo = invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
+              final invoiceNo =
+                  invNoMatch != null ? invNoMatch.group(1)?.trim() ?? '' : '';
 
               // Extract Invoice Date
-              final dateRegex = RegExp(r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})', caseSensitive: false);
+              final dateRegex = RegExp(
+                  r'(?:invoice|inv|bill)?\s*date\s*[:\-\s]\s*([0-9]{2}[/\.\-\s][0-9]{2}[/\.\-\s][0-9]{4}|[0-9]{2}[/\.\-\s][a-zA-Z]{3}[/\.\-\s][0-9]{4})',
+                  caseSensitive: false);
               final dateMatch = dateRegex.firstMatch(text);
-              final invoiceDate = dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
+              final invoiceDate =
+                  dateMatch != null ? dateMatch.group(1)?.trim() ?? '' : '';
 
               // Update cells
               _updateCell(sheet, bestRowIndex, invoiceNoIndex, invoiceNo);
@@ -239,12 +327,54 @@ class ExcelMetadataUpdater {
 
         final updatedExcelBytes = excel.encode();
         return {
-          'updatedExcel': updatedExcelBytes != null ? Uint8List.fromList(updatedExcelBytes) : excelBytes,
+          'updatedExcel': updatedExcelBytes != null
+              ? Uint8List.fromList(updatedExcelBytes)
+              : excelBytes,
           'updatedCount': updatedCount,
         };
       } else {
-        throw Exception("Unsupported Excel format (likely .xls). Please save it as .xlsx and try again, or run the app in a web browser for SheetJS support.");
+        throw Exception(
+            "Unsupported Excel format (likely .xls). Please save it as .xlsx and try again, or run the app in a web browser for SheetJS support.");
       }
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateKfintechMetadata({
+    required Uint8List excelBytes,
+    required List<InvoiceMetadata> invoiceMetadata,
+    required String fileExtension,
+  }) async {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final metadataJson = jsonEncode(invoiceMetadata
+        .map((metadata) => {
+              'sourceFileName': metadata.sourceFileName,
+              'invoiceNumber': metadata.invoiceNumber,
+              'invoiceReferenceNumber': metadata.invoiceReferenceNumber,
+              'invoiceDate': metadata.invoiceDate,
+            })
+        .toList());
+    js.context.callMethod('updateKfintechMetadataJS',
+        [excelBytes, metadataJson, fileExtension, id]);
+
+    final key = 'kfintech_excel_result_$id';
+    while (true) {
+      final result = js.context[key];
+      if (result != null) {
+        final error = result['error'];
+        final bytes = result['bytes'] as List<dynamic>?;
+        final count = result['count'] as int? ?? 0;
+        js.context[key] = null;
+        if (error != null) {
+          throw Exception(error);
+        }
+        return {
+          'updatedExcel': bytes == null
+              ? excelBytes
+              : Uint8List.fromList(bytes.cast<int>()),
+          'updatedCount': count,
+        };
+      }
+      await Future.delayed(const Duration(milliseconds: 50));
     }
   }
 

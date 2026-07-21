@@ -15,3 +15,57 @@ The Invoice Signer allows administrators of Sharan Fincorp to manually upload di
 * Located on the Admin Dashboard under the **Invoice Signer** tab.
 * Left Panel: Three big file selector cards (Invoice PDF/ZIP, Signature PNG, Stamp PNG).
 * Right Panel: Fine-tuning sliders for coordinates and the action button with loading indicators.
+
+## 4. CAMS Processor Boundary
+
+The working CAMS workflow is now represented by a CAMS-only registrar boundary
+in Flutter. ZIP decryption, signing, stamping, repackaging, output naming, and
+download handling remain shared controller/services responsibilities. The CAMS
+processor only extracts invoice metadata and delegates tracker updates to the
+existing updater, preserving its current matching and `FILE NAME` behavior.
+
+For CAMS ZIP jobs, PDF text is extracted once per document and retained for the
+tracker update. The existing tracker matching receives the same ordered
+filename/text inputs without a second PDF.js extraction pass.
+
+KFintech parsing and tracker-update support are available behind the
+registrar-processor boundary. Progressive internal detection now validates the
+tracker headers, the archive structure, then one sample invoice before a
+registrar is confirmed. The normal workflow routes confirmed CAMS and
+KFintech uploads automatically and reports the source in business-friendly
+language. It does not expose a registrar selector.
+
+For readable CAMS ZIP uploads, signing uses the archive manifest to retain
+archive hierarchy, entry order, and non-PDF companion files while replacing
+only PDFs that sign successfully. Password-protected CAMS ZIPs retain the
+existing decryption fallback. KFintech ZIP uploads use that same archive
+manifest to discover PDFs recursively, but deliberately produce one flat ZIP
+containing signed PDFs only. Leaf names are retained where unique; duplicates
+receive a deterministic numeric suffix. A tracker with zero matching invoices
+does not download an unchanged workbook and instead reports that no matching
+invoices were found.
+
+Preview, detection, and processing use the shared PDF-discovery service. The
+preview reads only the first eligible PDF, including one inside a nested ZIP,
+so it can render the existing signature and stamp coordinate overlays without
+extracting every invoice.
+
+## 5. CAMS Tracker Formats
+
+The dashboard accepts `.xls` and `.xlsx` CAMS trackers. On Flutter Web, the
+existing SheetJS processor reads both formats and preserves the uploaded format
+when writing the updated tracker: BIFF8 for `.xls` and Open XML for `.xlsx`.
+Matching, duplicate selection, unmatched handling, and `FILE NAME` updates all
+use the same CAMS processing loop.
+
+The Dart `excel` fallback supports `.xlsx` only. The current Invoice Signer is
+therefore fully format-preserving for its supported web workflow; a future
+native implementation would need an additional legacy-Excel reader/writer for
+identical `.xls` support outside the browser.
+
+## 6. Characterization Fixtures
+
+The real, redacted `.xls` fixture set is `BeforeCams.xls`, `AfterCams.xls`, and
+`UK_ARN-153316_UKM26-27E3.pdf`. Equivalent `.xlsx` fixtures are optional until
+they are approved, but must be added as `BeforeCams.xlsx` and `AfterCams.xlsx`
+together. See `test/fixtures/cams/README.md`.
