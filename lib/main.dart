@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/language_provider.dart';
+import 'features/authentication/presentation/onboarding_screens.dart';
+import 'features/authentication/services/account_state_resolver.dart';
 import 'screens/admin_dashboard.dart';
 import 'screens/client_dashboard.dart';
 import 'screens/login_screen.dart';
@@ -53,9 +55,6 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    final isDark = themeProvider.isDarkMode(context);
-    final colors = AppThemeColors(isDark);
-
     return MaterialApp(
       title: 'Sharan Fincorp',
       debugShowCheckedModeBanner: false,
@@ -74,26 +73,30 @@ class AuthWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
 
-    // 1. Unauthenticated -> Show Login Screen
-    if (!authProvider.isAuthenticated) {
-      return LoginScreen();
-    }
-
-    // 2. Loading Session/Role -> Show Premium Spinner
+    // Session and identity state must resolve before a protected destination.
     if (authProvider.isLoading) {
       return const LoadingScreen();
     }
 
-    // 3. Authenticated -> Route based on profiles role
-    final role = authProvider.role;
-    if (role == 'admin') {
-      return const AdminDashboard();
-    } else if (role == 'client') {
-      return const ClientDashboard();
+    if (!authProvider.isAuthenticated) {
+      return const LoginScreen();
     }
 
-    // 4. Authenticated but Role not found/registered yet
-    return const UnrecognizedRoleScreen();
+    final accountState = authProvider.accountState;
+    if (accountState == null) {
+      return const AccountAccessErrorScreen();
+    }
+
+    switch (const AccountStateResolver().resolve(accountState)) {
+      case ProtectedDestination.advisorDashboard:
+        return const AdminDashboard();
+      case ProtectedDestination.investorDashboard:
+        return const ClientDashboard();
+      case ProtectedDestination.explorer:
+        return const ExplorerHomeScreen();
+      case ProtectedDestination.portfolioLinking:
+        return const PortfolioLinkingScreen();
+    }
   }
 }
 
@@ -140,8 +143,8 @@ class LoadingScreen extends StatelessWidget {
   }
 }
 
-class UnrecognizedRoleScreen extends StatelessWidget {
-  const UnrecognizedRoleScreen({super.key});
+class AccountAccessErrorScreen extends StatelessWidget {
+  const AccountAccessErrorScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -153,10 +156,11 @@ class UnrecognizedRoleScreen extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.warning_amber_rounded, color: Color(0xFFF27121), size: 64),
+              const Icon(Icons.warning_amber_rounded,
+                  color: Color(0xFFF27121), size: 64),
               const SizedBox(height: 24),
               Text(
-                "Role Not Assigned",
+                "Account Setup Unavailable",
                 style: GoogleFonts.outfit(
                   color: Colors.white,
                   fontSize: 22,
@@ -165,7 +169,7 @@ class UnrecognizedRoleScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                "Your account is authenticated, but no matching role has been found in profiles. Please contact your system administrator.",
+                "Your account is authenticated, but its secure account state could not be loaded. Please contact your system administrator.",
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   color: Colors.grey.shade400,
@@ -178,7 +182,8 @@ class UnrecognizedRoleScreen extends StatelessWidget {
                 label: const Text("Sign Out"),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFE94057),
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
                 onPressed: () {
                   authProvider.signOut();
