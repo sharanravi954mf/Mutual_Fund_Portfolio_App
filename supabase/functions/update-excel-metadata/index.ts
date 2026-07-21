@@ -3,6 +3,7 @@ import * as zip from "npm:@zip.js/zip.js";
 import * as XLSX from "npm:xlsx";
 import { extractText, getDocumentProxy } from "npm:unpdf";
 import { encode as base64Encode } from "https://deno.land/std@0.177.0/encoding/base64.ts";
+import { requireAdvisor } from "../_shared/authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,6 +56,17 @@ serve(async (req) => {
 
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  }
+
+  const authorization = await requireAdvisor(req);
+  if ("failure" in authorization) {
+    return new Response(
+      JSON.stringify({ error: authorization.failure.message }),
+      {
+        status: authorization.failure.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   }
 
   try {

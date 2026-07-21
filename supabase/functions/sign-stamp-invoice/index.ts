@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import * as zip from "npm:@zip.js/zip.js";
 import { encode as base64Encode } from "https://deno.land/std@0.177.0/encoding/base64.ts";
+import { requireAdvisor, requireAuthenticated } from "../_shared/authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +16,15 @@ function base64ToUint8Array(base64: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+function isAllowedFundApiUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname === "api.mfapi.in";
+  } catch {
+    return false;
+  }
 }
 
 async function signSinglePdf(
@@ -86,13 +96,31 @@ serve(async (req) => {
     } = await req.json();
 
     if (action === "proxy-get") {
+      const authorization = await requireAuthenticated(req);
+      if ("failure" in authorization) {
+        return new Response(
+          JSON.stringify({ error: authorization.failure.message }),
+          {
+            status: authorization.failure.status,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
       if (!url) {
         return new Response(
           JSON.stringify({ error: "Missing target url for proxy" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      console.log(`Proxying GET request for URL: ${url}`);
+      if (!isAllowedFundApiUrl(url)) {
+        return new Response(
+          JSON.stringify({ error: "Unsupported fund data source." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      console.log("Proxying approved mutual-fund data request.");
       const res = await fetch(url);
       const resText = await res.text();
       return new Response(resText, {
@@ -101,6 +129,17 @@ serve(async (req) => {
           "Content-Type": "application/json" 
         }
       });
+    }
+
+    const authorization = await requireAdvisor(req);
+    if ("failure" in authorization) {
+      return new Response(
+        JSON.stringify({ error: authorization.failure.message }),
+        {
+          status: authorization.failure.status,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const fileBase64 = invoiceFile || invoicePdf;
