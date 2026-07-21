@@ -2,29 +2,28 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../../services/supabase_service.dart';
-import 'models/archive_manifest.dart';
 import 'models/invoice_document.dart';
 import 'models/invoice_job.dart';
 import 'processors/cams_processor.dart';
 import 'processors/kfintech_processor.dart';
-import 'processors/pdf_processor.dart';
 import 'processors/registrar_processor.dart';
 import 'processors/signature_engine.dart';
 import 'processors/zip_processor.dart';
+import 'services/invoice_pdf_discovery_service.dart';
 
 class InvoiceSignerJobController {
-  final PdfProcessor _pdfProcessor;
   final SignatureEngine _signatureEngine;
   final ZipProcessor _zipProcessor;
   final CamsProcessor _camsProcessor;
   final KfintechProcessor _kfintechProcessor;
+  final InvoicePdfDiscoveryService _pdfDiscoveryService;
 
   InvoiceSignerJobController(SupabaseService supabaseService)
-      : _pdfProcessor = const PdfProcessor(),
-        _signatureEngine = SignatureEngine(supabaseService),
+      : _signatureEngine = SignatureEngine(supabaseService),
         _zipProcessor = ZipProcessor(supabaseService),
         _camsProcessor = CamsProcessor(),
-        _kfintechProcessor = KfintechProcessor();
+        _kfintechProcessor = KfintechProcessor(),
+        _pdfDiscoveryService = const InvoicePdfDiscoveryService();
 
   Future<SigningJobResult> sign({
     required String sourceFileName,
@@ -32,34 +31,29 @@ class InvoiceSignerJobController {
     required String signatureBase64,
     required String stampBase64,
     required SignaturePlacement placement,
+    RegistrarType? registrar,
   }) async {
     final isZip = sourceFileName.toLowerCase().endsWith('.zip');
-    ArchiveManifest? archiveManifest;
-    List<ArchivePdfEntry>? archivePdfEntries;
     final sourceBytes = base64Decode(sourceBase64);
-    if (isZip) {
-      try {
-        archiveManifest = ArchiveManifest.decode(sourceBytes);
-        archivePdfEntries = archiveManifest.pdfEntries;
-      } catch (_) {
-        // Retain the existing CAMS decrypt path for encrypted ZIP archives.
-      }
+    InvoicePdfDiscoveryResult? discovered;
+    try {
+      discovered = _pdfDiscoveryService.discoverAll(
+        sourceFileName: sourceFileName,
+        sourceBytes: sourceBytes,
+      );
+    } catch (_) {
+      if (!isZip) rethrow;
+      // Retain the existing CAMS decrypt path for encrypted ZIP archives.
     }
     final originalDocuments =
-        archivePdfEntries != null && archivePdfEntries.isNotEmpty
-            ? archivePdfEntries
-                .map(
-                  (entry) => InvoiceDocument(
-                    sourceFileName: entry.sourceFileName,
-                    pdfBytes: entry.pdfBytes,
-                  ),
-                )
-                .toList()
+        discovered != null && discovered.documents.isNotEmpty
+            ? discovered.documents
             : isZip
                 ? await _zipProcessor.decrypt(sourceBase64)
-                : [
-                    _pdfProcessor.createDocument(sourceFileName, sourceBytes),
-                  ];
+                : <InvoiceDocument>[];
+    if (originalDocuments.isEmpty) {
+      throw Exception('No eligible PDF invoices found.');
+    }
     final outputDocuments = <InvoiceDocument>[];
     final signedNames = <String>{};
     final signedIndexes = <int>{};
@@ -83,18 +77,22 @@ class InvoiceSignerJobController {
     }
 
     if (isZip) {
-      final outputBytes = archiveManifest != null &&
-              archivePdfEntries != null &&
-              archivePdfEntries.isNotEmpty
-          ? archiveManifest.rebuild({
-              for (final index in signedIndexes)
-                archivePdfEntries[index].archivePath:
-                    outputDocuments[index].pdfBytes,
-            })
-          : _zipProcessor.package(
-              documents: outputDocuments,
-              signedFileNames: signedNames,
-            );
+      final outputBytes = registrar == RegistrarType.kfintech
+          ? ZipProcessor.packageFlatSignedPdfs([
+              for (final index in signedIndexes) outputDocuments[index],
+            ])
+          : discovered?.archiveManifest != null &&
+                  discovered?.archivePdfEntries != null &&
+                  discovered!.archivePdfEntries!.isNotEmpty
+              ? discovered.archiveManifest!.rebuild({
+                  for (final index in signedIndexes)
+                    discovered.archivePdfEntries![index].archivePath:
+                        outputDocuments[index].pdfBytes,
+                })
+              : _zipProcessor.package(
+                  documents: outputDocuments,
+                  signedFileNames: signedNames,
+                );
       return SigningJobResult(
         outputBytes: outputBytes,
         outputFileName:

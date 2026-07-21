@@ -35,11 +35,20 @@ registrar is confirmed. The normal workflow routes confirmed CAMS and
 KFintech uploads automatically and reports the source in business-friendly
 language. It does not expose a registrar selector.
 
-For readable ZIP uploads, signing uses the archive manifest to retain archive
-hierarchy, entry order, and non-PDF companion files while replacing only PDFs
-that sign successfully. Password-protected CAMS ZIPs retain the existing
-decryption fallback. A tracker with zero matching invoices does not download an
-unchanged workbook and instead reports that no matching invoices were found.
+For readable CAMS ZIP uploads, signing uses the archive manifest to retain
+archive hierarchy, entry order, and non-PDF companion files while replacing
+only PDFs that sign successfully. Password-protected CAMS ZIPs retain the
+existing decryption fallback. KFintech ZIP uploads use that same archive
+manifest to discover PDFs recursively, but deliberately produce one flat ZIP
+containing signed PDFs only. Leaf names are retained where unique; duplicates
+receive a deterministic numeric suffix. A tracker with zero matching invoices
+does not download an unchanged workbook and instead reports that no matching
+invoices were found.
+
+Preview, detection, and processing use the shared PDF-discovery service. The
+preview reads only the first eligible PDF, including one inside a nested ZIP,
+so it can render the existing signature and stamp coordinate overlays without
+extracting every invoice.
 
 ## 5. CAMS Tracker Formats
 

@@ -20,12 +20,12 @@ import '../features/invoice_signer/models/processing_report.dart';
 import '../features/invoice_signer/models/registrar_detection_result.dart';
 import '../features/invoice_signer/processors/registrar_processor.dart';
 import '../features/invoice_signer/services/registrar_detection_service.dart';
+import '../features/invoice_signer/services/invoice_pdf_discovery_service.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:js' as js;
-import 'package:archive/archive.dart' as archive;
 import 'package:http/http.dart' as http;
 
 class AdminDashboard extends StatefulWidget {
@@ -95,11 +95,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
   String _selectedPreset = "CAMS Distributor (Default)";
   Uint8List? _pdfPreviewBytes;
   bool _loadingPreview = false;
+  String? _previewError;
+  final InvoicePdfDiscoveryService _pdfDiscoveryService =
+      const InvoicePdfDiscoveryService();
 
   Future<void> _generatePdfPreview() async {
     if (_selectedInvoicePdf == null) {
       setState(() {
         _pdfPreviewBytes = null;
+        _previewError = null;
       });
       return;
     }
@@ -107,6 +111,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     setState(() {
       _loadingPreview = true;
       _pdfPreviewBytes = null;
+      _previewError = null;
     });
 
     try {
@@ -117,39 +122,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
         rawBytes = base64Decode(_selectedInvoicePdf!.base64String!);
       }
 
-      if (rawBytes != null) {
-        Uint8List? pdfBytes;
-        final filename = _selectedInvoicePdf!.filename.toLowerCase();
-        if (filename.endsWith('.pdf')) {
-          pdfBytes = rawBytes;
-        } else if (filename.endsWith('.zip')) {
-          final dec = archive.ZipDecoder();
-          final archiveFile = dec.decodeBytes(rawBytes);
-          for (final entry in archiveFile.files) {
-            if (entry.isFile && entry.name.toLowerCase().endsWith('.pdf')) {
-              if (entry.name.contains('__MACOSX') ||
-                  entry.name.split('/').last.startsWith('._')) {
-                continue;
-              }
-              pdfBytes = Uint8List.fromList(entry.content as List<int>);
-              break;
-            }
-          }
-        }
-
-        if (pdfBytes != null) {
-          final preview = await _renderPdfPage(pdfBytes);
-          setState(() {
-            _pdfPreviewBytes = preview;
-          });
-        }
+      if (rawBytes == null) {
+        throw const FormatException('The uploaded invoice could not be read.');
       }
-    } catch (e) {
-      print("Failed to generate PDF preview: $e");
+      final document = _pdfDiscoveryService.discoverFirst(
+        sourceFileName: _selectedInvoicePdf!.filename,
+        sourceBytes: rawBytes,
+      );
+      final preview = await _renderPdfPage(document.pdfBytes);
+      if (mounted) {
+        setState(() {
+          _pdfPreviewBytes = preview;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _previewError = 'Preview unavailable for this invoice file.';
+        });
+      }
     } finally {
-      setState(() {
-        _loadingPreview = false;
-      });
+      if (mounted) setState(() => _loadingPreview = false);
     }
   }
 
@@ -2653,7 +2646,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
         child: Center(
           child: Text(
-            "Could not load PDF page preview",
+            _previewError ?? 'Could not load PDF page preview',
             style: GoogleFonts.inter(color: Colors.grey.shade500, fontSize: 12),
           ),
         ),
@@ -3096,7 +3089,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       RegistrarDetectionService();
   ProcessingReport? _lastProcessingReport;
 
-  Future<SigningJobResult?> _signInvoiceProcess() async {
+  Future<SigningJobResult?> _signInvoiceProcess(
+      {RegistrarType? registrar}) async {
     setState(() {
       _signingInvoice = true;
     });
@@ -3107,6 +3101,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         sourceBase64: _selectedInvoicePdf!.base64String!,
         signatureBase64: _selectedSignaturePng!.base64String!,
         stampBase64: _selectedStampPng!.base64String!,
+        registrar: registrar,
         placement: SignaturePlacement(
           stampX: _stampX,
           stampY: _stampY,
@@ -3190,7 +3185,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         }
       }
 
-      final signing = await _signInvoiceProcess();
+      final signing =
+          await _signInvoiceProcess(registrar: detection?.registrar);
       if (signing == null) {
         if (detection != null) {
           _publishProcessingReport(

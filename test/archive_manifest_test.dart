@@ -4,6 +4,8 @@ import 'package:archive/archive.dart' as archive;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mutual_fund_portfolio_app/features/invoice_signer/models/archive_manifest.dart';
+import 'package:mutual_fund_portfolio_app/features/invoice_signer/models/invoice_document.dart';
+import 'package:mutual_fund_portfolio_app/features/invoice_signer/processors/zip_processor.dart';
 
 void main() {
   Uint8List buildZip(Map<String, List<int>> entries) {
@@ -94,5 +96,26 @@ void main() {
         .toList();
 
     expect(names, orderedEquals(['first.txt', 'invoice.pdf', 'last.txt']));
+  });
+
+  test('flat KFintech output contains only signed PDFs with unique names', () {
+    final flattened = ZipProcessor.packageFlatSignedPdfs([
+      InvoiceDocument(
+        sourceFileName: 'invoice.pdf',
+        pdfBytes: Uint8List.fromList('%PDF-one'.codeUnits),
+      ),
+      InvoiceDocument(
+        sourceFileName: 'invoice.pdf',
+        pdfBytes: Uint8List.fromList('%PDF-two'.codeUnits),
+      ),
+    ]);
+    final outputNames = archive.ZipDecoder()
+        .decodeBytes(flattened)
+        .files
+        .where((entry) => entry.isFile)
+        .map((entry) => entry.name)
+        .toList();
+
+    expect(outputNames, orderedEquals(['invoice.pdf', 'invoice_2.pdf']));
   });
 }

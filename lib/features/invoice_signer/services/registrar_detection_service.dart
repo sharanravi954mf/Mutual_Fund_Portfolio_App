@@ -5,6 +5,7 @@ import 'package:archive/archive.dart' as archive;
 import '../../../utils/excel_updater.dart';
 import '../models/archive_manifest.dart';
 import '../models/registrar_detection_result.dart';
+import 'invoice_pdf_discovery_service.dart';
 import 'registrar_detection_rules.dart';
 
 typedef TrackerSummaryReader = Future<List<TrackerSheetSummary>> Function(
@@ -19,12 +20,14 @@ typedef PdfTextExtractor = Future<String> Function(Uint8List pdfBytes);
 class RegistrarDetectionService {
   final TrackerSummaryReader _readTracker;
   final PdfTextExtractor _extractPdfText;
+  final InvoicePdfDiscoveryService _pdfDiscoveryService;
 
   RegistrarDetectionService({
     TrackerSummaryReader? readTracker,
     PdfTextExtractor? extractPdfText,
   })  : _readTracker = readTracker ?? _readTrackerSummary,
-        _extractPdfText = extractPdfText ?? ExcelMetadataUpdater.extractPdfText;
+        _extractPdfText = extractPdfText ?? ExcelMetadataUpdater.extractPdfText,
+        _pdfDiscoveryService = const InvoicePdfDiscoveryService();
 
   static Future<List<TrackerSheetSummary>> _readTrackerSummary(
     Uint8List trackerBytes,
@@ -53,32 +56,29 @@ class RegistrarDetectionService {
     if (tracker.status == RegistrarDetectionStatus.unknown) return tracker;
 
     // Stage 2: validate the expected archive shape before PDF.js work.
-    ArchiveManifest? manifest;
-    List<ArchivePdfEntry> pdfEntries;
+    InvoicePdfDiscoveryResult discovery;
     ArchiveStructureSummary archiveStructure;
-    if (_isPdf(archiveBytes)) {
-      pdfEntries = [
-        ArchivePdfEntry(
-          archivePath: 'Uploaded_Invoice.pdf',
-          sourceFileName: 'Uploaded_Invoice.pdf',
-          pdfBytes: archiveBytes,
-        ),
-      ];
+    try {
+      discovery = _pdfDiscoveryService.discoverAll(
+        sourceFileName: 'Uploaded_Invoice.pdf',
+        sourceBytes: archiveBytes,
+      );
+    } catch (error) {
+      return RegistrarDetectionResult.unknown(
+        trackerRows: tracker.trackerRows,
+        reason: 'Unable to read the invoice archive: $error',
+      );
+    }
+    if (discovery.archiveManifest == null) {
       archiveStructure = const ArchiveStructureSummary(
         pdfArchivePaths: ['Uploaded_Invoice.pdf'],
         nestedInvoiceBundleCount: 0,
       );
     } else {
-      try {
-        manifest = ArchiveManifest.decode(archiveBytes);
-      } catch (error) {
-        return RegistrarDetectionResult.unknown(
-          trackerRows: tracker.trackerRows,
-          reason: 'Unable to read the invoice archive: $error',
-        );
-      }
-      pdfEntries = manifest.pdfEntries;
-      archiveStructure = _inspectArchiveStructure(manifest, archiveBytes);
+      archiveStructure = _inspectArchiveStructure(
+        discovery.archiveManifest!,
+        archiveBytes,
+      );
     }
     final archive = RegistrarDetectionRules.validateArchive(
       trackerResult: tracker,
@@ -88,7 +88,7 @@ class RegistrarDetectionService {
 
     // Stage 3: one invoice is sufficient because the first two stages already
     // supplied multiple registrar-specific indicators.
-    final sample = pdfEntries.first;
+    final sample = discovery.documents.first;
     try {
       return RegistrarDetectionRules.confirmPdf(
         archiveResult: archive,
@@ -102,13 +102,6 @@ class RegistrarDetectionService {
       );
     }
   }
-
-  static bool _isPdf(Uint8List bytes) =>
-      bytes.length >= 4 &&
-      bytes[0] == 0x25 &&
-      bytes[1] == 0x50 &&
-      bytes[2] == 0x44 &&
-      bytes[3] == 0x46;
 
   static ArchiveStructureSummary _inspectArchiveStructure(
     ArchiveManifest manifest,

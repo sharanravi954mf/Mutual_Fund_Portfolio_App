@@ -57,4 +57,36 @@ class ZipProcessor {
     }
     return Uint8List.fromList(bytes);
   }
+
+  static Uint8List packageFlatSignedPdfs(List<InvoiceDocument> documents) {
+    final output = archive.Archive();
+    final usedNames = <String, int>{};
+    for (final document in documents) {
+      final filename = _uniqueFileName(document.sourceFileName, usedNames);
+      output.addFile(archive.ArchiveFile(
+        filename,
+        document.pdfBytes.length,
+        document.pdfBytes,
+      )..compress = true);
+    }
+    final bytes = archive.ZipEncoder().encode(
+      output,
+      level: archive.Deflate.BEST_COMPRESSION,
+    );
+    if (bytes == null) {
+      throw Exception('Failed to package signed PDFs into output ZIP.');
+    }
+    return Uint8List.fromList(bytes);
+  }
+
+  static String _uniqueFileName(
+      String sourceFileName, Map<String, int> usedNames) {
+    final count = usedNames.update(sourceFileName, (value) => value + 1,
+        ifAbsent: () => 1);
+    if (count == 1) return sourceFileName;
+    final dot = sourceFileName.lastIndexOf('.');
+    final base = dot == -1 ? sourceFileName : sourceFileName.substring(0, dot);
+    final extension = dot == -1 ? '' : sourceFileName.substring(dot);
+    return '${base}_$count$extension';
+  }
 }

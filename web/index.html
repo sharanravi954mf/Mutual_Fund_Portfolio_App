@@ -38,14 +38,7 @@
     window.extractPdfText = function(pdfBytes, id) {
       try {
         // Convert pdfBytes to Uint8Array safely
-        let bytes = pdfBytes;
-        if (pdfBytes && pdfBytes.buffer) {
-          bytes = new Uint8Array(pdfBytes.buffer);
-        } else if (pdfBytes && pdfBytes.bytes) {
-          bytes = new Uint8Array(pdfBytes.bytes);
-        } else {
-          bytes = new Uint8Array(pdfBytes);
-        }
+        const bytes = new Uint8Array(pdfBytes);
 
         pdfjsLib.getDocument({ data: bytes }).promise.then(async function(pdf) {
           let fullText = "";
@@ -68,14 +61,7 @@
 
     window.renderPdfPageToImage = function(pdfBytes, pageNum, id) {
       try {
-        let bytes = pdfBytes;
-        if (pdfBytes && pdfBytes.buffer) {
-          bytes = new Uint8Array(pdfBytes.buffer);
-        } else if (pdfBytes && pdfBytes.bytes) {
-          bytes = new Uint8Array(pdfBytes.bytes);
-        } else {
-          bytes = new Uint8Array(pdfBytes);
-        }
+        const bytes = new Uint8Array(pdfBytes);
 
         pdfjsLib.getDocument({ data: bytes }).promise.then(async function(pdf) {
           let targetPage = pageNum;
@@ -96,6 +82,8 @@
           }).promise;
 
           const dataUrl = canvas.toDataURL('image/png');
+          page.cleanup();
+          pdf.cleanup();
           window['pdf_render_result_' + id] = { dataUrl: dataUrl, error: null };
         }).catch(function(err) {
           console.error("PDFJS render failed:", err);
