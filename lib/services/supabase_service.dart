@@ -13,9 +13,11 @@ class SupabaseService {
     final isPhone = RegExp(r'^\d{3}').hasMatch(trimmed);
     if (isPhone) {
       final phone = trimmed.startsWith('+') ? trimmed : '+91$trimmed';
-      return await client.auth.signInWithPassword(phone: phone, password: password);
+      return await client.auth
+          .signInWithPassword(phone: phone, password: password);
     } else {
-      return await client.auth.signInWithPassword(email: trimmed, password: password);
+      return await client.auth
+          .signInWithPassword(email: trimmed, password: password);
     }
   }
 
@@ -33,7 +35,7 @@ class SupabaseService {
       final response = await client
           .from('profiles')
           .select('role')
-          .eq('id', uid)
+          .eq('user_id', uid)
           .maybeSingle();
       if (response == null) return null;
       return response['role'] as String?;
@@ -61,7 +63,9 @@ class SupabaseService {
   /// Upsert a factsheet for a given mutual fund (Admin only)
   Future<bool> upsertFactsheet(Map<String, dynamic> data) async {
     try {
-      await client.from('fund_factsheets').upsert(data, onConflict: 'mutual_fund_id,month_year');
+      await client
+          .from('fund_factsheets')
+          .upsert(data, onConflict: 'mutual_fund_id,month_year');
       return true;
     } catch (e) {
       return false;
