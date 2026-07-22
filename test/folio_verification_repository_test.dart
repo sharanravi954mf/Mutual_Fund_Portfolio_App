@@ -71,6 +71,79 @@ void main() {
     expect(result.items.single.maskedFolio, '••••5678');
   });
 
+  test('forwards Advisor queue filtering to the assignment-safe RPC', () async {
+    final source = _FakeDatasource([
+      [
+        {
+          'request_id': 'request-advisor',
+          'version': 2,
+          'investor_display_label': 'Investor request',
+          'registrar_display': 'CAMS',
+          'masked_folio': '••••4321',
+          'holder_relationship': 'SOLE_HOLDER',
+          'status': 'under_review',
+          'submitted_at': '2026-07-23T10:15:00Z',
+          'updated_at': '2026-07-23T10:16:00Z',
+        }
+      ]
+    ]);
+    final repository = SupabaseFolioVerificationRepository(source);
+
+    final result = await repository.getAssignedFolioQueue(
+      const FolioQueueFilter(
+        page: 1,
+        pageSize: 10,
+        status: FolioVerificationStatus.underReview,
+      ),
+    );
+
+    expect(source.calls.single.function, 'get_my_advisor_folio_requests');
+    expect(source.calls.single.params, {
+      'p_page': 1,
+      'p_page_size': 10,
+      'p_status': 'under_review',
+    });
+    expect(result.items.single.maskedFolio, '••••4321');
+    expect(result.items.single.registrarDisplay, 'CAMS');
+  });
+
+  test('maps assignment-safe Advisor detail without calling generic history',
+      () async {
+    final source = _FakeDatasource([
+      [
+        {
+          'request_id': 'request-advisor',
+          'version': 2,
+          'investor_display_label': 'Investor request',
+          'registrar_display': 'CAMS',
+          'masked_folio': '••••4321',
+          'holder_relationship': 'SOLE_HOLDER',
+          'status': 'under_review',
+          'event_summary': const [],
+        }
+      ]
+    ]);
+    final repository = SupabaseFolioVerificationRepository(source);
+
+    final detail =
+        await repository.getAssignedFolioRequestDetail('request-advisor');
+
+    expect(source.calls.single.function, 'get_my_advisor_folio_request_detail');
+    expect(source.calls.single.params, {'p_request_id': 'request-advisor'});
+    expect(detail.history, isEmpty);
+  });
+
+  test('uses the dedicated folio history RPC rather than generic history',
+      () async {
+    final source = _FakeDatasource([const []]);
+    final repository = SupabaseFolioVerificationRepository(source);
+
+    await repository.getHistory('request-public-id');
+
+    expect(source.calls.single.function, 'get_folio_verification_events');
+    expect(source.calls.single.params, {'p_request_id': 'request-public-id'});
+  });
+
   test('preserves typed failures from the safe-list RPC', () async {
     const failure =
         FolioVerificationFailure(FolioVerificationFailureCode.permissionDenied);

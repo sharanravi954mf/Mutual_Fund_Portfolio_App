@@ -105,5 +105,27 @@ class FolioTestRepository
       run(FolioVerificationPage(
           items: const [], page: f.page, pageSize: f.pageSize));
   @override
+  Future<FolioVerificationPage<AdvisorFolioVerificationQueueItem>>
+      getAssignedFolioQueue(FolioQueueFilter filter) => run(
+            FolioVerificationPage(
+              items: const [],
+              page: filter.page,
+              pageSize: filter.pageSize,
+            ),
+          );
+  @override
+  Future<AdvisorFolioVerificationDetail> getAssignedFolioRequestDetail(
+          String requestId) =>
+      run(const AdvisorFolioVerificationDetail(
+        requestId: 'request',
+        version: 1,
+        investorDisplayLabel: 'Investor request',
+        registrarDisplay: 'CAMS',
+        maskedFolio: '••••1234',
+        holderRelationship: FolioHolderRelationship.soleHolder,
+        status: FolioVerificationStatus.pendingAdvisorReview,
+        history: [],
+      ));
+  @override
   Future<FolioGrantSummary?> getGrantSummary(String id) => run(null);
 }

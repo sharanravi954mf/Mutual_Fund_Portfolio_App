@@ -72,8 +72,7 @@ void main() {
             const FolioVerificationDecisionCommand(
                 requestId: 'request',
                 expectedVersion: 1,
-                correlationId: 'cmd-invalid',
-                reasonCode: '  ')),
+                correlationId: 'cmd-invalid')),
         throwsA(isA<FolioVerificationApplicationFailure>()));
     expect(repo.calls, 0);
   });
@@ -94,17 +93,17 @@ void main() {
         requestId: 'request',
         expectedVersion: 1,
         correlationId: 'more',
-        reasonCode: 'INFO'));
+        reasonCode: FolioReviewReasonCode.folioDocumentRequired));
     await service.approve(const FolioVerificationDecisionCommand(
         requestId: 'request',
         expectedVersion: 1,
         correlationId: 'approve',
-        reasonCode: 'SOLE_HOLDER_CONFIRMED'));
+        reasonCode: FolioReviewReasonCode.verifiedSoleHolder));
     await service.reject(const FolioVerificationDecisionCommand(
         requestId: 'request',
         expectedVersion: 1,
         correlationId: 'reject',
-        reasonCode: 'INSUFFICIENT_EVIDENCE'));
+        reasonCode: FolioReviewReasonCode.insufficientDocuments));
     await service.revokeGrant(const RevokeFolioGrantCommand(
         grantId: 'grant',
         expectedVersion: 1,
@@ -132,6 +131,22 @@ void main() {
     expect(repo.safeListPageSize, 10);
     expect(page.page, 2);
     expect(page.pageSize, 10);
+  });
+
+  test('rejects action and reason combinations before repository invocation',
+      () async {
+    final repo = _FakeRepository();
+    final service = FolioVerificationService(repo, repo);
+
+    expect(
+      () => service.approve(const FolioVerificationDecisionCommand(
+          requestId: 'request',
+          expectedVersion: 1,
+          correlationId: 'invalid-approval',
+          reasonCode: FolioReviewReasonCode.invalidFolio)),
+      throwsA(isA<FolioVerificationApplicationFailure>()),
+    );
+    expect(repo.calls, 0);
   });
   test('maps safe-list infrastructure failures to an application failure',
       () async {
@@ -254,6 +269,28 @@ class _FakeRepository
           FolioQueueFilter f) =>
       _run(FolioVerificationPage(
           items: const [], page: f.page, pageSize: f.pageSize));
+  @override
+  Future<FolioVerificationPage<AdvisorFolioVerificationQueueItem>>
+      getAssignedFolioQueue(FolioQueueFilter filter) => _run(
+            FolioVerificationPage(
+              items: const [],
+              page: filter.page,
+              pageSize: filter.pageSize,
+            ),
+          );
+  @override
+  Future<AdvisorFolioVerificationDetail> getAssignedFolioRequestDetail(
+          String requestId) =>
+      _run(const AdvisorFolioVerificationDetail(
+        requestId: 'request',
+        version: 1,
+        investorDisplayLabel: 'Investor request',
+        registrarDisplay: 'CAMS',
+        maskedFolio: '••••1234',
+        holderRelationship: FolioHolderRelationship.soleHolder,
+        status: FolioVerificationStatus.pendingAdvisorReview,
+        history: [],
+      ));
   @override
   Future<FolioGrantSummary?> getGrantSummary(String id) => _run(null);
 }

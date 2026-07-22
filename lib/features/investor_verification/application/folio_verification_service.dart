@@ -55,7 +55,7 @@ class FolioVerificationDecisionCommand {
       this.reasonCode});
   final String requestId, correlationId;
   final int expectedVersion;
-  final String? reasonCode;
+  final FolioReviewReasonCode? reasonCode;
 }
 
 class RevokeFolioGrantCommand {
@@ -121,7 +121,7 @@ class FolioVerificationService {
           () => _advisorRepository.requestMoreInformation(
               command.requestId,
               command.expectedVersion,
-              _reason(command),
+              _reason(command, 'moreInformation'),
               command.correlationId));
   Future<FolioVerificationRequest> approve(
           FolioVerificationDecisionCommand command) =>
@@ -131,7 +131,7 @@ class FolioVerificationService {
           () => _advisorRepository.approve(
               command.requestId,
               command.expectedVersion,
-              _reason(command),
+              _reason(command, 'approve'),
               command.correlationId));
   Future<FolioVerificationRequest> reject(
           FolioVerificationDecisionCommand command) =>
@@ -141,7 +141,7 @@ class FolioVerificationService {
           () => _advisorRepository.reject(
               command.requestId,
               command.expectedVersion,
-              _reason(command),
+              _reason(command, 'reject'),
               command.correlationId));
   Future<void> revokeGrant(RevokeFolioGrantCommand command) => _run(
       'revokeGrant',
@@ -167,16 +167,55 @@ class FolioVerificationService {
   Future<FolioVerificationPage<FolioVerificationRequest>> getAdvisorQueue(
           FolioQueueFilter filter) =>
       _read(() => _advisorRepository.getAdvisorQueue(filter));
+  Future<FolioVerificationPage<AdvisorFolioVerificationQueueItem>>
+      getAssignedFolioQueue(FolioQueueFilter filter) =>
+          _read(() => _advisorRepository.getAssignedFolioQueue(filter));
+  Future<AdvisorFolioVerificationDetail> getAssignedFolioRequestDetail(
+          String requestId) =>
+      _read(() => _advisorRepository.getAssignedFolioRequestDetail(requestId));
   Future<FolioGrantSummary?> getGrantSummary(String requestId) =>
       _read(() => _advisorRepository.getGrantSummary(requestId));
-  String _reason(FolioVerificationDecisionCommand command) {
-    final value = command.reasonCode?.trim();
-    if (value == null || value.isEmpty) {
+  String _reason(FolioVerificationDecisionCommand command, String action) {
+    final value = command.reasonCode;
+    if (value == null || !_isReasonAllowed(action, value)) {
       throw const FolioVerificationApplicationFailure(
           FolioVerificationApplicationFailureCode.validation);
     }
-    return value;
+    return value.databaseValue;
   }
+
+  bool _isReasonAllowed(String action, FolioReviewReasonCode reason) =>
+      switch (action) {
+        'approve' => switch (reason) {
+            FolioReviewReasonCode.verifiedSoleHolder ||
+            FolioReviewReasonCode.verifiedJointHolder ||
+            FolioReviewReasonCode.verifiedGuardian ||
+            FolioReviewReasonCode.verifiedAuthorizedRelationship =>
+              true,
+            _ => false,
+          },
+        'reject' => switch (reason) {
+            FolioReviewReasonCode.invalidFolio ||
+            FolioReviewReasonCode.nameMismatch ||
+            FolioReviewReasonCode.panMismatch ||
+            FolioReviewReasonCode.insufficientDocuments ||
+            FolioReviewReasonCode.holderRelationshipNotProven ||
+            FolioReviewReasonCode.duplicateRequest ||
+            FolioReviewReasonCode.otherRejection =>
+              true,
+            _ => false,
+          },
+        'moreInformation' => switch (reason) {
+            FolioReviewReasonCode.folioDocumentRequired ||
+            FolioReviewReasonCode.jointHolderProofRequired ||
+            FolioReviewReasonCode.guardianProofRequired ||
+            FolioReviewReasonCode.identityClarificationRequired ||
+            FolioReviewReasonCode.additionalInformationRequired =>
+              true,
+            _ => false,
+          },
+        _ => false,
+      };
 
   Future<T> _run<T>(String operation, String correlationId,
       Future<T> Function() action) async {

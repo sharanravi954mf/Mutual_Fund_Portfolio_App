@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'folio_verification_datasource.dart';
+import 'advisor_folio_verification_dtos.dart';
 import 'folio_verification_dtos.dart';
 import 'folio_verification_repository.dart';
 import '../models/folio_verification_models.dart';
@@ -44,6 +45,36 @@ class SupabaseFolioVerificationRepository
       _request('cancel_folio_verification',
           {'p_request_id': id, 'p_expected_version': version});
   @override
+  Future<FolioVerificationPage<AdvisorFolioVerificationQueueItem>>
+      getAssignedFolioQueue(FolioQueueFilter filter) async {
+    final items = (await _rows('get_my_advisor_folio_requests', {
+      'p_page': filter.page,
+      'p_page_size': filter.pageSize,
+      'p_status': filter.status?.databaseValue,
+    }))
+        .map((row) => AdvisorFolioVerificationQueueItemDto(row).toDomain())
+        .toList();
+    return FolioVerificationPage(
+      items: items,
+      page: filter.page,
+      pageSize: filter.pageSize,
+    );
+  }
+
+  @override
+  Future<AdvisorFolioVerificationDetail> getAssignedFolioRequestDetail(
+      String requestId) async {
+    final rows = await _rows('get_my_advisor_folio_request_detail', {
+      'p_request_id': requestId,
+    });
+    if (rows.length != 1) {
+      throw const FolioVerificationFailure(
+          FolioVerificationFailureCode.requestUnavailable);
+    }
+    return AdvisorFolioVerificationDetailDto(rows.single).toDomain();
+  }
+
+  @override
   Future<FolioVerificationRequest> beginReview(
           String id, int version, String correlationId) =>
       _request('begin_folio_review',
@@ -83,14 +114,20 @@ class SupabaseFolioVerificationRepository
   @override
   Future<FolioVerificationPage<FolioVerificationRequest>> getMyRequests(
       {int page = 0, int pageSize = 25}) async {
-    final rows = await _rows('get_verification_status');
-    return _page(
-        rows
-            .where((row) => row['method_code'] == 'folio')
-            .map((row) => FolioVerificationRequestDto(row).toDomain())
-            .toList(),
-        page,
-        pageSize);
+    final safePage =
+        await getMyFolioRequestList(page: page, pageSize: pageSize);
+    return FolioVerificationPage(
+      items: safePage.items
+          .map((item) => FolioVerificationRequest(
+                id: item.requestId,
+                status: item.status,
+                version: item.version,
+                submittedAt: item.submittedAt,
+              ))
+          .toList(),
+      page: safePage.page,
+      pageSize: safePage.pageSize,
+    );
   }
 
   @override
@@ -114,17 +151,27 @@ class SupabaseFolioVerificationRepository
 
   @override
   Future<FolioVerificationRequest> getRequestDetail(String id) async {
-    final page = await getMyRequests(pageSize: 1000);
-    return page.items.firstWhere((request) => request.id == id,
-        orElse: () => throw const FolioVerificationFailure(
-            FolioVerificationFailureCode.requestUnavailable));
+    final rows = await _rows('get_folio_request_detail', {'p_request_id': id});
+    if (rows.length != 1) {
+      throw const FolioVerificationFailure(
+          FolioVerificationFailureCode.requestUnavailable);
+    }
+    final row = rows.single;
+    return FolioVerificationRequest(
+      id: id,
+      status: FolioVerificationStatus.fromDatabase(row['status'] as String),
+      version: row['version'] as int,
+      submittedAt: _date(row['submitted_at']),
+      resolvedAt: _date(row['resolved_at']),
+      expiresAt: _date(row['expires_at']),
+    );
   }
 
   @override
   Future<FolioVerificationPage<FolioVerificationEvent>> getHistory(String id,
           {int page = 0, int pageSize = 25}) async =>
       _page(
-          (await _rows('get_verification_events', {'p_request_id': id}))
+          (await _rows('get_folio_verification_events', {'p_request_id': id}))
               .map((row) => FolioVerificationEventDto(row).toDomain())
               .toList(),
           page,
@@ -132,20 +179,44 @@ class SupabaseFolioVerificationRepository
   @override
   Future<FolioVerificationPage<FolioVerificationRequest>> getAdvisorQueue(
       FolioQueueFilter filter) async {
-    final rows = await _rows('list_verification_review_queue_filtered',
-        {'p_status': filter.status?.name});
-    return _page(
-        rows
-            .where((row) => row['method_code'] == 'folio')
-            .map((row) => FolioVerificationRequestDto(row).toDomain())
-            .toList(),
-        filter.page,
-        filter.pageSize);
+    final safePage = await getAssignedFolioQueue(filter);
+    return FolioVerificationPage(
+      items: safePage.items
+          .map((item) => FolioVerificationRequest(
+                id: item.requestId,
+                status: item.status,
+                version: item.version,
+                submittedAt: item.submittedAt,
+              ))
+          .toList(),
+      page: safePage.page,
+      pageSize: safePage.pageSize,
+    );
   }
 
   @override
-  Future<FolioGrantSummary?> getGrantSummary(String requestId) =>
-      throw UnsupportedError('Phase 1 has no safe grant-summary RPC.');
+  Future<FolioGrantSummary?> getGrantSummary(String requestId) async {
+    final rows =
+        await _rows('get_folio_grant_summary', {'p_request_id': requestId});
+    if (rows.isEmpty) return null;
+    if (rows.length != 1) {
+      throw const FolioVerificationFailure(
+          FolioVerificationFailureCode.unexpected);
+    }
+    final row = rows.single;
+    return FolioGrantSummary(
+      id: requestId,
+      status: row['grant_status'] as String,
+      holderRelationship: FolioHolderRelationship.values.firstWhere(
+          (relationship) =>
+              relationship.databaseValue == row['holder_relationship']),
+      approvedAt: _date(row['approved_at']),
+      revokedAt: _date(row['revoked_at']),
+    );
+  }
+
+  DateTime? _date(Object? value) =>
+      value == null ? null : DateTime.tryParse(value as String);
   Future<FolioVerificationRequest> _request(
       String rpc, Map<String, dynamic> params) async {
     final rows = await _rows(rpc, params);

@@ -21,6 +21,10 @@ abstract class InvestorFolioVerificationRepository {
 }
 
 abstract class AdvisorFolioVerificationRepository {
+  Future<FolioVerificationPage<AdvisorFolioVerificationQueueItem>>
+      getAssignedFolioQueue(FolioQueueFilter filter);
+  Future<AdvisorFolioVerificationDetail> getAssignedFolioRequestDetail(
+      String requestId);
   Future<FolioVerificationRequest> beginReview(
       String requestId, int expectedVersion, String correlationId);
   Future<FolioVerificationRequest> requestMoreInformation(String requestId,
