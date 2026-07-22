@@ -13,13 +13,19 @@ import '../features/portfolio/data/supabase_portfolio_repository.dart';
 import '../features/portfolio/models/portfolio_dashboard_models.dart';
 import '../features/portfolio/services/portfolio_dashboard_service.dart';
 import '../features/portfolio/services/fund_search_service.dart';
+import '../features/investor_verification/presentation/folio_verification_route_factory.dart';
 import 'factsheet_dialog.dart';
 import 'rupee_rain_background.dart';
 
 class ClientDashboard extends StatefulWidget {
-  const ClientDashboard({super.key, this.portfolioRepository});
+  const ClientDashboard({
+    super.key,
+    this.portfolioRepository,
+    this.folioVerificationRouteFactory,
+  });
 
   final PortfolioRepository? portfolioRepository;
+  final FolioVerificationRouteFactory? folioVerificationRouteFactory;
 
   @override
   State<ClientDashboard> createState() => _ClientDashboardState();
@@ -435,6 +441,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                   Icons.document_scanner_outlined,
                                   colors,
                                   context),
+                              _buildFolioVerificationNavigationItem(colors),
                               _buildDrawerItem(2, t('settings'),
                                   Icons.settings_outlined, colors, context),
                               _buildDrawerItem(3, t('about_us_nav'),
@@ -860,6 +867,42 @@ class _ClientDashboardState extends State<ClientDashboard> {
     );
   }
 
+  Widget _buildFolioVerificationNavigationItem(AppThemeColors colors) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: InkWell(
+        key: const Key('verify-folios-navigation-item'),
+        onTap: _openFolioVerification,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.verified_user_outlined,
+                  color: colors.sidebarTextSecondary, size: 20),
+              const SizedBox(width: 16),
+              if (_isSidebarExpanded ||
+                  MediaQuery.of(context).size.width <= 900)
+                Expanded(
+                  child: Text('Verify Folios',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                          color: colors.sidebarTextSecondary, fontSize: 15)),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openFolioVerification() {
+    final factory =
+        widget.folioVerificationRouteFactory ?? buildFolioVerificationRoute;
+    Navigator.of(context).push(factory(context));
+  }
+
   Widget _buildDesktopSidebar(AppThemeColors colors, String Function(String) t,
       String clientName, User? user, AuthProvider authProvider) {
     return AnimatedContainer(
@@ -908,6 +951,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     Icons.account_balance_wallet_outlined, colors),
                 _buildSidebarItem(
                     1, "Factsheets", Icons.document_scanner_outlined, colors),
+                _buildFolioVerificationNavigationItem(colors),
                 _buildSidebarItem(
                     2, t('settings'), Icons.settings_outlined, colors),
                 _buildSidebarItem(
