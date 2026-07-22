@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../data/supabase_verification_repository.dart';
 import '../data/verification_repository.dart';
 import '../models/verification_models.dart';
+import 'pan_verification_submission_screen.dart';
 
 class VerificationStatusScreen extends StatefulWidget {
   const VerificationStatusScreen({super.key, this.repository});
@@ -24,6 +25,16 @@ class _VerificationStatusScreenState extends State<VerificationStatusScreen> {
     if (mounted) _reload();
   }
 
+  Future<void> _startPanVerification() async {
+    final submitted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) =>
+            PanVerificationSubmissionScreen(repository: _repository),
+      ),
+    );
+    if (submitted == true && mounted) _reload();
+  }
+
   @override
   Widget build(BuildContext context) =>
       FutureBuilder<List<VerificationRequest>>(
@@ -43,12 +54,9 @@ class _VerificationStatusScreenState extends State<VerificationStatusScreen> {
           final requests = snapshot.data ?? const <VerificationRequest>[];
           final request = requests.isEmpty ? null : requests.first;
           if (request == null) {
-            return _StatusMessage(
-              title: 'Verify your investment account',
-              body:
-                  'We could not automatically locate your investments. You can ask your advisor to help verify your account.',
-              action: _startAdvisorAssisted,
-              actionLabel: 'Request advisor verification',
+            return _StartVerification(
+              onPanVerification: _startPanVerification,
+              onAdvisorAssisted: _startAdvisorAssisted,
             );
           }
           return _RequestStatus(
@@ -88,6 +96,11 @@ class _RequestStatus extends StatelessWidget {
                     const SizedBox(height: 12),
                     Text(
                         'Method: ${request.method.databaseValue.replaceAll('_', ' ')}'),
+                    if (request.panSummary != null) ...[
+                      const SizedBox(height: 8),
+                      Text('PAN: ${request.panSummary!.maskedPan}'),
+                      Text(_panMatchMessage(request.panSummary!)),
+                    ],
                     if (request.status.canCancel) ...[
                       const SizedBox(height: 20),
                       OutlinedButton(
@@ -126,6 +139,68 @@ class _RequestStatus extends StatelessWidget {
         VerificationStatus.draft =>
           'Your verification request is not yet submitted.',
       };
+
+  static String _panMatchMessage(PanVerificationSummary summary) {
+    if (summary.conflictReason != VerificationConflictReason.none) {
+      return 'Your advisor will review this verification before any investment data is linked.';
+    }
+    return switch (summary.matchResult) {
+      VerificationMatchResult.singleMatch =>
+        'A matching investment record was found and is awaiting advisor review.',
+      VerificationMatchResult.multipleMatch =>
+        'More than one possible investment record was found. Your advisor will review it.',
+      VerificationMatchResult.noMatch =>
+        'No automatic match was found. Your advisor can review your request.',
+    };
+  }
+}
+
+class _StartVerification extends StatelessWidget {
+  const _StartVerification({
+    required this.onPanVerification,
+    required this.onAdvisorAssisted,
+  });
+
+  final Future<void> Function() onPanVerification;
+  final Future<void> Function() onAdvisorAssisted;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Verify your investment account',
+                        style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'We could not automatically locate your investments. You can securely '
+                      'verify an existing record with PAN or ask your advisor for help.',
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: onPanVerification,
+                      child: const Text('Verify with PAN'),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: onAdvisorAssisted,
+                      child: const Text('Request advisor verification'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
 }
 
 class _StatusMessage extends StatelessWidget {
@@ -133,13 +208,11 @@ class _StatusMessage extends StatelessWidget {
     required this.title,
     required this.body,
     required this.action,
-    this.actionLabel = 'Try again',
   });
 
   final String title;
   final String body;
   final Future<void> Function() action;
-  final String actionLabel;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -159,7 +232,8 @@ class _StatusMessage extends StatelessWidget {
                     const SizedBox(height: 12),
                     Text(body),
                     const SizedBox(height: 20),
-                    FilledButton(onPressed: action, child: Text(actionLabel)),
+                    FilledButton(
+                        onPressed: action, child: const Text('Try again')),
                   ],
                 ),
               ),

@@ -10,13 +10,11 @@ import 'factsheet_dialog.dart';
 class ClientDetailScreen extends StatefulWidget {
   final String clientId;
   final String clientName;
-  final String clientPan;
 
   const ClientDetailScreen({
     super.key,
     required this.clientId,
     required this.clientName,
-    required this.clientPan,
   });
 
   @override
@@ -25,7 +23,8 @@ class ClientDetailScreen extends StatefulWidget {
 
 class _ClientDetailScreenState extends State<ClientDetailScreen> {
   late Future<Map<String, dynamic>> _portfolioDataFuture;
-  final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
+  final currencyFormat =
+      NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
 
   @override
@@ -122,7 +121,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
             final data = snapshot.data;
             final portfolio = data?['portfolio'] as Map<String, dynamic>?;
-            final transactions = data?['transactions'] as List<Map<String, dynamic>>;
+            final transactions =
+                data?['transactions'] as List<Map<String, dynamic>>;
 
             final double invested = portfolio != null
                 ? (portfolio['total_invested_value'] as num).toDouble()
@@ -209,11 +209,6 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                "PAN: ${widget.clientPan.toUpperCase()}",
-                                style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
                                 "Client Portfolio Analysis",
                                 style: GoogleFonts.outfit(
                                   color: colors.textPrimary,
@@ -224,7 +219,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                             ],
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 6),
                             decoration: BoxDecoration(
                               color: colors.activeBackground,
                               borderRadius: BorderRadius.circular(20),
@@ -247,30 +243,87 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       isDesktop
                           ? Row(
                               children: [
-                                Expanded(child: _buildMetricCard(colors, "Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, colors.primary)),
+                                Expanded(
+                                    child: _buildMetricCard(
+                                        colors,
+                                        "Total Invested",
+                                        currencyFormat.format(invested),
+                                        Icons.account_balance_wallet_outlined,
+                                        colors.primary)),
                                 const SizedBox(width: 16),
-                                Expanded(child: _buildMetricCard(colors, "Current Valuation", currencyFormat.format(current), Icons.trending_up, colors.primary)),
+                                Expanded(
+                                    child: _buildMetricCard(
+                                        colors,
+                                        "Current Valuation",
+                                        currencyFormat.format(current),
+                                        Icons.trending_up,
+                                        colors.primary)),
                                 const SizedBox(width: 16),
-                                Expanded(child: _buildMetricCard(colors, "Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, colors.profit, isReturn: true, returnValue: absReturn)),
+                                Expanded(
+                                    child: _buildMetricCard(
+                                        colors,
+                                        "Absolute Return",
+                                        "${absReturn.toStringAsFixed(2)}%",
+                                        Icons.pie_chart_outline,
+                                        colors.profit,
+                                        isReturn: true,
+                                        returnValue: absReturn)),
                                 const SizedBox(width: 16),
-                                Expanded(child: _buildMetricCard(colors, "Annualized (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, colors.profit, isReturn: true, returnValue: xirrVal)),
+                                Expanded(
+                                    child: _buildMetricCard(
+                                        colors,
+                                        "Annualized (XIRR)",
+                                        "${xirrVal.toStringAsFixed(2)}%",
+                                        Icons.offline_bolt_outlined,
+                                        colors.profit,
+                                        isReturn: true,
+                                        returnValue: xirrVal)),
                               ],
                             )
                           : Column(
                               children: [
                                 Row(
                                   children: [
-                                    Expanded(child: _buildMetricCard(colors, "Total Invested", currencyFormat.format(invested), Icons.account_balance_wallet_outlined, colors.primary)),
+                                    Expanded(
+                                        child: _buildMetricCard(
+                                            colors,
+                                            "Total Invested",
+                                            currencyFormat.format(invested),
+                                            Icons
+                                                .account_balance_wallet_outlined,
+                                            colors.primary)),
                                     const SizedBox(width: 12),
-                                    Expanded(child: _buildMetricCard(colors, "Current Valuation", currencyFormat.format(current), Icons.trending_up, colors.primary)),
+                                    Expanded(
+                                        child: _buildMetricCard(
+                                            colors,
+                                            "Current Valuation",
+                                            currencyFormat.format(current),
+                                            Icons.trending_up,
+                                            colors.primary)),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
                                 Row(
                                   children: [
-                                    Expanded(child: _buildMetricCard(colors, "Absolute Return", "${absReturn.toStringAsFixed(2)}%", Icons.pie_chart_outline, colors.profit, isReturn: true, returnValue: absReturn)),
+                                    Expanded(
+                                        child: _buildMetricCard(
+                                            colors,
+                                            "Absolute Return",
+                                            "${absReturn.toStringAsFixed(2)}%",
+                                            Icons.pie_chart_outline,
+                                            colors.profit,
+                                            isReturn: true,
+                                            returnValue: absReturn)),
                                     const SizedBox(width: 12),
-                                    Expanded(child: _buildMetricCard(colors, "Annualized (XIRR)", "${xirrVal.toStringAsFixed(2)}%", Icons.offline_bolt_outlined, colors.profit, isReturn: true, returnValue: xirrVal)),
+                                    Expanded(
+                                        child: _buildMetricCard(
+                                            colors,
+                                            "Annualized (XIRR)",
+                                            "${xirrVal.toStringAsFixed(2)}%",
+                                            Icons.offline_bolt_outlined,
+                                            colors.profit,
+                                            isReturn: true,
+                                            returnValue: xirrVal)),
                                   ],
                                 ),
                               ],
@@ -307,7 +360,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: activeHoldings.length,
-                            separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                            separatorBuilder: (context, index) =>
+                                Divider(color: colors.border, height: 1),
                             itemBuilder: (context, index) {
                               final h = activeHoldings[index];
                               final units = h['units'] as double;
@@ -315,9 +369,12 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                               final curVal = units * nav;
 
                               return Container(
-                                color: index % 2 == 1 ? colors.tableRowAlt : colors.surface,
+                                color: index % 2 == 1
+                                    ? colors.tableRowAlt
+                                    : colors.surface,
                                 child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 20, vertical: 12),
                                   leading: Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
@@ -332,13 +389,18 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                   ),
                                   title: Text(
                                     h['name'] as String,
-                                    style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                    style: GoogleFonts.outfit(
+                                        color: colors.textPrimary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14),
                                   ),
                                   subtitle: Padding(
                                     padding: const EdgeInsets.only(top: 4.0),
                                     child: Text(
                                       "Code: ${h['code']}  •  ${units.toStringAsFixed(4)} Units  •  NAV: ₹${nav.toStringAsFixed(2)}",
-                                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 12),
+                                      style: GoogleFonts.inter(
+                                          color: colors.textSecondary,
+                                          fontSize: 12),
                                     ),
                                   ),
                                   trailing: Column(
@@ -347,12 +409,17 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                     children: [
                                       Text(
                                         currencyFormat.format(curVal),
-                                        style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                        style: GoogleFonts.outfit(
+                                            color: colors.textPrimary,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14),
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
                                         "Invested: ${currencyFormat.format(h['invested'])}",
-                                        style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                                        style: GoogleFonts.inter(
+                                            color: colors.textSecondary,
+                                            fontSize: 11),
                                       ),
                                     ],
                                   ),
@@ -403,10 +470,12 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: transactions.length,
-                            separatorBuilder: (context, index) => Divider(color: colors.border, height: 1),
+                            separatorBuilder: (context, index) =>
+                                Divider(color: colors.border, height: 1),
                             itemBuilder: (context, index) {
                               final tx = transactions[index];
-                              final fund = tx['mutual_funds'] as Map<String, dynamic>?;
+                              final fund =
+                                  tx['mutual_funds'] as Map<String, dynamic>?;
                               final type = tx['transaction_type'] as String;
                               final dateStr = tx['execution_date'] as String;
                               final date = DateTime.parse(dateStr);
@@ -416,9 +485,12 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                               final isBuy = type == 'BUY';
 
                               return Container(
-                                color: index % 2 == 1 ? colors.tableRowAlt : colors.surface,
+                                color: index % 2 == 1
+                                    ? colors.tableRowAlt
+                                    : colors.surface,
                                 child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 20, vertical: 10),
                                   leading: Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
@@ -428,27 +500,36 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                                       shape: BoxShape.circle,
                                     ),
                                     child: Icon(
-                                      isBuy ? Icons.add_shopping_cart : Icons.sell_outlined,
-                                      color: isBuy ? colors.profit : colors.error,
+                                      isBuy
+                                          ? Icons.add_shopping_cart
+                                          : Icons.sell_outlined,
+                                      color:
+                                          isBuy ? colors.profit : colors.error,
                                       size: 18,
                                     ),
                                   ),
                                   title: Text(
                                     fund?['scheme_name'] ?? 'Unknown Fund',
-                                    style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
+                                    style: GoogleFonts.outfit(
+                                        color: colors.textPrimary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   subtitle: Padding(
                                     padding: const EdgeInsets.only(top: 4.0),
                                     child: Text(
                                       "${dateFormat.format(date)}  •  ${units.toStringAsFixed(4)} Units",
-                                      style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11),
+                                      style: GoogleFonts.inter(
+                                          color: colors.textSecondary,
+                                          fontSize: 11),
                                     ),
                                   ),
                                   trailing: Text(
                                     "${isBuy ? '+' : '-'}${currencyFormat.format(amt)}",
                                     style: GoogleFonts.outfit(
-                                      color: isBuy ? colors.profit : colors.error,
+                                      color:
+                                          isBuy ? colors.profit : colors.error,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13,
                                     ),
@@ -469,7 +550,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     );
   }
 
-  Widget _buildMetricCard(AppThemeColors colors, String label, String value, IconData icon, Color accentColor, {bool isReturn = false, double returnValue = 0.0}) {
+  Widget _buildMetricCard(AppThemeColors colors, String label, String value,
+      IconData icon, Color accentColor,
+      {bool isReturn = false, double returnValue = 0.0}) {
     return Container(
       padding: const EdgeInsets.all(18.0),
       decoration: BoxDecoration(
@@ -494,7 +577,10 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               children: [
                 Text(
                   label,
-                  style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 11, fontWeight: FontWeight.w500),
+                  style: GoogleFonts.inter(
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -515,7 +601,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     );
   }
 
-  Widget _buildEmptyStateCard(AppThemeColors colors, String title, String description, IconData icon) {
+  Widget _buildEmptyStateCard(
+      AppThemeColors colors, String title, String description, IconData icon) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -530,13 +617,17 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           const SizedBox(height: 12),
           Text(
             title,
-            style: GoogleFonts.outfit(color: colors.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
+            style: GoogleFonts.outfit(
+                color: colors.textPrimary,
+                fontWeight: FontWeight.bold,
+                fontSize: 15),
           ),
           const SizedBox(height: 8),
           Text(
             description,
             textAlign: TextAlign.center,
-            style: GoogleFonts.inter(color: colors.textSecondary, fontSize: 13, height: 1.4),
+            style: GoogleFonts.inter(
+                color: colors.textSecondary, fontSize: 13, height: 1.4),
           ),
         ],
       ),
