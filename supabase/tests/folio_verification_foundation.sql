@@ -22,8 +22,15 @@ begin
   if (select count(*) from pg_proc where proname in ('submit_folio_verification','begin_folio_review','request_folio_more_information','resubmit_folio_verification','approve_folio_verification','reject_folio_verification','cancel_folio_verification','expire_folio_verification','revoke_folio_grant')) <> 9 then
     raise exception 'required folio RPC contract is incomplete';
   end if;
-  if exists (select 1 from information_schema.routine_privileges where routine_schema='public' and routine_name in ('_transition_folio_request','issue_folio_submission_token') and grantee='authenticated') then
+  if has_function_privilege('authenticated', 'public._transition_folio_request(uuid,integer,text,text)'::regprocedure, 'execute')
+      or has_function_privilege('authenticated', 'public.issue_folio_submission_token(uuid,uuid)'::regprocedure, 'execute')
+      or has_function_privilege('anon', 'public._transition_folio_request(uuid,integer,text,text)'::regprocedure, 'execute')
+      or has_function_privilege('anon', 'public.issue_folio_submission_token(uuid,uuid)'::regprocedure, 'execute') then
     raise exception 'private folio helper is browser-executable';
+  end if;
+  if not has_function_privilege('authenticated', 'public.issue_folio_submission_token(text,text)'::regprocedure, 'execute')
+      or has_function_privilege('anon', 'public.issue_folio_submission_token(text,text)'::regprocedure, 'execute') then
+    raise exception 'safe folio submission-token RPC privileges are incorrect';
   end if;
   if not exists (
     select 1
@@ -39,5 +46,17 @@ begin
       ]
   ) then
     raise exception 'registrar-aware canonical uniqueness is missing';
+  end if;
+  if to_regprocedure('public.issue_folio_submission_token(text,text)') is null
+      or to_regprocedure('public.get_folio_request_detail(uuid)') is null
+      or to_regprocedure('public.get_folio_grant_summary(uuid)') is null then
+    raise exception 'safe folio repository read/token RPC contract is incomplete';
+  end if;
+  if not exists (select 1 from pg_indexes where indexname='idx_folio_submission_tokens_active') then
+    raise exception 'active submission-token replay protection index is missing';
+  end if;
+  if has_table_privilege('anon', 'public.folio_submission_tokens', 'select')
+      or has_table_privilege('authenticated', 'public.folio_submission_tokens', 'select') then
+    raise exception 'submission tokens are directly browser-readable';
   end if;
 end $$;
