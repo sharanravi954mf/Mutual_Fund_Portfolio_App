@@ -17,6 +17,7 @@ class LanguageProvider extends ChangeNotifier {
     'en': {
       'admin_central': 'Admin Central',
       'clients_management': 'Clients Management',
+      'verification_queue': 'Verification Queue',
       'data_ingestion': 'Data Ingestion',
       'factsheets_manager': 'Factsheets Manager',
       'invoice_signer': 'Invoice Signer',
@@ -69,6 +70,7 @@ class LanguageProvider extends ChangeNotifier {
     'hi': {
       'admin_central': 'एडमिन सेंट्रल',
       'clients_management': 'ग्राहक प्रबंधन',
+      'verification_queue': 'सत्यापन कतार',
       'data_ingestion': 'डेटा इनजेशन',
       'factsheets_manager': 'फैक्टशीट मैनेजर',
       'invoice_signer': 'इनवॉइस हस्ताक्षरकर्ता',

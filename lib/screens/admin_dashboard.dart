@@ -21,6 +21,7 @@ import '../features/invoice_signer/models/registrar_detection_result.dart';
 import '../features/invoice_signer/processors/registrar_processor.dart';
 import '../features/invoice_signer/services/registrar_detection_service.dart';
 import '../features/invoice_signer/services/invoice_pdf_discovery_service.dart';
+import '../features/investor_verification/presentation/verification_screens.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
@@ -785,13 +786,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         children: [
                           _buildDrawerItem(0, t('clients_management'),
                               Icons.people_outline, colors, context),
-                          _buildDrawerItem(1, t('data_ingestion'),
+                          _buildDrawerItem(1, t('verification_queue'),
+                              Icons.verified_user_outlined, colors, context),
+                          _buildDrawerItem(2, t('data_ingestion'),
                               Icons.cloud_upload_outlined, colors, context),
-                          _buildDrawerItem(2, t('factsheets_manager'),
+                          _buildDrawerItem(3, t('factsheets_manager'),
                               Icons.document_scanner_outlined, colors, context),
-                          _buildDrawerItem(3, t('invoice_signer'),
+                          _buildDrawerItem(4, t('invoice_signer'),
                               Icons.draw_outlined, colors, context),
-                          _buildDrawerItem(4, t('settings'),
+                          _buildDrawerItem(5, t('settings'),
                               Icons.settings_outlined, colors, context),
                         ],
                       ),
@@ -894,12 +897,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
               _selectedTab == 0
                   ? t('clients_directory')
                   : (_selectedTab == 1
-                      ? t('data_ingestion_engine')
+                      ? t('verification_queue')
                       : (_selectedTab == 2
-                          ? t('factsheets_manager')
+                          ? t('data_ingestion_engine')
                           : (_selectedTab == 3
-                              ? t('invoice_signer')
-                              : t('settings_console')))),
+                              ? t('factsheets_manager')
+                              : (_selectedTab == 4
+                                  ? t('invoice_signer')
+                                  : t('settings_console'))))),
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.w600,
                 fontSize: 18,
@@ -962,12 +967,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final sectionTitle = _selectedTab == 0
         ? t('clients_directory')
         : (_selectedTab == 1
-            ? t('data_ingestion_engine')
+            ? t('verification_queue')
             : (_selectedTab == 2
-                ? t('factsheets_manager')
+                ? t('data_ingestion_engine')
                 : (_selectedTab == 3
-                    ? t('invoice_signer')
-                    : t('settings_console'))));
+                    ? t('factsheets_manager')
+                    : (_selectedTab == 4
+                        ? t('invoice_signer')
+                        : t('settings_console')))));
 
     return Container(
       height: 64,
@@ -1159,14 +1166,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               children: [
                 _buildSidebarItem(
                     0, t('clients_management'), Icons.people_outline, colors),
-                _buildSidebarItem(1, t('data_ingestion'),
+                _buildSidebarItem(1, t('verification_queue'),
+                    Icons.verified_user_outlined, colors),
+                _buildSidebarItem(2, t('data_ingestion'),
                     Icons.cloud_upload_outlined, colors),
-                _buildSidebarItem(2, t('factsheets_manager'),
+                _buildSidebarItem(3, t('factsheets_manager'),
                     Icons.document_scanner_outlined, colors),
                 _buildSidebarItem(
-                    3, t('invoice_signer'), Icons.draw_outlined, colors),
+                    4, t('invoice_signer'), Icons.draw_outlined, colors),
                 _buildSidebarItem(
-                    4, t('settings'), Icons.settings_outlined, colors),
+                    5, t('settings'), Icons.settings_outlined, colors),
               ],
             ),
           ),
@@ -1226,7 +1235,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             onTap: () {
               setState(() {
                 _selectedTab = index;
-                if (index == 2) {
+                if (index == 3) {
                   _fetchFundsList();
                 }
               });
@@ -1259,7 +1268,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         onTap: () {
           setState(() {
             _selectedTab = index;
-            if (index == 2) {
+            if (index == 3) {
               _fetchFundsList();
             }
           });
@@ -1313,7 +1322,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           Navigator.pop(context); // Close the drawer natively
           setState(() {
             _selectedTab = index;
-            if (index == 2) {
+            if (index == 3) {
               _fetchFundsList();
             }
           });
@@ -1360,12 +1369,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 0:
         return _buildClientsListContent();
       case 1:
-        return _buildIngestionContent();
+        return const AdvisorVerificationQueueScreen();
       case 2:
-        return _buildFactsheetsContent();
+        return _buildIngestionContent();
       case 3:
-        return _buildInvoiceSignerContent();
+        return _buildFactsheetsContent();
       case 4:
+        return _buildInvoiceSignerContent();
+      case 5:
         return _buildSettingsContent();
       default:
         return const SizedBox.shrink();
