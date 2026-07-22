@@ -22,6 +22,21 @@ Registrar data may be imported before an investor has an application account.
 The product therefore separates authentication identity from the distributor's
 business investor identity.
 
+## Current Project Health
+
+| Area | Status |
+|---|---|
+| Current sprint | Sprint 5.6A — Advisor Folio Authorization Layer |
+| Overall status | Complete |
+| Build | Passing |
+| SQL runtime validation | Passed |
+| Persistent SQL regression suite | Passed |
+| Flutter tests | Passing for Sprint 5.6A scope |
+| Flutter analyzer | No new Sprint 5.6A findings; existing project warnings remain |
+| Browser validation | Passed using explicit Supabase Dart defines |
+| Known unrelated issue | Client Dashboard `RenderFlex` overflow in its shell test |
+| Next sprint | Sprint 5.6B — Advisor Folio Verification Workflow presentation |
+
 ## Technology Stack
 
 - Flutter and Dart for the web and mobile application.
@@ -32,6 +47,38 @@ business investor identity.
   safe read projections.
 - Repository and datasource abstractions between Flutter and Supabase.
 - Supabase Vault-backed encryption/HMAC for protected PAN data.
+
+## Local Development Environment
+
+This project does **not** automatically load `.env` at application startup.
+`lib/main.dart` reads only these compile-time values through
+`String.fromEnvironment()`:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+Load the local environment file in the terminal and pass both values explicitly
+when launching Flutter:
+
+```sh
+set -a
+source .env
+set +a
+
+flutter run -d chrome \
+  --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+  --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+```
+
+This command does **not** work:
+
+```sh
+flutter run -d chrome --dart-define=ENV=.env
+```
+
+`ENV` is never read by the application. Without the two explicit Dart defines,
+the app uses its placeholder Supabase values rather than a local or hosted
+project.
 
 ## Repository Structure
 
@@ -150,9 +197,9 @@ generic lifecycle endpoints for folio review.
 - **Sprint 5.3:** Folio verification foundation: canonical registrar-aware
   folios, immutable evidence, grants, folio-scoped RLS, repositories, services,
   presentation contracts, and investor UI integration.
-- **Sprint 5.6A (working tree):** Assignment-scoped Advisor folio
-  authorization, safe Advisor projections, legacy generic-RPC closure, and
-  action-specific reason codes. Acceptance still requires local SQL execution.
+- **Sprint 5.6A:** Completed assignment-scoped Advisor folio authorization,
+  safe Advisor projections, legacy generic-RPC closure, action-specific reason
+  codes, SQL validation, browser smoke testing, and security review.
 
 ## Coding Standards
 

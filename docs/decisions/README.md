@@ -21,4 +21,4 @@ the earlier ADR as Superseded.
 | [ADR-004](ADR-004-Repository-Pattern.md) | Accepted | Keep Supabase access and business orchestration outside widgets. |
 | [ADR-005](ADR-005-Release-Workflow.md) | Accepted | Require architecture, review, validation, and pre-release evidence. |
 | [ADR-006](ADR-006-Folio-Access-Authorization.md) | Proposed | Scope investor portfolio access through active approved folio grants. |
-| [ADR-007](ADR-007-Advisor-Folio-Review-Assignment.md) | Proposed | Require active Advisor assignment for folio review operations; acceptance awaits Sprint 5.6A.1 SQL validation. |
+| [ADR-007](ADR-007-Advisor-Folio-Review-Assignment.md) | Accepted | Require active Advisor assignment for folio review operations and prevent legacy generic-RPC bypasses. |

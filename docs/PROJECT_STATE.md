@@ -5,7 +5,7 @@ end of every sprint or whenever a material validation boundary changes.
 
 ## Current Sprint
 
-Sprint 5.6A.1 — Close Legacy Folio Authorization Bypasses.
+Sprint 5.6A — Advisor Folio Authorization Layer.
 
 ## Current Branch
 
@@ -13,8 +13,8 @@ Sprint 5.6A.1 — Close Legacy Folio Authorization Bypasses.
 
 ## Current Milestone
 
-Sprint 5.6A implementation is frozen for final acceptance review. The working
-tree contains the Advisor folio assignment layer and legacy-RPC remediation.
+Sprint 5.6A is complete and validated. The next approved scope is Sprint 5.6B
+Advisor Folio Verification Workflow presentation.
 
 ## Completed Work
 
@@ -31,31 +31,23 @@ tree contains the Advisor folio assignment layer and legacy-RPC remediation.
   and safe repository/service contracts.
 - Legacy generic verification RPC closure for folio requests, including typed
   action-specific reason codes and dedicated folio history access.
+- Principal engineering architecture review passed.
+- Security review passed.
+- SQL runtime validation and persistent SQL regression suite passed.
+- Flutter analyzer introduced zero new Sprint 5.6A findings; existing project
+  warnings remain separately tracked.
+- Browser login was validated using explicit Supabase Dart defines.
 
 ## Pending Work
 
-- Run Sprint 5.6A/5.6A.1 database validation locally.
-- Resolve or explicitly waive the known unrelated Client Dashboard RenderFlex
-  test failure before a clean full-suite release gate.
-- Obtain approval, then commit the frozen Sprint 5.6A change set.
 - Sprint 5.6B Advisor folio review presentation is not started.
 - Supervisor assignment/reassignment workflow is deferred; it is required
   before enabling a second Advisor account.
 
 ## Known Blockers
 
-1. Mandatory local database validation has not completed for the current
-   uncommitted migrations:
-
-   ```sh
-   supabase db reset
-   sh supabase/tests/run_all.sh
-   ```
-
-2. The full Flutter suite has one known unrelated failure in
-   `test/portfolio/client_dashboard_test.dart`: a `RenderFlex` overflow at
-   `lib/screens/client_dashboard.dart:682` during the injected-folio-feature
-   shell test.
+No Sprint 5.6A blocker remains. The project retains one unrelated dashboard
+test issue listed under Open Bugs.
 
 ## Known Technical Debt
 
@@ -63,42 +55,36 @@ tree contains the Advisor folio assignment layer and legacy-RPC remediation.
   and utility files.
 - Client Dashboard test animation/layout behavior needs isolated remediation.
 - Multi-Advisor routing and supervised reassignment are deliberately deferred.
-- Folio request/grant review remains an alpha workflow pending full local SQL
-  validation and UAT.
+- Folio request/grant review remains an alpha workflow pending broader UAT.
 
 ## Open Bugs
 
 - Dashboard shell test RenderFlex overflow described above.
-- No confirmed defect in the frozen Sprint 5.6A implementation; SQL runtime
-  execution remains the required confirmation.
 
 ## Current Database Version
 
-Target working-tree migration head:
-`20260729000001_close_legacy_folio_authorization_bypasses.sql`.
+Current working-tree migration head:
+`20260729000002_qualify_folio_lifecycle_updates.sql`.
 
 The preceding assignment migration is:
 `20260729000000_advisor_folio_authorization.sql`.
 
-Both are uncommitted and require local reset plus persistent SQL regression
-execution before acceptance.
+Sprint 5.6A SQL runtime validation and persistent regression execution passed.
 
 ## Next Sprint
 
 Sprint 5.6B — Advisor Folio Verification Workflow presentation, only after
-Sprint 5.6A is accepted, committed, and its SQL validation evidence is recorded.
+Sprint 5.6A’s validated authorization boundary is preserved.
 
 ## Files Most Likely To Change Next
 
-- `supabase/tests/folio_verification_foundation.sql` — only if local validation
-  exposes a real regression.
-- `docs/sprints/Sprint-5.6A.md`
-- `docs/decisions/ADR-007-Advisor-Folio-Review-Assignment.md`
 - Future Sprint 5.6B presentation files under
   `lib/features/investor_verification/presentation/`.
-- `test/portfolio/client_dashboard_test.dart` and potentially its test harness
-  when the known overflow is separately authorized.
+- `lib/features/investor_verification/data/` and `application/` only if the
+  approved Advisor presentation requires an already-missing safe contract.
+- `test/portfolio/client_dashboard_test.dart` when the known overflow is
+  separately authorized for remediation.
 
 ## Last Updated
 
-2026-07-23 — Final acceptance review preparation for Sprint 5.6A.1.
+2026-07-23 — Sprint 5.6A final validation recorded.

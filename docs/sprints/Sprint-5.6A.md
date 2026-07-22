@@ -77,6 +77,33 @@ rejection, and atomic event creation. Dart tests cover typed reason-code
 mapping, action compatibility, safe DTO mapping, and assignment-safe repository
 invocation.
 
+## Final acceptance results
+
+- ✓ Principal engineering review passed.
+- ✓ SQL runtime validation passed.
+- ✓ Persistent SQL regression suite passed.
+- ✓ Flutter analyzer introduced no new Sprint 5.6A issues.
+- ✓ Browser login validated with explicit Supabase Dart defines.
+
+## Lessons learned
+
+The Flutter application does not automatically load `.env`. `lib/main.dart`
+reads only `SUPABASE_URL` and `SUPABASE_ANON_KEY` through
+`String.fromEnvironment()`. Launch locally with:
+
+```sh
+set -a
+source .env
+set +a
+
+flutter run -d chrome \
+  --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+  --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+```
+
+`flutter run -d chrome --dart-define=ENV=.env` does not configure Supabase,
+because `ENV` is not read by the application.
+
 ## Deferred work
 
 - Supervisor role and Advisor reassignment RPCs/UI. Before enabling a second

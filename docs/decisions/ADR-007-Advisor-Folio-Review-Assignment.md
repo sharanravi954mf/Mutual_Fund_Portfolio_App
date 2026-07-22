@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — pending Sprint 5.6A.1 SQL validation
+Accepted
 
 ## Date
 
