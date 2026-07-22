@@ -33,6 +33,14 @@ class SupabaseVerificationRepository implements VerificationRepository {
   }
 
   @override
+  Future<PanVerificationSubmission> submitPanVerification(String pan) async {
+    final rows = await _client.rpc('submit_pan_verification', params: {
+      'p_pan': pan,
+    });
+    return PanVerificationSubmission.fromJson(_singleRow(rows));
+  }
+
+  @override
   Future<void> cancelRequest(String requestId, int expectedVersion) =>
       _client.rpc(
         'cancel_verification_request',
@@ -89,6 +97,20 @@ class SupabaseVerificationRepository implements VerificationRepository {
     String? reasonCode,
   }) =>
       _client.rpc('approve_verification_candidate', params: {
+        'p_request_id': requestId,
+        'p_candidate_token': candidateToken,
+        'p_expected_version': expectedVersion,
+        'p_reason_code': reasonCode,
+      });
+
+  @override
+  Future<void> approvePanCandidate(
+    String requestId,
+    String candidateToken,
+    int expectedVersion, {
+    String? reasonCode,
+  }) =>
+      _client.rpc('approve_pan_verification_candidate', params: {
         'p_request_id': requestId,
         'p_candidate_token': candidateToken,
         'p_expected_version': expectedVersion,

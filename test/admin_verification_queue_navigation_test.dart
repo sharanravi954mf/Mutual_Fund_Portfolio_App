@@ -56,6 +56,11 @@ class _FakeVerificationRepository implements VerificationRepository {
   }
 
   @override
+  Future<PanVerificationSubmission> submitPanVerification(String pan) {
+    throw UnimplementedError();
+  }
+
+  @override
   Future<List<VerificationEvent>> getHistory(String requestId) async =>
       const [];
 
@@ -80,6 +85,10 @@ class _FakeVerificationRepository implements VerificationRepository {
       const [];
   @override
   Future<void> approveCandidate(
+      String requestId, String candidateToken, int expectedVersion,
+      {String? reasonCode}) async {}
+  @override
+  Future<void> approvePanCandidate(
       String requestId, String candidateToken, int expectedVersion,
       {String? reasonCode}) async {}
   @override

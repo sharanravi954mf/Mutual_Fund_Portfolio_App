@@ -2,6 +2,7 @@ import * as zip from "npm:@zip.js/zip.js";
 
 export interface ParsedTransaction {
   clientPan: string;
+  registrar: "CAMS" | "KFINTECH";
   investorName: string;
   folioNumber: string;
   schemeCode: string;
@@ -60,6 +61,10 @@ function parseDecimal(val: any): number {
   if (isNaN(parsed)) return 0;
   // Format/align decimals up to 6 decimal positions
   return Math.round(parsed * 1000000) / 1000000;
+}
+
+function registrarFromFilename(filename: string): "CAMS" | "KFINTECH" {
+  return filename.toLowerCase().includes("kfin") ? "KFINTECH" : "CAMS";
 }
 
 // 1. Pure TypeScript DBF File Format Parser
@@ -218,6 +223,7 @@ function mapDbfRecordToTransaction(rec: Record<string, any>): ParsedTransaction 
 
   return {
     clientPan,
+    registrar: "CAMS",
     investorName,
     folioNumber,
     schemeCode,
@@ -268,7 +274,7 @@ function validateParsedTransaction(tx: ParsedTransaction): string[] {
   if (!tx.pan_no) {
     errors.push("PAN is missing");
   } else if (!panRegex.test(tx.pan_no.toUpperCase())) {
-    errors.push(`Invalid PAN format: "${tx.pan_no}"`);
+    errors.push("PAN format is invalid");
   }
   
   if (!tx.inv_name) errors.push("Investor name is missing");
@@ -350,12 +356,13 @@ export class RtaFileParser {
           this.totalLinesProcessed++; // Map DBF records to lines processed for logging
           
           const transaction = mapDbfRecordToTransaction(rec);
+          transaction.registrar = registrarFromFilename(filename);
           const validationErrors = validateParsedTransaction(transaction);
           
           if (validationErrors.length > 0) {
             this.totalErrors++;
             this.errors.push({
-              line: JSON.stringify(rec),
+              line: "[REDACTED]",
               lineNumber: rowNum,
               reason: validationErrors.join(", ")
             });
@@ -397,6 +404,7 @@ export class RtaFileParser {
         this.totalLinesProcessed++;
         const parsed = this.parseLine(line, targetFilename, lineNum);
         if (parsed) {
+          parsed.registrar = registrarFromFilename(filename);
           this.totalRecordsParsed++;
           yield parsed;
         }
@@ -412,6 +420,7 @@ export class RtaFileParser {
       this.totalLinesProcessed++;
       const parsed = this.parseLine(remaining, targetFilename, lineNum);
       if (parsed) {
+        parsed.registrar = registrarFromFilename(filename);
         this.totalRecordsParsed++;
         yield parsed;
       }
@@ -435,7 +444,7 @@ export class RtaFileParser {
     if (!delimiter) {
       this.totalErrors++;
       this.errors.push({
-        line: trimmed,
+        line: "[REDACTED]",
         lineNumber: lineNum,
         reason: "No valid delimiter (; or ,) found in line."
       });
@@ -446,7 +455,7 @@ export class RtaFileParser {
     if (parts.length < 12) {
       this.totalErrors++;
       this.errors.push({
-        line: trimmed,
+        line: "[REDACTED]",
         lineNumber: lineNum,
         reason: `Incorrect number of fields: expected at least 12, got ${parts.length}`
       });
@@ -475,6 +484,7 @@ export class RtaFileParser {
 
     const transaction = {
       clientPan: pan.toUpperCase(),
+      registrar: registrarFromFilename(filename),
       investorName: name,
       folioNumber: folio,
       schemeCode,
@@ -519,7 +529,7 @@ export class RtaFileParser {
     if (validationErrors.length > 0) {
       this.totalErrors++;
       this.errors.push({
-        line: trimmed,
+        line: "[REDACTED]",
         lineNumber: lineNum,
         reason: validationErrors.join(", ")
       });

@@ -54,6 +54,88 @@ enum VerificationStatus {
   bool get canRetry => this == rejected || this == cancelled || this == expired;
 }
 
+enum VerificationMatchResult {
+  noMatch,
+  singleMatch,
+  multipleMatch;
+
+  String get databaseValue => switch (this) {
+        VerificationMatchResult.noMatch => 'NO_MATCH',
+        VerificationMatchResult.singleMatch => 'SINGLE_MATCH',
+        VerificationMatchResult.multipleMatch => 'MULTIPLE_MATCH',
+      };
+
+  static VerificationMatchResult fromDatabase(String value) =>
+      VerificationMatchResult.values.firstWhere(
+        (result) => result.databaseValue == value,
+        orElse: () => throw ArgumentError.value(value, 'value'),
+      );
+}
+
+enum VerificationConflictReason {
+  none,
+  alreadyVerified,
+  pendingDuplicate,
+  historicalMismatch,
+  legacyInvalid;
+
+  String get databaseValue => switch (this) {
+        VerificationConflictReason.none => 'NONE',
+        VerificationConflictReason.alreadyVerified => 'ALREADY_VERIFIED',
+        VerificationConflictReason.pendingDuplicate => 'PENDING_DUPLICATE',
+        VerificationConflictReason.historicalMismatch => 'HISTORICAL_MISMATCH',
+        VerificationConflictReason.legacyInvalid => 'LEGACY_INVALID',
+      };
+
+  static VerificationConflictReason fromDatabase(String value) =>
+      VerificationConflictReason.values.firstWhere(
+        (reason) => reason.databaseValue == value,
+        orElse: () => throw ArgumentError.value(value, 'value'),
+      );
+}
+
+class PanVerificationSummary {
+  const PanVerificationSummary({
+    required this.maskedPan,
+    required this.matchResult,
+    required this.conflictReason,
+  });
+
+  final String maskedPan;
+  final VerificationMatchResult matchResult;
+  final VerificationConflictReason conflictReason;
+
+  factory PanVerificationSummary.fromJson(Map<String, dynamic> json) {
+    return PanVerificationSummary(
+      maskedPan: json['masked_pan'] as String,
+      matchResult: VerificationMatchResult.fromDatabase(
+          json['pan_match_result'] as String),
+      conflictReason: VerificationConflictReason.fromDatabase(
+        json['pan_conflict_reason'] as String,
+      ),
+    );
+  }
+}
+
+class PanVerificationSubmission {
+  const PanVerificationSubmission({
+    required this.requestId,
+    required this.status,
+    required this.summary,
+  });
+
+  final String requestId;
+  final VerificationStatus status;
+  final PanVerificationSummary summary;
+
+  factory PanVerificationSubmission.fromJson(Map<String, dynamic> json) =>
+      PanVerificationSubmission(
+        requestId: json['request_id'] as String,
+        status: VerificationStatus.fromDatabase(json['status'] as String),
+        summary: PanVerificationSummary.fromJson(json),
+      );
+}
+
 class VerificationRequest {
   const VerificationRequest({
     required this.id,
@@ -65,6 +147,7 @@ class VerificationRequest {
     this.resolvedAt,
     this.expiresAt,
     this.retryOfRequestId,
+    this.panSummary,
   });
 
   final String id;
@@ -76,6 +159,7 @@ class VerificationRequest {
   final DateTime? resolvedAt;
   final DateTime? expiresAt;
   final String? retryOfRequestId;
+  final PanVerificationSummary? panSummary;
 
   factory VerificationRequest.fromJson(Map<String, dynamic> json) =>
       VerificationRequest(
@@ -94,6 +178,9 @@ class VerificationRequest {
             ? null
             : DateTime.parse(json['expires_at'] as String),
         retryOfRequestId: json['retry_of_request_id'] as String?,
+        panSummary: json['masked_pan'] == null
+            ? null
+            : PanVerificationSummary.fromJson(json),
       );
 }
 

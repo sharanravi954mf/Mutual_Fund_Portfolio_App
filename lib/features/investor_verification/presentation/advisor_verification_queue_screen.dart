@@ -104,7 +104,18 @@ class _AdvisorVerificationQueueScreenState
                       return ListTile(
                         title: Text('Request ${_shortId(request.id)}'),
                         subtitle: Text(
-                          '${_label(request.method.databaseValue)} • ${_label(request.status.databaseValue)}',
+                          [
+                            _label(request.method.databaseValue),
+                            _label(request.status.databaseValue),
+                            if (request.panSummary != null)
+                              request.panSummary!.maskedPan,
+                            if (request.panSummary?.conflictReason != null &&
+                                request.panSummary!.conflictReason !=
+                                    VerificationConflictReason.none)
+                              _conflictLabel(
+                                request.panSummary!.conflictReason,
+                              ),
+                          ].join(' • '),
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => _openDetail(request),
@@ -126,6 +137,16 @@ class _AdvisorVerificationQueueScreenState
             RegExp(r'^.'),
             (match) => match.group(0)!.toUpperCase(),
           );
+
+  static String _conflictLabel(VerificationConflictReason reason) =>
+      switch (reason) {
+        VerificationConflictReason.none => 'No conflict',
+        VerificationConflictReason.alreadyVerified => 'Already verified',
+        VerificationConflictReason.pendingDuplicate => 'Pending duplicate',
+        VerificationConflictReason.historicalMismatch => 'Historical mismatch',
+        VerificationConflictReason.legacyInvalid =>
+          'Legacy record needs review',
+      };
 }
 
 class _QueueFilters extends StatelessWidget {

@@ -279,13 +279,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           final email = (client['email'] ?? '')
               .toString()
               .toLowerCase(); // fallback email
-          final pan = (client['pan'] ?? '').toString().toLowerCase();
           final id = (client['id'] ?? '').toString().toLowerCase();
 
-          return name.contains(q) ||
-              email.contains(q) ||
-              pan.contains(q) ||
-              id.contains(q);
+          return name.contains(q) || email.contains(q) || id.contains(q);
         }).toList();
       }
     });
@@ -1466,7 +1462,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       itemBuilder: (context, index) {
                         final client = _filteredClients[index];
                         final name = client['full_name'] ?? 'Unnamed Client';
-                        final pan = client['pan'] ?? 'PAN Pending';
                         final id = client['id'].toString().substring(0, 8);
 
                         // Extract market value from portfolio lists
@@ -1492,7 +1487,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                   builder: (context) => ClientDetailScreen(
                                     clientId: client['id'] as String,
                                     clientName: name,
-                                    clientPan: pan,
                                   ),
                                 ),
                               );
@@ -1518,7 +1512,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             subtitle: Padding(
                               padding: const EdgeInsets.only(top: 4.0),
                               child: Text(
-                                "PAN: ${pan.toUpperCase()}  •  ID: $id",
+                                "Client ID: $id",
                                 style: GoogleFonts.inter(
                                     color: colors.textSecondary,
                                     fontSize: 12,

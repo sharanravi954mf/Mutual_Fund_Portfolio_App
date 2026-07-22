@@ -4,6 +4,7 @@ abstract class VerificationRepository {
   Future<List<VerificationRequest>> getStatus();
   Future<List<VerificationEvent>> getHistory(String requestId);
   Future<VerificationRequest> createRequest(VerificationMethod method);
+  Future<PanVerificationSubmission> submitPanVerification(String pan);
   Future<void> cancelRequest(String requestId, int expectedVersion);
   Future<List<VerificationRequest>> reviewQueue(
       [VerificationQueueFilter filter = const VerificationQueueFilter()]);
@@ -11,6 +12,12 @@ abstract class VerificationRepository {
   Future<List<AdvisorVerificationCandidate>> searchCandidates(
       String requestId, String query);
   Future<void> approveCandidate(
+    String requestId,
+    String candidateToken,
+    int expectedVersion, {
+    String? reasonCode,
+  });
+  Future<void> approvePanCandidate(
     String requestId,
     String candidateToken,
     int expectedVersion, {

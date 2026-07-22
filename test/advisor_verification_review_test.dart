@@ -181,11 +181,30 @@ class _FakeRepository implements VerificationRepository {
   }
 
   @override
+  Future<void> approvePanCandidate(
+      String requestId, String candidateToken, int expectedVersion,
+      {String? reasonCode}) async {
+    approvedCandidateToken = candidateToken;
+  }
+
+  @override
   Future<void> cancelRequest(String requestId, int expectedVersion) async {}
 
   @override
   Future<VerificationRequest> createRequest(VerificationMethod method) async =>
       _request;
+
+  @override
+  Future<PanVerificationSubmission> submitPanVerification(String pan) async =>
+      const PanVerificationSubmission(
+        requestId: 'request-12345678',
+        status: VerificationStatus.pendingAdvisorReview,
+        summary: PanVerificationSummary(
+          maskedPan: '******1234',
+          matchResult: VerificationMatchResult.singleMatch,
+          conflictReason: VerificationConflictReason.none,
+        ),
+      );
 
   @override
   Future<List<VerificationEvent>> getHistory(String requestId) async =>

@@ -71,12 +71,21 @@ class _AdvisorVerificationRequestDetailScreenState
     try {
       switch (decision) {
         case _Decision.approve:
-          await _repository.approveCandidate(
-            review.request.id,
-            _selectedCandidate!.token,
-            review.request.version,
-            reasonCode: reason.isEmpty ? null : reason,
-          );
+          if (review.request.method == VerificationMethod.pan) {
+            await _repository.approvePanCandidate(
+              review.request.id,
+              _selectedCandidate!.token,
+              review.request.version,
+              reasonCode: reason.isEmpty ? null : reason,
+            );
+          } else {
+            await _repository.approveCandidate(
+              review.request.id,
+              _selectedCandidate!.token,
+              review.request.version,
+              reasonCode: reason.isEmpty ? null : reason,
+            );
+          }
           break;
         case _Decision.reject:
           await _repository.reject(
@@ -186,6 +195,23 @@ class _ReviewContent extends StatelessWidget {
               _InfoRow('Retry of', _shortId(request.retryOfRequestId!)),
           ],
         ),
+        if (request.panSummary != null) ...[
+          const SizedBox(height: 16),
+          _InfoCard(
+            title: 'PAN verification',
+            children: [
+              _InfoRow('PAN', request.panSummary!.maskedPan),
+              _InfoRow(
+                'Match result',
+                _label(request.panSummary!.matchResult.databaseValue),
+              ),
+              _InfoRow(
+                'Review note',
+                _conflictLabel(request.panSummary!.conflictReason),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 16),
         _InfoCard(
           title: 'Requester',
@@ -232,6 +258,18 @@ class _ReviewContent extends StatelessWidget {
   static String _label(String value) => value.replaceAll('_', ' ');
   static String _date(DateTime value) =>
       value.toLocal().toString().split('.').first;
+
+  static String _conflictLabel(VerificationConflictReason reason) =>
+      switch (reason) {
+        VerificationConflictReason.none => 'No conflict identified',
+        VerificationConflictReason.alreadyVerified =>
+          'Already linked to a verified investor',
+        VerificationConflictReason.pendingDuplicate =>
+          'Duplicate pending verification',
+        VerificationConflictReason.historicalMismatch => 'Historical mismatch',
+        VerificationConflictReason.legacyInvalid =>
+          'Legacy record needs review',
+      };
 }
 
 class _DecisionActions extends StatelessWidget {
