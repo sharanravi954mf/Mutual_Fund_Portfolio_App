@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
-import '../services/identity_verification_service.dart';
+import '../../investor_verification/presentation/verification_screens.dart';
 
 class ExplorerHomeScreen extends StatelessWidget {
   const ExplorerHomeScreen({super.key});
@@ -198,8 +198,7 @@ class _PortfolioLinkingScreenState extends State<PortfolioLinkingScreen> {
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: _showVerificationExplanation
-                  ? _VerificationExplanation(
-                      methods: authProvider.verificationMethods)
+                  ? const _VerificationExplanation()
                   : _ChoiceCard(
                       isLoading: authProvider.isLoading,
                       onExplorer: _chooseExplorer,
@@ -268,43 +267,10 @@ class _ChoiceCard extends StatelessWidget {
 }
 
 class _VerificationExplanation extends StatelessWidget {
-  const _VerificationExplanation({required this.methods});
-
-  final List<VerificationMethodDescriptor> methods;
+  const _VerificationExplanation();
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Verification is required',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'We could not automatically locate your investments. This can happen when your registered email address or mobile number has changed.',
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'A secure verification step will be available here before any investments are linked. We will never ask for verification details on the login screen.',
-            ),
-            const SizedBox(height: 20),
-            ...methods.map(
-              (method) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.lock_outline),
-                title: Text(method.label),
-                subtitle: const Text('Coming soon'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return const VerificationStatusScreen();
   }
 }
