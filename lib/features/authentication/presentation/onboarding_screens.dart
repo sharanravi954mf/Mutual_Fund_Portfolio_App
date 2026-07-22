@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
-import '../../investor_verification/presentation/verification_screens.dart';
+import '../../investor_verification/presentation/verification_status_screen.dart';
 
 class ExplorerHomeScreen extends StatelessWidget {
   const ExplorerHomeScreen({super.key});

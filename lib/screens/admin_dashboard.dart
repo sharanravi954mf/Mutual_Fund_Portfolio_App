@@ -21,7 +21,7 @@ import '../features/invoice_signer/models/registrar_detection_result.dart';
 import '../features/invoice_signer/processors/registrar_processor.dart';
 import '../features/invoice_signer/services/registrar_detection_service.dart';
 import '../features/invoice_signer/services/invoice_pdf_discovery_service.dart';
-import '../features/investor_verification/presentation/verification_screens.dart';
+import '../features/investor_verification/presentation/advisor_verification_queue_screen.dart';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';

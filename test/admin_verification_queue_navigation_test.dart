@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mutual_fund_portfolio_app/features/investor_verification/data/verification_repository.dart';
 import 'package:mutual_fund_portfolio_app/features/investor_verification/models/verification_models.dart';
-import 'package:mutual_fund_portfolio_app/features/investor_verification/presentation/verification_screens.dart';
+import 'package:mutual_fund_portfolio_app/features/investor_verification/presentation/advisor_verification_queue_screen.dart';
 
 void main() {
   testWidgets('advisor verification queue renders with a fake repository',
@@ -17,10 +17,11 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump();
 
     expect(find.text('Verification review queue'), findsOneWidget);
     expect(
-      find.text('No verification requests are waiting for review.'),
+      find.text('No verification requests match these filters.'),
       findsOneWidget,
     );
   });
@@ -66,5 +67,22 @@ class _FakeVerificationRepository implements VerificationRepository {
       {String? reasonCode}) async {}
 
   @override
-  Future<List<VerificationRequest>> reviewQueue() async => const [];
+  Future<List<VerificationRequest>> reviewQueue(
+          [VerificationQueueFilter filter =
+              const VerificationQueueFilter()]) async =>
+      const [];
+  @override
+  Future<AdvisorVerificationReview> getReview(String requestId) =>
+      throw UnimplementedError();
+  @override
+  Future<List<AdvisorVerificationCandidate>> searchCandidates(
+          String requestId, String query) async =>
+      const [];
+  @override
+  Future<void> approveCandidate(
+      String requestId, String candidateToken, int expectedVersion,
+      {String? reasonCode}) async {}
+  @override
+  Future<void> requestMoreInformation(String requestId, int expectedVersion,
+      {required String reasonCode}) async {}
 }

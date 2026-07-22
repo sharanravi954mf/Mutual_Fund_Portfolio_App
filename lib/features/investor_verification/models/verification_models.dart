@@ -30,7 +30,8 @@ enum VerificationStatus {
   approved,
   rejected,
   cancelled,
-  expired;
+  expired,
+  moreInformationRequired;
 
   String get databaseValue => switch (this) {
         VerificationStatus.draft => 'draft',
@@ -39,6 +40,8 @@ enum VerificationStatus {
         VerificationStatus.rejected => 'rejected',
         VerificationStatus.cancelled => 'cancelled',
         VerificationStatus.expired => 'expired',
+        VerificationStatus.moreInformationRequired =>
+          'more_information_required',
       };
 
   static VerificationStatus fromDatabase(String value) =>
@@ -60,6 +63,8 @@ class VerificationRequest {
     required this.version,
     this.submittedAt,
     this.resolvedAt,
+    this.expiresAt,
+    this.retryOfRequestId,
   });
 
   final String id;
@@ -69,6 +74,8 @@ class VerificationRequest {
   final int version;
   final DateTime? submittedAt;
   final DateTime? resolvedAt;
+  final DateTime? expiresAt;
+  final String? retryOfRequestId;
 
   factory VerificationRequest.fromJson(Map<String, dynamic> json) =>
       VerificationRequest(
@@ -83,7 +90,89 @@ class VerificationRequest {
         resolvedAt: json['resolved_at'] == null
             ? null
             : DateTime.parse(json['resolved_at'] as String),
+        expiresAt: json['expires_at'] == null
+            ? null
+            : DateTime.parse(json['expires_at'] as String),
+        retryOfRequestId: json['retry_of_request_id'] as String?,
       );
+}
+
+class VerificationQueueFilter {
+  const VerificationQueueFilter({
+    this.requestIdQuery = '',
+    this.status,
+    this.method,
+  });
+
+  final String requestIdQuery;
+  final VerificationStatus? status;
+  final VerificationMethod? method;
+
+  VerificationQueueFilter copyWith({
+    String? requestIdQuery,
+    VerificationStatus? status,
+    VerificationMethod? method,
+    bool clearStatus = false,
+    bool clearMethod = false,
+  }) {
+    return VerificationQueueFilter(
+      requestIdQuery: requestIdQuery ?? this.requestIdQuery,
+      status: clearStatus ? null : status ?? this.status,
+      method: clearMethod ? null : method ?? this.method,
+    );
+  }
+}
+
+class AdvisorVerificationCandidate {
+  const AdvisorVerificationCandidate({
+    required this.token,
+    required this.name,
+    required this.profileSummary,
+    this.maskedEmail,
+    this.maskedMobile,
+  });
+
+  final String token;
+  final String name;
+  final String? maskedEmail;
+  final String? maskedMobile;
+  final String profileSummary;
+
+  factory AdvisorVerificationCandidate.fromJson(Map<String, dynamic> json) {
+    return AdvisorVerificationCandidate(
+      token: json['candidate_token'] as String,
+      name: json['candidate_name'] as String,
+      maskedEmail: json['masked_email'] as String?,
+      maskedMobile: json['masked_mobile'] as String?,
+      profileSummary: json['profile_summary'] as String,
+    );
+  }
+}
+
+class AdvisorVerificationReview {
+  const AdvisorVerificationReview({
+    required this.request,
+    required this.timeline,
+    this.maskedEmail,
+    this.maskedMobile,
+  });
+
+  final VerificationRequest request;
+  final List<VerificationEvent> timeline;
+  final String? maskedEmail;
+  final String? maskedMobile;
+
+  factory AdvisorVerificationReview.fromJson(
+    Map<String, dynamic> json,
+    List<VerificationEvent> timeline,
+  ) {
+    return AdvisorVerificationReview(
+      request: VerificationRequest.fromJson(json),
+      timeline: timeline,
+      maskedEmail: json['requester_masked_email'] as String?,
+      maskedMobile: json['requester_masked_mobile'] as String?,
+    );
+  }
 }
 
 class VerificationEvent {
