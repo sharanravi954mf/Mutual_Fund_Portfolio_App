@@ -26,7 +26,9 @@ Future<PickedFileData?> pickFile(String accept) async {
     allowed.addAll(['pdf', 'zip', 'xlsx', 'xls', 'csv', 'png', 'jpg', 'jpeg']);
   }
 
-  final isImageOnly = (allowed.contains('png') || allowed.contains('jpg') || allowed.contains('jpeg')) &&
+  final isImageOnly = (allowed.contains('png') ||
+          allowed.contains('jpg') ||
+          allowed.contains('jpeg')) &&
       allowed.every((ext) => ['png', 'jpg', 'jpeg'].contains(ext));
 
   final result = await fp.FilePicker.platform.pickFiles(

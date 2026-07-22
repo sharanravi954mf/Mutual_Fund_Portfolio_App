@@ -1,0 +1,296 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:mutual_fund_portfolio_app/features/investor_verification/application/folio_verification_service.dart';
+import 'package:mutual_fund_portfolio_app/features/investor_verification/data/folio_verification_repository.dart';
+import 'package:mutual_fund_portfolio_app/features/investor_verification/models/folio_verification_models.dart';
+
+void main() {
+  test('forwards correlation ID and records successful workflow', () async {
+    final repo = _FakeRepository();
+    final log = _Log();
+    final service = FolioVerificationService(repo, repo, logSink: log);
+    await service.submit(const SubmitFolioVerificationCommand(
+        token: FolioSubmissionToken('opaque'),
+        relationship: FolioHolderRelationship.soleHolder,
+        correlationId: 'cmd-1'));
+    expect(repo.correlation, 'cmd-1');
+    expect(log.success, ['submit:cmd-1']);
+  });
+  test('maps repository failures and logs safe application failure', () async {
+    final repo = _FakeRepository(
+        failure: const FolioVerificationFailure(
+            FolioVerificationFailureCode.staleVersion));
+    final log = _Log();
+    final service = FolioVerificationService(repo, repo, logSink: log);
+    expect(
+        () => service.beginReview(const FolioVerificationDecisionCommand(
+            requestId: 'request', expectedVersion: 1, correlationId: 'cmd-2')),
+        throwsA(isA<FolioVerificationApplicationFailure>().having((f) => f.code,
+            'code', FolioVerificationApplicationFailureCode.staleVersion)));
+    await Future<void>.delayed(Duration.zero);
+    expect(log.failure, ['beginReview:cmd-2']);
+  });
+  test('requires structured reasons before repository invocation', () async {
+    final repo = _FakeRepository();
+    final service = FolioVerificationService(repo, repo);
+    expect(
+        () => service.approve(const FolioVerificationDecisionCommand(
+            requestId: 'request', expectedVersion: 1, correlationId: 'cmd-3')),
+        throwsA(isA<FolioVerificationApplicationFailure>()));
+    expect(repo.calls, 0);
+  });
+  test('logging failure does not change a successful workflow result',
+      () async {
+    final service = FolioVerificationService(
+        _FakeRepository(), _FakeRepository(),
+        logSink: _ThrowingLog());
+    final result = await service.submit(const SubmitFolioVerificationCommand(
+        token: FolioSubmissionToken('opaque'),
+        relationship: FolioHolderRelationship.soleHolder,
+        correlationId: 'cmd-success'));
+    expect(result.id, 'request');
+  });
+  test('logging failure does not replace a typed application failure',
+      () async {
+    final repo = _FakeRepository(
+        failure: const FolioVerificationFailure(
+            FolioVerificationFailureCode.staleVersion));
+    final service =
+        FolioVerificationService(repo, repo, logSink: _ThrowingLog());
+    expect(
+        () => service.beginReview(const FolioVerificationDecisionCommand(
+            requestId: 'request',
+            expectedVersion: 1,
+            correlationId: 'cmd-failure')),
+        throwsA(isA<FolioVerificationApplicationFailure>().having((f) => f.code,
+            'code', FolioVerificationApplicationFailureCode.staleVersion)));
+  });
+  test('invalid decision commands never invoke repositories', () async {
+    final repo = _FakeRepository();
+    final service = FolioVerificationService(repo, repo);
+    expect(
+        () => service.requestMoreInformation(
+            const FolioVerificationDecisionCommand(
+                requestId: 'request',
+                expectedVersion: 1,
+                correlationId: 'cmd-invalid')),
+        throwsA(isA<FolioVerificationApplicationFailure>()));
+    expect(repo.calls, 0);
+  });
+  test('forwards each write correlation ID exactly once', () async {
+    final repo = _FakeRepository();
+    final service = FolioVerificationService(repo, repo);
+    await service.submit(const SubmitFolioVerificationCommand(
+        token: FolioSubmissionToken('opaque'),
+        relationship: FolioHolderRelationship.soleHolder,
+        correlationId: 'submit'));
+    await service.resubmit(const FolioVerificationDecisionCommand(
+        requestId: 'request', expectedVersion: 1, correlationId: 'resubmit'));
+    await service.cancel(const FolioVerificationDecisionCommand(
+        requestId: 'request', expectedVersion: 1, correlationId: 'cancel'));
+    await service.beginReview(const FolioVerificationDecisionCommand(
+        requestId: 'request', expectedVersion: 1, correlationId: 'review'));
+    await service.requestMoreInformation(const FolioVerificationDecisionCommand(
+        requestId: 'request',
+        expectedVersion: 1,
+        correlationId: 'more',
+        reasonCode: FolioReviewReasonCode.folioDocumentRequired));
+    await service.approve(const FolioVerificationDecisionCommand(
+        requestId: 'request',
+        expectedVersion: 1,
+        correlationId: 'approve',
+        reasonCode: FolioReviewReasonCode.verifiedSoleHolder));
+    await service.reject(const FolioVerificationDecisionCommand(
+        requestId: 'request',
+        expectedVersion: 1,
+        correlationId: 'reject',
+        reasonCode: FolioReviewReasonCode.insufficientDocuments));
+    await service.revokeGrant(const RevokeFolioGrantCommand(
+        grantId: 'grant',
+        expectedVersion: 1,
+        reasonCode: 'APPROVED_IN_ERROR',
+        correlationId: 'revoke'));
+    expect(repo.correlations, [
+      'submit',
+      'resubmit',
+      'cancel',
+      'review',
+      'more',
+      'approve',
+      'reject',
+      'revoke'
+    ]);
+  });
+  test('loads the safe list once while preserving pagination', () async {
+    final repo = _FakeRepository();
+    final service = FolioVerificationService(repo, repo);
+
+    final page = await service.getMyFolioRequestList(page: 2, pageSize: 10);
+
+    expect(repo.safeListCalls, 1);
+    expect(repo.safeListPage, 2);
+    expect(repo.safeListPageSize, 10);
+    expect(page.page, 2);
+    expect(page.pageSize, 10);
+  });
+
+  test('rejects action and reason combinations before repository invocation',
+      () async {
+    final repo = _FakeRepository();
+    final service = FolioVerificationService(repo, repo);
+
+    expect(
+      () => service.approve(const FolioVerificationDecisionCommand(
+          requestId: 'request',
+          expectedVersion: 1,
+          correlationId: 'invalid-approval',
+          reasonCode: FolioReviewReasonCode.invalidFolio)),
+      throwsA(isA<FolioVerificationApplicationFailure>()),
+    );
+    expect(repo.calls, 0);
+  });
+  test('maps safe-list infrastructure failures to an application failure',
+      () async {
+    final repo = _FakeRepository(failure: StateError('network unavailable'));
+    final service = FolioVerificationService(repo, repo);
+
+    expect(
+      () => service.getMyFolioRequestList(),
+      throwsA(
+        isA<FolioVerificationApplicationFailure>().having(
+          (failure) => failure.code,
+          'code',
+          FolioVerificationApplicationFailureCode.unexpected,
+        ),
+      ),
+    );
+  });
+}
+
+class _Log implements FolioVerificationLogSink {
+  final success = <String>[];
+  final failure = <String>[];
+  @override
+  void operationSucceeded(String op, String id) => success.add('$op:$id');
+  @override
+  void operationFailed(
+          String op, String id, FolioVerificationApplicationFailure error) =>
+      failure.add('$op:$id');
+}
+
+class _ThrowingLog implements FolioVerificationLogSink {
+  @override
+  void operationSucceeded(String op, String id) => throw StateError('logging');
+  @override
+  void operationFailed(
+          String op, String id, FolioVerificationApplicationFailure error) =>
+      throw StateError('logging');
+}
+
+class _FakeRepository
+    implements
+        InvestorFolioVerificationRepository,
+        AdvisorFolioVerificationRepository {
+  _FakeRepository({this.failure});
+  final Object? failure;
+  String? correlation;
+  final correlations = <String>[];
+  int calls = 0;
+  int safeListCalls = 0;
+  int? safeListPage;
+  int? safeListPageSize;
+  Future<T> _run<T>(T value, [String? id]) async {
+    calls++;
+    correlation = id ?? correlation;
+    if (id != null) correlations.add(id);
+    if (failure != null) throw failure!;
+    return value;
+  }
+
+  final request = const FolioVerificationRequest(
+      id: 'request',
+      status: FolioVerificationStatus.pendingAdvisorReview,
+      version: 1);
+  @override
+  Future<FolioSubmissionToken> acquireSubmissionToken(
+          String registrar, String folioNumber) =>
+      _run(const FolioSubmissionToken('opaque'));
+  @override
+  Future<FolioVerificationPage<InvestorFolioRequestListRecord>>
+      getMyFolioRequestList({int page = 0, int pageSize = 25}) {
+    safeListCalls++;
+    safeListPage = page;
+    safeListPageSize = pageSize;
+    return _run(
+        FolioVerificationPage(items: const [], page: page, pageSize: pageSize));
+  }
+
+  @override
+  Future<FolioVerificationRequest> submit(
+          FolioSubmissionToken t, FolioHolderRelationship r, String id) =>
+      _run(request, id);
+  @override
+  Future<FolioVerificationRequest> resubmit(String id, int v, String c) =>
+      _run(request, c);
+  @override
+  Future<FolioVerificationRequest> cancel(String id, int v, String c) =>
+      _run(request, c);
+  @override
+  Future<FolioVerificationPage<FolioVerificationRequest>> getMyRequests(
+          {int page = 0, int pageSize = 25}) =>
+      _run(FolioVerificationPage(
+          items: [request], page: page, pageSize: pageSize));
+  @override
+  Future<FolioVerificationRequest> getRequestDetail(String id) => _run(request);
+  @override
+  Future<FolioVerificationPage<FolioVerificationEvent>> getHistory(String id,
+          {int page = 0, int pageSize = 25}) =>
+      _run(FolioVerificationPage(
+          items: const [], page: page, pageSize: pageSize));
+  @override
+  Future<FolioVerificationRequest> beginReview(String id, int v, String c) =>
+      _run(request, c);
+  @override
+  Future<FolioVerificationRequest> requestMoreInformation(
+          String id, int v, String r, String c) =>
+      _run(request, c);
+  @override
+  Future<FolioVerificationRequest> approve(
+          String id, int v, String r, String c) =>
+      _run(request, c);
+  @override
+  Future<FolioVerificationRequest> reject(
+          String id, int v, String r, String c) =>
+      _run(request, c);
+  @override
+  Future<void> revokeGrant(String id, int v, String r, String c) =>
+      _run(null, c);
+  @override
+  Future<FolioVerificationPage<FolioVerificationRequest>> getAdvisorQueue(
+          FolioQueueFilter f) =>
+      _run(FolioVerificationPage(
+          items: const [], page: f.page, pageSize: f.pageSize));
+  @override
+  Future<FolioVerificationPage<AdvisorFolioVerificationQueueItem>>
+      getAssignedFolioQueue(FolioQueueFilter filter) => _run(
+            FolioVerificationPage(
+              items: const [],
+              page: filter.page,
+              pageSize: filter.pageSize,
+            ),
+          );
+  @override
+  Future<AdvisorFolioVerificationDetail> getAssignedFolioRequestDetail(
+          String requestId) =>
+      _run(const AdvisorFolioVerificationDetail(
+        requestId: 'request',
+        version: 1,
+        investorDisplayLabel: 'Investor request',
+        registrarDisplay: 'CAMS',
+        maskedFolio: '••••1234',
+        holderRelationship: FolioHolderRelationship.soleHolder,
+        status: FolioVerificationStatus.pendingAdvisorReview,
+        history: [],
+      ));
+  @override
+  Future<FolioGrantSummary?> getGrantSummary(String id) => _run(null);
+}

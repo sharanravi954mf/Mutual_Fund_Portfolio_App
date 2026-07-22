@@ -13,7 +13,7 @@ class PickedFileData {
 Future<PickedFileData?> pickFile(String accept) async {
   final completer = Completer<PickedFileData?>();
   final uploadInput = html.FileUploadInputElement()..accept = accept;
-  
+
   // Important for Safari/macOS: The input must be in the DOM to trigger a click
   uploadInput.style.display = 'none';
   html.document.body?.append(uploadInput);
@@ -25,11 +25,11 @@ Future<PickedFileData?> pickFile(String accept) async {
       uploadInput.remove();
       return;
     }
-    
+
     final file = files[0];
     final reader = html.FileReader();
     reader.readAsDataUrl(file);
-    
+
     reader.onLoadEnd.listen((e) {
       final result = reader.result as String;
       final base64String = result.split(',').last;
@@ -49,10 +49,15 @@ Future<PickedFileData?> pickFile(String accept) async {
 Future<void> saveFileBytes(Uint8List bytes, String filename) async {
   String mimeType = 'application/octet-stream';
   final lowerName = filename.toLowerCase();
-  if (lowerName.endsWith('.pdf')) mimeType = 'application/pdf';
-  else if (lowerName.endsWith('.zip')) mimeType = 'application/zip';
-  else if (lowerName.endsWith('.xlsx')) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  else if (lowerName.endsWith('.xls')) mimeType = 'application/vnd.ms-excel';
+  if (lowerName.endsWith('.pdf'))
+    mimeType = 'application/pdf';
+  else if (lowerName.endsWith('.zip'))
+    mimeType = 'application/zip';
+  else if (lowerName.endsWith('.xlsx'))
+    mimeType =
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  else if (lowerName.endsWith('.xls'))
+    mimeType = 'application/vnd.ms-excel';
   else if (lowerName.endsWith('.csv')) mimeType = 'text/csv';
 
   final blob = html.Blob([bytes], mimeType);

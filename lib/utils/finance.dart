@@ -1,7 +1,7 @@
 import 'dart:math';
 
 /// Calculates absolute return percentage.
-/// 
+///
 /// Formula: ((Current Value - Invested Value) / Invested Value) * 100
 double calculateAbsoluteReturn(double invested, double current) {
   if (invested <= 0) return 0.0;
@@ -17,9 +17,9 @@ class CashFlow {
 
 /// Calculates the Internal Rate of Return for irregular cash flows (XIRR).
 /// Uses the Newton-Raphson root-finding method.
-/// 
+///
 /// Formula to solve for r: Sum(C_i / (1 + r)^((d_i - d_1) / 365)) = 0
-/// 
+///
 /// @param cashFlows List of cash flows with amounts and dates.
 /// @param guess Initial guess for rate (default: 0.1 for 10%).
 /// @returns Annualized rate of return as a percentage (e.g. 15.5 for 15.5%).
@@ -46,7 +46,7 @@ double calculateXIRR(List<CashFlow> cashFlows, {double guess = 0.1}) {
     double sum = 0.0;
     for (var cf in sorted) {
       final days = cf.date.difference(d0).inDays;
-      sum += - (days / 365.0) * cf.amount / pow(1 + r, (days / 365.0) + 1.0);
+      sum += -(days / 365.0) * cf.amount / pow(1 + r, (days / 365.0) + 1.0);
     }
     return sum;
   }

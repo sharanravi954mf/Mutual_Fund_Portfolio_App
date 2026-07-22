@@ -56,7 +56,8 @@ class RupeeRainBackground extends StatefulWidget {
   State<RupeeRainBackground> createState() => _RupeeRainBackgroundState();
 }
 
-class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTickerProviderStateMixin {
+class _RupeeRainBackgroundState extends State<RupeeRainBackground>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   final List<MoneyParticle> _moneyParticles = [];
   final List<WealthOrb> _wealthOrbs = [];
@@ -73,9 +74,11 @@ class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTi
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 10),
-    )..addListener(() {
+    )
+      ..addListener(() {
         _updateAnimation();
-      })..repeat();
+      })
+      ..repeat();
   }
 
   @override
@@ -94,8 +97,18 @@ class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTi
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final colors = isDark
-        ? [const Color(0xFFC9B4BC), const Color(0xFF00E676), const Color(0xFFFFD54F), const Color(0xFF81D4FA)]
-        : [const Color(0xFF7D5C69), const Color(0xFF059669), const Color(0xFFD97706), const Color(0xFF0284C7)];
+        ? [
+            const Color(0xFFC9B4BC),
+            const Color(0xFF00E676),
+            const Color(0xFFFFD54F),
+            const Color(0xFF81D4FA)
+          ]
+        : [
+            const Color(0xFF7D5C69),
+            const Color(0xFF059669),
+            const Color(0xFFD97706),
+            const Color(0xFF0284C7)
+          ];
 
     for (int i = 0; i < _maxParticles; i++) {
       _moneyParticles.add(
@@ -119,8 +132,16 @@ class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTi
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final colors = isDark
-        ? [const Color(0xFFC9B4BC), const Color(0xFF00C853), const Color(0xFFFFB300)]
-        : [const Color(0xFF7D5C69), const Color(0xFF10B981), const Color(0xFFF59E0B)];
+        ? [
+            const Color(0xFFC9B4BC),
+            const Color(0xFF00C853),
+            const Color(0xFFFFB300)
+          ]
+        : [
+            const Color(0xFF7D5C69),
+            const Color(0xFF10B981),
+            const Color(0xFFF59E0B)
+          ];
 
     for (int i = 0; i < _maxOrbs; i++) {
       _wealthOrbs.add(
@@ -162,8 +183,10 @@ class _RupeeRainBackgroundState extends State<RupeeRainBackground> with SingleTi
         orb.x += orb.dx;
         orb.y += orb.dy;
 
-        if (orb.x < -orb.radius || orb.x > size.width + orb.radius) orb.dx = -orb.dx;
-        if (orb.y < -orb.radius || orb.y > size.height + orb.radius) orb.dy = -orb.dy;
+        if (orb.x < -orb.radius || orb.x > size.width + orb.radius)
+          orb.dx = -orb.dx;
+        if (orb.y < -orb.radius || orb.y > size.height + orb.radius)
+          orb.dy = -orb.dy;
       }
     });
   }
@@ -242,7 +265,8 @@ class MoneyWallpaperPainter extends CustomPainter {
       canvas.save();
       canvas.translate(particle.x, particle.y);
       canvas.rotate(particle.rotation);
-      textPainter.paint(canvas, Offset(-textPainter.width / 2, -textPainter.height / 2));
+      textPainter.paint(
+          canvas, Offset(-textPainter.width / 2, -textPainter.height / 2));
       canvas.restore();
     }
   }
@@ -256,7 +280,8 @@ class MoneyWallpaperPainter extends CustomPainter {
             orb.color.withValues(alpha: orb.opacity),
             orb.color.withValues(alpha: 0.0),
           ],
-        ).createShader(Rect.fromCircle(center: Offset(orb.x, orb.y), radius: orb.radius));
+        ).createShader(
+            Rect.fromCircle(center: Offset(orb.x, orb.y), radius: orb.radius));
 
       canvas.drawCircle(Offset(orb.x, orb.y), orb.radius, paint);
     }
@@ -267,7 +292,8 @@ class MoneyWallpaperPainter extends CustomPainter {
     path.moveTo(0, waveY);
 
     for (double x = 0; x <= size.width; x += 20) {
-      final y = waveY + sin((x / size.width * 2 * pi) + (animValue * 2 * pi)) * 25.0;
+      final y =
+          waveY + sin((x / size.width * 2 * pi) + (animValue * 2 * pi)) * 25.0;
       path.lineTo(x, y);
     }
 
