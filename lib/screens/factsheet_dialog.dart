@@ -220,17 +220,21 @@ class _FactsheetDialogState extends State<FactsheetDialog> {
                       Row(
                         children: [
                           if (_factsheet!['factsheet_url'] != null &&
-                              _factsheet!['factsheet_url'].toString().isNotEmpty)
+                              _factsheet!['factsheet_url']
+                                  .toString()
+                                  .isNotEmpty)
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () =>
                                     _openUrl(_factsheet!['factsheet_url']),
-                                icon: const Icon(Icons.download_rounded, size: 18),
+                                icon: const Icon(Icons.download_rounded,
+                                    size: 18),
                                 label: const Text("Factsheet PDF"),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFFE94057),
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
@@ -244,14 +248,16 @@ class _FactsheetDialogState extends State<FactsheetDialog> {
                                   .isNotEmpty)
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: () =>
-                                    _openUrl(_factsheet!['portfolio_holdings_url']),
-                                icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                                onPressed: () => _openUrl(
+                                    _factsheet!['portfolio_holdings_url']),
+                                icon: const Icon(Icons.open_in_new_rounded,
+                                    size: 18),
                                 label: const Text("All Holdings"),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: Colors.white,
                                   side: const BorderSide(color: Colors.white30),
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),

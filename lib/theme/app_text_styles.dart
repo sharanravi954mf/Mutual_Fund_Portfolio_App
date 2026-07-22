@@ -38,13 +38,15 @@ class AppTextStyles {
   static TextStyle bodySecondary(bool isDark) => GoogleFonts.inter(
         fontSize: 14,
         fontWeight: FontWeight.w400,
-        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+        color:
+            isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
       );
 
   static TextStyle labelMedium(bool isDark) => GoogleFonts.inter(
         fontSize: 14,
         fontWeight: FontWeight.w500,
-        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+        color:
+            isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
       );
 
   static TextStyle labelBold(bool isDark) => GoogleFonts.inter(
@@ -56,6 +58,7 @@ class AppTextStyles {
   static TextStyle caption(bool isDark) => GoogleFonts.inter(
         fontSize: 13,
         fontWeight: FontWeight.w400,
-        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+        color:
+            isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
       );
 }
