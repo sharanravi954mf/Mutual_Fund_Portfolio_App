@@ -26,5 +26,5 @@ We structure files, tasks, and documentation to be easily parsed and edited by L
 ---
 
 ## References
-- [Project Principles](../../governance/project-principles.md)
-- [Repository Governance](../../governance/repository-governance.md)
+- [Project Principles](../governance/project-principles.md)
+- [Repository Governance](../governance/repository-governance.md)

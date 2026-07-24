@@ -32,4 +32,4 @@ Constructing a machine-readable directory map of the codebase to allow new agent
 
 ## References
 - [ROADMAP.md](../../ROADMAP.md)
-- [07 — AI Engineering & Agent Architecture](../../architecture/07-ai-architecture.md)
+- [07 — AI Engineering & Agent Architecture](../architecture/07-ai-architecture.md)

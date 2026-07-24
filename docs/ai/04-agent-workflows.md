@@ -41,5 +41,5 @@ flowchart TD
 ---
 
 ## References
-- [Change Management](../../governance/change-management.md)
-- [Git Workflow](../../engineering/git-workflow.md)
+- [Change Management](../governance/change-management.md)
+- [Git Workflow](../engineering/git-workflow.md)

@@ -38,5 +38,5 @@ Agents must respect security trust boundaries:
 ---
 
 ## References
-- [Target Architecture Contract: Section 7](../../architecture/ARCHITECTURE.md#7-authentication-and-authorization-strategy)
+- [Target Architecture Contract: Section 7](../architecture/ARCHITECTURE.md#7-authentication-and-authorization-strategy)
 - [AI Engineering Handoff Specs](../AI_HANDOFF.md)

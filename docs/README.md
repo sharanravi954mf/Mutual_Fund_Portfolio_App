@@ -30,11 +30,11 @@ Defines project principles, change management processes, release readiness check
 - **Change Processes**: [Change Management](governance/change-management.md)
 - **Release Controls**: [Release Governance](governance/release-governance.md)
 
-### 🛠️ [Repository Operating System](../../CONTRIBUTING.md)
+### 🛠️ [Repository Operating System](../CONTRIBUTING.md)
 Standardizes developer onboarding, issue templates, PR checklists, code review ownerships, and reusable project templates.
-- **PR Checklists**: [Pull Request Template](../../.github/PULL_REQUEST_TEMPLATE.md)
-- **Label Taxonomy**: [Labels Catalog](../../.github/labels.md)
-- **Review Owners**: [CODEOWNERS](../../.github/CODEOWNERS)
+- **PR Checklists**: [Pull Request Template](../.github/PULL_REQUEST_TEMPLATE.md)
+- **Label Taxonomy**: [Labels Catalog](../.github/labels.md)
+- **Review Owners**: [CODEOWNERS](../.github/CODEOWNERS)
 
 ### 🤖 [AI Operating System (AIOS)](ai/README.md)
 Establishes the AI operating model, agent catalogs, workflow transitions, prompt standards, and human-in-the-loop validation frameworks.
