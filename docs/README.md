@@ -1,6 +1,6 @@
-# Technical, Product & Engineering Documentation Directory
+# Technical, Product, Engineering & Governance Documentation Directory
 
-This directory contains technical specifications, design logs, product vision maps, coding standards, and development records for the **Sharan Fincorp** app.
+This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, and development records for the **Sharan Fincorp** app.
 
 ---
 
@@ -23,8 +23,14 @@ Establishes the coding conventions, database guidelines, API structures, testing
 - **Coding Conventions**: [Coding Standards](engineering/coding-standards.md)
 - **Testing Specifications**: [Testing Strategy](engineering/testing-strategy.md)
 - **Git Branch Workflows**: [Git Workflow](engineering/git-workflow.md)
-- **API & REST Rules**: [API Standards](engineering/api-standards.md)
-- **Database Schema Rules**: [Database Standards](engineering/database-standards.md)
+
+### ⚖️ [Governance Framework](governance/README.md)
+Defines project principles, change management processes, release readiness checklists, living decision registers, and risk registers.
+- **Core Principles**: [Project Principles](governance/project-principles.md)
+- **Change Processes**: [Change Management](governance/change-management.md)
+- **Release Controls**: [Release Governance](governance/release-governance.md)
+- **Decision Registries**: [Decision Register](governance/decision-register.md)
+- **Risk Tables**: [Risk Register](governance/risk-register.md)
 
 ### 📋 [Features & Release Specs](features/README.md)
 User guides and functional specifications for completed system components.
