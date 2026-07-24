@@ -1,6 +1,6 @@
-# Technical, Product, Engineering, Governance & AI Documentation Directory
+# Technical, Product, Engineering, Governance, AI & Audit Documentation Directory
 
-This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, AI operating guides, and development records for the **Sharan Fincorp** app.
+This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, AI operating guides, certification audits, and development records for the **Sharan Fincorp** app.
 
 ---
 
@@ -41,7 +41,11 @@ Establishes the AI operating model, agent catalogs, workflow transitions, prompt
 - **Operating Model**: [Operating Model](ai/01-ai-operating-model.md)
 - **Agent Catalogs**: [Agent Catalog](ai/02-agent-catalog.md)
 - **Workflows**: [Agent Workflows](ai/04-agent-workflows.md)
-- **Quality Gates**: [AI Quality Assurance](ai/08-ai-quality-assurance.md)
+
+### 🔬 [Documentation Audit](audit/README.md)
+Stores the documentation certification reports, health audits, and open documentation debt logs.
+- **Certification Report**: [Certification Review](audit/documentation-certification-report.md)
+- **Debt Tracking**: [Debt Register](audit/documentation-debt-register.md)
 
 ### 📋 [Features & Release Specs](features/README.md)
 User guides and functional specifications for completed system components.

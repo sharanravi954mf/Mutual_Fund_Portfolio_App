@@ -140,6 +140,7 @@ All AI coding assistants working on this repository must read and adhere to [AGE
 - [Material 3 Design System Guides](docs/design-system.md)
 - [AI Engineering Handoff Specs](docs/AI_HANDOFF.md)
 - [Verification Workflow Blueprint](docs/verification_workflow_design.md)
+- [Documentation Certification Audit](docs/audit/README.md)
 
 ---
 
@@ -152,4 +153,13 @@ We translate our governance, product, and engineering guidelines into executable
 - **[Labels Taxonomy](.github/labels.md)**: Standard issue and PR classifications.
 - **[Release Template Specification](.github/release-template.md)**: Release checklists and rollback plans.
 - **[Reusable Templates Catalog](docs/templates/RFC.md)**: Templates for ADRs, Epics, Sprints, Security reviews, and RFCs.
+
+---
+
+## 11. Documentation Certification
+
+The entire repository documentation suite is certified as internally consistent and production-ready:
+- **[Documentation Certification Report](docs/audit/documentation-certification-report.md)**: Evaluates coverage, health scores, and release compliance.
+- **[Documentation Debt Register](docs/audit/documentation-debt-register.md)**: Tracks resolved path corrections and naming consistency issues.
+
 
