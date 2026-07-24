@@ -1,6 +1,6 @@
-# Technical & Product Documentation Directory
+# Technical, Product & Engineering Documentation Directory
 
-This directory contains technical specifications, design logs, product vision maps, and development records for the **Sharan Fincorp** app.
+This directory contains technical specifications, design logs, product vision maps, coding standards, and development records for the **Sharan Fincorp** app.
 
 ---
 
@@ -11,13 +11,20 @@ Contains business visions, glossary terms, non-functional requirements, target u
 - **Vision Blueprint**: [Product Vision](product/product-vision.md)
 - **Entities & Diagrams**: [Domain Model](product/domain-model.md)
 - **Workflows**: [User Journeys](product/user-journeys.md)
-- **Capability Specs**: [Business Capabilities](product/business-capabilities.md)
 
 ### ⚙️ [Architecture Documentation](architecture/README.md)
 Details underlying infrastructure, deployment topologies, database schemas, RLS policies, CI/CD pipeline structures, and security definitions.
 - **Executive Entrypoint**: [Executive Architecture Document](architecture.md)
 - **Target Contract**: [Target Architecture Contract](architecture/ARCHITECTURE.md)
 - **ADR Repository**: [Architecture Decision Records](decisions/README.md)
+
+### 💻 [Engineering Handbook](engineering/README.md)
+Establishes the coding conventions, database guidelines, API structures, testing strategies, Definition of Done, and review checklists.
+- **Coding Conventions**: [Coding Standards](engineering/coding-standards.md)
+- **Testing Specifications**: [Testing Strategy](engineering/testing-strategy.md)
+- **Git Branch Workflows**: [Git Workflow](engineering/git-workflow.md)
+- **API & REST Rules**: [API Standards](engineering/api-standards.md)
+- **Database Schema Rules**: [Database Standards](engineering/database-standards.md)
 
 ### 📋 [Features & Release Specs](features/README.md)
 User guides and functional specifications for completed system components.
