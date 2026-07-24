@@ -54,4 +54,4 @@ User guides and functional specifications for completed system components.
 ### 🚀 [Changelogs & Sprints](changelog/README.md)
 Historical logs tracing release tags and completed sprint details.
 - **Milestone History**: [Root Changelog](../CHANGELOG.md)
-- **Sprint Status**: [Active Project State](PROJECT_STATE.md)
+- **Sprint Status**: [Active Project State](../PROJECT_STATE.md)

@@ -4,6 +4,11 @@ Sharan Fincorp (internally codenamed **Moneyball**) is a premium, secure, and re
 
 ---
 
+## Project Control Center
+Before contributing, review the active sprint plans, database migration versions, completed epics, and development metrics in our living **[Project Control Center (PROJECT_STATE.md)](PROJECT_STATE.md)**.
+
+---
+
 ## 1. Project Vision & Overview
 The platform gives mutual fund Advisors (distributors) a trusted operating system to manage client onboarding, automated registrar (RTA) statement ingestion, reconciliation, and compliance operations. Concurrently, it grants Investors a secure, real-time interface to monitor their verified assets without exposing sensitive identifiers or raw personal credentials.
 
@@ -136,7 +141,7 @@ All AI coding assistants working on this repository must read and adhere to [AGE
 - [Target Architecture Contract](docs/architecture/ARCHITECTURE.md)
 - [Executive Architecture Entrypoint](docs/architecture.md)
 - [Architecture Decision Records (ADRs)](docs/decisions/README.md)
-- [Sprint Progress & State Records](docs/PROJECT_STATE.md)
+- [Sprint Progress & State Records](PROJECT_STATE.md)
 - [Material 3 Design System Guides](docs/design-system.md)
 - [AI Engineering Handoff Specs](docs/AI_HANDOFF.md)
 - [Verification Workflow Blueprint](docs/verification_workflow_design.md)
