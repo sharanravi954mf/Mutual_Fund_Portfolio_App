@@ -52,7 +52,15 @@ To prevent server I/O overhead and comply with security bounds, the PDF Invoice 
 
 ## 3. Architecture Library Index
 
-- 📑 **[Target Architecture Contract](architecture/ARCHITECTURE.md)**: Component layouts, state machines, and RLS rules.
+- 📑 **[Target Architecture Contract](architecture/ARCHITECTURE.md)**: Main component relationships, database ERD schemas, account state machines, and RLS guidelines.
+- 🚀 **[05 — Deployment Architecture](architecture/05-deployment-architecture.md)**: Physical environments (local, staging, production) and runtime hosting details.
+- ⚙️ **[06 — Infrastructure Architecture](architecture/06-infrastructure-architecture.md)**: Serverless compute, object storage, and pg_vault secrets management.
+- 🤖 **[07 — AI Engineering & Agent Architecture](architecture/07-ai-architecture.md)**: Multi-agent coordination pipelines, repository handovers, and prompt structures.
+- 👁️ **[08 — Observability Architecture](architecture/08-observability.md)**: Logging levels, structured diagnostic tracking, and P0/P1 alerts.
+- 📊 **[09 — Monitoring Architecture](architecture/09-monitoring.md)**: Connection pool, deadlock diagnostics, brute force detections, and runbooks.
+- 🛡️ **[10 — Backup & Disaster Recovery](architecture/10-backup-disaster-recovery.md)**: Logical dumps, offline Vault KMS archives, and RPO/RTO goals.
+- ⛓️ **[11 — CI/CD Pipeline Architecture](architecture/11-cicd-architecture.md)**: Pull request build check gates, branch strategy, and rollback procedures.
+- 🔐 **[12 — Security Architecture](architecture/12-security-architecture.md)**: Token signature validations, active link/grant checks, and encryption details.
 - 🔑 **[Architecture Decision Records Index](decisions/README.md)**: Architectural rationales (ADR-001 through ADR-008).
 - 🛠️ **[Verification Design Spec](verification_workflow_design.md)**: Detailed onboarding verification paths and state transitions.
 - 📋 **[Invoice Signer Spec](features/invoice_signer.md)**: PDF layout overlays, Coordinate anchoring, and SheetJS parsing boundary.
