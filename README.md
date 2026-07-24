@@ -132,6 +132,7 @@ All AI coding assistants working on this repository must read and adhere to [AGE
 - [Product Documentation Directory](docs/product/README.md)
 - [Engineering Handbook](docs/engineering/README.md)
 - [Governance Framework](docs/governance/README.md)
+- [AI Operating System (AIOS)](docs/ai/README.md)
 - [Target Architecture Contract](docs/architecture/ARCHITECTURE.md)
 - [Executive Architecture Entrypoint](docs/architecture.md)
 - [Architecture Decision Records (ADRs)](docs/decisions/README.md)

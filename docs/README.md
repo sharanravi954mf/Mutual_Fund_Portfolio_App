@@ -1,6 +1,6 @@
-# Technical, Product, Engineering & Governance Documentation Directory
+# Technical, Product, Engineering, Governance & AI Documentation Directory
 
-This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, and development records for the **Sharan Fincorp** app.
+This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, AI operating guides, and development records for the **Sharan Fincorp** app.
 
 ---
 
@@ -35,7 +35,13 @@ Standardizes developer onboarding, issue templates, PR checklists, code review o
 - **PR Checklists**: [Pull Request Template](../../.github/PULL_REQUEST_TEMPLATE.md)
 - **Label Taxonomy**: [Labels Catalog](../../.github/labels.md)
 - **Review Owners**: [CODEOWNERS](../../.github/CODEOWNERS)
-- **Reusable Templates**: [Project Templates Catalog](templates/RFC.md)
+
+### 🤖 [AI Operating System (AIOS)](ai/README.md)
+Establishes the AI operating model, agent catalogs, workflow transitions, prompt standards, and human-in-the-loop validation frameworks.
+- **Operating Model**: [Operating Model](ai/01-ai-operating-model.md)
+- **Agent Catalogs**: [Agent Catalog](ai/02-agent-catalog.md)
+- **Workflows**: [Agent Workflows](ai/04-agent-workflows.md)
+- **Quality Gates**: [AI Quality Assurance](ai/08-ai-quality-assurance.md)
 
 ### 📋 [Features & Release Specs](features/README.md)
 User guides and functional specifications for completed system components.
