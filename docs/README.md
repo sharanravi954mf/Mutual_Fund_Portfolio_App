@@ -1,14 +1,53 @@
-# Technical Documentation Directory
+# Technical, Product, Engineering, Governance & AI Documentation Directory
 
-This directory contains technical specs, logs, and development records for the **Sharan Fincorp** app.
+This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, AI operating guides, and development records for the **Sharan Fincorp** app.
+
+---
 
 ## Directory Structure
 
-* [architecture/](architecture/README.md) - System layout, database schemas, and data flow.
-* [features/](features/README.md) - Descriptions and user manuals for implemented features.
-* [decisions/](decisions/README.md) - Log of architecture design choices and trade-offs.
-* [development/](development/README.md) - Environment guides, configuration scripts, and troubleshooting tips.
-* [changelog/](changelog/README.md) - Log of releases, changes, and updates.
+### 🧱 [Product Documentation](product/README.md)
+Contains business visions, glossary terms, non-functional requirements, target user personas, and customer journey maps.
+- **Vision Blueprint**: [Product Vision](product/product-vision.md)
+- **Entities & Diagrams**: [Domain Model](product/domain-model.md)
+- **Workflows**: [User Journeys](product/user-journeys.md)
 
-## Documentation Policy
-Every completed feature must update the appropriate documentation under these folders to maintain an up-to-date representation of the codebase.
+### ⚙️ [Architecture Documentation](architecture/README.md)
+Details underlying infrastructure, deployment topologies, database schemas, RLS policies, CI/CD pipeline structures, and security definitions.
+- **Executive Entrypoint**: [Executive Architecture Document](architecture.md)
+- **Target Contract**: [Target Architecture Contract](architecture/ARCHITECTURE.md)
+- **ADR Repository**: [Architecture Decision Records](decisions/README.md)
+
+### 💻 [Engineering Handbook](engineering/README.md)
+Establishes the coding conventions, database guidelines, API structures, testing strategies, Definition of Done, and review checklists.
+- **Coding Conventions**: [Coding Standards](engineering/coding-standards.md)
+- **Testing Specifications**: [Testing Strategy](engineering/testing-strategy.md)
+- **Git Branch Workflows**: [Git Workflow](engineering/git-workflow.md)
+
+### ⚖️ [Governance Framework](governance/README.md)
+Defines project principles, change management processes, release readiness checklists, living decision registers, and risk registers.
+- **Core Principles**: [Project Principles](governance/project-principles.md)
+- **Change Processes**: [Change Management](governance/change-management.md)
+- **Release Controls**: [Release Governance](governance/release-governance.md)
+
+### 🛠️ [Repository Operating System](../../CONTRIBUTING.md)
+Standardizes developer onboarding, issue templates, PR checklists, code review ownerships, and reusable project templates.
+- **PR Checklists**: [Pull Request Template](../../.github/PULL_REQUEST_TEMPLATE.md)
+- **Label Taxonomy**: [Labels Catalog](../../.github/labels.md)
+- **Review Owners**: [CODEOWNERS](../../.github/CODEOWNERS)
+
+### 🤖 [AI Operating System (AIOS)](ai/README.md)
+Establishes the AI operating model, agent catalogs, workflow transitions, prompt standards, and human-in-the-loop validation frameworks.
+- **Operating Model**: [Operating Model](ai/01-ai-operating-model.md)
+- **Agent Catalogs**: [Agent Catalog](ai/02-agent-catalog.md)
+- **Workflows**: [Agent Workflows](ai/04-agent-workflows.md)
+- **Quality Gates**: [AI Quality Assurance](ai/08-ai-quality-assurance.md)
+
+### 📋 [Features & Release Specs](features/README.md)
+User guides and functional specifications for completed system components.
+- **Invoice Signer Specification**: [Invoice PDF/ZIP Signer Spec](features/invoice_signer.md)
+
+### 🚀 [Changelogs & Sprints](changelog/README.md)
+Historical logs tracing release tags and completed sprint details.
+- **Milestone History**: [Root Changelog](../CHANGELOG.md)
+- **Sprint Status**: [Active Project State](PROJECT_STATE.md)

@@ -1,0 +1,19 @@
+# CODEOWNERS
+# This file assigns code review ownership to specific teams.
+# Placeholder teams must be replaced with production user accounts before release.
+
+# Default owners for all files
+* @engineering-team
+
+# Architecture documentation and target contracts
+docs/architecture/ @architecture-team
+docs/architecture.md @architecture-team
+docs/decisions/ @architecture-team
+
+# Security configurations, migrations and Vault setups
+supabase/migrations/ @security-team
+docs/engineering/database-standards.md @security-team
+
+# Product requirements and personas
+docs/product/ @product-team
+docs/features/ @product-team
