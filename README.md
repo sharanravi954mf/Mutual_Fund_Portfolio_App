@@ -139,3 +139,16 @@ All AI coding assistants working on this repository must read and adhere to [AGE
 - [Material 3 Design System Guides](docs/design-system.md)
 - [AI Engineering Handoff Specs](docs/AI_HANDOFF.md)
 - [Verification Workflow Blueprint](docs/verification_workflow_design.md)
+
+---
+
+## 10. Repository Operating System
+
+We translate our governance, product, and engineering guidelines into executable workflows using the following contributor assets:
+- **[Contributor Guide (CONTRIBUTING.md)](CONTRIBUTING.md)**: Onboarding instructions, coding rules, and git workflows.
+- **[Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md)**: Validation checklists, system impact summaries, and DoD rules.
+- **[CODEOWNERS Review Matrix](.github/CODEOWNERS)**: Automated peer review routing by expertise (Architecture, Engineering, Security, Product).
+- **[Labels Taxonomy](.github/labels.md)**: Standard issue and PR classifications.
+- **[Release Template Specification](.github/release-template.md)**: Release checklists and rollback plans.
+- **[Reusable Templates Catalog](docs/templates/RFC.md)**: Templates for ADRs, Epics, Sprints, Security reviews, and RFCs.
+

@@ -29,8 +29,13 @@ Defines project principles, change management processes, release readiness check
 - **Core Principles**: [Project Principles](governance/project-principles.md)
 - **Change Processes**: [Change Management](governance/change-management.md)
 - **Release Controls**: [Release Governance](governance/release-governance.md)
-- **Decision Registries**: [Decision Register](governance/decision-register.md)
-- **Risk Tables**: [Risk Register](governance/risk-register.md)
+
+### 🛠️ [Repository Operating System](../../CONTRIBUTING.md)
+Standardizes developer onboarding, issue templates, PR checklists, code review ownerships, and reusable project templates.
+- **PR Checklists**: [Pull Request Template](../../.github/PULL_REQUEST_TEMPLATE.md)
+- **Label Taxonomy**: [Labels Catalog](../../.github/labels.md)
+- **Review Owners**: [CODEOWNERS](../../.github/CODEOWNERS)
+- **Reusable Templates**: [Project Templates Catalog](templates/RFC.md)
 
 ### 📋 [Features & Release Specs](features/README.md)
 User guides and functional specifications for completed system components.
