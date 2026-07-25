@@ -29,7 +29,15 @@ All AI coding agents must:
 
 ---
 
-## 4. Documentation Libraries
+## 4. Documentation Quality & Validation
+To ensure that repository cross-linking and structures remain correct, all changes must pass automated verification checks:
+- **Local Verification**: Execute `python3 .github/scripts/validate_docs.py` before push.
+- **GitHub Workflow**: A runner validates folder structure, UTF-8 formats, Mermaid closures, and relative links on every push/PR.
+- **Guide Reference**: See the full rules in **[Documentation Quality Gates (.github/documentation-quality.md)](.github/documentation-quality.md)**.
+
+---
+
+## 5. Documentation Libraries
 
 Before writing code, review the specific standards in our documentation libraries:
 - 🎯 **[Product vision & Persona Guides](docs/product/README.md)**: Target user stories, domain models, and business capability specifications.
