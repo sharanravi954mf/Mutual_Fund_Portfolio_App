@@ -6,6 +6,7 @@ import '../features/authentication/services/identity_bootstrap_service.dart';
 import '../features/authentication/services/identity_verification_service.dart';
 import '../features/authentication/services/onboarding_coordinator.dart';
 import '../features/investor_identity/models/user_account.dart';
+import '../features/investor_identity/models/user_profile.dart';
 import '../services/supabase_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -15,6 +16,7 @@ class AuthProvider extends ChangeNotifier {
 
   User? _user;
   UserAccount? _userAccount;
+  UserProfile? _userProfile;
   bool _isLoading = true;
   String? _errorMessage;
   Future<void>? _identityLoad;
@@ -22,6 +24,7 @@ class AuthProvider extends ChangeNotifier {
 
   User? get user => _user;
   UserAccount? get userAccount => _userAccount;
+  UserProfile? get userProfile => _userProfile;
   AccountState? get accountState => _userAccount?.accountState;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -48,6 +51,7 @@ class AuthProvider extends ChangeNotifier {
         await _loadIdentity(_user!);
       } else {
         _userAccount = null;
+        _userProfile = null;
         _isLoading = false;
         notifyListeners();
       }
@@ -82,10 +86,26 @@ class AuthProvider extends ChangeNotifier {
       if (_user?.id == user.id) {
         _userAccount = result.account;
       }
+
+      // Fetch the active profile to verify roles and account status
+      final profileResponse = await _supabaseService.client
+          .from('profiles')
+          .select()
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      if (_user?.id == user.id) {
+        if (profileResponse != null) {
+          _userProfile = UserProfile.fromJson(profileResponse);
+        } else {
+          _userProfile = null;
+        }
+      }
     } catch (e) {
       if (_user?.id == user.id) {
         _errorMessage = 'Unable to load your account securely.';
         _userAccount = null;
+        _userProfile = null;
       }
     } finally {
       if (_user?.id == user.id) {
@@ -165,6 +185,7 @@ class AuthProvider extends ChangeNotifier {
       await _supabaseService.signOut();
       _user = null;
       _userAccount = null;
+      _userProfile = null;
       _errorMessage = null;
     } catch (e) {
       _errorMessage = e.toString();
