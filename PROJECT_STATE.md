@@ -17,11 +17,12 @@
 ## Current Status
 - **Current Epic**: Core Platform Implementation
 - **Current Milestone**: User Management & Workspace Foundation Implemented
-- **Current Sprint**: Sprint 5.6A (Workspace isolation, memberships, assignments, invitations, and audit immutability complete)
+- **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
+- **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v1.2.1
 - **Overall Progress**: 90%
 - **Repository Health**: 99%
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Testing and staging readiness for multi-tenant isolation.
+- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas, edge processors, and transaction modal frontends.
 
 ---
 
