@@ -16,7 +16,7 @@ Draft Proposal / Issue → Write Plan (high-risk) → Code in Sandbox → Run Te
 ```
 
 - **Branching Strategy**: Branch from `main` using `feature/` (e.g. `feature/analytics`), `hotfix/`, or `release/` prefixes.
-- **Commit Messages**: Enforce Conventional Commits (e.g. `feat(analytics): add xirr curves`, `fix(signer): resolve coordinates`).
+- **Commit Messages**: Enforce Conventional Commits (e.g. `feat(analytics): add xirr curves`, `fix(signer): resolve coordinates`). See full rules in **[Commit Quality Gates (.github/commit-quality.md)](.github/commit-quality.md)**.
 - **PR approvals**: Pull requests require passing static analysis (`flutter analyze`), unit tests, database resets, and a peer developer review before merging.
 
 ---
