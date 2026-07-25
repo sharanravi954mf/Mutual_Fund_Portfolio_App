@@ -15,13 +15,13 @@
 ---
 
 ## Current Status
-- **Current Epic**: Documentation and Engineering Enablement
-- **Current Milestone**: Documentation Platform Certified
-- **Current Sprint**: Sprint 5.6A (Authorization Layer Complete) / Preparing for Sprint 5.6B
-- **Overall Progress**: 85%
+- **Current Epic**: Core Platform Implementation
+- **Current Milestone**: Core Authentication and RBAC Foundation Implemented
+- **Current Sprint**: Sprint 5.6A (Authorization Layer Complete)
+- **Overall Progress**: 87%
 - **Repository Health**: 98%
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Standardizing coding platforms, engineering manuals, and AI operational guidelines.
+- **Current Development Focus**: Authentication and role-based access control database triggers, RLS policies, and Flutter route guards.
 
 ---
 
@@ -30,6 +30,7 @@
 | Epic | Status | Completion Date | Major Deliverables |
 | :--- | :--- | :--- | :--- |
 | **Documentation Platform v1.0** | **Completed** | 2026-07-25 | Target Architecture Contract, Product Vision blueprint, Engineering handbooks, Governance frameworks, Repository OS configurations, AIOS, and Documentation Certification audits. |
+| **Core Authentication & RBAC** | **Completed** | 2026-07-25 | Database migrations, triggers, is_admin() and has_active_investor_link() status RLS validations, UserProfile models, and decoupled RouteGuard builders. |
 
 ---
 
@@ -43,12 +44,7 @@
 ### 2. Core Platform
 - **Priority**: Critical
 - **Dependencies**: Supabase DB local setup
-- **Current Status**: Database migrations and tests deployed locally.
-
-### 3. Authentication
-- **Priority**: Critical
-- **Dependencies**: Supabase Auth
-- **Current Status**: Investor identity profiles separated from login credentials.
+- **Current Status**: Completed (Authentication and Role-Based Access Control foundation integrated).
 
 ### 4. Email Ingestion
 - **Priority**: High

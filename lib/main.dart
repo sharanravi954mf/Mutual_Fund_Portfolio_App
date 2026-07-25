@@ -7,7 +7,7 @@ import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/language_provider.dart';
 import 'features/authentication/presentation/onboarding_screens.dart';
-import 'features/authentication/services/account_state_resolver.dart';
+import 'features/authentication/services/route_guard.dart';
 import 'screens/admin_dashboard.dart';
 import 'screens/client_dashboard.dart';
 import 'screens/login_screen.dart';
@@ -72,31 +72,16 @@ class AuthWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-
-    // Session and identity state must resolve before a protected destination.
-    if (authProvider.isLoading) {
-      return const LoadingScreen();
-    }
-
-    if (!authProvider.isAuthenticated) {
-      return const LoginScreen();
-    }
-
-    final accountState = authProvider.accountState;
-    if (accountState == null) {
-      return const AccountAccessErrorScreen();
-    }
-
-    switch (const AccountStateResolver().resolve(accountState)) {
-      case ProtectedDestination.advisorDashboard:
-        return const AdminDashboard();
-      case ProtectedDestination.investorDashboard:
-        return const ClientDashboard();
-      case ProtectedDestination.explorer:
-        return const ExplorerHomeScreen();
-      case ProtectedDestination.portfolioLinking:
-        return const PortfolioLinkingScreen();
-    }
+    return RouteGuard(
+      loginBuilder: (_) => const LoginScreen(),
+      loadingBuilder: (_) => const LoadingScreen(),
+      errorBuilder: (title, message) =>
+          AccountAccessErrorScreen(title: title, message: message),
+      advisorBuilder: (_) => const AdminDashboard(),
+      investorBuilder: (_) => const ClientDashboard(),
+      explorerBuilder: (_) => const ExplorerHomeScreen(),
+      linkingBuilder: (_) => const PortfolioLinkingScreen(),
+    ).resolve(context, authProvider);
   }
 }
 
@@ -144,7 +129,15 @@ class LoadingScreen extends StatelessWidget {
 }
 
 class AccountAccessErrorScreen extends StatelessWidget {
-  const AccountAccessErrorScreen({super.key});
+  const AccountAccessErrorScreen({
+    this.title = "Account Setup Unavailable",
+    this.message =
+        "Your account is authenticated, but its secure account state could not be loaded. Please contact your system administrator.",
+    super.key,
+  });
+
+  final String title;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +153,8 @@ class AccountAccessErrorScreen extends StatelessWidget {
                   color: Color(0xFFF27121), size: 64),
               const SizedBox(height: 24),
               Text(
-                "Account Setup Unavailable",
+                title,
+                textAlign: TextAlign.center,
                 style: GoogleFonts.outfit(
                   color: Colors.white,
                   fontSize: 22,
@@ -169,7 +163,7 @@ class AccountAccessErrorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                "Your account is authenticated, but its secure account state could not be loaded. Please contact your system administrator.",
+                message,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   color: Colors.grey.shade400,
