@@ -16,12 +16,12 @@
 
 ## Current Status
 - **Current Epic**: Core Platform Implementation
-- **Current Milestone**: Core Authentication and RBAC Foundation Implemented
-- **Current Sprint**: Sprint 5.6A (Authorization Layer Complete)
-- **Overall Progress**: 87%
-- **Repository Health**: 98%
+- **Current Milestone**: User Management & Workspace Foundation Implemented
+- **Current Sprint**: Sprint 5.6A (Workspace isolation, memberships, assignments, invitations, and audit immutability complete)
+- **Overall Progress**: 90%
+- **Repository Health**: 99%
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Authentication and role-based access control database triggers, RLS policies, and Flutter route guards.
+- **Current Development Focus**: Testing and staging readiness for multi-tenant isolation.
 
 ---
 
@@ -31,6 +31,7 @@
 | :--- | :--- | :--- | :--- |
 | **Documentation Platform v1.0** | **Completed** | 2026-07-25 | Target Architecture Contract, Product Vision blueprint, Engineering handbooks, Governance frameworks, Repository OS configurations, AIOS, and Documentation Certification audits. |
 | **Core Authentication & RBAC** | **Completed** | 2026-07-25 | Database migrations, triggers, is_admin() and has_active_investor_link() status RLS validations, UserProfile models, and decoupled RouteGuard builders. |
+| **Workspace & User Management** | **Completed** | 2026-07-25 | Workspaces, workspace memberships, assignments, invitations, and mutable audit logs schema, current_user_profile_id() RLS functions, secure accepting and acceptance RPC functions, Dart models, and API Services. |
 
 ---
 
