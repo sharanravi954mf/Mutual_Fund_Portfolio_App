@@ -1,78 +1,62 @@
-# Money Bowl — Synthesized System Architecture Specification
-Document Version: v1.2.1 Canonical Synthesized Baseline  
+# Money Bowl — System Architecture Specification
+Document Version: v1.2.1 Canonical Baseline  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
-BRD Alignment: docs/business/BRD.md (v1.2.1)  
+BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
-## 1. System Topology & Data Flow Boundaries
-Money Bowl uses an Event-Driven Serverless Architecture structured into four distinct execution zones:
+## 1. Executive System Topology
+Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serverless architecture. It provides isolation between Multi-Tenant MFD Workspaces and End-Investors while executing portfolio ingestion, order qualification, and market data synchronization in real-time.
 
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                SYSTEM TOPOLOGY MATRIX                                  │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│ 1. CLIENT ZONE (Flutter Mobile & Web App)                                               │
-│    • Clean Architecture (Data ➔ Domain ➔ Presentation via BLoC)                        │
-│    • Dynamic Client-Side PII Masking Engine (`FR-011`)                                  │
-│                                                                                         │
-│ 2. IDENTITY & SECURITY ZONE (Supabase Auth & JWT Engine)                                │
-│    • Mobile/Email OTP Auth ➔ Emits JWT with Claims:                                     │
-│      { "workspace_id": "UUID", "user_role": "mfd|investor|delegate", "tier": "pro" }    │
-│                                                                                         │
-│ 3. PERSISTENCE LAYER ZONE (PostgreSQL 15+ with Row Level Security)                       │
-│    • Multi-Tenant Data Isolation enforced via RLS Kernel Policies                       │
-│    • Foreign Key Constraints, Table Schemes, and State Enums                            │
-│                                                                                         │
-│ 4. SERVERLESS COMPUTE EDGE ZONE (Deno Edge Functions)                                   │
-│    • Mailbag Stream Decoder Engine (`cams-kfintech-ingestion`)                │
-│    • Order Qualification Engine (`order-processor`)                           │
-│    • Market Data Sync (`amfi-nav-worker`)                                     │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            SYSTEM TOPOLOGY MAP                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Flutter Client (iOS/Android/Web)                                           │
+│         │                                                                   │
+│         ├─► Supabase Auth (JWT with workspace_id & role claims)             │
+│         ├─► PostgreSQL Database (Row-Level Security / Multi-Tenancy)        │
+│         └─► Deno Edge Functions (Ingestion, Auto-Approval Engine, AMFI Sync) │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-## 2. Synthesized Database Domain Schema & Relationships
-The database architecture maps directly to BRD v1.2.1 Entities (BE-001 through BE-012).
+## 2. Core Architectural Layers
 
-### Key Enums & States
-* `user_role`: mfd, investor, family_delegate
-* `order_type`: buy, sell, switch
-* `order_status`: pending_qualification, auto_approved, approved, rejected, submitted_to_exchange
-* `ingestion_status`: received, parsing, processed, failed
+### A. Presentation Layer (Flutter Client)
+* **Architecture Pattern**: Clean Architecture with BLoC / Provider state management organized into structured features (Data ➔ Domain ➔ Presentation).
+* **Core Modules**:
+  * *Investor Workspace*: Portfolio view, Buy/Sell/Switch order initiation, Family delegation hub.
+  * *MFD Command Hub*: Transaction qualification queue, auto-approval threshold configuration, client onboarding.
+  * *PII Guardrails*: Automatic client-side masking for sensitive investor demographic data in shared views.
 
-### Core Tables & Foreign Key Graph
+### B. Security & Identity Layer (Supabase Auth & RLS)
+* **Authentication**: Multi-factor Mobile/Email OTP authentication via GoTrue.
+* **Authorization & Multi-Tenancy**:
+  * Enforced at the database engine level via PostgreSQL Row-Level Security (RLS).
+  * User JWT tokens carry `workspace_id`, `role` (mfd, investor, delegate), and `subscription_tier`.
+  * Multi-tenant data leakage is structurally prevented because database policies restrict all reads/writes to matching workspace IDs or validated membership linkages.
 
-           ┌────────────────┐
-           │   workspaces   │ (BE-003) Multi-tenant MFD Practice
-           └───────┬────────┘
-                   │ 1:N
-                   ▼
-┌──────────────────┴───────────────┐
-│        master_investors          │ (BE-001) Primary Client Profiles
-└──────────┬────────────────┬──────┘
-           │ 1:N            │ 1:N
-           ▼                ▼
-┌──────────┴───────┐  ┌─────┴──────────────┐
-│  order_requests  │  │ family_delegations │
-│     (BE-012)     │  │     (BE-005)       │
-└──────────────────┘  └────────────────────┘
+### C. Serverless Execution & Edge Layer (Deno Edge Functions)
+* **Mailbag & Feed Ingestion Worker**:
+  * Receives CAMS/KFintech WBR2 & WBR22 DBF feeds and CAS PDF files.
+  * Processes files using in-memory RAM stream decoding (zero disk persistence for zero-trust security).
+* **Order Auto-Approval Engine**:
+  * Evaluates pending investor transaction requests against MFD-configured threshold rules (e.g., SIP amount limits).
+  * Automatically advances order statuses (`pending_qualification` ➔ `auto_approved` or `pending_review`).
+* **AMFI Market Data Sync Worker**:
+  * Scheduled cron worker pulling daily scheme NAVs and riskometer metadata directly from official AMFI data feeds.
 
-### Detailed Table Specifications
+## 3. Core Data Architecture & Domain Model
+The database is structured into 5 primary entity domains matching the business capabilities:
 
-#### `workspaces` (BE-003)
-Stores MFD practice details, subscription status, and threshold rules:
-* **Attributes**: `id` (UUID), `arn_code` (TEXT), `auto_approval_enabled` (BOOL), `auto_approval_max_amount` (NUMERIC), `subscription_tier` (TEXT).
+| Domain | Key Data Entities | Architectural Purpose |
+| :--- | :--- | :--- |
+| **Identity & Access** | `workspaces`, `master_investors`, `mfd_profiles`, `workspace_memberships` | Manages multi-tenant workspace boundaries, user profiles, and roles (`platform_admin`, `admin`, `advisor`, `investor`, `operations`). |
+| **Portfolio & Holdings** | `portfolios`, `folios`, `scheme_holdings`, `transactions` | Stores unit balances, scheme choices, NAV pricing historical tracks, and raw statement data. |
+| **Order Execution** | `order_requests`, `qualification_queues`, `workspace_invitations`, `workspace_audit_logs` | Manages Buy/Sell/Switch initiation, MFD approval queues, and immutable security audit trails. |
+| **Subscriptions & Billing** | `subscription_plans`, `workspace_billing`, `investor_subscriptions` | Enforces feature gates and client limit verification triggers for MFD subscription tiers. |
+| **Referrals & Delegations** | `investor_referrals`, `family_delegations` | Manages asymmetric read-only sharing controls and viral registration attribution. |
 
-#### `master_investors` (BE-001)
-Core investor entity tied to a tenant:
-* **Attributes**: `id` (UUID), `workspace_id` (FK), `pan_hash` (TEXT), `full_name` (TEXT), `email` (TEXT), `phone` (TEXT), `bank_details` (JSONB).
+---
 
-#### `order_requests` (BE-012)
-Transaction initiation logs:
-* **Attributes**: `id` (UUID), `workspace_id` (FK), `investor_id` (FK), `scheme_code` (TEXT), `type` (order_type), `amount` (NUMERIC), `units` (NUMERIC), `status` (order_status), `auto_approved` (BOOL).
-
-#### `family_delegations` (BE-005)
-Asymmetric read-only sharing rules:
-* **Attributes**: `id` (UUID), `owner_investor_id` (FK), `delegate_investor_id` (FK), `access_level` (TEXT: read_only), `is_active` (BOOL).
-
-## 3. Concrete Row Level Security (RLS) Mechanics
-Instead of generic rules, the persistence layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003):
+## 4. Concrete Row Level Security (RLS) Mechanics
+The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
 ### A. Workspace Tenant Boundary Policy (BR-003)
 ```sql
@@ -97,32 +81,47 @@ CREATE POLICY family_delegate_read_policy ON order_requests
     );
 ```
 
-## 4. Edge Service Architectures & Pipelines
-
-### A. In-Memory Zero-Disk Mailbag Parser (BC-006)
-* **Trigger**: Supabase Storage Event / Mailbag Webhook.
-* **Pipeline**:
-  1. Stream incoming CAMS/KFintech WBR2 / WBR22 DBF or CAS PDF binary feed into Deno Edge RAM Buffer.
-  2. Parse binary records using stream decoders (No disk writes to ensure zero-trust compliance).
-  3. Upsert holdings into folios and transactions tables within a single Postgres transaction.
-
-### B. Transaction Qualification & Auto-Approval Engine (BR-006)
-* **Trigger**: HTTP POST RPC to `/functions/v1/order-processor` on order creation.
-* **Logic Execution Flow**:
-```text
-   Investor Submits Order Request
-                │
-                ▼
-  [Check Workspace Rules in DB]
-                │
-   Is auto_approval_enabled == TRUE?
-         ├── NO  ──► Set status = 'pending_qualification' (Alert MFD Queue)
-         └── YES ──► Is amount <= auto_approval_max_amount?
-                        ├── NO  ──► Set status = 'pending_qualification'
-                        └── YES ──► Set status = 'auto_approved' & auto_approved = TRUE
+### C. Platform Admin Override Policy (BR-007)
+```sql
+-- Platform admins bypass table-level workspace scoping to resolve accounts and overrides
+CREATE POLICY platform_admin_override_policy ON workspaces
+    FOR ALL
+    USING (
+        (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    );
 ```
 
-## 5. Non-Functional Criteria & Security Architecture
-* **Performance SLA**: Order qualification evaluation completes under 150ms at the Edge.
-* **Data Masking (BR-011)**: Client layer masks PAN (XXXXX1234X) and Mobile numbers (XXXXXX8901) dynamically unless explicit MFD auth context is granted.
-* **Auditability**: All order state transitions insert an immutable tracking record into `order_audit_logs`.
+---
+
+## 5. Edge Service Architectures & Pipelines
+
+### A. In-Memory Zero-Disk Mailbag Ingestion (BC-006 / FR-009)
+```text
+[IMAP Mailbag Polling] ➔ [Deno RAM buffer] ➔ [Stream Decoders] ➔ [Postgres Transaction]
+```
+To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs directly from network streams into memory buffers. It extracts transaction arrays and updates folio balances without saving temporary files to disk.
+
+### B. Transaction Qualification & Auto-Approval Engine (BR-006)
+1. Mapped Investor submits a Buy/Sell/Switch `order_request`.
+2. The database trigger invokes the Edge auto-approval function.
+3. The engine evaluates:
+   * Is `auto_approval_enabled` true for the workspace?
+   * Is the order amount $\le$ `auto_approval_max_amount`?
+4. If yes, status is set to `auto_approved`. If no, it is marked `pending_qualification` and routed to the MFD approval queue.
+
+### C. Universal Search Architecture (BC-015 / FR-007)
+To meet the `<200ms` latency SLA, the database uses PostgreSQL Generalized Inverted Index (GIN) on scheme names, folios, and client details using the `pg_trgm` extension. The client implements search-as-you-type debouncing and query caching.
+
+### D. Educational AI Assistant Proxy (BC-007 / FR-012)
+* **Core Stack**: Edge function communicating with a secured LLM endpoint.
+* **Decline Gate (FR-013)**: The prompt system includes rigid system instructions to detect intent. Queries containing recommendation keywords (e.g., "which fund to buy", "should I switch") are blocked and responded to with the static education declination template.
+
+---
+
+## 6. Non-Functional Criteria & Security Architecture
+* **NFR-001: Data Security & PII Protection**: Sensitive fields (`pan`, `phone`) are encrypted at rest using AES-256 keys managed by the Supabase Vault. Searches use SHA-256 HMAC lookups to verify matching entities without decrypting values.
+* **NFR-002: Latency SLAs**:
+  * Search queries: `<200ms`.
+  * Order qualification routing: `<5s`.
+  * Statement parsing processing: `<15 minutes`.
+* **NFR-003: Audit Trail**: Every status change on `order_requests`, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The table enforces immutability via a trigger blocking all update and delete queries.
