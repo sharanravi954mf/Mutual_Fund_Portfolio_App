@@ -14,7 +14,7 @@ Applies to task allocation, PR assignments, and test monitoring.
 
 We map core repository activities to specific agent roles:
 
-- **Chief Architect Agent**: Reviews proposed designs against [Target Architecture Contract](../../architecture/README.md) and approves ADR status changes.
+- **Chief Architect Agent**: Reviews proposed designs against [Target Architecture Contract](../architecture/README.md) and approves ADR status changes.
 - **Product Architect Agent**: Maintains user journeys, catalogs features, and tracks personas.
 - **Engineering Architect Agent**: Enforces clean architecture guidelines and audits API REST rules.
 - **Implementation Agent (Coder)**: Modifies code inside sandboxed workspaces.
@@ -26,5 +26,5 @@ We map core repository activities to specific agent roles:
 ---
 
 ## References
-- [Repository Governance](../../governance/repository-governance.md)
-- [Review Checklists](../../engineering/review-checklists.md)
+- [Repository Governance](../governance/repository-governance.md)
+- [Review Checklists](../engineering/review-checklists.md)

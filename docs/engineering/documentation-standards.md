@@ -18,7 +18,7 @@ Applies to roadmaps, changelogs, architecture designs, features, and engineering
 ### 2. Navigation & Cross-Linking
 - **Relative Linking**: Link files using absolute file URI links relative to the file:
   - Good: `[ADR-003](../decisions/ADR-003-PAN-Verification.md)`
-  - Bad: `[ADR-003](/decisions/ADR-003-PAN-Verification.md)`
+  - Bad: absolute slash-prefixed link like `/decisions/ADR-003-PAN-Verification.md`
 - **Symbol Referencing**: Provide clickable links pointing to specific source code symbols or file lines wherever possible.
 
 ### 3. Visuals & Mermaid Diagrams

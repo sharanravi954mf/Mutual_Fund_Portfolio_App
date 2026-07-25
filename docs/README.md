@@ -1,6 +1,6 @@
-# Technical, Product, Engineering, Governance & AI Documentation Directory
+# Technical, Product, Engineering, Governance, AI & Audit Documentation Directory
 
-This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, AI operating guides, and development records for the **Sharan Fincorp** app.
+This directory contains technical specifications, design logs, product vision maps, coding standards, governance policies, AI operating guides, certification audits, and development records for the **Sharan Fincorp** app.
 
 ---
 
@@ -30,18 +30,22 @@ Defines project principles, change management processes, release readiness check
 - **Change Processes**: [Change Management](governance/change-management.md)
 - **Release Controls**: [Release Governance](governance/release-governance.md)
 
-### 🛠️ [Repository Operating System](../../CONTRIBUTING.md)
+### 🛠️ [Repository Operating System](../CONTRIBUTING.md)
 Standardizes developer onboarding, issue templates, PR checklists, code review ownerships, and reusable project templates.
-- **PR Checklists**: [Pull Request Template](../../.github/PULL_REQUEST_TEMPLATE.md)
-- **Label Taxonomy**: [Labels Catalog](../../.github/labels.md)
-- **Review Owners**: [CODEOWNERS](../../.github/CODEOWNERS)
+- **PR Checklists**: [Pull Request Template](../.github/PULL_REQUEST_TEMPLATE.md)
+- **Label Taxonomy**: [Labels Catalog](../.github/labels.md)
+- **Review Owners**: [CODEOWNERS](../.github/CODEOWNERS)
 
 ### 🤖 [AI Operating System (AIOS)](ai/README.md)
 Establishes the AI operating model, agent catalogs, workflow transitions, prompt standards, and human-in-the-loop validation frameworks.
 - **Operating Model**: [Operating Model](ai/01-ai-operating-model.md)
 - **Agent Catalogs**: [Agent Catalog](ai/02-agent-catalog.md)
 - **Workflows**: [Agent Workflows](ai/04-agent-workflows.md)
-- **Quality Gates**: [AI Quality Assurance](ai/08-ai-quality-assurance.md)
+
+### 🔬 [Documentation Audit](audit/README.md)
+Stores the documentation certification reports, health audits, and open documentation debt logs.
+- **Certification Report**: [Certification Review](audit/documentation-certification-report.md)
+- **Debt Tracking**: [Debt Register](audit/documentation-debt-register.md)
 
 ### 📋 [Features & Release Specs](features/README.md)
 User guides and functional specifications for completed system components.
@@ -50,4 +54,4 @@ User guides and functional specifications for completed system components.
 ### 🚀 [Changelogs & Sprints](changelog/README.md)
 Historical logs tracing release tags and completed sprint details.
 - **Milestone History**: [Root Changelog](../CHANGELOG.md)
-- **Sprint Status**: [Active Project State](PROJECT_STATE.md)
+- **Sprint Status**: [Active Project State](../PROJECT_STATE.md)

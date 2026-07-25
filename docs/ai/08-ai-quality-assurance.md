@@ -31,5 +31,5 @@ If different coding agents suggest conflicting edits (e.g. nested brackets vs. c
 ---
 
 ## References
-- [Testing Strategy](../../engineering/testing-strategy.md)
-- [Review Checklists](../../engineering/review-checklists.md)
+- [Testing Strategy](../engineering/testing-strategy.md)
+- [Review Checklists](../engineering/review-checklists.md)

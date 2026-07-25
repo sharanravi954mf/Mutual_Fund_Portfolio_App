@@ -4,6 +4,11 @@ Sharan Fincorp (internally codenamed **Moneyball**) is a premium, secure, and re
 
 ---
 
+## Project Control Center
+Before contributing, review the active sprint plans, database migration versions, completed epics, and development metrics in our living **[Project Control Center (PROJECT_STATE.md)](PROJECT_STATE.md)**.
+
+---
+
 ## 1. Project Vision & Overview
 The platform gives mutual fund Advisors (distributors) a trusted operating system to manage client onboarding, automated registrar (RTA) statement ingestion, reconciliation, and compliance operations. Concurrently, it grants Investors a secure, real-time interface to monitor their verified assets without exposing sensitive identifiers or raw personal credentials.
 
@@ -136,10 +141,11 @@ All AI coding assistants working on this repository must read and adhere to [AGE
 - [Target Architecture Contract](docs/architecture/ARCHITECTURE.md)
 - [Executive Architecture Entrypoint](docs/architecture.md)
 - [Architecture Decision Records (ADRs)](docs/decisions/README.md)
-- [Sprint Progress & State Records](docs/PROJECT_STATE.md)
+- [Sprint Progress & State Records](PROJECT_STATE.md)
 - [Material 3 Design System Guides](docs/design-system.md)
 - [AI Engineering Handoff Specs](docs/AI_HANDOFF.md)
 - [Verification Workflow Blueprint](docs/verification_workflow_design.md)
+- [Documentation Certification Audit](docs/audit/README.md)
 
 ---
 
@@ -152,4 +158,13 @@ We translate our governance, product, and engineering guidelines into executable
 - **[Labels Taxonomy](.github/labels.md)**: Standard issue and PR classifications.
 - **[Release Template Specification](.github/release-template.md)**: Release checklists and rollback plans.
 - **[Reusable Templates Catalog](docs/templates/RFC.md)**: Templates for ADRs, Epics, Sprints, Security reviews, and RFCs.
+
+---
+
+## 11. Documentation Certification
+
+The entire repository documentation suite is certified as internally consistent and production-ready:
+- **[Documentation Certification Report](docs/audit/documentation-certification-report.md)**: Evaluates coverage, health scores, and release compliance.
+- **[Documentation Debt Register](docs/audit/documentation-debt-register.md)**: Tracks resolved path corrections and naming consistency issues.
+
 

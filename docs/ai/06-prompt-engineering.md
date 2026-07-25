@@ -35,4 +35,4 @@ Write a detailed implementation plan. Do NOT apply changes. Wait for human feedb
 
 ## References
 - [AI Developer Manual (AGENTS.md)](../../AGENTS.md)
-- [Review Checklists](../../engineering/review-checklists.md)
+- [Review Checklists](../engineering/review-checklists.md)

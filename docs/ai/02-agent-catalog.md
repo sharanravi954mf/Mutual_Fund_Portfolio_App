@@ -41,4 +41,4 @@ Includes LLM generation runtimes, coder subagents, and automated review assistan
 ---
 
 ## References
-- [Repository Governance](../../governance/repository-governance.md)
+- [Repository Governance](../governance/repository-governance.md)

@@ -29,6 +29,6 @@ If conflicts occur between performance targets and security requirements (e.g. V
 ---
 
 ## References
-- [Change Management](../../governance/change-management.md)
-- [Repository Governance](../../governance/repository-governance.md)
-- [Release Governance](../../governance/release-governance.md)
+- [Change Management](../governance/change-management.md)
+- [Repository Governance](../governance/repository-governance.md)
+- [Release Governance](../governance/release-governance.md)
