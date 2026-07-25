@@ -3,7 +3,8 @@ enum UserRole {
   advisor,
   admin,
   operations,
-  client; // legacy compatibility role
+  client, // legacy compatibility role
+  platformAdmin; // platform administrator
 
   static UserRole fromDatabase(String value) {
     switch (value.toLowerCase()) {
@@ -17,12 +18,19 @@ enum UserRole {
         return UserRole.operations;
       case 'client':
         return UserRole.client;
+      case 'platform_admin':
+        return UserRole.platformAdmin;
       default:
         return UserRole.investor; // fallback default
     }
   }
 
-  String get databaseValue => name;
+  String get databaseValue {
+    if (this == UserRole.platformAdmin) {
+      return 'platform_admin';
+    }
+    return name;
+  }
 }
 
 enum AccountStatus {
@@ -80,7 +88,8 @@ class UserProfile {
   bool get isAuthorizedForAdvisorDashboard =>
       role == UserRole.advisor ||
       role == UserRole.admin ||
-      role == UserRole.operations;
+      role == UserRole.operations ||
+      role == UserRole.platformAdmin;
 
   bool get isAuthorizedForInvestorDashboard =>
       role == UserRole.investor || role == UserRole.client;

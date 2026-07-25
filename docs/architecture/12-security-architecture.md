@@ -40,8 +40,9 @@ flowchart TD
 
 ### Row Level Security (RLS)
 Operational tables have RLS enabled. Read policies assert owner/identity linkages:
-- **Portfolios / Transactions**: A select policy validates that an active relationship exists in `investor_account_links` and an approved grant exists in `folio_grants` for the specific folio.
-- **Direct Update Prevention**: Client roles cannot perform updates on state parameters, roles, or links.
+- **Workspace Isolation**: Portfolios, transactions, profiles, memberships, assignments, invitations, and audit logs are scoped to active workspace memberships. Users can only view data within workspaces they are active members of.
+- **Portfolios / Transactions**: A select policy validates that the advisor is an active workspace member with permissions to view the client's portfolio, or the investor matches the portfolio client ID and has an active folio grant.
+- **Direct Update Prevention**: Client roles cannot perform updates on state parameters, roles, or links. Only Platform Admins or authorized Workspace Admins (via SECURITY DEFINER helpers) can perform admin mutations.
 
 ### Vault Cryptography & PAN Protection
 PAN verification isolates encrypted business files from request evidence records:
