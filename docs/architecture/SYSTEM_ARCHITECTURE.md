@@ -1,5 +1,5 @@
 # Money Bowl — System Architecture Specification
-Document Version: v1.3.1-Final-Baseline  
+Document Version: v1.4.0-Final-Baseline  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
@@ -11,6 +11,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.2.1 | 2026-07-26 | BAI | Reorganized into standard 17-layer format. |
 | v1.3.0 | 2026-07-27 | BAI | Integrated dynamic membership-based RLS, family delegation updates, outbox patterns, and server-side masking. |
 | v1.3.1 | 2026-07-27 | BAI | Final baseline addressing precision feedback from ChatGPT 5.5 review. |
+| v1.4.0 | 2026-07-27 | BAI | Updated Traceability matrices, retention lifecycle policies, malware scan workflow, and role-segregated WITH CHECK RLS policies. |
 
 ---
 
@@ -88,7 +89,7 @@ The following matrix maps Business Requirements Document (BRD) user personas to 
 
 | BRD Persona | Auth Role | Membership Role | Notes |
 | :--- | :--- | :--- | :--- |
-| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Full write capabilities within workspace boundaries. |
+| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Own workspace scope. Full write capabilities within workspace boundaries. |
 | **Mapped Investor** | `investor` | `investor` | Active membership required to view details or initiate transactions. |
 | **Exploring Investor** | `investor` | `none` | Standalone explore access only; cannot access specific workspace datasets. |
 | **Family Guest** | `investor` | `delegate` | Read-only delegated access to portfolios/holdings only. |
@@ -121,7 +122,15 @@ CREATE POLICY workspace_isolation_policy ON order_requests
         EXISTS (
             SELECT 1 FROM workspace_memberships wm
             WHERE wm.workspace_id = order_requests.workspace_id
-              AND wm.user_id = auth.uid()
+              AND wm.profile_id = auth.uid()
+              AND wm.status = 'active'
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM workspace_memberships wm
+            WHERE wm.workspace_id = order_requests.workspace_id
+              AND wm.profile_id = auth.uid()
               AND wm.status = 'active'
         )
     );
@@ -133,14 +142,15 @@ Family Read RLS policies are strictly applied to portfolio-domain tables (`portf
 -- Allows family delegates read-only portfolio access
 CREATE POLICY family_delegate_read_policy ON portfolios
     FOR SELECT
+    TO authenticated
     USING (
-        investor_id IN (
+        client_id IN (
             SELECT owner_investor_id FROM family_delegations
             WHERE delegate_investor_id = auth.uid() AND is_active = TRUE
         )
     );
 ```
-* **Prohibition**: Family delegates are strictly prohibited from viewing `order_requests`, bank accounts, or support tickets.
+* **Prohibition**: Family delegates are strictly prohibited from viewing `order_requests`, bank accounts, or support tickets. No write or unauthorized transactional access is allowed.
 
 ### C. Platform Admin Override Policy (BR-007)
 ```sql
@@ -158,10 +168,11 @@ CREATE POLICY platform_admin_override_policy ON workspaces
 
 ### A. In-Memory Zero-Disk Mailbag Ingestion (BC-006 / FR-009 / BC-013)
 ```text
-[IMAP Mailbag Polling] ➔ [Encrypted Object Storage] ➔ [Deno RAM buffer] ➔ [Stream Decoders] ➔ [Postgres Transaction]
+[Upload Stream] ➔ [MIME & Magic-Byte Validation] ➔ [Malware Scan] ➔ [SHA-256 Hashing] ➔ [Encrypted Object Storage] ➔ [Parsing]
 ```
-To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs directly from secure encrypted object storage into memory buffers. It extracts transaction arrays and updates folio balances without saving temporary files to local disk.
-* **Vaulting Controls**: Object storage enforces file-size limits (<20MB), MIME validation (PDF/DBF), SHA-256 content-hash deduplication, 30-day retention pruning policies, and single-use signed URLs expiring in 15 minutes.
+To guarantee zero-trust compliance, the file ingestion workflow mandates malware screening: `Upload Stream -> MIME & Magic-Byte Validation -> Malware Scan -> SHA-256 Hashing -> Encrypted Object Storage -> Parsing`. The parser reads DBF feeds and CAS PDFs directly from the secure encrypted object storage vault into memory buffers. It extracts transaction arrays and updates folio balances without saving temporary files to local disk.
+* **Vaulting Controls**: The encrypted object storage vault enforces file-size limits (<20MB), MIME validation (PDF/DBF), malware screening, SHA-256 content-hash deduplication, and single-use signed URLs expiring in 15 minutes.
+* **Retention Policy**: Retention is governed by configurable platform policy and applicable regulatory, contractual, and user-consent requirements. Automatic deletion shall not occur while a document is required for portfolio lineage, audit, active servicing, or legal retention. Temporary processing artefacts may be removed after 30 days, but original vault documents follow a separate compliance retention lifecycle.
 
 ### B. Transaction Qualification & Auto-Approval Engine (BR-006)
 1. Mapped Investor submits a Buy/Sell/Switch `order_request`.
@@ -275,21 +286,21 @@ Every status change on `order_requests`, workspace administrative resets, and bi
 
 | Business Capability | Mapping Personas | BRD Requirements | BRD Rules | Postgres Entities & Component Links |
 | :--- | :--- | :--- | :--- | :--- |
-| **BC-001** (Identity) | Investor, Distributor | `FR-002` | `BR-001` | `profiles`, `workspace_memberships` |
+| **BC-001** (Identity) | Platform Admin, Distributor, Mapped Investor, Exploring Investor | `FR-002`, `FR-003`, `FR-004` | `BR-001`, `BR-007`, `BR-008` | `profiles`, `workspace_memberships` |
 | **BC-002** (Distributor) | Distributor | `FR-001` | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
 | **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | `profiles` |
 | **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004` | `workspace_memberships` |
 | **BC-005** (Portfolio) | Investor, Distributor | N/A | `BR-004` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
-| **BC-007** (Educational AI) | Investor | `FR-012` | `BR-010` | `ai-helper` Edge worker, declination guard gate |
+| **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013` | `BR-010` | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | `support_tickets` |
-| **BC-009** (Subscriptions) | Distributor | `FR-010` | `BR-011` | `subscription_plans`, `workspace_billing`, `payment_events` |
+| **BC-009** (Subscriptions) | Distributor, Mapped Investor, Exploring Investor | `FR-010` | `BR-011` | `subscription_plans`, `workspace_billing`, `payment_events` |
 | **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | `platform_admin_override_policy`, `workspace_audit_logs` |
 | **BC-011** (Lineage) | None | `NFR-005` | Auditability Principle | `ingestion_logs` (Immutable) |
-| **BC-012** (Notifications) | Investor, Distributor | `FR-014` / Event triggers | N/A | `notifications`, `notification_retry_queue` |
-| **BC-013** (Vaulting) | Investor, Distributor | `FR-009` | `BR-008` | `ingested_documents`, AES-256 S3 storage vault |
+| **BC-012** (Notifications) | Investor, Distributor | FR-014 plus BC-triggered events | BR-009 (family consent notifications) | `notifications`, `notification_retry_queue` |
+| **BC-013** (Vaulting) | Investor, Distributor | `FR-009` | `BR-008` | `ingested_documents`, AES-256 encrypted object storage vault |
 | **BC-014** (Analytics) | Distributor | N/A | `BR-004` (Enforced separation) | `mfd_dashboard_metrics` view |
 | **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | GIN search index projections |
-| **BC-016** (Platform Config) | Platform Admin | `FR-001` | `BR-006` | `platform_settings`, `feature_flags`, `notification_templates`, `registrar_configs` |
+| **BC-016** (Platform Config) | Platform Admin | N/A | BR-006, BR-010, BR-012 | platform_settings, feature_flags, notification_templates, registrar_configs, ai_guardrail_versions (Design Principle: "Configuration over Customisation") |
 | **BC-017** (AMFI Market Data) | Investor, Distributor | `FR-008` | `BR-012` | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
 | **BC-018** (Referral Engine) | Investor | `FR-011` | N/A | `investor_referrals`, `referral_rewards` |
