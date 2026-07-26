@@ -562,7 +562,7 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **Family consent acceptance** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
 | **Family delegation revocation** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
 | **Family delegation expiration** | `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
-| **Platform Admin override** | `actor_profile_id`, `actor_type`, `workspace_id`, `entity_type`, `entity_id`, `action`, `reason`, `correlation_id`, `outcome`, `error_code`, `occurred_at` | `workspace_audit_logs` |
+| **Platform Admin override** | `actor_profile_id`, `actor_type`, `workspace_id`, `entity_type`, `entity_id`, `action`, `reason`, `correlation_id`, `event_type`, `outcome`, `error_code`, `occurred_at` | `workspace_audit_logs` |
 | **Access reset** | `actor_profile_id`, `workspace_id`, `action` | `workspace_audit_logs` |
 | **Original CAS access** | `actor_profile_id`, `entity_id` (document), `action` | `workspace_audit_logs` |
 | **Original CAS download** | `actor_profile_id`, `entity_id` (document), `action` | `workspace_audit_logs` |
@@ -585,7 +585,7 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | N/A | `support_tickets` |
 | **BC-009** (Subscriptions) | Distributor, Mapped Investor, Exploring Investor | `FR-010` | `BR-011` | N/A | `subscription_plans`, `workspace_billing`, `payment_events`, `plan_entitlements` |
-| **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | `NFR-005` | `platform_admin_override_policy`, `workspace_audit_logs` |
+| **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | `NFR-005` | `platform_admin_read_policies`, `platform_admin_override_rpcs`, `workspace_audit_logs` |
 | **BC-011** (Lineage) | None | N/A | Auditability Principle | `NFR-005` | `ingestion_logs` (Immutable) |
 | **BC-012** (Notifications) | Investor, Distributor | FR-014 plus BC-triggered events | BR-009 (family consent notifications) | N/A | `notifications`, `notification_retry_queue` |
 | **BC-013** (Vaulting) | Investor, Distributor | `FR-009` | `BR-008` | `NFR-001` | `ingested_documents`, AES-256 encrypted object storage vault |
