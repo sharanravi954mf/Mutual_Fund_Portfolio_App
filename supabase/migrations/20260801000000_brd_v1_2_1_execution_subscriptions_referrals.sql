@@ -206,7 +206,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Hardened qualify_order RPC with row locking & idempotent re-validation guards (P0-2)
+-- Hardened qualify_order RPC with step-by-step P0-2 validations & locking
 CREATE OR REPLACE FUNCTION public.qualify_order(
   p_order_id uuid,
   p_decision public.order_status,
@@ -228,23 +228,27 @@ BEGIN
     RAISE EXCEPTION 'Order not found';
   END IF;
 
-  -- 2. Idempotent re-validation check
-  IF v_current_status IS DISTINCT FROM 'pending_qualification' AND v_current_status IS DISTINCT FROM 'pending_review' THEN
+  -- 2. Idempotent check: return immediately if order is already qualified or cancelled
+  IF v_current_status IN ('approved', 'rejected', 'cancelled', 'auto_approved') THEN
     SELECT * INTO v_order FROM public.order_requests WHERE id = p_order_id;
     RETURN v_order;
   END IF;
 
-  -- 3. Verify auth
-  IF NOT public.has_advisor_membership(v_workspace_id) AND COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') <> 'platform_admin' THEN
+  -- 3. Verify advisor membership or platform admin override
+  IF NOT (public.has_advisor_membership(v_workspace_id) OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin') THEN
     RAISE EXCEPTION 'Unauthorized: Only advisors or platform admins can qualify orders.';
   END IF;
 
-  -- 4. State validation check
+  -- 4. State validation check: Ensure status is pending_qualification or pending_review
+  IF v_current_status NOT IN ('pending_qualification', 'pending_review') THEN
+    RAISE EXCEPTION 'Invalid State: Only pending orders can be qualified.';
+  END IF;
+
   IF p_decision NOT IN ('approved', 'rejected', 'pending_review') THEN
     RAISE EXCEPTION 'Invalid Target State: Qualification target must be approved, rejected, or pending_review.';
   END IF;
 
-  -- 5. Update fields (blocking modifications to other attributes)
+  -- 5. Mutate ONLY status, reviewed_by, reviewed_at, and rejection_reason
   UPDATE public.order_requests
   SET status = p_decision,
       reviewed_by = auth.uid(),
@@ -254,7 +258,7 @@ BEGIN
   WHERE id = p_order_id
   RETURNING * INTO v_order;
 
-  -- 6. Insert audit log event
+  -- 6. Write immutable event to workspace_audit_logs
   INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
   VALUES (
     v_workspace_id,
@@ -275,6 +279,81 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 -- Revoke default public execution & grant to authenticated
 REVOKE EXECUTE ON FUNCTION public.qualify_order FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
+
+-- Order Cancellation Path RPC (P0-3)
+CREATE OR REPLACE FUNCTION public.cancel_order(
+  p_order_id uuid,
+  p_reason text DEFAULT null
+)
+RETURNS public.order_requests AS $$
+DECLARE
+  v_workspace_id uuid;
+  v_investor_profile_id uuid;
+  v_current_status public.order_status;
+  v_order public.order_requests;
+BEGIN
+  -- 1. Pessimistic row locking for concurrency protection
+  SELECT workspace_id, investor_profile_id, status 
+  INTO v_workspace_id, v_investor_profile_id, v_current_status 
+  FROM public.order_requests 
+  WHERE id = p_order_id 
+  FOR UPDATE;
+  
+  IF v_workspace_id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  -- 2. Idempotent check
+  IF v_current_status = 'cancelled' THEN
+    SELECT * INTO v_order FROM public.order_requests WHERE id = p_order_id;
+    RETURN v_order;
+  END IF;
+
+  -- 3. Verify authorization:
+  -- Permits Investors to cancel their own orders while in pending states.
+  -- Permits Advisors to cancel orders in their workspace.
+  -- Permits Platform Admins.
+  IF NOT (
+    (v_investor_profile_id = auth.uid() AND public.has_investor_membership(v_workspace_id))
+    OR public.has_advisor_membership(v_workspace_id)
+    OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
+  ) THEN
+    RAISE EXCEPTION 'Unauthorized: You do not have permission to cancel this order.';
+  END IF;
+
+  -- 4. Rejects cancellation on already approved, rejected, or auto_approved orders
+  IF v_current_status NOT IN ('draft', 'pending_qualification', 'pending_review') THEN
+    RAISE EXCEPTION 'Invalid State: Cannot cancel an order that has already been qualified or processed.';
+  END IF;
+
+  -- 5. Mutate status and rejection reason
+  UPDATE public.order_requests
+  SET status = 'cancelled',
+      rejection_reason = COALESCE(p_reason, 'Cancelled by user'),
+      updated_at = now()
+  WHERE id = p_order_id
+  RETURNING * INTO v_order;
+
+  -- 6. Write immutable event to workspace_audit_logs
+  INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
+  VALUES (
+    v_workspace_id,
+    auth.uid(),
+    'order.cancelled',
+    'order_requests',
+    p_order_id,
+    jsonb_build_object(
+      'reason', p_reason
+    )
+  );
+
+  RETURN v_order;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+
+-- Revoke default public execution & grant to authenticated
+REVOKE EXECUTE ON FUNCTION public.cancel_order FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cancel_order TO authenticated;
 
 -- 9. Create Investor Referrals Table
 CREATE TABLE public.investor_referrals (

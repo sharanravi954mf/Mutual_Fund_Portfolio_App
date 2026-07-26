@@ -7,8 +7,8 @@
 - **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), and coordinate advisor review pipelines.
 - **Current Phase**: Phase 3 (Documentation Platform and Operational Systems complete).
 - **Repository Status**: Standards-driven, Production-ready.
-- **Documentation Version**: v1.8.0
-- **Architecture Version**: v1.8.0-Canonical-Production-Freeze
+- **Documentation Version**: v1.9.0
+- **Architecture Version**: v1.9.0-Canonical-Production-Freeze
 - **Target Release**: v1.1.0-alpha
 - **Last Updated**: 2026-07-27
 
@@ -18,7 +18,7 @@
 - **Current Epic**: Core Platform Implementation
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
-- **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v1.8.0-Canonical-Production-Freeze
+- **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v1.9.0-Canonical-Production-Freeze
 - **Overall Progress**: 90%
 - **Repository Health**: 99%
 - **Documentation Certification Status**: Certified
