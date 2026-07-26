@@ -1,5 +1,5 @@
 # Money Bowl — System Architecture Specification
-Document Version: v1.6.0-Final-Approved-Baseline  
+Document Version: v1.7.0-Canonical-Implementation-Baseline  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
@@ -13,7 +13,8 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.3.1 | 2026-07-27 | BAI | Final baseline addressing precision feedback from ChatGPT 5.5 review. |
 | v1.4.0 | 2026-07-27 | BAI | Updated Traceability matrices, retention lifecycle policies, malware scan workflow, and role-segregated WITH CHECK RLS policies. |
 | v1.5.0 | 2026-07-27 | BAI | Integrated role-segregated RLS policies, workspace-scoped family delegations, auto-approval rules engine table, deterministic PII classification, restored IMAP connector flow, and scope boundaries. |
-| v1.6.0 | 2026-07-27 | BAI | Resolved final NFR definitions, hardened order RLS, incorporated qualify_order RPC design, added Aadhaar to PII classification, and introduced plan entitlements model. |
+| v1.6.0 | 2026-07-27 | BAI | Resolved NFR definitions, hardened order RLS, qualify_order RPC design, added Aadhaar to PII classification, and introduced plan entitlements model. |
+| v1.7.0 | 2026-07-27 | BAI | Enforced RPC-only order qualification (removed advisor direct update), workspace-matched family RLS, expanded audit scope, and added plan entitlements. |
 
 ---
 
@@ -50,7 +51,7 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 | **BC-012** | Actionable Notification Management| `NotificationService` | `notifications`, `notification_retry_queue` | `notification-dispatcher` |
 | **BC-013** | Document Storage & Vaulting | `StorageService` | `ingested_documents` | None |
 | **BC-014** | Distributor Analytics Dashboard | `AnalyticsService` | `mfd_dashboard_metrics` (View/Table) | None |
-| **BC-015** | Universal Search & Discovery | `SearchService` | `folios`, `transactions`, `support_tickets`, `amfi_factsheets`, `ingested_documents` | None |
+| **BC-015** | Universal Search & Discovery | `SearchService` | `folios`, `transactions`, `support_tickets`, `amfi_factsheets`, `ingested_documents`, `searchable_tools` | None |
 | **BC-016** | Platform Configuration | `ConfigService` | `platform_settings`, `workspace_settings`, `feature_flags`, `notification_templates`, `registrar_configs` | None |
 | **BC-017** | AMFI Scheme Factsheets & Market Data | `FactsheetService` | `amfi_factsheets` | `amfi-nav-worker` |
 | **BC-018** | Investor Referral Engine | `ReferralService` | `investor_referrals`, `referral_conversions`, `referral_rewards` | `referral-tracker` |
@@ -115,7 +116,7 @@ The database is structured into 5 primary entity domains matching the business c
 ## 6. Concrete Row Level Security (RLS) Mechanics
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
-### A. Role-Segregated `order_requests` RLS Policies (P0-1 / BRD-FR-005)
+### A. RPC-Only Order Qualification & Order RLS (P0-1 / BRD-FR-005)
 * Hardened role-segregated RLS policies enforce query access limits:
 
 ```sql
@@ -135,33 +136,31 @@ CREATE POLICY order_requests_investor_insert ON order_requests FOR INSERT
 CREATE POLICY order_requests_advisor_select ON order_requests FOR SELECT
     TO authenticated
     USING (has_advisor_membership(workspace_id));
-
--- Distributor/Advisor: Read and qualify workspace orders
-CREATE POLICY order_requests_advisor_update ON order_requests FOR UPDATE
-    USING (has_advisor_membership(workspace_id))
-    WITH CHECK (has_advisor_membership(workspace_id));
 ```
-* **Prohibition**: Direct `DELETE` queries on `order_requests` by normal users are blocked. Status transitions are executed exclusively via a `SECURITY DEFINER` RPC function `qualify_order(order_id, decision, rejection_reason)` which mutates ONLY the following attributes: `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason`. All direct modifications to investor ID, scheme, or order amount are blocked at the transactional boundary.
+* **Prohibition (RPC-Only qualification)**: Direct `UPDATE` and `DELETE` queries on `order_requests` by normal users are blocked. Status transitions are executed exclusively via a `SECURITY DEFINER` RPC function `qualify_order(order_id, decision, rejection_reason)` with `search_path = public`.
+* **qualify_order RPC internal safeguards**:
+  1. Verifies `has_advisor_membership(workspace_id)` or platform admin override.
+  2. Enforces strict state machine transitions (`pending_qualification` ➔ `approved`/`rejected`).
+  3. Restricts mutations strictly to `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason`.
+  4. Inserts an immutable event log into `workspace_audit_logs`.
 
-### B. Relationship-Scoped Family Delegation (P0-2)
+### B. Explicit Workspace Match in Family Delegation RLS (P0-2 / BRD-BR-009)
 * The `family_delegations` schema requires `owner_profile_id`, `delegate_profile_id`, AND `workspace_id`.
-* Enforces that family delegation **never** grants cross-workspace visibility into portfolios managed by unlinked MFDs. All policies use standard `profile_id` references:
+* Enforces that family delegation **never** grants cross-workspace visibility. The portfolios RLS policy explicitly matches workspace IDs and handles active expiration limits:
 
 ```sql
--- Allows family delegates read-only portfolio access restricted to specific workspaces
-CREATE POLICY family_delegate_read_policy ON portfolios
-    FOR SELECT
-    TO authenticated
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.family_delegations fd
-            JOIN public.workspace_memberships wm_owner ON wm_owner.workspace_id = fd.workspace_id AND wm_owner.profile_id = portfolios.client_id AND wm_owner.status = 'active'
-            JOIN public.workspace_memberships wm_delegate ON wm_delegate.workspace_id = fd.workspace_id AND wm_delegate.profile_id = auth.uid() AND wm_delegate.status = 'active'
-            WHERE fd.delegate_profile_id = auth.uid()
-              AND fd.owner_profile_id = portfolios.client_id
-              AND fd.is_active = TRUE
-        )
-    );
+-- Allows family delegates read-only portfolio access matching specific workspace IDs
+CREATE POLICY family_delegate_read_policy ON portfolios FOR SELECT TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM family_delegations fd
+        WHERE fd.owner_profile_id = portfolios.client_id
+          AND fd.delegate_profile_id = auth.uid()
+          AND fd.workspace_id = portfolios.workspace_id
+          AND fd.is_active = TRUE
+          AND (fd.expires_at IS NULL OR fd.expires_at > now())
+    )
+);
 ```
 
 ### C. Platform Admin Override Policy (BR-007)
@@ -215,7 +214,7 @@ All domain events are written to the `event_outbox` table within the primary dat
 
 ---
 
-## 9. Notification Service Architecture & Retry Queue (BC-012)
+## 9. Actionable Notification Management (BC-012)
 * **Channels**: Email, SMS, WhatsApp, and Push Notifications.
 * **Requirements**: Dispatches `FR-014` support notifications, mailbox health exceptions, as well as capability-triggered events (e.g. statement updates, workspace invitations).
 * **Rules**: Enforces `BR-009` (family consent notifications) by alerting owners whenever family visibility delegation occurs.
@@ -254,8 +253,8 @@ Support requests follow a rigid state machine layout:
 ## 13. Dual Subscription & Feature Gating Engine (BC-009 / BR-011)
 * **State Machine**: `trialing` ➔ `active` ➔ `past_due` ➔ `suspended` ➔ `cancelled`.
 * **Starter limits**: Gated at 25 mapped clients. Upgrades require active checkout session confirmations.
-* **Plan Entitlements Model**: Subscription features are gated via `plan_entitlements` records mappings:
-  * Keys: `max_active_investors`, `mailbag_ingestion_enabled`, `auto_approval_enabled`, `white_label_enabled`, `crm_enabled`, `multi_advisor_enabled`, `family_hub_enabled`, `capital_gain_projection_enabled`, `priority_support_enabled`.
+* **Plan Entitlements Model (P1-1)**: Subscription features are gated via `plan_entitlements` records mappings:
+  * Keys: `max_active_investors`, `mailbag_ingestion_enabled`, `auto_approval_enabled`, `white_label_enabled`, `crm_enabled`, `multi_advisor_enabled`, `family_hub_enabled`, `capital_gain_projection_enabled`, `priority_support_enabled`, `advanced_analytics_enabled`, `support_sla_policy_id`.
 * **Idempotency**: Webhook payment events use unique payment IDs to prevent double-charging or double-crediting.
 * **Auto-Approval limits**: Workspace limits are checked at order submission. If the workspace exceeds its monthly allowed auto-approval volume, orders fallback to manual qualification.
 
@@ -266,11 +265,12 @@ Support requests follow a rigid state machine layout:
 * **Calculators**: Execution of financial calculators is performed deterministically outside the LLM context.
 * **Decline Gate (FR-013)**: The prompt system includes rigid system instructions to detect intent. Queries containing recommendation keywords (e.g., "which fund to buy", "should I switch") are blocked and responded to with the static education declination template.
 * **Ticket Handoff (FR-014)**: Users can request AI to log a support ticket, which routes directly into their mapped advisor's queue.
+* **Exploring Investor AI routing**: Exploring investors without a mapped advisor route support queries to Platform Admin support or are prompted to establish an MFD relationship before tickets can be assigned.
 
 ---
 
-## 15. Universal Search Architecture (BC-015 / FR-007)
-To meet the `<200ms` latency SLA, the database uses PostgreSQL Generalized Inverted Index (GIN) on scheme names, folios, and client details using the `pg_trgm` extension. Projections include `amfi_factsheets`, `folios`, `transactions`, `ingested_documents`, and `support_tickets`, strictly filtered through RLS.
+## 15. Universal Search & Searchable Tools Catalog (BC-015 / FR-007 / P1-2)
+To meet the `<200ms` latency SLA, the database uses PostgreSQL Generalized Inverted Index (GIN) on scheme names, folios, and client details using the `pg_trgm` extension. Projections include `amfi_factsheets`, `folios`, `transactions`, `ingested_documents`, `support_tickets`, and `searchable_tools` (tool catalog containing deterministic calculators, sheets, and documents metadata), strictly filtered through RLS.
 
 ---
 
@@ -293,7 +293,7 @@ Single digital investor records use deterministic SHA-256 HMAC attributes inside
 All sensitive attributes are classified and protected at rest and in transit:
 * **Target List**: `Aadhaar number` (and Aadhaar-derived identifiers), `PAN`, `Bank Account Numbers`, `IFSC`, `Phone`, `Email`, `Date of Birth`, `Nominee Details`, `Statement Passwords`, and `Mailbox OAuth Credentials`.
 * **Aadhaar Exclusion Rule**: Aadhaar is strictly excluded from general database search indexes or application log payloads, displaying strictly as masked projections.
-* **Remediation Policy**: Encrypted using AES-256 keys managed by the Supabase Vault. Returns strictly server-authorized masked projections by default. Reveals trigger step-up MFA/OTP validations, writing immutable audit logs to `pii.revealed` in the central audit queue.
+* **Remediation Policy**: Encrypted using AES-256 keys managed by the Supabase Vault. Reveals trigger step-up MFA/OTP validations, writing immutable audit logs to `pii.revealed` in the central audit queue.
 
 ### D. System-Wide Non-Functional Requirements (NFR-001 - NFR-005)
 * **`NFR-001` (Data Security & Masking)**: Sensitive PII attributes encrypted at rest & masked by default; step-up MFA reveal.
@@ -306,8 +306,13 @@ All sensitive attributes are classified and protected at rest and in transit:
 * **`ARCH-SLO-001`**: Security engine key validation overhead latency: `<50ms`.
 * **`ARCH-SLO-002`**: Central log queue write confirmation: `<100ms` async acknowledgment.
 
-### F. Audit Trail
-Every status change on `order_requests`, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The `workspace_audit_logs` and `ingestion_logs` tables enforce immutability via triggers blocking all update and delete queries.
+### F. Immutability Triggers & Explicit Audit Log Scopes
+* Every status change on `order_requests`, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The `workspace_audit_logs` and `ingestion_logs` tables enforce immutability via triggers blocking all update and delete queries.
+* **Explicit Audit Log Triggers (P0-3)**: The system writes immutable audit events to `workspace_audit_logs` upon:
+  * Family delegation grant creation.
+  * Consent acceptance for family guest access.
+  * Delegation revocation/expiration.
+  * Original CAS document download attempts.
 
 ---
 
@@ -318,21 +323,21 @@ Every status change on `order_requests`, workspace administrative resets, and bi
 | **BC-001** (Identity) | Platform Admin, Distributor, Mapped Investor, Exploring Investor | `FR-002`, `FR-003`, `FR-004` | `BR-001`, `BR-007`, `BR-008` | `NFR-001` | `profiles`, `workspace_memberships` |
 | **BC-002** (Distributor) | Distributor | `FR-001` | N/A | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
 | **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | N/A | `profiles` |
-| **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004` | N/A | `workspace_memberships` |
-| **BC-005** (Portfolio) | Investor, Distributor | N/A | `BR-004` | N/A | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
+| **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004` | `NFR-003`, `NFR-005` | `workspace_memberships` |
+| **BC-005** (Portfolio) | Investor, Distributor | N/A | `BR-004` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `NFR-004` | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | N/A | `support_tickets` |
 | **BC-009** (Subscriptions) | Distributor, Mapped Investor, Exploring Investor | `FR-010` | `BR-011` | N/A | `subscription_plans`, `workspace_billing`, `payment_events`, `plan_entitlements` |
-| **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | N/A | `platform_admin_override_policy`, `workspace_audit_logs` |
-| **BC-011** (Lineage) | None | `NFR-005` | Auditability Principle | `NFR-005` | `ingestion_logs` (Immutable) |
+| **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | `NFR-005` | `platform_admin_override_policy`, `workspace_audit_logs` |
+| **BC-011** (Lineage) | None | N/A | Auditability Principle | `NFR-005` | `ingestion_logs` (Immutable) |
 | **BC-012** (Notifications) | Investor, Distributor | FR-014 plus BC-triggered events | BR-009 (family consent notifications) | N/A | `notifications`, `notification_retry_queue` |
 | **BC-013** (Vaulting) | Investor, Distributor | `FR-009` | `BR-008` | `NFR-001` | `ingested_documents`, AES-256 encrypted object storage vault |
 | **BC-014** (Analytics) | Distributor | N/A | `BR-004` (Enforced separation) | N/A | `mfd_dashboard_metrics` view |
-| **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | `NFR-002` | GIN search index projections |
+| **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | `NFR-002` | GIN search index projections, `searchable_tools` |
 | **BC-016** (Platform Config) | Platform Admin | N/A | BR-006, BR-010, BR-012 | N/A | platform_settings, feature_flags, notification_templates, registrar_configs, ai_guardrail_versions (Design Principle: "Configuration over Customisation") |
 | **BC-017** (AMFI Market Data) | Investor, Distributor | `FR-008` | `BR-012` | N/A | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
-| **BC-018** (Referral Engine) | Investor | `FR-011` | N/A | N/A | `investor_referrals`, `referral_rewards` |
+| **BC-018** (Referral Engine) | Investor | `FR-011` | N/A | `NFR-005` | `investor_referrals`, `referral_rewards` |
 
 ---
 

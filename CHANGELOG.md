@@ -6,6 +6,20 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.7.0-Canonical-Implementation-Baseline] — 2026-07-27
+
+### Summary
+Release v1.7.0-Canonical-Implementation-Baseline applies final hardening adjustments to row-level security and service API boundaries. Specifically, it enforces RPC-only order qualifications for advisors (direct updates revoked), hardens the family RLS rules to match workspace and expiration filters explicitly, defines additional plan entitlement properties, and includes a searchable tools catalog projection in Section 15.
+
+### Major Additions & Changes
+- **RPC-Only Order Qualification**: Revoked direct `UPDATE` permissions on `order_requests` from authenticated roles. Mutating order statuses is routed exclusively through the `SECURITY DEFINER` RPC `qualify_order` with set `search_path = public`.
+- **Workspace-Matched & Expiration-Hardened Family Delegation RLS**: Hardened the portfolios read check to require explicit workspace ID matching and expiration limits validation (`expires_at IS NULL OR expires_at > now()`).
+- **Expanded Audit Log Scopes**: Configured system triggers logging immutable audit entries upon family delegation creation, acceptance, revocation, and original CAS file downloads.
+- **Entitlements Extension**: Added keys `advanced_analytics_enabled` and `support_sla_policy_id` to the `plan_entitlements` catalog.
+- **Searchable Tools Catalog**: Added `searchable_tools` to Universal Search projections mapping calculators and factsheet paths.
+
+---
+
 ## [v1.6.0-Final-Approved-Baseline] — 2026-07-27
 
 ### Summary
