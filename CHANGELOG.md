@@ -6,6 +6,20 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v2.0.0-Canonical-Production-Freeze] — 2026-07-27
+
+### Summary
+Release v2.0.0-Canonical-Production-Freeze establishes the permanent production-freeze system architecture baseline, aligning outbox-decoupled auto-approval execution flows, blocking direct advisor actions on pending_qualification state to prevent race conditions, and setting explicit execution revoke and grants for transaction functions.
+
+### Major Additions & Changes
+- **Pessimistic Order Race Guard**: Restricted advisor qualification actions in `qualify_order` strictly to orders in `pending_review` status, preventing race conditions with the auto-approval pipeline.
+- **Unified Decoupled Outbox Flow**: Configured the outbox auto-approval workflow triggering upon investor order insertion events.
+- **Revoked RPC Privileges**: Revoked public access privileges on `qualify_order` and `cancel_order` functions, restricting executions solely to authenticated roles.
+- **Family Guest Workspace Exclusions**: Standardized family delegation permissions mapping, allowing guest visibility checks without secondary workspace membership requirements.
+- **Taxonomy Mappings Expansion**: Expanded the capability `BC-005` definition mapping order execution components.
+
+---
+
 ## [v1.9.0-Canonical-Production-Freeze] — 2026-07-27
 
 ### Summary

@@ -206,7 +206,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Hardened qualify_order RPC with step-by-step P0-2 validations & locking
+-- Hardened qualify_order RPC with step-by-step validations & row locking (P0-1, P0-2)
 CREATE OR REPLACE FUNCTION public.qualify_order(
   p_order_id uuid,
   p_decision public.order_status,
@@ -239,13 +239,23 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: Only advisors or platform admins can qualify orders.';
   END IF;
 
-  -- 4. State validation check: Ensure status is pending_qualification or pending_review
-  IF v_current_status NOT IN ('pending_qualification', 'pending_review') THEN
-    RAISE EXCEPTION 'Invalid State: Only pending orders can be qualified.';
-  END IF;
-
-  IF p_decision NOT IN ('approved', 'rejected', 'pending_review') THEN
-    RAISE EXCEPTION 'Invalid Target State: Qualification target must be approved, rejected, or pending_review.';
+  -- 4. State validation check (Race-Condition Guard P0-1):
+  -- Direct advisor intervention during pending_qualification is blocked to prevent race conditions.
+  -- Advisors qualify orders only when status = 'pending_review'.
+  -- Platform admins/system roles can transition from pending_qualification to auto_approved or pending_review.
+  IF v_current_status = 'pending_qualification' THEN
+    IF COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') <> 'platform_admin' THEN
+      RAISE EXCEPTION 'Race Guard Exception: Advisors cannot qualify orders in pending_qualification state directly.';
+    END IF;
+    IF p_decision NOT IN ('auto_approved', 'pending_review') THEN
+      RAISE EXCEPTION 'Invalid Transition: pending_qualification orders must transition to auto_approved or pending_review.';
+    END IF;
+  ELSIF v_current_status = 'pending_review' THEN
+    IF p_decision NOT IN ('approved', 'rejected') THEN
+      RAISE EXCEPTION 'Invalid Transition: pending_review orders must transition to approved or rejected.';
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'Invalid State: Order is not in a valid pending state.';
   END IF;
 
   -- 5. Mutate ONLY status, reviewed_by, reviewed_at, and rejection_reason
@@ -276,8 +286,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
--- Revoke default public execution & grant to authenticated
-REVOKE EXECUTE ON FUNCTION public.qualify_order FROM PUBLIC;
+-- Revoke default public execution & grant to authenticated (P0-3)
+REVOKE ALL ON FUNCTION public.qualify_order FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
 
 -- Order Cancellation Path RPC (P0-3)
@@ -292,7 +302,7 @@ DECLARE
   v_current_status public.order_status;
   v_order public.order_requests;
 BEGIN
-  -- 1. Pessimistic row locking for concurrency protection
+  -- 1. Pessimistic row locking for concurrency protection (Acquire Lock)
   SELECT workspace_id, investor_profile_id, status 
   INTO v_workspace_id, v_investor_profile_id, v_current_status 
   FROM public.order_requests 
@@ -309,10 +319,7 @@ BEGIN
     RETURN v_order;
   END IF;
 
-  -- 3. Verify authorization:
-  -- Permits Investors to cancel their own orders while in pending states.
-  -- Permits Advisors to cancel orders in their workspace.
-  -- Permits Platform Admins.
+  -- 3. Verify actor: Caller must be order owner or advisor in matching workspace (Verify Actor)
   IF NOT (
     (v_investor_profile_id = auth.uid() AND public.has_investor_membership(v_workspace_id))
     OR public.has_advisor_membership(v_workspace_id)
@@ -321,7 +328,8 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: You do not have permission to cancel this order.';
   END IF;
 
-  -- 4. Rejects cancellation on already approved, rejected, or auto_approved orders
+  -- 4. Validate state: Permits cancellation on pending_qualification and pending_review.
+  -- Rejects cancellation on auto_approved, approved, rejected, or cancelled orders.
   IF v_current_status NOT IN ('draft', 'pending_qualification', 'pending_review') THEN
     RAISE EXCEPTION 'Invalid State: Cannot cancel an order that has already been qualified or processed.';
   END IF;
@@ -334,7 +342,7 @@ BEGIN
   WHERE id = p_order_id
   RETURNING * INTO v_order;
 
-  -- 6. Write immutable event to workspace_audit_logs
+  -- 6. Write immutable event to workspace_audit_logs (Record immutable audit entry)
   INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
   VALUES (
     v_workspace_id,
@@ -351,8 +359,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
--- Revoke default public execution & grant to authenticated
-REVOKE EXECUTE ON FUNCTION public.cancel_order FROM PUBLIC;
+-- Revoke default public execution & grant to authenticated (P0-3)
+REVOKE ALL ON FUNCTION public.cancel_order FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.cancel_order TO authenticated;
 
 -- 9. Create Investor Referrals Table
