@@ -6,6 +6,19 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.3.0-Synthesized-Baseline] — 2026-07-27
+
+### Summary
+Release v1.3.0-Synthesized-Baseline refines and reorganizes the System Architecture Specification to resolve audit defects (membership-based RLS, family delegation realignment, server-side masking, non-consolidation invariants, and event outbox pattern) and updates Sprint 6.1 specs.
+
+### Major Additions & Changes
+- **Audit Defect Fixes**: Integrated membership-based RLS queries for multi-relationship isolation. Realigned family delegation policies to run strictly on portfolio tables.
+- **Server-Side Masking**: Documented step-up unmasking reveal pipelines and audit trail mappings.
+- **Transactional Event Outbox**: Defined a durable outbox pattern replacing raw Postgres NOTIFY listeners.
+- **Full Traceability Matrix**: Expanded Section 17 to map 100% of capabilities, rules, functional requirements, and entities.
+
+---
+
 ## [v1.2.1-synthesized] — 2026-07-26
 
 ### Summary
