@@ -30,7 +30,9 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Flutter Client (iOS/Android/Web)                                           │
 │         │                                                                   │
-│         ├─► Supabase Auth (JWT with workspace_id & role claims)             │
+│         ├─► Supabase Auth (JWT with app_metadata.workspace_id,              │
+│         │                  app_metadata.user_role,                          │
+│         │                  and app_metadata.subscription_tier claims)       │
 │         ├─► PostgreSQL Database (Row-Level Security / Multi-Tenancy)        │
 │         └─► Deno Edge Functions (Ingestion, Auto-Approval Engine, AMFI Sync) │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -204,8 +206,17 @@ Automated rule decisions are written via a dedicated, secure database interface:
   9. Privilege Contract:
      ```sql
      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM PUBLIC;
-     GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) TO authenticated;
+     REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM authenticated;
+     GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) TO service_role;
      ```
+  10. Security Invariants:
+      * Only the trusted Deno backend worker (acting as the authorized `service_role`) may invoke this function.
+      * Investors, advisors, family guests, and normal authenticated users must be denied execution rights.
+      * Normal authenticated users must receive permission denied when invoking `apply_auto_approval_decision` directly.
+      * The service RPC must not rely only on caller-provided arguments; it must still validate the current state under a pessimistic `FOR UPDATE` lock.
+      * Only `pending_qualification` ➔ `auto_approved` and `pending_qualification` ➔ `pending_review` transitions are permitted.
+      * Duplicate or stale `correlation_id` values must be rejected idempotently.
+      * The rule ID, rule version, decision timestamp, and correlation ID must be audited.
 
 ### D. Hardened Advisor Qualification RPC: `qualify_order` (Section 1.4)
 Manual advisor qualification is routed through a separate, audited routine:
@@ -262,7 +273,7 @@ Manual advisor qualification is routed through a separate, audited routine:
      GRANT EXECUTE ON FUNCTION public.cancel_order(uuid, text) TO authenticated;
      ```
 
-### F. Workspace-Matched Family Delegation Policy (Section 1.5 / P1-2)
+### F. Workspace-Matched Family Delegation Policy (Section 6.F)
 * The accepted `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative source of truth for family guest read access. No secondary workspace membership is required.
 * Portfolios RLS matches workspace constraints:
   ```sql

@@ -6,21 +6,21 @@
 - **Current Mission**: Provide a premium, responsive Mutual Fund Portfolio Tracker for Web and Mobile platforms.
 - **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), and coordinate advisor review pipelines.
 - **Current Phase**: Phase 3 (Documentation Platform and Operational Systems complete).
-- **Repository Status**: Standards-driven, Production-ready.
-- **Documentation Version**: v2.0.1
-- **Architecture Version**: v2.0.1-Canonical-Production-Freeze
-- **Target Release**: v1.1.0-alpha
+- **Architecture Status**: Canonical production-freeze baseline approved
+- **Documentation Status**: Canonical documents aligned
+- **Application Status**: Pre-alpha implementation in progress
+- **Current Release Target**: v1.1.0-alpha
 - **Last Updated**: 2026-07-27
 
 ---
 
 ## Canonical Project Documents Notice
 The following five documents are the current and authoritative records for this project:
-- [PROJECT_STATE.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/PROJECT_STATE.md)
-- [docs/sprints/Sprint-6.1.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/docs/sprints/Sprint-6.1.md)
-- [docs/business/BRD.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/docs/business/BRD.md)
-- [docs/architecture/SYSTEM_ARCHITECTURE.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/docs/architecture/SYSTEM_ARCHITECTURE.md)
-- [CHANGELOG.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/CHANGELOG.md)
+- [PROJECT_STATE.md](PROJECT_STATE.md)
+- [Sprint 6.1](docs/sprints/Sprint-6.1.md)
+- [BRD](docs/business/BRD.md)
+- [System Architecture](docs/architecture/SYSTEM_ARCHITECTURE.md)
+- [CHANGELOG](CHANGELOG.md)
 
 All other Markdown files are stale and must not be used for project status or architecture decisions.
 
@@ -31,10 +31,12 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 - **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.1-Canonical-Production-Freeze
-- **Overall Progress**: 90%
-- **Repository Health**: 99%
+- **Sprint 6.1 Status**: Planning aligned; implementation not started/in progress
+- **Architecture Completion**: Complete
+- **Application Implementation**: In progress
+- **Release Readiness**: Not ready
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas (including event outbox table & triggers, Deno auto-approval worker, service-only auto-approval decision RPC, manual advisor qualify RPC, order cancellation RPC, workspace isolation, family delegation RLS, subscription plans & entitlements, referral engine, Flutter investor order modal, MFD qualification queue, and pgTAP security & state-transition tests).
+- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas (including `order_requests`, workspace isolation RLS, event outbox table and triggers, Deno auto-approval worker, service-only auto-approval decision RPC, manual advisor qualify RPC, order cancellation RPC, family delegation RLS, subscription plans & entitlements, referral security, Flutter investor order modal, MFD qualification queue, and pgTAP race & security tests).
 
 ---
 
@@ -48,7 +50,7 @@ All other Markdown files are stale and must not be used for project status or ar
 
 ---
 
-## Upcoming Epics
+## Upcoming Epics (Historical / non-authoritative references)
 
 ### 1. Repository Automation
 - **Priority**: High
@@ -108,7 +110,7 @@ All other Markdown files are stale and must not be used for project status or ar
 
 ---
 
-## Repository Metrics
+## Repository Metrics (Historical / non-authoritative references)
 - **Documentation Libraries**: 6 (Product, Architecture, Engineering, Governance, AI, Audit)
 - **Templates**: 10 (RFC, ADR, Sprint, Epic, Feature, Bug, Task, Release, Architecture Review, Security Review)
 - **Architecture Documents**: 10
@@ -121,8 +123,8 @@ All other Markdown files are stale and must not be used for project status or ar
 
 ---
 
-## AI Collaboration Model
-See **[AI Operating System](docs/ai/README.md)** for detail.
+## AI Collaboration Model (Historical / non-authoritative references)
+See **[AI Operating System](docs/ai/README.md)** (Historical / non-authoritative reference) for detail.
 - **Antigravity (Coordinator)**: Coordinates planning, subagent task allocation, and QA verifications.
 - **ChatGPT / Codex (Coder)**: Inline edits, feature modifications, and unit tests under sandbox execution.
 - **BAI (Auditor)**: Validates database models, calculations, and registrar parser logic.
@@ -130,24 +132,24 @@ See **[AI Operating System](docs/ai/README.md)** for detail.
 
 ---
 
-## Decision Summary
-- **ADR Repository**: [Architecture Decision Records Index](docs/decisions/README.md)
-- **Decision Register**: [Living registry of decisions](docs/governance/decision-register.md)
-- **Risk Register**: [Ecosystem risk mitigation tables](docs/governance/risk-register.md)
-- **Architecture**: [Executive Architecture entrypoint](docs/architecture.md)
-- **Repository Governance**: [Ownership and approval matrices](docs/governance/repository-governance.md)
+## Decision Summary (Historical / non-authoritative references)
+- **ADR Repository**: [Architecture Decision Records Index](docs/decisions/README.md) (Historical / non-authoritative reference)
+- **Decision Register**: [Living registry of decisions](docs/governance/decision-register.md) (Historical / non-authoritative reference)
+- **Risk Register**: [Ecosystem risk mitigation tables](docs/governance/risk-register.md) (Historical / non-authoritative reference)
+- **Architecture**: [Executive Architecture entrypoint](docs/architecture.md) (Historical / non-authoritative reference)
+- **Repository Governance**: [Ownership and approval matrices](docs/governance/repository-governance.md) (Historical / non-authoritative reference)
 
 ---
 
-## Technical Debt Summary
-See **[Documentation Debt Register](docs/audit/documentation-debt-register.md)** for detail.
+## Technical Debt Summary (Historical / non-authoritative references)
+See **[Documentation Debt Register](docs/audit/documentation-debt-register.md)** (Historical / non-authoritative reference) for detail.
 - **Open Debt**: Existing legacy compiler warning lines under `lib/`.
 - **Documentation Debt**: Sibling path corrections completed; no outstanding documentation debt remaining.
 - **Engineering Debt**: Web interop `.xls` SheetJS interop remains an alpha path.
 
 ---
 
-## Next Priorities (Execution Order)
+## Next Priorities (Execution Order) (Historical / non-authoritative references)
 1. **Fix Image Selector Filter**: Modify image selection file pickers in `admin_dashboard.dart` to support `.jpg`, `.jpeg`, and `.png` extensions.
 2. **Configure Non-Mandatory Excel Ingestion**: Adjust PDF/ZIP signing workflows in `admin_dashboard.dart` to run successfully without requiring an Excel workbook tracker.
 3. **Resolve Staging Dashboard Warnings**: Clean up existing lint warnings inside legacy presentation widgets.
@@ -156,18 +158,18 @@ See **[Documentation Debt Register](docs/audit/documentation-debt-register.md)**
 
 ---
 
-## Quick Navigation
+## Quick Navigation (Historical / non-authoritative references)
 
 | Target Guide | Document Reference Link |
 | :--- | :--- |
-| **README** | [README.md](README.md) |
-| **Architecture** | [Architecture Index](docs/architecture/README.md) |
-| **Product** | [Product Index](docs/product/README.md) |
-| **Engineering** | [Engineering Index](docs/engineering/README.md) |
-| **Governance** | [Governance Index](docs/governance/README.md) |
-| **AIOS** | [AI Operating System Index](docs/ai/README.md) |
-| **Repository OS** | [Repository OS Contributing Guide](CONTRIBUTING.md) |
-| **Audit** | [Audit Index](docs/audit/README.md) |
-| **Templates** | [Reusable Templates Index](docs/templates/RFC.md) |
-| **Contributing Guide** | [Contributor Guide](CONTRIBUTING.md) |
-| **PROJECT_STATE** | [Project Control Center](PROJECT_STATE.md) |
+| **README** | [README.md](README.md) (Historical / non-authoritative reference) |
+| **Architecture** | [Architecture Index](docs/architecture/README.md) (Historical / non-authoritative reference) |
+| **Product** | [Product Index](docs/product/README.md) (Historical / non-authoritative reference) |
+| **Engineering** | [Engineering Index](docs/engineering/README.md) (Historical / non-authoritative reference) |
+| **Governance** | [Governance Index](docs/governance/README.md) (Historical / non-authoritative reference) |
+| **AIOS** | [AI Operating System Index](docs/ai/README.md) (Historical / non-authoritative reference) |
+| **Repository OS** | [Repository OS Contributing Guide](CONTRIBUTING.md) (Historical / non-authoritative reference) |
+| **Audit** | [Audit Index](docs/audit/README.md) (Historical / non-authoritative reference) |
+| **Templates** | [Reusable Templates Index](docs/templates/RFC.md) (Historical / non-authoritative reference) |
+| **Contributing Guide** | [Contributor Guide](CONTRIBUTING.md) (Historical / non-authoritative reference) |
+| **PROJECT_STATE** | [Project Control Center](PROJECT_STATE.md) (Authoritative) |
