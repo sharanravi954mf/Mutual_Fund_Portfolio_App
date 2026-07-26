@@ -17,7 +17,7 @@ This sprint implements the core order execution engine, membership-based workspa
 - [ ] **feat(flutter): build MFD Qualification Queue Screen [BRD-FR-006, Section 3.A]** (#35)
 - [ ] **feat(database): create subscription_plans and workspace_billing tables with tier limits [BC-009, BR-011, Section 5, Section 13]** (#39)
 - [ ] **feat(database): create investor_referrals and referral_rewards tables [BC-018, FR-011, Section 12]** (#40)
-- [ ] **test(database): add pgTAP automated tests for outbox, worker claiming, RPC validations, and race conditions [BR-003, BR-006, Section 6.A, Section 6.B, Section 6.C, Section 8, Section 17.F]** (#41)
+- [ ] **test(database/edge): add auto-approval outbox, replay, rule-validation and race-condition tests [BRD-BR-003, BRD-BR-006, Section 6.A, Section 6.B, Section 6.C, Section 8, Section 17.F]** (#41)
 - [ ] **feat(database): implement event_outbox table and transactional triggers [Section 8]** (#43)
 - [ ] **feat(database): implement membership-based RLS policy for workspace isolation [BR-003, Section 6.A]** (#44)
 - [ ] **feat(database): create advisor-only qualify_order SECURITY DEFINER RPC restricted to pending_review orders [BRD-FR-005, BRD-FR-006, BRD-BR-005, Section 6.D, Section 17.F]** (#48)

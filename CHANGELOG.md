@@ -9,6 +9,10 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Added `event_type` to the Platform Admin override audit-matrix contract (Section 17.F).
+- Replaced the misleading `platform_admin_override_policy` traceability component with platform_admin_read_policies and platform_admin_override_rpcs (Section 18).
+- Renamed issue `#41` to accurately represent auto-approval outbox, replay, rule-validation and race-condition testing.
+- Clarified separation between auto-approval tests in `#41` and Platform Admin/order RPC tests in `#51`.
 - Removed Platform Admin authorization from `qualify_order`, restricting manual qualifications strictly to active advisors and workspace owners.
 - Clarified advisor-only order qualification rules, ensuring Platform Admins cannot qualify, approve, or reject order requests.
 - Made auto-approval rule validation conditional by decision (strict rule validations when `auto_approved`; no rule lookup and null checks when `pending_review`).
