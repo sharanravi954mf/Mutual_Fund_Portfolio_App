@@ -1,5 +1,5 @@
 # Money Bowl — System Architecture Specification
-Document Version: v1.9.0-Canonical-Production-Freeze  
+Document Version: v2.0.0-Canonical-Production-Freeze  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
@@ -17,6 +17,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.7.0 | 2026-07-27 | BAI | Enforced RPC-only order qualification (removed advisor direct update), workspace-matched family RLS, expanded audit scope, and added plan entitlements. |
 | v1.8.0 | 2026-07-27 | BAI | Freezed baseline, standardized order status enum state machine lifecycle, implemented qualify_order RPC row locking, enforced accepted consent status checks on family delegations RLS, and standardized JWT claims. |
 | v1.9.0 | 2026-07-27 | BAI | Updated auto-approval fallback behavior, qualify_order RPC authorization safeguards, integrated cancel_order RPC function, and standardized family delegations as authoritative access sources. |
+| v2.0.0 | 2026-07-27 | BAI | Final permanent production freeze baseline, unified outbox-based auto-approval state flow, blocked direct advisor intervention on pending_qualification orders to prevent race conditions, and updated BC-005 taxonomy. |
 
 ---
 
@@ -43,7 +44,7 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 | **BC-002** | Distributor Lifecycle Management | `WorkspaceService` | `workspaces`, `mfd_profiles`, `mfd_verification_documents`, `mfd_onboarding_reviews` | None |
 | **BC-003** | Investor Lifecycle Management | `MembershipService` | `profiles` | None |
 | **BC-004** | Relationship Management | `MembershipService` | `workspace_memberships` | None |
-| **BC-005** | Portfolio Management | `WorkspaceService` | `portfolios`, `folios`, `scheme_holdings`, `transactions` | None |
+| **BC-005** | Portfolio & Order Execution | `PortfolioService`, `OrderService` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, `order_requests`, `auto_approval_rules`, `qualify_order`, `cancel_order`, `event_outbox` | None |
 | **BC-006** | Registrar Data Ingestion | `IngestionService` | `transactions`, `scheme_holdings` | `cams-kfintech-ingestion` |
 | **BC-007** | Educational AI Assistance | `AIProxyService` | None | `ai-helper` |
 | **BC-008** | Customer Servicing (Ticketing) | `TicketService` | `support_tickets` | None |
@@ -73,8 +74,8 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 * **Authentication**: Multi-factor Mobile/Email OTP authentication via GoTrue.
 * **Authorization & Multi-Tenancy**:
   * Enforced at the database engine level via PostgreSQL Row-Level Security (RLS).
-  * User JWT tokens carry `workspace_id`, `role` (mfd, investor, delegate), and `subscription_tier`.
-  * **Important**: JWT `workspace_id` indicates active UI context; database authorization for multi-relationship investors is strictly enforced via `workspace_memberships` table queries to prevent access token hijacking.
+  * User JWT tokens carry `app_metadata.workspace_id`, `app_metadata.user_role`, and `app_metadata.subscription_tier`.
+  * **Important**: JWT `app_metadata.workspace_id` indicates active UI context; database authorization for multi-relationship investors is strictly enforced via `workspace_memberships` table queries to prevent access token hijacking.
 
 ### C. Serverless Execution & Edge Layer (Deno Edge Functions)
 * **Mailbag & Feed Ingestion Worker**:
@@ -97,7 +98,7 @@ The following matrix maps Business Requirements Document (BRD) user personas to 
 | **Distributor** | `mfd` | `workspace_owner` / `advisor` | Own workspace scope. Full write capabilities within workspace boundaries. |
 | **Mapped Investor** | `investor` | `investor` | Active membership required to view details or initiate transactions. |
 | **Exploring Investor** | `investor` | `none` | Standalone explore access only; cannot access specific workspace datasets. |
-| **Family Guest** | `investor` | `delegate` | Read-only delegated access to portfolios/holdings only. |
+| **Family Guest** | `investor` | `none` required | Read-only delegated access driven strictly by an active, accepted family delegations record. |
 | **Platform Admin** | `platform_admin` | `none` | Audited system-wide override access. Bypass check triggers log warnings. |
 
 ### A. Sub-Role Mappings & Permissions Hierarchy
@@ -123,10 +124,13 @@ The database is structured into 5 primary entity domains matching the business c
 ## 6. Concrete Row Level Security (RLS) Mechanics
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
-### A. RPC-Only Order Qualification & Hardened Order RLS (P0-1, P0-2 / BRD-FR-005)
-* Order requests follow a standardized lifecycle state machine:
-  $$\text{draft} \longrightarrow \text{pending\_qualification} \longrightarrow \text{pending\_review} \longrightarrow \text{auto\_approved} \mid \text{approved} \mid \text{rejected} \mid \text{cancelled}$$
-  * `draft` status is managed strictly in client UI state, while database insertion starts at `pending_qualification`.
+### A. Unified Order Lifecycle, Auto-Approval Outbox & Hardened Order RLS (P0-1, P0-2 / BRD-FR-005)
+* Order requests follow a standardized lifecycle state machine designed to prevent advisor race-conditions with the auto-approval worker:
+  $$\text{Client-side Draft} \longrightarrow \text{pending\_qualification} \longrightarrow (\text{auto\_approved} \mid \text{pending\_review}) \longrightarrow (\text{approved} \mid \text{rejected} \mid \text{cancelled})$$
+  * Direct advisor qualification of orders during `pending_qualification` is strictly blocked. Advisors can only qualify orders once they transition to `pending_review` (if bypassed by rules) or `auto_approved` triggers fail.
+* **Auto-Approval Decoupled Outbox Execution**:
+  1. Investor `INSERT` sets status to `pending_qualification` and inserts an `order.created` event into `event_outbox` in the same transaction.
+  2. The Deno auto-approval background worker claims the outbox event, evaluates active auto-approval rules, and triggers a restricted RPC to transition the order's status to `auto_approved` or `pending_review`.
 * Hardened RLS policies enforce access scopes:
 
 ```sql
@@ -150,15 +154,23 @@ CREATE POLICY order_requests_advisor_select ON order_requests FOR SELECT
 * **Prohibition**: Direct `UPDATE` and `DELETE` queries on `order_requests` by authenticated normal users are blocked. Status mutations are executed exclusively via a hardened `SECURITY DEFINER` RPC `public.qualify_order` or `public.cancel_order` with set `search_path = ''` using fully qualified object names.
 * **qualify_order RPC internal safeguards**:
   1. Set `search_path = ''`.
-  2. Acquire pessimistic row lock: `SELECT workspace_id, status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
+  2. Acquire pessimistic row lock: `SELECT status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
   3. Verify authorization: `IF NOT (public.has_advisor_membership(v_workspace_id) OR (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin')) THEN RAISE EXCEPTION 'Unauthorized'; END IF;`.
-  4. Validate state: Ensure status is `pending_qualification` or `pending_review`.
+  4. Validate state: Direct advisor transition requires status to be `pending_review`. The system blocks direct advisor changes during `pending_qualification` to prevent race conditions. Platform admin overrides or auto-approval service workers can transition orders from `pending_qualification` to `auto_approved` or `pending_review`.
   5. Mutate ONLY `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason`.
   6. Write immutable event to `public.workspace_audit_logs`.
 * **cancel_order RPC internal safeguards**:
-  * Permits Investors to cancel their own orders while status is `pending_qualification` or `pending_review`.
-  * Permits Advisors to cancel orders within their workspace scope while status is `pending_qualification` or `pending_review`.
-  * Rejects cancellation requests if status is already `approved`, `rejected`, or `cancelled`.
+  1. Lock: `SELECT workspace_id, investor_profile_id, status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
+  2. Verify actor: Caller must be order owner or advisor in matching workspace.
+  3. Validate state: Permits cancellation on `pending_qualification` and `pending_review`. Rejects cancellation on `auto_approved`, `approved`, `rejected`, or `cancelled` orders.
+  4. Write immutable event to `public.workspace_audit_logs`.
+* **Privilege revocation contracts**:
+  ```sql
+  REVOKE ALL ON FUNCTION public.qualify_order FROM PUBLIC;
+  REVOKE ALL ON FUNCTION public.cancel_order FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
+  GRANT EXECUTE ON FUNCTION public.cancel_order TO authenticated;
+  ```
 
 ### B. Authoritative Family Delegation Model (P0-3 / BRD-BR-009 / P1-2)
 * The `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative authorization source for family access. No secondary workspace membership is required for delegates to view linked portfolio datasets.
@@ -342,7 +354,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 | **BC-002** (Distributor) | Distributor | `FR-001` | N/A | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
 | **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | N/A | `profiles` |
 | **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004`, `BR-009` | `NFR-003` | `workspace_memberships`, `family_delegations` |
-| **BC-005** (Portfolio) | Investor, Distributor | `FR-005`, `FR-006` | `BR-004`, `BR-005`, `BR-006` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
+| **BC-005** (Portfolio & Order Execution) | Investor, Distributor | `FR-005`, `FR-006` | `BR-004`, `BR-005`, `BR-006` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, `order_requests`, `auto_approval_rules`, `qualify_order`, `cancel_order`, `event_outbox` |
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `NFR-004` | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | N/A | `support_tickets` |
