@@ -6,6 +6,20 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.6.0-Final-Approved-Baseline] — 2026-07-27
+
+### Summary
+Release v1.6.0-Final-Approved-Baseline updates the NFR identifiers to align 100% with the frozen BRD, enforces stricter RLS insert checking for investors, incorporates the qualify_order security-definer RPC design, explicitly classifies Aadhaar numbers as excluded PII elements, and introduces the plan entitlements data model.
+
+### Major Additions & Changes
+- **NFR ID Alignments**: Re-mapped all capabilities in Section 18 to NFR-001 through NFR-005, and defined internal SLO thresholds for key validation and central logging.
+- **Hardened Order RLS & qualification RPC**: Hardened the investor order insertion constraint to use `has_investor_membership(workspace_id)` and added explicit select RLS for advisors. Hardened transaction status mutation triggers to execute strictly via `qualify_order` RPC.
+- **Aadhaar PII classification**: Added Aadhaar number and Aadhaar-derived identifiers to Section 17.C, strictly prohibiting Aadhaar details from search and logging pools.
+- **Plan Entitlements Model**: Introduced the `plan_entitlements` entity supporting configurable gating options (Auto-approval limits, white-label flags, family-hub flags).
+- **Mailbox Health Notification Events**: Documented mailbox connection, authentication failure, and poll failure states inside Section 8/12 triggers.
+
+---
+
 ## [v1.5.0-Final-Production-Baseline] — 2026-07-27
 
 ### Summary

@@ -20,6 +20,7 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS pan_hmac text,
   ADD COLUMN IF NOT EXISTS normalised_phone_hmac text,
   ADD COLUMN IF NOT EXISTS normalised_email_hmac text,
+  ADD COLUMN IF NOT EXISTS aadhaar_hmac text,
   ADD COLUMN IF NOT EXISTS identity_match_status text check (identity_match_status in ('unresolved', 'matched', 'manual_verification_required')) default 'unresolved';
 
 -- 3. Create Subscription Plans Table
@@ -32,12 +33,60 @@ CREATE TABLE public.subscription_plans (
 );
 
 -- Seed Subscription Plans
-INSERT INTO public.subscription_plans (name, client_limit, monthly_price)
+INSERT INTO public.subscription_plans (id, name, client_limit, monthly_price)
 VALUES 
-  ('Starter', 25, 0.00),
-  ('Pro MFD', 999999, 1500.00),
-  ('Enterprise Firm', 99999999, 5000.00)
-ON CONFLICT (name) DO NOTHING;
+  ('11111111-1111-1111-1111-111111111111', 'Starter', 25, 0.00),
+  ('22222222-2222-2222-2222-222222222222', 'Pro MFD', 999999, 1500.00),
+  ('33333333-3333-3333-3333-333333333333', 'Enterprise Firm', 99999999, 5000.00)
+ON CONFLICT (name) DO UPDATE 
+SET client_limit = EXCLUDED.client_limit,
+    monthly_price = EXCLUDED.monthly_price;
+
+-- Create Plan Entitlements Table (P1-4)
+CREATE TABLE public.plan_entitlements (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references public.subscription_plans(id) on delete cascade,
+  entitlement_key text not null,
+  entitlement_value text not null,
+  created_at timestamptz not null default now(),
+  constraint plan_entitlements_unique unique (plan_id, entitlement_key)
+);
+
+-- Seed Plan Entitlements
+INSERT INTO public.plan_entitlements (plan_id, entitlement_key, entitlement_value)
+VALUES
+  -- Starter
+  ('11111111-1111-1111-1111-111111111111', 'max_active_investors', '25'),
+  ('11111111-1111-1111-1111-111111111111', 'mailbag_ingestion_enabled', 'true'),
+  ('11111111-1111-1111-1111-111111111111', 'auto_approval_enabled', 'false'),
+  ('11111111-1111-1111-1111-111111111111', 'white_label_enabled', 'false'),
+  ('11111111-1111-1111-1111-111111111111', 'crm_enabled', 'false'),
+  ('11111111-1111-1111-1111-111111111111', 'multi_advisor_enabled', 'false'),
+  ('11111111-1111-1111-1111-111111111111', 'family_hub_enabled', 'false'),
+  ('11111111-1111-1111-1111-111111111111', 'capital_gain_projection_enabled', 'false'),
+  ('11111111-1111-1111-1111-111111111111', 'priority_support_enabled', 'false'),
+  -- Pro MFD
+  ('22222222-2222-2222-2222-222222222222', 'max_active_investors', '999999'),
+  ('22222222-2222-2222-2222-222222222222', 'mailbag_ingestion_enabled', 'true'),
+  ('22222222-2222-2222-2222-222222222222', 'auto_approval_enabled', 'true'),
+  ('22222222-2222-2222-2222-222222222222', 'white_label_enabled', 'false'),
+  ('22222222-2222-2222-2222-222222222222', 'crm_enabled', 'true'),
+  ('22222222-2222-2222-2222-222222222222', 'multi_advisor_enabled', 'false'),
+  ('22222222-2222-2222-2222-222222222222', 'family_hub_enabled', 'true'),
+  ('22222222-2222-2222-2222-222222222222', 'capital_gain_projection_enabled', 'true'),
+  ('22222222-2222-2222-2222-222222222222', 'priority_support_enabled', 'false'),
+  -- Enterprise Firm
+  ('33333333-3333-3333-3333-333333333333', 'max_active_investors', '99999999'),
+  ('33333333-3333-3333-3333-333333333333', 'mailbag_ingestion_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'auto_approval_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'white_label_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'crm_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'multi_advisor_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'family_hub_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'capital_gain_projection_enabled', 'true'),
+  ('33333333-3333-3333-3333-333333333333', 'priority_support_enabled', 'true')
+ON CONFLICT (plan_id, entitlement_key) DO UPDATE 
+SET entitlement_value = EXCLUDED.entitlement_value;
 
 -- 4. Create Workspace Billing Table
 CREATE TABLE public.workspace_billing (
@@ -88,10 +137,89 @@ CREATE TABLE public.order_requests (
   auto_approved boolean not null default false,
   triggered_rule_id uuid references public.auto_approval_rules(id) on delete set null,
   triggered_rule_version integer check (triggered_rule_version >= 1),
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewed_at timestamptz,
+  rejection_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint order_requests_amount_or_units check (amount is not null or units is not null)
 );
+
+-- Helper function: check if user has active workspace membership
+CREATE OR REPLACE FUNCTION public.has_active_workspace_membership(p_workspace_id uuid)
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.workspace_memberships
+    WHERE workspace_id = p_workspace_id
+      AND profile_id = auth.uid()
+      AND status = 'active'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Helper function: check if user is advisor in workspace
+CREATE OR REPLACE FUNCTION public.has_advisor_membership(p_workspace_id uuid)
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.workspace_memberships
+    WHERE workspace_id = p_workspace_id
+      AND profile_id = auth.uid()
+      AND role IN ('advisor', 'admin', 'operations')
+      AND status = 'active'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Helper function: check if user is investor in workspace (P0-2)
+CREATE OR REPLACE FUNCTION public.has_investor_membership(p_workspace_id uuid)
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.workspace_memberships
+    WHERE workspace_id = p_workspace_id
+      AND profile_id = auth.uid()
+      AND role = 'investor'
+      AND status = 'active'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Restricted Qualification RPC Function (P0-1)
+CREATE OR REPLACE FUNCTION public.qualify_order(
+  p_order_id uuid,
+  p_decision public.order_status,
+  p_rejection_reason text DEFAULT null
+)
+RETURNS public.order_requests AS $$
+DECLARE
+  v_workspace_id uuid;
+  v_order public.order_requests;
+BEGIN
+  SELECT workspace_id INTO v_workspace_id FROM public.order_requests WHERE id = p_order_id;
+  IF v_workspace_id IS NULL THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  -- Verify auth
+  IF NOT public.has_advisor_membership(v_workspace_id) AND (auth.jwt() -> 'app_metadata' ->> 'user_role') <> 'platform_admin' THEN
+    RAISE EXCEPTION 'Unauthorized: Only advisors or platform admins can qualify orders.';
+  END IF;
+
+  -- Update fields
+  UPDATE public.order_requests
+  SET status = p_decision,
+      reviewed_by = auth.uid(),
+      reviewed_at = now(),
+      rejection_reason = p_rejection_reason,
+      updated_at = now()
+  WHERE id = p_order_id
+  RETURNING * INTO v_order;
+
+  RETURN v_order;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 8. Create Investor Referrals Table
 CREATE TABLE public.investor_referrals (
@@ -209,36 +337,10 @@ CREATE TRIGGER order_created_outbox_trigger
   FOR EACH ROW
   EXECUTE FUNCTION public.trigger_order_outbox_event();
 
--- Helper function: check if user has active workspace membership
-CREATE OR REPLACE FUNCTION public.has_active_workspace_membership(p_workspace_id uuid)
-RETURNS boolean AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM public.workspace_memberships
-    WHERE workspace_id = p_workspace_id
-      AND profile_id = auth.uid()
-      AND status = 'active'
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Helper function: check if user is advisor in workspace
-CREATE OR REPLACE FUNCTION public.has_advisor_membership(p_workspace_id uuid)
-RETURNS boolean AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM public.workspace_memberships
-    WHERE workspace_id = p_workspace_id
-      AND profile_id = auth.uid()
-      AND role IN ('advisor', 'admin', 'operations')
-      AND status = 'active'
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
 -- 15. Enable Row-Level Security on all newly created tables
 ALTER TABLE public.order_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscription_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plan_entitlements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_billing ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.auto_approval_rules ENABLE ROW LEVEL SECURITY;
@@ -282,7 +384,7 @@ CREATE POLICY order_requests_investor_insert ON public.order_requests
   TO authenticated
   WITH CHECK (
     investor_profile_id = auth.uid()
-    AND public.has_active_workspace_membership(workspace_id)
+    AND public.has_investor_membership(workspace_id)
     -- Enforce status restriction
     AND status = 'pending_qualification'
     -- Family guest delegates are read-only and blocked from inserting orders on behalf of other users
@@ -364,7 +466,13 @@ CREATE POLICY auto_approval_rules_admin_all ON public.auto_approval_rules
     OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
   );
 
--- 20. Document Vault Security & Lineage - Deny Family Delegates Select (P0-3)
+-- 20. Plan Entitlements RLS
+CREATE POLICY plan_entitlements_select ON public.plan_entitlements
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- 21. Document Vault Security & Lineage - Deny Family Delegates Select (P0-3)
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'ingested_documents') THEN
@@ -375,13 +483,13 @@ BEGIN
 END
 $$;
 
--- 21. Subscription Plans RLS (Read-only for all authenticated users)
+-- 22. Subscription Plans RLS (Read-only for all authenticated users)
 CREATE POLICY subscription_plans_read ON public.subscription_plans
   FOR SELECT
   TO authenticated
   USING (true);
 
--- 22. Workspace Billing RLS
+-- 23. Workspace Billing RLS
 CREATE POLICY workspace_billing_select ON public.workspace_billing
   FOR SELECT
   TO authenticated
@@ -396,7 +504,7 @@ CREATE POLICY workspace_billing_admin_all ON public.workspace_billing
   USING ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin');
 
--- 23. Payment Events RLS
+-- 24. Payment Events RLS
 CREATE POLICY payment_events_select ON public.payment_events
   FOR SELECT
   TO authenticated
@@ -405,7 +513,7 @@ CREATE POLICY payment_events_select ON public.payment_events
     OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
   );
 
--- 24. Referrals, Conversions, and Rewards RLS
+-- 25. Referrals, Conversions, and Rewards RLS
 CREATE POLICY referrals_select ON public.investor_referrals
   FOR SELECT
   TO authenticated
@@ -433,7 +541,7 @@ CREATE POLICY rewards_select ON public.referral_rewards
   TO authenticated
   USING (profile_id = auth.uid());
 
--- 25. Custom Brandings, Advisor Profiles, and CRM Notes RLS
+-- 26. Custom Brandings, Advisor Profiles, and CRM Notes RLS
 CREATE POLICY workspace_branding_select ON public.workspace_branding
   FOR SELECT
   TO authenticated
@@ -477,14 +585,14 @@ CREATE POLICY crm_notes_insert ON public.crm_notes
     AND advisor_profile_id = auth.uid()
   );
 
--- 26. Event Outbox RLS (Platform admin or system role only)
+-- 27. Event Outbox RLS (Platform admin or system role only)
 CREATE POLICY event_outbox_all ON public.event_outbox
   FOR ALL
   TO authenticated
   USING ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin')
   WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin');
 
--- 27. Trigger functions to maintain billing counters and status
+-- 28. Trigger functions to maintain billing counters and status
 CREATE OR REPLACE FUNCTION public.sync_billing_workspace_limit()
 RETURNS trigger AS $$
 BEGIN
