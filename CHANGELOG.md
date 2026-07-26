@@ -9,6 +9,10 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Corrected issue `#28` traceability from stale Section 5.A/Section 4 references to Sections 6.A, 6.E, and 17.F.
+- Clarified that `cancel_order` resolves the authenticated caller through `public.current_user_profile_id()` rather than comparing `investor_profile_id` directly with `auth.uid()`.
+- Clarified that repeated cancellation from `cancelled` is denied and is not treated as a successful idempotent operation.
+- Added matching cancellation identity and final-state test requirements to issue `#51`.
 - Removed duplicated outbox-insertion test ownership from issue `#51`.
 - Assigned all auto-approval outbox, replay, event-binding, and rule-validation tests exclusively to issue `#41`.
 - Restricted issue `#51` to advisor qualification, cancellation, immutable-audit, and Platform Admin override testing.
