@@ -7,10 +7,22 @@
 - **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), and coordinate advisor review pipelines.
 - **Current Phase**: Phase 3 (Documentation Platform and Operational Systems complete).
 - **Repository Status**: Standards-driven, Production-ready.
-- **Documentation Version**: v2.0.0
-- **Architecture Version**: v2.0.0-Canonical-Production-Freeze
+- **Documentation Version**: v2.0.1
+- **Architecture Version**: v2.0.1-Canonical-Production-Freeze
 - **Target Release**: v1.1.0-alpha
 - **Last Updated**: 2026-07-27
+
+---
+
+## Canonical Project Documents Notice
+The following five documents are the current and authoritative records for this project:
+- [PROJECT_STATE.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/PROJECT_STATE.md)
+- [docs/sprints/Sprint-6.1.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/docs/sprints/Sprint-6.1.md)
+- [docs/business/BRD.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/docs/business/BRD.md)
+- [docs/architecture/SYSTEM_ARCHITECTURE.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/docs/architecture/SYSTEM_ARCHITECTURE.md)
+- [CHANGELOG.md](file:///Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/CHANGELOG.md)
+
+All other Markdown files are stale and must not be used for project status or architecture decisions.
 
 ---
 
@@ -18,11 +30,11 @@
 - **Current Epic**: Core Platform Implementation
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
-- **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.0-Canonical-Production-Freeze
+- **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.1-Canonical-Production-Freeze
 - **Overall Progress**: 90%
 - **Repository Health**: 99%
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas, edge processors, and transaction modal frontends.
+- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas (including event outbox table & triggers, Deno auto-approval worker, service-only auto-approval decision RPC, manual advisor qualify RPC, order cancellation RPC, workspace isolation, family delegation RLS, subscription plans & entitlements, referral engine, Flutter investor order modal, MFD qualification queue, and pgTAP security & state-transition tests).
 
 ---
 
