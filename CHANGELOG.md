@@ -6,16 +6,17 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
-## [v1.3.0-Synthesized-Baseline] — 2026-07-27
+## [v1.3.1-Final-Baseline] — 2026-07-27
 
 ### Summary
-Release v1.3.0-Synthesized-Baseline refines and reorganizes the System Architecture Specification to resolve audit defects (membership-based RLS, family delegation realignment, server-side masking, non-consolidation invariants, and event outbox pattern) and updates Sprint 6.1 specs.
+Release v1.3.1-Final-Baseline applies precision improvements to the System Architecture baseline addressing all ChatGPT 5.5 review feedback points, logs the revision history, and updates the Sprint 6.1 issue traceability matrices.
 
 ### Major Additions & Changes
-- **Audit Defect Fixes**: Integrated membership-based RLS queries for multi-relationship isolation. Realigned family delegation policies to run strictly on portfolio tables.
-- **Server-Side Masking**: Documented step-up unmasking reveal pipelines and audit trail mappings.
-- **Transactional Event Outbox**: Defined a durable outbox pattern replacing raw Postgres NOTIFY listeners.
-- **Full Traceability Matrix**: Expanded Section 17 to map 100% of capabilities, rules, functional requirements, and entities.
+- **Many-to-Many Traceability Matrix**: Refined capability maps (BC-002, BC-004, BC-005, BC-006, BC-008, BC-011, BC-012, BC-016) to map cleanly to requirements and tables.
+- **Distributor Analytics Dashboard Projection**: Defined the schema and target fields for `mfd_dashboard_metrics` view/table aggregation.
+- **Canonical Persona Role Matrix**: Added explicit mapping of BRD user personas to PostgreSQL application membership and auth roles.
+- **Ticket SLA target definitions**: Updated static SLA targets to plan-configurable variables.
+- **Document Vault Security & Lineage**: Documented file limits, content hashing, deduplication, and added immutable rules to `ingestion_logs`.
 
 ---
 

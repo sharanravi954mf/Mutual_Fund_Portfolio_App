@@ -1,7 +1,18 @@
 # Money Bowl — System Architecture Specification
-Document Version: v1.3.0-Synthesized-Baseline  
+Document Version: v1.3.1-Final-Baseline  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
+
+## Revision History
+
+| Version | Date | Author | Description |
+| :--- | :--- | :--- | :--- |
+| v1.0.0 | 2026-07-25 | BAI | Initial draft of the system architecture baseline. |
+| v1.2.1 | 2026-07-26 | BAI | Reorganized into standard 17-layer format. |
+| v1.3.0 | 2026-07-27 | BAI | Integrated dynamic membership-based RLS, family delegation updates, outbox patterns, and server-side masking. |
+| v1.3.1 | 2026-07-27 | BAI | Final baseline addressing precision feedback from ChatGPT 5.5 review. |
+
+---
 
 ## 1. Executive System Topology & Execution Zones
 Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serverless architecture. It provides isolation between Multi-Tenant MFD Workspaces and End-Investors while executing portfolio ingestion, order qualification, and market data synchronization in real-time.
@@ -16,9 +27,11 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 │         └─► Deno Edge Functions (Ingestion, Auto-Approval Engine, AMFI Sync) │
 └─────────────────────────────────────────────────────────────────────────────┘
 
+---
+
 ## 2. Master Business Capability Mapping Matrix
 
-| Capability ID | Capability Name | Target Services | Database Tables | Edge Functions |
+| Capability ID | Capability Name | Target Services | Database Tables / Entities | Edge Functions |
 | :--- | :--- | :--- | :--- | :--- |
 | **BC-001** | Identity & Access Management | `AuthService` | `profiles`, `workspace_memberships` | None |
 | **BC-002** | Distributor Lifecycle Management | `WorkspaceService` | `workspaces`, `mfd_profiles`, `mfd_verification_documents`, `mfd_onboarding_reviews` | None |
@@ -29,15 +42,17 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 | **BC-007** | Educational AI Assistance | `AIProxyService` | None | `ai-helper` |
 | **BC-008** | Customer Servicing (Ticketing) | `TicketService` | `support_tickets` | None |
 | **BC-009** | Dual Subscription & Billing | `BillingService` | `subscription_plans`, `workspace_billing`, `investor_subscriptions`, `payment_events` | `subscription-manager` |
-| **BC-010** | Platform Governance & Administration | `AdminService` | `workspace_audit_logs`, `profiles`, `platform_settings`, `feature_flags`, `notification_templates`, `ai_guardrail_versions` | None |
+| **BC-010** | Platform Governance & Administration | `AdminService` | `workspace_audit_logs`, `profiles`, `ai_guardrail_versions` | None |
 | **BC-011** | Document Management (Lineage) | `IngestionService` | `ingestion_logs` | `cams-kfintech-ingestion` |
 | **BC-012** | Actionable Notification Management| `NotificationService` | `notifications`, `notification_retry_queue` | `notification-dispatcher` |
 | **BC-013** | Document Storage & Vaulting | `StorageService` | `ingested_documents` | None |
-| **BC-014** | Distributor Analytics Dashboard | `AnalyticsService` | `portfolios` (Materialized View) | None |
+| **BC-014** | Distributor Analytics Dashboard | `AnalyticsService` | `mfd_dashboard_metrics` (View/Table) | None |
 | **BC-015** | Universal Search & Discovery | `SearchService` | `folios`, `transactions`, `support_tickets`, `amfi_factsheets`, `ingested_documents` | None |
-| **BC-016** | Platform Configuration | `ConfigService` | `workspaces` | None |
+| **BC-016** | Platform Configuration | `ConfigService` | `platform_settings`, `workspace_settings`, `feature_flags`, `notification_templates`, `registrar_configs` | None |
 | **BC-017** | AMFI Scheme Factsheets & Market Data | `FactsheetService` | `amfi_factsheets` | `amfi-nav-worker` |
 | **BC-018** | Investor Referral Engine | `ReferralService` | `investor_referrals`, `referral_conversions`, `referral_rewards` | `referral-tracker` |
+
+---
 
 ## 3. Core Architectural Layers
 
@@ -46,7 +61,7 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 * **Core Modules**:
   * *Investor Workspace*: Portfolio view, Buy/Sell/Switch order initiation, Family delegation hub.
   * *MFD Command Hub*: Transaction qualification queue, auto-approval threshold configuration, client onboarding.
-  * *PII Guardrails*: Automatic client-side masking for sensitive investor demographic data in shared views.
+  * *PII Guardrails*: UI renders strictly server-authorized masked projections by default. Client-side formatting is supplementary and is never treated as a security boundary.
 
 ### B. Security & Identity Layer (Supabase Auth & RLS)
 * **Authentication**: Multi-factor Mobile/Email OTP authentication via GoTrue.
@@ -65,7 +80,23 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 * **AMFI Market Data Sync Worker**:
   * Scheduled cron worker pulling daily scheme NAVs and riskometer metadata directly from official AMFI data feeds.
 
-## 4. Core Data Architecture & Domain Model
+---
+
+## 4. Canonical Role Mapping Matrix
+
+The following matrix maps Business Requirements Document (BRD) user personas to underlying database Auth & Membership structures:
+
+| BRD Persona | Auth Role | Membership Role | Notes |
+| :--- | :--- | :--- | :--- |
+| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Full write capabilities within workspace boundaries. |
+| **Mapped Investor** | `investor` | `investor` | Active membership required to view details or initiate transactions. |
+| **Exploring Investor** | `investor` | `none` | Standalone explore access only; cannot access specific workspace datasets. |
+| **Family Guest** | `investor` | `delegate` | Read-only delegated access to portfolios/holdings only. |
+| **Platform Admin** | `platform_admin` | `none` | Audited system-wide override access. Bypass check triggers log warnings. |
+
+---
+
+## 5. Core Data Architecture & Domain Model
 The database is structured into 5 primary entity domains matching the business capabilities:
 
 | Domain | Key Data Entities | Architectural Purpose |
@@ -78,7 +109,7 @@ The database is structured into 5 primary entity domains matching the business c
 
 ---
 
-## 5. Concrete Row Level Security (RLS) Mechanics
+## 6. Concrete Row Level Security (RLS) Mechanics
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
 ### A. Workspace Tenant Boundary Policy (BR-003)
@@ -123,13 +154,14 @@ CREATE POLICY platform_admin_override_policy ON workspaces
 
 ---
 
-## 6. Edge Service Architectures & Ingestion Pipelines
+## 7. Edge Service Architectures & Ingestion Pipelines
 
 ### A. In-Memory Zero-Disk Mailbag Ingestion (BC-006 / FR-009 / BC-013)
 ```text
 [IMAP Mailbag Polling] ➔ [Encrypted Object Storage] ➔ [Deno RAM buffer] ➔ [Stream Decoders] ➔ [Postgres Transaction]
 ```
 To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs directly from secure encrypted object storage into memory buffers. It extracts transaction arrays and updates folio balances without saving temporary files to local disk.
+* **Vaulting Controls**: Object storage enforces file-size limits (<20MB), MIME validation (PDF/DBF), SHA-256 content-hash deduplication, 30-day retention pruning policies, and single-use signed URLs expiring in 15 minutes.
 
 ### B. Transaction Qualification & Auto-Approval Engine (BR-006)
 1. Mapped Investor submits a Buy/Sell/Switch `order_request`.
@@ -141,7 +173,7 @@ To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs dire
 
 ---
 
-## 7. Asynchronous Event Bus Topology & Transactional Outbox
+## 8. Asynchronous Event Bus Topology & Transactional Outbox
 Money Bowl features a Transactional Outbox Pattern to guarantee durable event dispatching:
 
 ```text
@@ -156,7 +188,7 @@ All domain events are written to the `event_outbox` table within the primary dat
 
 ---
 
-## 8. Notification Service Architecture & Retry Queue (BC-012)
+## 9. Notification Service Architecture & Retry Queue (BC-012)
 * **Channels**: Email, SMS, WhatsApp, and Push Notifications.
 * **Retry Queue Engine**: Failures trigger the dispatcher worker using exponential backoff:
   $$T_{\text{wait}} = 2^{\text{attempt}} \times 60 \text{ seconds}$$
@@ -164,26 +196,23 @@ All domain events are written to the `event_outbox` table within the primary dat
 
 ---
 
-## 9. Customer Servicing & Ticketing Workflow Engine (BC-008)
+## 10. Customer Servicing & Ticketing Workflow Engine (BC-008)
 Support requests follow a rigid state machine layout:
 ```text
 [raised] ➔ [assigned] ➔ [resolved] ➔ [closed]
 ```
 * **SLA Thresholds**:
-  * P0 (Critical): 4 hours
-  * P1 (Medium): 24 hours
-  * P2 (Low): 72 hours
-Breaches auto-escalate directly to the workspace owner.
+  * Default operational SLA targets are set to P0: 4h, P1: 24h, P2: 72h. Contractual SLA values are plan-configurable and do not constitute static contractual commitments. Breaches auto-escalate directly to the workspace owner.
 
 ---
 
-## 10. Encrypted Document Vaulting & Signed URL Lineage (BC-011, BC-013)
+## 11. Encrypted Document Vaulting & Signed URL Lineage (BC-011, BC-013)
 * **Encryption**: CAS PDF statements are encrypted at the object boundary using AES-256 keys.
 * **Access Control**: Users receive signed URLs with an expiry limit of 15 minutes. Decryption happens on-the-fly inside the Edge compute boundary.
 
 ---
 
-## 11. Viral Referral Engine & Fraud Detection Rules (BC-018 / FR-011)
+## 12. Viral Referral Engine & Fraud Detection Rules (BC-018 / FR-011)
 * **Attribution**: Referrals are tracked using SHA-256 hashed invite tokens.
 * **Fraud Detection rules**:
   * Self-Referral block: Prevents users from registering with identical emails/phones.
@@ -192,7 +221,7 @@ Breaches auto-escalate directly to the workspace owner.
 
 ---
 
-## 12. Dual Subscription & Feature Gating Engine (BC-009 / BR-011)
+## 13. Dual Subscription & Feature Gating Engine (BC-009 / BR-011)
 * **State Machine**: `trialing` ➔ `active` ➔ `past_due` ➔ `suspended` ➔ `cancelled`.
 * **Starter limits**: Gated at 25 mapped clients. Upgrades require active checkout session confirmations.
 * **Idempotency**: Webhook payment events use unique payment IDs to prevent double-charging or double-crediting.
@@ -200,7 +229,7 @@ Breaches auto-escalate directly to the workspace owner.
 
 ---
 
-## 13. Educational AI Assistant Proxy & Guardrail Declination Gate (BC-007, BR-010)
+## 14. Educational AI Assistant Proxy & Guardrail Declination Gate (BC-007, BR-010)
 * **Core AI Proxy**: Secured LLM connector with predefined educational prompts.
 * **Calculators**: Execution of financial calculators is performed deterministically outside the LLM context.
 * **Decline Gate (FR-013)**: The prompt system includes rigid system instructions to detect intent. Queries containing recommendation keywords (e.g., "which fund to buy", "should I switch") are blocked and responded to with the static education declination template.
@@ -208,17 +237,19 @@ Breaches auto-escalate directly to the workspace owner.
 
 ---
 
-## 14. Universal Search Architecture (BC-015 / FR-007)
+## 15. Universal Search Architecture (BC-015 / FR-007)
 To meet the `<200ms` latency SLA, the database uses PostgreSQL Generalized Inverted Index (GIN) on scheme names, folios, and client details using the `pg_trgm` extension. Projections include `amfi_factsheets`, `folios`, `transactions`, `ingested_documents`, and `support_tickets`, strictly filtered through RLS.
 
 ---
 
-## 15. Observability, Structured Logging & Audit Metrics
-All microservices and Edge functions log structured JSON outputs containing `workspace_id`, `execution_time_ms`, and `operation_type` to a centralized Postgres logging collector. Central metrics include database latency, ingestion failures, and SLA breaches.
+## 16. Distributor Analytics Dashboard View (BC-014)
+To drive dashboard metric summaries without executing heavy aggregate queries on load, the system projects analytics through the `mfd_dashboard_metrics` view:
+* **Fields**: `workspace_id`, `total_aum`, `active_investor_count`, `pending_ticket_count`, `active_sip_count`, `monthly_sip_value`, `last_successful_ingestion_at`, `failed_ingestion_count`, `refreshed_at`.
+* **Sources**: `portfolios`, `workspace_memberships`, `support_tickets`, `transactions`, `ingestion_logs`.
 
 ---
 
-## 16. Non-Functional Criteria & Security Architecture
+## 17. Non-Functional Criteria & Security Architecture
 
 ### A. Architectural Invariant for BR-004 ("No Consolidation")
 Cross-workspace portfolio aggregation, consolidated XIRR calculations, or merged performance APIs across multiple MFD relationships are strictly prohibited at database, view, and API levels.
@@ -236,29 +267,29 @@ Cross-workspace portfolio aggregation, consolidated XIRR calculations, or merged
 * Statement parsing processing: `<15 minutes`.
 
 ### D. Audit Trail
-Every status change on `order_requests`, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The table enforces immutability via a trigger blocking all update and delete queries.
+Every status change on `order_requests`, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The `workspace_audit_logs` and `ingestion_logs` tables enforce immutability via triggers blocking all update and delete queries.
 
 ---
 
-## 17. Full BRD Traceability Matrix
+## 18. Many-to-Many Traceability Matrix
 
-| Business Capability | BRD Req ID | BRD Rule ID | Business Entity | Technical Component / Service | Target Postgres Table / Edge Function |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **BC-001** | FR-002 | BR-001 | BE-003 | Onboarding / Auth Service | `profiles` |
-| **BC-002** | FR-001 | BR-002 | BE-002 | Workspace / Distributor Lifecycle | `workspaces`, `mfd_profiles`, `mfd_verification_documents` |
-| **BC-003** | FR-002 | BR-001 | BE-003 | Investor Onboarding Lifecycle | `profiles` |
-| **BC-004** | FR-001 | BR-002 | BE-004 | Relationship Management | `workspace_memberships` |
-| **BC-005** | FR-008 | BR-012 | BE-006 | Portfolio Management | `portfolios`, `folios`, `scheme_holdings`, `transactions` |
-| **BC-006** | FR-009 | BR-003 | BE-010 | Zero-Disk Ingestion Worker | `cams-kfintech-ingestion` |
-| **BC-007** | FR-012 | BR-010 | BE-014 | Educational AI Assistant Proxy | `ai-helper` |
-| **BC-008** | FR-014 | BR-009 | BE-013 | Customer Servicing / Ticket state | `support_tickets` |
-| **BC-009** | FR-010 | BR-011 | BE-012 | Subscription & Feature Gating | `subscription_plans`, `workspace_billing`, `payment_events` |
-| **BC-010** | FR-003 | BR-007 | BE-001 | Platform Governance | `platform_admin_override_policy` |
-| **BC-011** | N/A | BR-005 | BE-010 | Document Lineage Logger | `ingestion_logs` |
-| **BC-012** | N/A | BR-009 | BE-017 | Actionable Notifications Dispatcher | `notifications`, `notification_retry_queue` |
-| **BC-013** | N/A | BR-008 | BE-010 | Encrypted Object Storage Vault | `ingested_documents` |
-| **BC-014** | N/A | BR-004 | BE-006 | MFD Analytics Dashboard Projection | `portfolios` (Materialized View) |
-| **BC-015** | FR-007 | N/A | BE-015 | Universal Search projection | pg_trgm GIN Index |
-| **BC-016** | FR-001 | BR-006 | BE-002 | Configuration / Settings | `platform_settings`, `feature_flags` |
-| **BC-017** | FR-008 | BR-012 | BE-015 | AMFI Factsheet sync worker | `amfi_factsheets` / `amfi-nav-worker` |
-| **BC-018** | FR-011 | N/A | BE-016 | Investor Referral / Rewards Engine | `investor_referrals`, `referral_rewards` |
+| Business Capability | Mapping Personas | BRD Requirements | BRD Rules | Postgres Entities & Component Links |
+| :--- | :--- | :--- | :--- | :--- |
+| **BC-001** (Identity) | Investor, Distributor | `FR-002` | `BR-001` | `profiles`, `workspace_memberships` |
+| **BC-002** (Distributor) | Distributor | `FR-001` | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
+| **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | `profiles` |
+| **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004` | `workspace_memberships` |
+| **BC-005** (Portfolio) | Investor, Distributor | N/A | `BR-004` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
+| **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
+| **BC-007** (Educational AI) | Investor | `FR-012` | `BR-010` | `ai-helper` Edge worker, declination guard gate |
+| **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | `support_tickets` |
+| **BC-009** (Subscriptions) | Distributor | `FR-010` | `BR-011` | `subscription_plans`, `workspace_billing`, `payment_events` |
+| **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | `platform_admin_override_policy`, `workspace_audit_logs` |
+| **BC-011** (Lineage) | None | `NFR-005` | Auditability Principle | `ingestion_logs` (Immutable) |
+| **BC-012** (Notifications) | Investor, Distributor | `FR-014` / Event triggers | N/A | `notifications`, `notification_retry_queue` |
+| **BC-013** (Vaulting) | Investor, Distributor | `FR-009` | `BR-008` | `ingested_documents`, AES-256 S3 storage vault |
+| **BC-014** (Analytics) | Distributor | N/A | `BR-004` (Enforced separation) | `mfd_dashboard_metrics` view |
+| **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | GIN search index projections |
+| **BC-016** (Platform Config) | Platform Admin | `FR-001` | `BR-006` | `platform_settings`, `feature_flags`, `notification_templates`, `registrar_configs` |
+| **BC-017** (AMFI Market Data) | Investor, Distributor | `FR-008` | `BR-012` | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
+| **BC-018** (Referral Engine) | Investor | `FR-011` | N/A | `investor_referrals`, `referral_rewards` |
