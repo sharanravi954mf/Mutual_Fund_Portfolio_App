@@ -15,3 +15,6 @@ This sprint implements the core order execution engine, asymmetric family delega
 - [ ] **feat(edge): build Order Auto-Approval RPC Engine [BRD-BR-006, ARCH-Sec5.B]** (#33)
 - [ ] **feat(flutter): build Investor Order Request Modal (Buy/Sell/Switch) [BRD-FR-005, ARCH-Sec2.A]** (#34)
 - [ ] **feat(flutter): build MFD Qualification Queue Screen [BRD-FR-006, ARCH-Sec2.A]** (#35)
+- [ ] **feat(database): create subscription_plans and workspace_billing tables with tier limits [BC-009, BR-011]** (#39)
+- [ ] **feat(database): create investor_referrals table and code generation logic [BC-018]** (#40)
+- [ ] **test(database): add pgTAP automated tests for RLS workspace isolation and auto-approval triggers [BR-003, BR-006]** (#41)
