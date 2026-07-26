@@ -7,7 +7,7 @@ This sprint implements the core order execution engine, membership-based workspa
 `supabase/migrations/20260801000000_brd_v1_2_1_execution_subscriptions_referrals.sql`
 
 ## Task Checklist & Tracking
-- [ ] **feat(database): create order_status ENUM and cancel_order SECURITY DEFINER RPC [BRD-FR-005, Section 6.A, Section 6.E]** (#28)
+- [ ] **feat(database): create order_status ENUM and cancel_order SECURITY DEFINER RPC [BRD-FR-005, BRD-BR-005, Section 6.A, Section 6.E, Section 17.F]** (#28)
 - [ ] **feat(database): create order_requests and immutable workspace_audit_logs tables [BRD-FR-005, BRD-FR-006, BRD-BR-005, BRD-NFR-005, Section 5, Section 6.A, Section 17.F]** (#29)
 - [ ] **feat(database): implement workspace isolation RLS policy on order_requests [BRD-BR-003, Section 6.A]** (#30)
 - [ ] **feat(database/edge): implement audited Platform Admin override and family delegation access controls [BRD-BR-007, BRD-BR-009, Section 6.F, Section 6.G, Section 17.F]** (#31)

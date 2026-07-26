@@ -338,16 +338,36 @@ Manual advisor qualification is routed through a separate, audited routine:
 * **Internal Safeguards & Rules**:
   1. Must be declared as `SECURITY DEFINER` and enforce `SET search_path = ''`.
   2. Acquires row lock: `SELECT workspace_id, investor_profile_id, status INTO v_workspace_id, v_investor_profile_id, v_status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
-  3. Verifies caller is either the order owner (`investor_profile_id = auth.uid()`) or an advisor in the order's workspace.
-  4. Denies request permissions for family guests and unrelated advisors.
-  5. Allows cancellations only if status is `pending_qualification` or `pending_review`.
-  6. Rejects cancellation if status is `auto_approved`, `approved`, `rejected`, or `cancelled`.
-  7. Mutates status to `cancelled`, captures the reason, and writes an audit log inside the same transaction.
-  8. Privilege Contract:
+  3. Resolves caller's application profile ID through `public.current_user_profile_id()`. A null resolved profile ID is denied immediately raising `profile_resolution_failed`. The resolved profile ID must not be accepted from caller parameters.
+  4. Authorizes the action only if:
+     - The locked order `investor_profile_id` equals the resolved current application profile ID; or
+     - The caller has active advisor or workspace-owner membership in the order's workspace.
+     
+     **SQL-equivalent validation contract:**
      ```sql
-     REVOKE ALL ON FUNCTION public.cancel_order(uuid, text) FROM PUBLIC;
-     GRANT EXECUTE ON FUNCTION public.cancel_order(uuid, text) TO authenticated;
+     v_current_profile_id := public.current_user_profile_id();
+     IF v_current_profile_id IS NULL THEN
+         RAISE EXCEPTION 'profile_resolution_failed';
+     END IF;
+
+     IF v_investor_profile_id = v_current_profile_id THEN
+         -- order owner cancellation path
+     ELSIF public.has_advisor_membership(v_workspace_id) THEN
+         -- advisor cancellation path
+     ELSE
+         RAISE EXCEPTION 'not_authorized';
+     END IF;
      ```
+  5. Denies cancellation rights for Family Guests, unrelated advisors, and Platform Admins (Platform Admin status alone does not satisfy cancellation authorization). Unauthorised attempts raise `not_authorized`.
+  6. Permits cancellation only if the locked database status is `pending_qualification` or `pending_review`.
+  7. Rejects cancellation attempts with `invalid_cancellation_state` if status is `auto_approved`, `approved`, or `rejected`.
+  8. Rejects cancellation attempts with `already_cancelled` if status is `cancelled`. Repeated cancellation is strictly denied.
+  9. Mutates status to `cancelled`, captures the reason, and writes an immutable audit record in `public.workspace_audit_logs` using database-loaded values inside the same transaction.
+  10. Privilege Contract:
+      ```sql
+      REVOKE ALL ON FUNCTION public.cancel_order(uuid, text) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION public.cancel_order(uuid, text) TO authenticated;
+      ```
 
 ### F. Workspace-Matched Family Delegation Policy (Section 6.F)
 * The accepted `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative source of truth for family guest read access. No secondary workspace membership is required.
