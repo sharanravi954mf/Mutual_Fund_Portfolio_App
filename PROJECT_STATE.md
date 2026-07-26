@@ -31,12 +31,12 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 - **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.1-Canonical-Production-Freeze
-- **Sprint 6.1 Status**: Planning aligned; implementation not started/in progress
+- **Sprint 6.1 Status**: Planning aligned; implementation in progress
 - **Architecture Completion**: Complete
 - **Application Implementation**: In progress
 - **Release Readiness**: Not ready
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas (including `order_requests`, workspace isolation RLS, event outbox table and triggers, Deno auto-approval worker, service-only auto-approval decision RPC, manual advisor qualify RPC, order cancellation RPC, family delegation RLS, subscription plans & entitlements, referral security, Flutter investor order modal, MFD qualification queue, and pgTAP race & security tests).
+- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas (including `order_requests`, workspace isolation RLS, event_outbox, `auto_approval_rules`, `apply_auto_approval_decision`, `order-auto-approval-worker`, `qualify_order`, `cancel_order`, family delegation RLS, Platform Admin override, immutable audit logging, subscription entitlements, referral security, Flutter investor order modal, MFD qualification queue, and pgTAP race and security tests).
 
 ---
 
@@ -46,7 +46,7 @@ All other Markdown files are stale and must not be used for project status or ar
 | :--- | :--- | :--- | :--- |
 | **Documentation Platform v1.0** | **Completed** | 2026-07-25 | Target Architecture Contract, Product Vision blueprint, Engineering handbooks, Governance frameworks, Repository OS configurations, AIOS, and Documentation Certification audits. |
 | **Core Authentication & RBAC** | **Completed** | 2026-07-25 | Database migrations, triggers, is_admin() and has_active_investor_link() status RLS validations, UserProfile models, and decoupled RouteGuard builders. |
-| **Workspace & User Management** | **Completed** | 2026-07-25 | Workspaces, workspace memberships, assignments, invitations, and mutable audit logs schema, current_user_profile_id() RLS functions, secure accepting and acceptance RPC functions, Dart models, and API Services. |
+| **Workspace & User Management** | **Completed** | 2026-07-25 | Workspaces, workspace memberships, assignments, invitations, and legacy mutable audit schema—scheduled for immutable hardening in Sprint 6.1, current_user_profile_id() RLS functions, secure accepting and acceptance RPC functions, Dart models, and API Services. |
 
 ---
 

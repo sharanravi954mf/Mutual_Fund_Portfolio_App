@@ -126,7 +126,7 @@ The database is structured into 5 primary entity domains matching the business c
 ## 6. Concrete Row Level Security (RLS) Mechanics & Transaction Contracts
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
-### A. Unified Order Lifecycle (Section 1.1)
+### A. Unified Order Lifecycle
 Order requests follow a single, unambiguous lifecycle flow to eliminate race conditions between auto-approval workers and manual MFD qualifications:
 
 ```text
@@ -155,7 +155,7 @@ Client-only draft
   * Cancellations are rejected if the order is already in `auto_approved`, `approved`, `rejected`, or `cancelled` statuses.
   * Status transitions between `auto_approved` ➔ `approved`, `auto_approved` ➔ `rejected`, or `pending_review` ➔ `auto_approved` are strictly prohibited.
 
-### B. Decoupled Event-Driven Auto-Approval Workflow (Section 1.2)
+### B. Decoupled Event-Driven Auto-Approval Workflow
 To ensure reliable, race-free operation, rule evaluation is decoupled from the transactional database path:
 
 ```text
@@ -181,7 +181,7 @@ Investor inserts order_request
   * Unmatched rules trigger a fallback status transition to `pending_review`.
   * The entire workflow from insertion to state resolution must be completed within 5 seconds to satisfy the `NFR-003` queue availability SLA.
 
-### C. Service-Only Auto-Approval RPC: `apply_auto_approval_decision` (Section 1.3)
+### C. Service-Only Auto-Approval RPC: `apply_auto_approval_decision`
 Automated rule decisions are written via a dedicated, secure database interface:
 
 * **Signature**:
@@ -197,28 +197,43 @@ Automated rule decisions are written via a dedicated, secure database interface:
 * **Internal Safeguards & Rules**:
   1. Must be declared as `SECURITY DEFINER` and enforce `SET search_path = ''`.
   2. Uses fully qualified object references exclusively (`public.order_requests`, `public.workspace_audit_logs`).
-  3. Obtains a pessimistic row lock: `SELECT status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
-  4. Accepts transition processing only if the order's current status is `pending_qualification`.
-  5. Permits target state transitions to `auto_approved` or `pending_review` only.
-  6. Rejects duplicate or stale correlation IDs to guarantee worker idempotency.
-  7. Persists the worker correlation ID, decision timestamp, `rule_id`, and `rule_version` in `order_requests`.
-  8. Records an immutable audit payload in `public.workspace_audit_logs` in the same transaction.
-  9. Privilege Contract:
+  3. Obtains a pessimistic row lock:
      ```sql
-     REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM PUBLIC;
-     REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM authenticated;
-     GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) TO service_role;
+     SELECT
+         workspace_id,
+         investor_profile_id,
+         status,
+         auto_approval_correlation_id
+     INTO
+         v_workspace_id,
+         v_investor_profile_id,
+         v_status,
+         v_existing_correlation_id
+     FROM public.order_requests
+     WHERE id = p_order_id
+     FOR UPDATE;
      ```
-  10. Security Invariants:
+  4. Accepts transition processing only if the order's current status is exactly `pending_qualification`.
+  5. Permits target state transitions to `auto_approved` or `pending_review` only. All other decision values are rejected.
+  6. Enforces Auto-Approval Null Semantics:
+     - If decision is `auto_approved`, both `rule_id` and `rule_version` are mandatory. Rejects if either is null.
+     - If decision is `pending_review`, both `rule_id` and `rule_version` must be null. Rejects if either is non-null.
+  7. Verifies that the correlation ID has not already been processed (i.e. `v_existing_correlation_id` is null or does not match `p_correlation_id`) and rejects duplicate correlation IDs idempotently.
+  8. Verifies that the matching rule belongs to the order's workspace (workspace validation checks on `auto_approval_rules`), that the rule is active, and that the supplied rule version matches the persisted rule version in the system.
+  9. Persists the worker correlation ID, decision timestamp, `rule_id`, and `rule_version` in `order_requests`.
+  10. Records an immutable audit payload in `public.workspace_audit_logs` using strictly values loaded from the locked database record (e.g. `v_workspace_id`, `v_investor_profile_id`) rather than trusting caller-supplied parameters.
+  11. Privilege Contract:
+      ```sql
+      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM PUBLIC;
+      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM authenticated;
+      GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) TO service_role;
+      ```
+  12. Security Invariants:
       * Only the trusted Deno backend worker (acting as the authorized `service_role`) may invoke this function.
       * Investors, advisors, family guests, and normal authenticated users must be denied execution rights.
       * Normal authenticated users must receive permission denied when invoking `apply_auto_approval_decision` directly.
-      * The service RPC must not rely only on caller-provided arguments; it must still validate the current state under a pessimistic `FOR UPDATE` lock.
-      * Only `pending_qualification` ➔ `auto_approved` and `pending_qualification` ➔ `pending_review` transitions are permitted.
-      * Duplicate or stale `correlation_id` values must be rejected idempotently.
-      * The rule ID, rule version, decision timestamp, and correlation ID must be audited.
 
-### D. Hardened Advisor Qualification RPC: `qualify_order` (Section 1.4)
+### D. Hardened Advisor Qualification RPC: `qualify_order`
 Manual advisor qualification is routed through a separate, audited routine:
 
 * **Signature**:
@@ -251,7 +266,7 @@ Manual advisor qualification is routed through a separate, audited routine:
      GRANT EXECUTE ON FUNCTION public.qualify_order(uuid, public.order_status, text) TO authenticated;
      ```
 
-### E. Hardened Order Cancellation RPC: `cancel_order` (Section 1.5)
+### E. Hardened Order Cancellation RPC: `cancel_order`
 * **Signature**:
   ```sql
   public.cancel_order(
@@ -290,6 +305,39 @@ Manual advisor qualification is routed through a separate, audited routine:
       )
   );
   ```
+
+### G. Audited Platform Admin Override Contract (Section 6.G)
+Platform Admin actions bypass standard table-level workspace restrictions under a strict, auditable governance model:
+
+* **Identity Verification**:
+  Verified using: `(auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'`.
+* **Governance Safeguards**:
+  * Platform Admin overrides must never be a silent, unrestricted database or API bypass.
+  * Every override request requires capturing:
+    * `actor_profile_id` (Acting admin identity)
+    * `workspace_id`
+    * `entity_type` (Target entity type)
+    * `entity_id` (Target entity ID)
+    * `action` (Requested action)
+    * `reason` (Mandatory human-entered override reason)
+    * `correlation_id` (System-generated request ID)
+    * `occurred_at` (Timestamp)
+  * Sensitive overrides (e.g. access reset, data export) require step-up authentication.
+  * The override is implemented strictly through narrowly scoped RLS policies, hardened `SECURITY DEFINER` RPCs, or both.
+  * Platform Admins must not directly mutate protected data rows without auditing mechanisms.
+  * Every successful and failed override attempt must create an immutable audit record in `public.workspace_audit_logs`.
+  * The override contract must not weaken investor ownership, workspace isolation, or family-delegation rules.
+* **Permitted Override Use Cases**:
+  - Account unlock
+  - Access reset
+  - MFD onboarding assistance
+  - Identity-link resolution
+  - Emergency support intervention
+* **Explicitly Prohibited Actions**:
+  - Silent portfolio reassignment
+  - Cross-workspace data extraction without reason
+  - Order approval outside the documented audited override path
+  - Deletion or alteration of audit history
 
 ---
 
@@ -353,7 +401,7 @@ Support requests follow a rigid state machine layout:
 
 ---
 
-## 12. Secure Referral Security Contract (Section 1.8)
+## 12. Secure Referral Security Contract
 To protect user privacy and prevent tracking vulnerabilities, referrers are resolved under a strict security schema:
 * Referral codes are random, high-entropy, cryptographically secure tokens.
 * Plaintext token keys are visible only when required for sharing purposes.
@@ -421,7 +469,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 * **`ARCH-SLO-001`**: Security engine key validation overhead latency: `<50ms`.
 * **`ARCH-SLO-002`**: Central log queue write confirmation: `<100ms` async acknowledgment.
 
-### F. Expanded Audit Logging Architecture (Section 1.7)
+### F. Expanded Audit Logging Architecture
 The platform records immutable audit logs inside `public.workspace_audit_logs` (and `public.ingestion_logs` where relevant). Triggers block updates and deletions on audit tables.
 
 * **Audit Scopes & Events Table**:

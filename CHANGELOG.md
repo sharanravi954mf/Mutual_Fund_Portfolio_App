@@ -2,7 +2,7 @@
 
 All notable completed releases of Sharan Fincorp are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
 
-Detailed release notes and boundaries are maintained inside the [docs/changelog/](docs/changelog/README.md) directory.
+This CHANGELOG.md is the sole authoritative release-history document. Historical release references found elsewhere are non-authoritative.
 
 ---
 
@@ -15,6 +15,12 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 - Synchronized GitHub issues and Kanban board card statuses.
 - Replaced local file links (`file:///Users/...`) with repository-relative links across canonical documents.
 - Clarified architecture readiness status (canonical production-freeze baseline approved) versus application execution status (pre-alpha implementation in progress).
+- Added an audited Platform Admin override contract (Section 6.G).
+- Corrected stale architecture section annotations.
+- Defined null and rule-version semantics for auto-approval decisions inside the service RPC.
+- Corrected Sprint 6.1 traceability for issues #29, #31, #51, and #59.
+- Clarified legacy mutable audit schema status.
+- Removed the nonexistent `docs/changelog/` reference.
 
 ### Unchanged
 - BRD remains frozen at v1.2.1.
