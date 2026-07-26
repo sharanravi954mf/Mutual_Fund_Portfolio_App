@@ -36,7 +36,7 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Application Implementation**: In progress
 - **Release Readiness**: Not ready
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas and services (including `order_requests`, workspace isolation RLS, event_outbox, `auto_approval_rules`, `apply_auto_approval_decision` service RPC with stable outbox-event idempotency and rule-version validation, `order-auto-approval-worker` correlation retry policies, family delegation RLS, action-specific Platform Admin override RPCs, durable override attempt auditing and rollback-retention logging, immutable audit logs, subscription entitlements, referral security, Flutter investor order modal, MFD qualification queue, and pgTAP and service integration testing).
+- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas and services (including `order_requests`, workspace isolation RLS, event_outbox, `auto_approval_rules`, `apply_auto_approval_decision` service RPC with stable UUID outbox-event correlation, replay-before-stale validation ordering, idempotency-conflict detection, conditional rule lookup, and rule-version validation; `order-auto-approval-worker` correlation retry policies; family delegation RLS; advisor-only `qualify_order` qualification and explicit Platform Admin order-qualification denial; action-specific Platform Admin override RPCs, durable append-only override audit outcomes and rollback-retention logging; immutable audit logs; subscription entitlements; referral security; Flutter investor order modal; MFD qualification queue; and pgTAP and service integration/event-replay testing).
 
 ---
 

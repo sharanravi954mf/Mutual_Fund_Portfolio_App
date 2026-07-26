@@ -191,59 +191,105 @@ Automated rule decisions are written via a dedicated, secure database interface:
       p_decision public.order_status,
       p_rule_id uuid,
       p_rule_version integer,
-      p_correlation_id text
+      p_correlation_id uuid
   ) RETURNS public.order_requests
   ```
 * **Internal Safeguards & Rules**:
   1. Must be declared as `SECURITY DEFINER` and enforce `SET search_path = ''`.
-  2. Uses fully qualified object references exclusively (`public.order_requests`, `public.workspace_audit_logs`).
-  3. Obtains a pessimistic row lock:
-     ```sql
-     SELECT
-         workspace_id,
-         investor_profile_id,
-         status,
-         auto_approval_correlation_id
-     INTO
-         v_workspace_id,
-         v_investor_profile_id,
-         v_status,
-         v_existing_correlation_id
-     FROM public.order_requests
-     WHERE id = p_order_id
-     FOR UPDATE;
-     ```
-  4. Accepts transition processing only if the order's current status is exactly `pending_qualification`.
-  5. Permits target state transitions to `auto_approved` or `pending_review` only. All other decision values are rejected.
-  6. Enforces Auto-Approval Null Semantics:
-     - If decision is `auto_approved`, both `rule_id` and `rule_version` are mandatory. Rejects if either is null.
-     - If decision is `pending_review`, both `rule_id` and `rule_version` must be null. Rejects if either is non-null.
-  7. Enforces Stable Outbox-Event Idempotency:
-     - The worker correlation ID must be deterministic and 1-to-1 mapped: `auto_approval_correlation_id = event_outbox.id`.
-     - The worker must reuse the exact same correlation ID for all retries of the same outbox event, and must never generate a new correlation ID per retry.
-     - Enforces a unique constraint on correlation IDs:
+  2. Uses fully qualified object references exclusively (`public.order_requests`, `public.workspace_audit_logs`, `public.event_outbox`, `public.auto_approval_rules`).
+  3. Processing and Validation Sequence:
+     - **Step 1: Lock the order row and load state**:
        ```sql
-       CREATE UNIQUE INDEX order_requests_auto_approval_correlation_uidx
-       ON public.order_requests (auto_approval_correlation_id)
-       WHERE auto_approval_correlation_id IS NOT NULL;
+       SELECT
+           workspace_id,
+           investor_profile_id,
+           status,
+           auto_approval_correlation_id,
+           triggered_rule_id,
+           triggered_rule_version
+       INTO
+           v_workspace_id,
+           v_investor_profile_id,
+           v_status,
+           v_existing_correlation_id,
+           v_existing_rule_id,
+           v_existing_rule_version
+       FROM public.order_requests
+       WHERE id = p_order_id
+       FOR UPDATE;
        ```
-     - Replay Behavior:
-       - Same outbox event + same correlation ID: returns the existing resolved order, preventing duplicate transitions or side effects.
-       - Different event targeting an already-resolved order: rejects as stale and records a worker/security failure outcome.
-  8. Enforces Rule-Version Equality Validation:
-     - Verifies that `p_rule_id` identifies an active rule in `public.auto_approval_rules`.
-     - Verifies that `rule.workspace_id` exactly matches `order.workspace_id` (the order's database-loaded workspace ID).
-     - Verifies rule-version equality: `p_rule_version` must exactly match the persisted `auto_approval_rules.rule_version`.
-     - Rejects decision application if the rule is missing, rule is inactive, rule belongs to another workspace, `p_rule_version` differs from the persisted rule version, or the rule was modified after evaluation.
-  9. Persists the worker correlation ID, decision timestamp, validated `rule_id`, and validated `rule_version` in `order_requests`.
-  10. Records an immutable audit payload in `public.workspace_audit_logs` using strictly values loaded from the locked database record (e.g. `v_workspace_id`, `v_investor_profile_id`) rather than trusting caller-supplied parameters.
-  11. Privilege Contract:
+     - **Step 2: Idempotent Replay Check (Before Stale-State Validation)**:
+       - If `v_existing_correlation_id = p_correlation_id` then:
+         - Verify `p_decision` matches `v_status`.
+         - Verify `p_rule_id` matches `v_existing_rule_id`.
+         - Verify `p_rule_version` matches `v_existing_rule_version`.
+         - If all match, return the existing `order_requests` row immediately without mutation or duplicate side effects.
+         - If any field differs, raise a SQL exception with code `idempotency_conflict`.
+     - **Step 3: Stale State Check**:
+       - If `v_status != 'pending_qualification'` then:
+         - Raise a SQL exception with code `stale_order_state`.
+     - **Step 4: Outbox Event & Correlation Binding Validation**:
+       - Retrieve and lock the associated outbox event:
+         ```sql
+         SELECT
+             id,
+             entity_id,
+             event_type,
+             status
+         INTO
+             v_event_id,
+             v_event_entity_id,
+             v_event_type,
+             v_event_status
+         FROM public.event_outbox
+         WHERE id = p_correlation_id
+         FOR UPDATE;
+         ```
+       - Reject and raise exceptions if:
+         - Event does not exist: `event_not_found`.
+         - Event type is not `order.created`: `invalid_event_type`.
+         - Event targets a different order (`v_event_entity_id != p_order_id`): `event_order_mismatch`.
+         - Event has not been claimed for processing or is already bound to another order request.
+     - **Step 5: Conditional Rule Validation**:
+       - **IF** `p_decision = 'auto_approved'` **THEN**:
+         - Require `p_rule_id` and `p_rule_version` to be non-null (else raise exception).
+         - Validate that the rule exists: `rule_not_found`.
+         - Validate that the rule belongs to the order's workspace: `rule_workspace_mismatch`.
+         - Validate that the rule is active: `rule_inactive`.
+         - Validate rule-version equality: `p_rule_version` must exactly match the persisted `auto_approval_rules.rule_version`. Raise `rule_version_mismatch` on mismatch or if the rule was modified after evaluation.
+       - **ELSIF** `p_decision = 'pending_review'` **THEN**:
+         - Require `p_rule_id IS NULL` and `p_rule_version IS NULL` (else raise exception).
+         - Do not perform any rule lookup or load rule parameters.
+       - **ELSE**:
+         - Raise exception for unsupported decision.
+       - **END IF;**
+     - **Step 6: Apply state transition**:
+       - Update status, save validated rule ID, validated rule version, correlation ID, and timestamps.
+     - **Step 7: Record append-only audit log**:
+       - Record an immutable audit log payload in `public.workspace_audit_logs` using strictly values loaded from the locked database record (`v_workspace_id`, `v_investor_profile_id`).
+  4. Stable Machine-Readable Error Codes:
+     - `idempotency_conflict`
+     - `stale_order_state`
+     - `event_not_found`
+     - `event_order_mismatch`
+     - `invalid_event_type`
+     - `rule_not_found`
+     - `rule_inactive`
+     - `rule_workspace_mismatch`
+     - `rule_version_mismatch`
+  5. Uniqueness Constraint:
+     ```sql
+     CREATE UNIQUE INDEX order_requests_auto_approval_correlation_uidx
+     ON public.order_requests (auto_approval_correlation_id)
+     WHERE auto_approval_correlation_id IS NOT NULL;
+     ```
+  6. Privilege Contract:
       ```sql
-      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM PUBLIC;
-      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM authenticated;
-      GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) TO service_role;
+      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, uuid) FROM PUBLIC;
+      REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, uuid) FROM authenticated;
+      GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, uuid) TO service_role;
       ```
-  12. Security Invariants:
+  7. Security Invariants:
       * Only the trusted Deno backend worker (acting as the authorized `service_role`) may invoke this function.
       * Investors, advisors, family guests, and normal authenticated users must be denied execution rights.
       * Normal authenticated users must receive permission denied when invoking `apply_auto_approval_decision` directly.
@@ -269,8 +315,8 @@ Manual advisor qualification is routed through a separate, audited routine:
      WHERE id = p_order_id
      FOR UPDATE;
      ```
-  3. Verifies advisor membership in the target workspace (via `public.has_advisor_membership(v_workspace_id)`) or an audited `platform_admin` override.
-  4. Blocks execution attempts by investors, family guest delegates, or unrelated advisors.
+  3. Verifies that the caller has an active workspace-owner or advisor membership in the order's workspace (via `public.has_advisor_membership(v_workspace_id)`). Platform Admins must not qualify, approve, or reject order requests; Platform Admin status does not satisfy `qualify_order` authorization.
+  4. Blocks execution attempts by Platform Admins, investors, family guest delegates, or unrelated advisors.
   5. Accepts transitions only if the order's locked status is exactly `pending_review`.
   6. Restricts status mutations strictly to `approved` or `rejected`.
   7. Mutates only `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason` columns.
@@ -337,22 +383,24 @@ Platform Admin actions bypass standard table-level workspace restrictions under 
     * `action` (Requested action)
     * `reason` (Mandatory human-entered business reason for override)
     * `correlation_id` (Stable identifier for the complete override attempt)
-    * `outcome` (`succeeded`, `denied`, or `failed`)
-    * `error_code` (Stable machine-readable failure/denial code)
+    * `event_type` (e.g. `override.attempted`, `override.succeeded`, `override.denied`, `override.failed`)
+    * `outcome` (`attempted`, `succeeded`, `denied`, or `failed`)
+    * `error_code` (Stable machine-readable failure/denial code, null for success)
     * `occurred_at` (Timestamp)
-* **Failed-Override Durable Auditing**:
-  * Since database mutation execution rollbacks would roll back any transactional log inserts, the system uses a durable auditing sequence:
+* **Append-Only Platform Admin Override Auditing**:
+  * To guarantee that all attempts are audit-logged and cannot be bypassed via rollbacks, auditing uses a strictly append-only sequence (no records are ever updated or deleted):
     1. A Platform Admin override request is initiated.
     2. Edge/service layer authenticates actor and verifies step-up state.
-    3. The service writes an initial attempt record with outcome `pending` or `denied` (using a separate database call committed before invoking the mutation RPC) to capture all attempt details. This guarantees the attempt log survives any transaction rollbacks.
+    3. The service appends an initial `override.attempted` attempt event (outcome = `attempted`, `error_code` is null) to `public.workspace_audit_logs` using a separate database call committed before invoking the mutation RPC. This ensures it survives any mutation rollbacks.
     4. Service invokes the narrowly scoped mutation RPC.
     5. Mutation RPC writes a successful domain audit inside its database transaction.
-    6. Service updates/appends the final attempt outcome status (`succeeded`, `denied`, or `failed` with error code) in the durable attempt log.
+    6. The service appends a separate final outcome event to `public.workspace_audit_logs` sharing the same `correlation_id` (outcome = `succeeded` with null error code, `denied` with mandatory error code, or `failed` with mandatory error code).
 * **Prohibition of Broad Mutation Bypass**:
   * Generic Platform Admin `FOR ALL` policies on protected business tables are strictly prohibited.
   * Silent direct `UPDATE` or `DELETE` mutation access is prohibited.
   * Unrestricted cross-workspace extraction is prohibited.
-  * Direct order approval outside documented override RPCs is prohibited.
+  * Direct order approval, rejection, or qualification by Platform Admins is strictly prohibited.
+  * Platform Admins must not qualify, approve, or reject order requests; Platform Admin status does not satisfy `qualify_order` authorization.
   * Audit-table mutations are prohibited.
   * Overrides are implemented strictly via narrow read-only policies where operationally necessary, and hardened `SECURITY DEFINER` RPCs for mutations with explicit action-specific authorization, mandatory reason, correlation ID, step-up verification, and durable auditing.
 * **Permitted Override Use Cases**:

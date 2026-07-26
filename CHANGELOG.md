@@ -9,6 +9,14 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Removed Platform Admin authorization from `qualify_order`, restricting manual qualifications strictly to active advisors and workspace owners.
+- Clarified advisor-only order qualification rules, ensuring Platform Admins cannot qualify, approve, or reject order requests.
+- Made auto-approval rule validation conditional by decision (strict rule validations when `auto_approved`; no rule lookup and null checks when `pending_review`).
+- Bound auto-approval correlation IDs to matching `order.created` outbox events using UUID type.
+- Defined replay-before-stale validation sequence in the service RPC.
+- Added idempotency-conflict semantics for duplicate event replays.
+- Converted Platform Admin override auditing to strictly append-only attempt and final-outcome events, prohibiting updates or deletions of audit rows.
+- Corrected Sprint 6.1 and issue traceability for #31, #33, #41, #48, and #59.
 - Removed every remaining reference to the nonexistent `docs/changelog/` directory.
 - Aligned Platform Admin override audit-field requirements to match in Section 6.G and Section 17.F.
 - Defined durable logging for failed override attempts using a separate database call committed before the mutation RPC.
