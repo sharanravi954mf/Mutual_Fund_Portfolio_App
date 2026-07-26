@@ -1,5 +1,5 @@
 # Money Bowl — System Architecture Specification
-Document Version: v1.8.0-Canonical-Production-Freeze  
+Document Version: v1.9.0-Canonical-Production-Freeze  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
@@ -16,6 +16,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.6.0 | 2026-07-27 | BAI | Resolved NFR definitions, hardened order RLS, qualify_order RPC design, added Aadhaar to PII classification, and introduced plan entitlements model. |
 | v1.7.0 | 2026-07-27 | BAI | Enforced RPC-only order qualification (removed advisor direct update), workspace-matched family RLS, expanded audit scope, and added plan entitlements. |
 | v1.8.0 | 2026-07-27 | BAI | Freezed baseline, standardized order status enum state machine lifecycle, implemented qualify_order RPC row locking, enforced accepted consent status checks on family delegations RLS, and standardized JWT claims. |
+| v1.9.0 | 2026-07-27 | BAI | Updated auto-approval fallback behavior, qualify_order RPC authorization safeguards, integrated cancel_order RPC function, and standardized family delegations as authoritative access sources. |
 
 ---
 
@@ -125,7 +126,7 @@ The database layer uses specific PostgreSQL policies to guarantee Workspace Isol
 ### A. RPC-Only Order Qualification & Hardened Order RLS (P0-1, P0-2 / BRD-FR-005)
 * Order requests follow a standardized lifecycle state machine:
   $$\text{draft} \longrightarrow \text{pending\_qualification} \longrightarrow \text{pending\_review} \longrightarrow \text{auto\_approved} \mid \text{approved} \mid \text{rejected} \mid \text{cancelled}$$
-  * `auto_approved` represents a qualification state where qualifying orders bypassing manual reviews advance directly to external exchange routing.
+  * `draft` status is managed strictly in client UI state, while database insertion starts at `pending_qualification`.
 * Hardened RLS policies enforce access scopes:
 
 ```sql
@@ -146,17 +147,22 @@ CREATE POLICY order_requests_advisor_select ON order_requests FOR SELECT
     TO authenticated
     USING (has_advisor_membership(workspace_id));
 ```
-* **Prohibition**: Direct `UPDATE` and `DELETE` queries on `order_requests` by authenticated normal users are blocked. Status mutations are executed exclusively via a hardened `SECURITY DEFINER` RPC `public.qualify_order` with set `search_path = ''` using fully qualified object names.
-* **Concurrent row locking**: The qualify function requests a pessimistic row-level lock (`SELECT status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`) and enforces idempotent re-validations (gracefully rejecting already qualified transactions).
-* **Public execution revoke**: Executed via:
-  ```sql
-  REVOKE EXECUTE ON FUNCTION public.qualify_order FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
-  ```
+* **Prohibition**: Direct `UPDATE` and `DELETE` queries on `order_requests` by authenticated normal users are blocked. Status mutations are executed exclusively via a hardened `SECURITY DEFINER` RPC `public.qualify_order` or `public.cancel_order` with set `search_path = ''` using fully qualified object names.
+* **qualify_order RPC internal safeguards**:
+  1. Set `search_path = ''`.
+  2. Acquire pessimistic row lock: `SELECT workspace_id, status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
+  3. Verify authorization: `IF NOT (public.has_advisor_membership(v_workspace_id) OR (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin')) THEN RAISE EXCEPTION 'Unauthorized'; END IF;`.
+  4. Validate state: Ensure status is `pending_qualification` or `pending_review`.
+  5. Mutate ONLY `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason`.
+  6. Write immutable event to `public.workspace_audit_logs`.
+* **cancel_order RPC internal safeguards**:
+  * Permits Investors to cancel their own orders while status is `pending_qualification` or `pending_review`.
+  * Permits Advisors to cancel orders within their workspace scope while status is `pending_qualification` or `pending_review`.
+  * Rejects cancellation requests if status is already `approved`, `rejected`, or `cancelled`.
 
-### B. Explicit Consent in Family RLS Policy (P0-3 / BRD-BR-009)
-* The `family_delegations` schema requires `owner_profile_id`, `delegate_profile_id`, `workspace_id`, and `consent_status`.
-* Portfolios select policy requires explicit workspace ID matching and accepted consent status check to prevent leaks:
+### B. Authoritative Family Delegation Model (P0-3 / BRD-BR-009 / P1-2)
+* The `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative authorization source for family access. No secondary workspace membership is required for delegates to view linked portfolio datasets.
+* Portfolios select policy requires explicit workspace ID matching and accepted consent status check:
 
 ```sql
 -- Allows family delegates read-only portfolio access matching workspace and accepted consent status
@@ -201,7 +207,8 @@ To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs dire
 1. Mapped Investor submits a Buy/Sell/Switch `order_request`.
 2. The database trigger evaluates the request against rules defined in the `auto_approval_rules` table:
    * Fields: `workspace_id`, `transaction_type`, `min_amount`, `max_amount`, `trusted_client_only`, `category_restrictions`, `effective_from`, `is_active`.
-3. If qualifying, status is updated to `auto_approved` and the trigger stamps the target `rule_id` and `rule_version` directly onto the `order_requests` row. If not qualifying, it falls back to `pending_qualification`.
+3. If qualifying, status is updated to `auto_approved` and the trigger stamps the target `rule_id` and `rule_version` directly onto the `order_requests` row.
+4. **Fallback Flow**: If the order does not match auto-approval rule parameters, status is set to `pending_review` (routing to MFD advisor qualification queue) or falls back to standard qualification queues.
 
 ---
 
@@ -253,7 +260,7 @@ Support requests follow a rigid state machine layout:
 ---
 
 ## 12. Viral Referral Engine & Fraud Detection Rules (BC-018 / FR-011)
-* **Attribution**: Referrals are tracked using SHA-256 hashed invite tokens.
+* **Attribution**: Referrals are tracked using Attributor mapping logic matching SHA-256 hashes.
 * **Fraud Detection rules**:
   * Self-Referral block: Prevents users from registering with identical emails/phones.
   * Collision block: Rejects referrals matching pre-existing PAN or bank accounts.
@@ -276,7 +283,7 @@ Support requests follow a rigid state machine layout:
 * **Calculators**: Execution of financial calculators is performed deterministically outside the LLM context.
 * **Decline Gate (FR-013)**: The prompt system includes rigid system instructions to detect intent. Queries containing recommendation keywords (e.g., "which fund to buy", "should I switch") are blocked and responded to with the static education declination template.
 * **Ticket Handoff (FR-014)**: Users can request AI to log a support ticket, which routes directly into their mapped advisor's queue.
-* **Exploring Investor AI routing**: Exploring investors without a mapped advisor route support queries to Platform Admin support or are prompted to establish an MFD relationship before tickets can be assigned.
+* **Exploring Investor AI routing (BC-007)**: Exploring investors without a mapped MFD relationship route support queries to Platform Admin support or are prompted to establish an MFD relationship before tickets can be assigned.
 
 ---
 
@@ -300,11 +307,11 @@ Cross-workspace portfolio aggregation, consolidated XIRR calculations, or merged
 ### B. Global Identity Resolution (BR-001 / P1-3)
 Single digital investor records use deterministic SHA-256 HMAC attributes inside profiles (`pan_hmac`, `normalised_phone_hmac`, `normalised_email_hmac`, and `identity_match_status`) to resolve matches.
 
-### C. Comprehensive PII Classification & Encryption List (P0-4)
+### C. Comprehensive PII Classification & Encryption List (PII Security)
 All sensitive attributes are classified and protected at rest and in transit:
 * **Target List**: `Aadhaar number` (and Aadhaar-derived identifiers), `PAN`, `Bank Account Numbers`, `IFSC`, `Phone`, `Email`, `Date of Birth`, `Nominee Details`, `Statement Passwords`, and `Mailbox OAuth Credentials`.
 * **Aadhaar Exclusion Rule**: Aadhaar is strictly excluded from general database search indexes or application log payloads, displaying strictly as masked projections.
-* **Remediation Policy**: Encrypted using AES-256 keys managed by the Supabase Vault. Reveals trigger step-up MFA/OTP validations, writing immutable audit logs to `pii.revealed` in the central audit queue.
+* **Remediation Policy**: Encrypted using AES-256 keys managed by the Supabase Vault. Returns strictly server-authorized masked projections by default. Reveals trigger step-up MFA/OTP validations, writing immutable audit logs to `pii.revealed` in the central audit queue.
 
 ### D. System-Wide Non-Functional Requirements (NFR-001 - NFR-005)
 * **`NFR-001` (Data Security & Masking)**: Sensitive PII attributes encrypted at rest & masked by default; step-up MFA reveal.
@@ -334,7 +341,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 | **BC-001** (Identity) | Platform Admin, Distributor, Mapped Investor, Exploring Investor | `FR-002`, `FR-003`, `FR-004` | `BR-001`, `BR-007`, `BR-008` | `NFR-001` | `profiles`, `workspace_memberships` |
 | **BC-002** (Distributor) | Distributor | `FR-001` | N/A | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
 | **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | N/A | `profiles` |
-| **BC-004** (Relationship) | Investor, Distributor | `FR-001`, `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004`, `BR-009` | `NFR-003` | `workspace_memberships` |
+| **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004`, `BR-009` | `NFR-003` | `workspace_memberships`, `family_delegations` |
 | **BC-005** (Portfolio) | Investor, Distributor | `FR-005`, `FR-006` | `BR-004`, `BR-005`, `BR-006` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `NFR-004` | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
@@ -348,7 +355,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 | **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | `NFR-002` | GIN search index projections, `searchable_tools` |
 | **BC-016** (Platform Config) | Platform Admin | N/A | BR-006, BR-010, BR-012 | N/A | platform_settings, feature_flags, notification_templates, registrar_configs, ai_guardrail_versions (Design Principle: "Configuration over Customisation") |
 | **BC-017** (AMFI Scheme Factsheets & Market Data) | Investor, Distributor | `FR-008` | `BR-012` | N/A | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
-| **BC-018** (Referral Engine) | Investor | `FR-011` | N/A | `NFR-005` | `investor_referrals`, `referral_rewards` |
+| **BC-018** (Referral Engine) | Investor | `FR-011` | Product Design Principle #5 | N/A | `investor_referrals`, `referral_rewards` |
 
 ---
 

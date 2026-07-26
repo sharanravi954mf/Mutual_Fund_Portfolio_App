@@ -6,6 +6,20 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.9.0-Canonical-Production-Freeze] — 2026-07-27
+
+### Summary
+Release v1.9.0-Canonical-Production-Freeze refines system-wide authorization safeguards, auto-approval engines fallbacks, introduces a secure cancellation path, and standardizes the JWT claim structure.
+
+### Major Additions & Changes
+- **Auto-Approval Fallbacks**: Non-matching transactions route explicitly to `pending_review` in the MFD queue.
+- **RPC Authorization & Row Locking Hardening**: verify advisor memberships and platform admin overrides inside `qualify_order` under pessimistic `FOR UPDATE` locks.
+- **cancel_order RPC Function**: Integrated `cancel_order` permitting investors and advisors to cancel orders in pending state and rejecting cancellation on finalized ones.
+- **Standardized JWT Claim Naming**: Realigned RLS checks to use `(auth.jwt() -> 'app_metadata' ->> 'user_role')` and `(auth.jwt() -> 'app_metadata' ->> 'subscription_tier')`.
+- **Authoritative Family Delegation**: Documented `family_delegations` accepted consent as the single authoritative source of truth for portfolio delegated access.
+
+---
+
 ## [v1.8.0-Canonical-Production-Freeze] — 2026-07-27
 
 ### Summary
