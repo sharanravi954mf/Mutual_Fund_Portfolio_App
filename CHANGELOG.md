@@ -9,6 +9,10 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Removed duplicated outbox-insertion test ownership from issue `#51`.
+- Assigned all auto-approval outbox, replay, event-binding, and rule-validation tests exclusively to issue `#41`.
+- Restricted issue `#51` to advisor qualification, cancellation, immutable-audit, and Platform Admin override testing.
+- Removed Section 8 traceability from Sprint task and issue `#51`.
 - Added `event_type` to the Platform Admin override audit-matrix contract (Section 17.F).
 - Replaced the misleading `platform_admin_override_policy` traceability component with platform_admin_read_policies and platform_admin_override_rpcs (Section 18).
 - Renamed issue `#41` to accurately represent auto-approval outbox, replay, rule-validation and race-condition testing.

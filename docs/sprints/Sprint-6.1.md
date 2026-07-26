@@ -23,7 +23,7 @@ This sprint implements the core order execution engine, membership-based workspa
 - [ ] **feat(database): create advisor-only qualify_order SECURITY DEFINER RPC restricted to pending_review orders [BRD-FR-005, BRD-FR-006, BRD-BR-005, Section 6.D, Section 17.F]** (#48)
 - [ ] **feat(database): create family_delegations table with consent_status and workspace RLS [BRD-BR-009, Section 6.F]** (#49)
 - [ ] **feat(database): create auto_approval_rules table, rule-version persistence fields, and indexes; no database decision-evaluation trigger [BRD-BR-006, Section 6.B, Section 6.C, Section 8]** (#50)
-- [ ] **test(database/edge): add pgTAP and service-level tests for qualify_order, cancel_order, outbox triggers, immutable audits, and Platform Admin overrides [BRD-BR-003, BRD-BR-007, BRD-FR-005, Section 6.D, Section 6.E, Section 6.G, Section 8, Section 17.F]** (#51)
+- [ ] **test(database/edge): add pgTAP and service-level tests for qualify_order, cancel_order, immutable audits, and Platform Admin overrides [BRD-BR-003, BRD-BR-007, BRD-FR-005, Section 6.D, Section 6.E, Section 6.G, Section 17.F]** (#51)
 - [ ] **feat(database): create plan_entitlements table for feature gating [BRD-BR-011, Section 13]** (#53)
 - [ ] **feat(database): create service-only apply_auto_approval_decision RPC with stable outbox-event idempotency and rule-version validation [BRD-FR-005, BRD-BR-005, BRD-BR-006, Section 6.B, Section 6.C, Section 8, NFR-003, NFR-005]** (#59)
 - [x] **docs: align architecture v2.0.1 with Sprint 6.1 [Section 1, Section 18]** (#60)
