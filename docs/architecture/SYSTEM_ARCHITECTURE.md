@@ -218,9 +218,24 @@ Automated rule decisions are written via a dedicated, secure database interface:
   6. Enforces Auto-Approval Null Semantics:
      - If decision is `auto_approved`, both `rule_id` and `rule_version` are mandatory. Rejects if either is null.
      - If decision is `pending_review`, both `rule_id` and `rule_version` must be null. Rejects if either is non-null.
-  7. Verifies that the correlation ID has not already been processed (i.e. `v_existing_correlation_id` is null or does not match `p_correlation_id`) and rejects duplicate correlation IDs idempotently.
-  8. Verifies that the matching rule belongs to the order's workspace (workspace validation checks on `auto_approval_rules`), that the rule is active, and that the supplied rule version matches the persisted rule version in the system.
-  9. Persists the worker correlation ID, decision timestamp, `rule_id`, and `rule_version` in `order_requests`.
+  7. Enforces Stable Outbox-Event Idempotency:
+     - The worker correlation ID must be deterministic and 1-to-1 mapped: `auto_approval_correlation_id = event_outbox.id`.
+     - The worker must reuse the exact same correlation ID for all retries of the same outbox event, and must never generate a new correlation ID per retry.
+     - Enforces a unique constraint on correlation IDs:
+       ```sql
+       CREATE UNIQUE INDEX order_requests_auto_approval_correlation_uidx
+       ON public.order_requests (auto_approval_correlation_id)
+       WHERE auto_approval_correlation_id IS NOT NULL;
+       ```
+     - Replay Behavior:
+       - Same outbox event + same correlation ID: returns the existing resolved order, preventing duplicate transitions or side effects.
+       - Different event targeting an already-resolved order: rejects as stale and records a worker/security failure outcome.
+  8. Enforces Rule-Version Equality Validation:
+     - Verifies that `p_rule_id` identifies an active rule in `public.auto_approval_rules`.
+     - Verifies that `rule.workspace_id` exactly matches `order.workspace_id` (the order's database-loaded workspace ID).
+     - Verifies rule-version equality: `p_rule_version` must exactly match the persisted `auto_approval_rules.rule_version`.
+     - Rejects decision application if the rule is missing, rule is inactive, rule belongs to another workspace, `p_rule_version` differs from the persisted rule version, or the rule was modified after evaluation.
+  9. Persists the worker correlation ID, decision timestamp, validated `rule_id`, and validated `rule_version` in `order_requests`.
   10. Records an immutable audit payload in `public.workspace_audit_logs` using strictly values loaded from the locked database record (e.g. `v_workspace_id`, `v_investor_profile_id`) rather than trusting caller-supplied parameters.
   11. Privilege Contract:
       ```sql
@@ -311,33 +326,42 @@ Platform Admin actions bypass standard table-level workspace restrictions under 
 
 * **Identity Verification**:
   Verified using: `(auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'`.
-* **Governance Safeguards**:
+* **Governance Safeguards & Audit Fields**:
   * Platform Admin overrides must never be a silent, unrestricted database or API bypass.
-  * Every override request requires capturing:
-    * `actor_profile_id` (Acting admin identity)
-    * `workspace_id`
+  * Every override request requires capturing the following aligned fields exactly:
+    * `actor_profile_id` (Acting admin profile ID)
+    * `actor_type` (Role/actor type, e.g. `platform_admin`)
+    * `workspace_id` (Target workspace ID)
     * `entity_type` (Target entity type)
     * `entity_id` (Target entity ID)
     * `action` (Requested action)
-    * `reason` (Mandatory human-entered override reason)
-    * `correlation_id` (System-generated request ID)
+    * `reason` (Mandatory human-entered business reason for override)
+    * `correlation_id` (Stable identifier for the complete override attempt)
+    * `outcome` (`succeeded`, `denied`, or `failed`)
+    * `error_code` (Stable machine-readable failure/denial code)
     * `occurred_at` (Timestamp)
-  * Sensitive overrides (e.g. access reset, data export) require step-up authentication.
-  * The override is implemented strictly through narrowly scoped RLS policies, hardened `SECURITY DEFINER` RPCs, or both.
-  * Platform Admins must not directly mutate protected data rows without auditing mechanisms.
-  * Every successful and failed override attempt must create an immutable audit record in `public.workspace_audit_logs`.
-  * The override contract must not weaken investor ownership, workspace isolation, or family-delegation rules.
+* **Failed-Override Durable Auditing**:
+  * Since database mutation execution rollbacks would roll back any transactional log inserts, the system uses a durable auditing sequence:
+    1. A Platform Admin override request is initiated.
+    2. Edge/service layer authenticates actor and verifies step-up state.
+    3. The service writes an initial attempt record with outcome `pending` or `denied` (using a separate database call committed before invoking the mutation RPC) to capture all attempt details. This guarantees the attempt log survives any transaction rollbacks.
+    4. Service invokes the narrowly scoped mutation RPC.
+    5. Mutation RPC writes a successful domain audit inside its database transaction.
+    6. Service updates/appends the final attempt outcome status (`succeeded`, `denied`, or `failed` with error code) in the durable attempt log.
+* **Prohibition of Broad Mutation Bypass**:
+  * Generic Platform Admin `FOR ALL` policies on protected business tables are strictly prohibited.
+  * Silent direct `UPDATE` or `DELETE` mutation access is prohibited.
+  * Unrestricted cross-workspace extraction is prohibited.
+  * Direct order approval outside documented override RPCs is prohibited.
+  * Audit-table mutations are prohibited.
+  * Overrides are implemented strictly via narrow read-only policies where operationally necessary, and hardened `SECURITY DEFINER` RPCs for mutations with explicit action-specific authorization, mandatory reason, correlation ID, step-up verification, and durable auditing.
 * **Permitted Override Use Cases**:
   - Account unlock
   - Access reset
   - MFD onboarding assistance
   - Identity-link resolution
   - Emergency support intervention
-* **Explicitly Prohibited Actions**:
-  - Silent portfolio reassignment
-  - Cross-workspace data extraction without reason
-  - Order approval outside the documented audited override path
-  - Deletion or alteration of audit history
+  * Any future override action must be separately documented and auditable.
 
 ---
 
@@ -490,7 +514,7 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **Family consent acceptance** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
 | **Family delegation revocation** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
 | **Family delegation expiration** | `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
-| **Platform Admin override** | `actor_profile_id`, `entity_type`, `entity_id`, `action`, `reason` | `workspace_audit_logs` |
+| **Platform Admin override** | `actor_profile_id`, `actor_type`, `workspace_id`, `entity_type`, `entity_id`, `action`, `reason`, `correlation_id`, `outcome`, `error_code`, `occurred_at` | `workspace_audit_logs` |
 | **Access reset** | `actor_profile_id`, `workspace_id`, `action` | `workspace_audit_logs` |
 | **Original CAS access** | `actor_profile_id`, `entity_id` (document), `action` | `workspace_audit_logs` |
 | **Original CAS download** | `actor_profile_id`, `entity_id` (document), `action` | `workspace_audit_logs` |

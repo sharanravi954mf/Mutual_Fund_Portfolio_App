@@ -9,6 +9,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Removed every remaining reference to the nonexistent `docs/changelog/` directory.
+- Aligned Platform Admin override audit-field requirements to match in Section 6.G and Section 17.F.
+- Defined durable logging for failed override attempts using a separate database call committed before the mutation RPC.
+- Clarified that Platform Admin mutation overrides use hardened SECURITY DEFINER RPCs rather than broad unrestricted RLS bypass.
+- Added Platform Admin override test requirements in the database test suite.
+- Defined stable outbox-based auto-approval idempotency keys (`auto_approval_correlation_id = event_outbox.id`) and uniqueness contracts.
+- Added explicit rule-version equality validation.
 - Corrected `apply_auto_approval_decision` privileges to service-role-only (revoked authenticated and public execution grants, granted exclusively to service_role).
 - Updated Sprint 6.1 task checklists and issue traceability matrices to match v2.0.1 architecture headers.
 - Removed remaining trigger-evaluation business rule logic wording from issue specifications and sprint planning.
@@ -20,7 +27,6 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 - Defined null and rule-version semantics for auto-approval decisions inside the service RPC.
 - Corrected Sprint 6.1 traceability for issues #29, #31, #51, and #59.
 - Clarified legacy mutable audit schema status.
-- Removed the nonexistent `docs/changelog/` reference.
 
 ### Unchanged
 - BRD remains frozen at v1.2.1.
@@ -165,11 +171,6 @@ Release v1.1.0 introduces significant upgrades to the Admin Dashboard (Invoice S
 - **Ingestion Pipeline Upgrades**: Deno engine parses password-protected ZIPs containing dBASE III `.dbf` statements. Standalone CAMs staging table imports, unregistered client ingestion, and auto-linking triggers.
 - **Live Money Wallpaper**: Animated falling rupee symbols (`₹`) and golden wealth curves under Display settings.
 - **Deduplicated greetings**: Unified time-of-day greetings on the main header appbar.
-
-### Detailed Release Logs
-- [v1.1.0 In-Memory ZIP Ingestion Spec](docs/changelog/v1.1.0_invoice_signer.md)
-- [CAMS Signer Boundary Notes](docs/changelog/cams_invoice_signer_boundary.md)
-- [Material 3 Theme Redesign Notes](docs/changelog/theme-redesign.md)
 
 ---
 
