@@ -6,6 +6,21 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.5.0-Final-Production-Baseline] — 2026-07-27
+
+### Summary
+Release v1.5.0-Final-Production-Baseline refines the System Architecture Specifications to v1.5.0 security compliance baseline, establishing role-segregated RLS policies, workspace-scoped family visibility delegations, auto-approval rules schemas, global identity resolution markers, and out-of-scope product boundaries.
+
+### Major Additions & Changes
+- **Role-Segregated Order RLS**: Replaced generic order policies with distinct select, insert, and update policies for Investors, Advisors, and Admins, including explicit `WITH CHECK` clauses and normal user delete prohibitions.
+- **Workspace-Scoped Family Delegations**: Realignment of the family delegation model to link to specific workspaces and standardizing on profile ID selectors to prevent unlinked visibility leaks.
+- **Vault Security Realignment**: Added explicit document download denial constraints for family guest profiles.
+- **Advanced Auto-Approval Rule Table**: Implemented schema entities for the `auto_approval_rules` engine and triggers recording execution rules.
+- **Global Identity Matching**: Defined HMAC identity markers on profile entities (`pan_hmac`, `normalised_phone_hmac`, etc.) for deterministic resolution.
+- **Product Scope Boundaries**: Defined Section 19 specifying out-of-scope boundaries (direct stocks, insurance, FDs, crypto, tax filing, etc.).
+
+---
+
 ## [v1.4.0-Final-Baseline] — 2026-07-27
 
 ### Summary
