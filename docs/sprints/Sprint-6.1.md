@@ -1,7 +1,7 @@
 # Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 
 ## Technical Specifications & Scope
-This sprint implements the core order execution engine, asymmetric family delegation schemas, auto-approval triggers, zero-disk stream parser, and frontend order queues in alignment with BRD v1.2.1 and SYSTEM_ARCHITECTURE v1.2.1.
+This sprint implements the core order execution engine, membership-based workspace isolation RLS, transactional event outbox, subscriber billing, referrals tracking, and frontend order queues in alignment with BRD v1.2.1 and SYSTEM_ARCHITECTURE v1.3.0-Synthesized-Baseline.
 
 ### Target Migration File
 `supabase/migrations/20260801000000_brd_v1_2_1_execution_subscriptions_referrals.sql`
@@ -16,5 +16,7 @@ This sprint implements the core order execution engine, asymmetric family delega
 - [ ] **feat(flutter): build Investor Order Request Modal (Buy/Sell/Switch) [BRD-FR-005, ARCH-Sec2.A]** (#34)
 - [ ] **feat(flutter): build MFD Qualification Queue Screen [BRD-FR-006, ARCH-Sec2.A]** (#35)
 - [ ] **feat(database): create subscription_plans and workspace_billing tables with tier limits [BC-009, BR-011]** (#39)
-- [ ] **feat(database): create investor_referrals table and code generation logic [BC-018]** (#40)
-- [ ] **test(database): add pgTAP automated tests for RLS workspace isolation and auto-approval triggers [BR-003, BR-006]** (#41)
+- [ ] **feat(database): create investor_referrals and referral_rewards tables [BC-018, FR-011]** (#40)
+- [ ] **test(database): add pgTAP automated tests for RLS membership isolation and auto-approval triggers [BR-003, BR-006]** (#41)
+- [ ] **feat(database): implement event_outbox table and transactional triggers [ARCH-Sec7]** (#43)
+- [ ] **feat(database): implement membership-based RLS policy for workspace isolation [BR-003, ARCH-Sec5.A]** (#44)
