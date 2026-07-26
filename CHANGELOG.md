@@ -9,19 +9,12 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
-- Corrected the canonical order-state diagram.
-- Standardised outbox-driven Deno auto-approval processing.
-- Removed database-trigger rule evaluation.
-- Added service-only auto-approval decision RPC contract (`apply_auto_approval_decision`).
-- Hardened `qualify_order` with lock checking and state validations.
-- Hardened `cancel_order` with lock checking, permissions, and status validations.
-- Added exact PostgreSQL privilege signatures in architecture specifications.
-- Added capability BC-005 auto-approval worker mapping in capabilities mapping.
-- Expanded audit-event requirements with comprehensive immutability triggers and audit scopes.
-- Clarified referral token hashing and PII-safe HMAC fraud checks.
-- Corrected Sprint 6.1 architecture references.
-- Removed incorrect `BRD-BE-012` mapping from order tasks.
-- Updated the active architecture baseline to v2.0.1.
+- Corrected `apply_auto_approval_decision` privileges to service-role-only (revoked authenticated and public execution grants, granted exclusively to service_role).
+- Updated Sprint 6.1 task checklists and issue traceability matrices to match v2.0.1 architecture headers.
+- Removed remaining trigger-evaluation business rule logic wording from issue specifications and sprint planning.
+- Synchronized GitHub issues and Kanban board card statuses.
+- Replaced local file links (`file:///Users/...`) with repository-relative links across canonical documents.
+- Clarified architecture readiness status (canonical production-freeze baseline approved) versus application execution status (pre-alpha implementation in progress).
 
 ### Unchanged
 - BRD remains frozen at v1.2.1.
