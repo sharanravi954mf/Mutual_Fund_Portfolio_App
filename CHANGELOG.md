@@ -6,6 +6,19 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.4.0-Final-Baseline] — 2026-07-27
+
+### Summary
+Release v1.4.0-Final-Baseline updates the traceability matrix capability mappings and persona details, implements a compliant document retention lifecycle policy, updates the secure file ingestion scan workflow, and implements role-segregated Row-Level Security policies with explicit `WITH CHECK` conditions on order requests and family delegation transactional tables.
+
+### Major Additions & Changes
+- **Traceability Matrix & Persona Updates**: Map BC-016 Platform Config to N/A for functional requirements and associate with BRD Rules BR-006, BR-010, BR-012 under the "Configuration over Customisation" design principle. Refined BC-001 (Identity), BC-007 (AI Assistant), BC-009 (Subscriptions), and BC-012 (Notifications) mappings and personas.
+- **Document Retention Lifecycle Overhaul**: Replaced the automated 30-day deletion of original vault files with a compliance-driven retention policy allowing temporary artifact pruning but preserving original files for legal and audit lineage.
+- **Secure File Ingestion Scan Workflow**: Standardized file ingestion pipeline to explicitly run MIME & Magic-byte validation, malware screening, and SHA-256 hashing prior to encrypted object storage.
+- **Role-Segregated WITH CHECK RLS Policies**: Implemented secure, dynamic membership-based RLS isolation policies on `order_requests`, `family_delegations`, and `portfolios` tables with explicit `WITH CHECK` blocks to prevent write bypasses.
+
+---
+
 ## [v1.3.1-Final-Baseline] — 2026-07-27
 
 ### Summary

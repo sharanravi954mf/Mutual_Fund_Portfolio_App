@@ -1,7 +1,7 @@
 # Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 
 ## Technical Specifications & Scope
-This sprint implements the core order execution engine, membership-based workspace isolation RLS, transactional event outbox, subscriber billing, referrals tracking, and frontend order queues in alignment with BRD v1.2.1 and SYSTEM_ARCHITECTURE v1.3.1-Final-Baseline.
+This sprint implements the core order execution engine, membership-based workspace isolation RLS, transactional event outbox, subscriber billing, referrals tracking, and frontend order queues in alignment with BRD v1.2.1 and SYSTEM_ARCHITECTURE v1.4.0-Final-Baseline.
 
 ### Target Migration File
 `supabase/migrations/20260801000000_brd_v1_2_1_execution_subscriptions_referrals.sql`
