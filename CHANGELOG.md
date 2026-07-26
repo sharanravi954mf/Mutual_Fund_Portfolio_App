@@ -6,6 +6,19 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.8.0-Canonical-Production-Freeze] — 2026-07-27
+
+### Summary
+Release v1.8.0-Canonical-Production-Freeze locks the System Architecture baseline, standardizing the order status lifecycles, hardening the qualify_order security-definer RPC with row locking and idempotent re-validation guards, enforcing consent verification for family delegation RLS, and detailing role-based sub-permissions.
+
+### Major Additions & Changes
+- **Standardized Order State Machine**: Configured the order lifecycle flow: `draft ➔ pending_qualification ➔ pending_review ➔ auto_approved / approved / rejected / cancelled`.
+- **Hardened qualify_order RPC**: Implemented concurrent row locking (`SELECT FOR UPDATE`), idempotent checks, set `search_path = ''` constraints, and revoked default execution permissions from PUBLIC.
+- **Enforced Consent checks on Family Delegation RLS**: Hardened portfolios select policies to check `consent_status = 'accepted'` to prevent unconsented family guest access.
+- **JWT Claim & Workspace Sub-role Hierarchy**: Standardized token validation logic and mapped workspace admin/operations sub-roles permissions.
+
+---
+
 ## [v1.7.0-Canonical-Implementation-Baseline] — 2026-07-27
 
 ### Summary

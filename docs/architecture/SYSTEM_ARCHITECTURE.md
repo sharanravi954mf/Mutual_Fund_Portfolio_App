@@ -1,5 +1,5 @@
 # Money Bowl — System Architecture Specification
-Document Version: v1.7.0-Canonical-Implementation-Baseline  
+Document Version: v1.8.0-Canonical-Production-Freeze  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
@@ -15,6 +15,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.5.0 | 2026-07-27 | BAI | Integrated role-segregated RLS policies, workspace-scoped family delegations, auto-approval rules engine table, deterministic PII classification, restored IMAP connector flow, and scope boundaries. |
 | v1.6.0 | 2026-07-27 | BAI | Resolved NFR definitions, hardened order RLS, qualify_order RPC design, added Aadhaar to PII classification, and introduced plan entitlements model. |
 | v1.7.0 | 2026-07-27 | BAI | Enforced RPC-only order qualification (removed advisor direct update), workspace-matched family RLS, expanded audit scope, and added plan entitlements. |
+| v1.8.0 | 2026-07-27 | BAI | Freezed baseline, standardized order status enum state machine lifecycle, implemented qualify_order RPC row locking, enforced accepted consent status checks on family delegations RLS, and standardized JWT claims. |
 
 ---
 
@@ -98,6 +99,11 @@ The following matrix maps Business Requirements Document (BRD) user personas to 
 | **Family Guest** | `investor` | `delegate` | Read-only delegated access to portfolios/holdings only. |
 | **Platform Admin** | `platform_admin` | `none` | Audited system-wide override access. Bypass check triggers log warnings. |
 
+### A. Sub-Role Mappings & Permissions Hierarchy
+Within any workspace context, the `workspace_memberships` table defines granular permissions underneath `workspace_owner` / `advisor`:
+* **`admin`**: Workspace-internal administrative permission mapping underneath the `workspace_owner`. Can configure custom branding, change auto-approval rules parameters, and manage team memberships.
+* **`operations`**: Workspace-internal servicing role mapping underneath `advisor`. Allows statement upload pipeline management and support ticket qualification, but blocks manual billing parameter updates.
+
 ---
 
 ## 5. Core Data Architecture & Domain Model
@@ -116,8 +122,11 @@ The database is structured into 5 primary entity domains matching the business c
 ## 6. Concrete Row Level Security (RLS) Mechanics
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
-### A. RPC-Only Order Qualification & Order RLS (P0-1 / BRD-FR-005)
-* Hardened role-segregated RLS policies enforce query access limits:
+### A. RPC-Only Order Qualification & Hardened Order RLS (P0-1, P0-2 / BRD-FR-005)
+* Order requests follow a standardized lifecycle state machine:
+  $$\text{draft} \longrightarrow \text{pending\_qualification} \longrightarrow \text{pending\_review} \longrightarrow \text{auto\_approved} \mid \text{approved} \mid \text{rejected} \mid \text{cancelled}$$
+  * `auto_approved` represents a qualification state where qualifying orders bypassing manual reviews advance directly to external exchange routing.
+* Hardened RLS policies enforce access scopes:
 
 ```sql
 -- Investor: View own orders within active workspace
@@ -137,26 +146,28 @@ CREATE POLICY order_requests_advisor_select ON order_requests FOR SELECT
     TO authenticated
     USING (has_advisor_membership(workspace_id));
 ```
-* **Prohibition (RPC-Only qualification)**: Direct `UPDATE` and `DELETE` queries on `order_requests` by normal users are blocked. Status transitions are executed exclusively via a `SECURITY DEFINER` RPC function `qualify_order(order_id, decision, rejection_reason)` with `search_path = public`.
-* **qualify_order RPC internal safeguards**:
-  1. Verifies `has_advisor_membership(workspace_id)` or platform admin override.
-  2. Enforces strict state machine transitions (`pending_qualification` ➔ `approved`/`rejected`).
-  3. Restricts mutations strictly to `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason`.
-  4. Inserts an immutable event log into `workspace_audit_logs`.
+* **Prohibition**: Direct `UPDATE` and `DELETE` queries on `order_requests` by authenticated normal users are blocked. Status mutations are executed exclusively via a hardened `SECURITY DEFINER` RPC `public.qualify_order` with set `search_path = ''` using fully qualified object names.
+* **Concurrent row locking**: The qualify function requests a pessimistic row-level lock (`SELECT status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`) and enforces idempotent re-validations (gracefully rejecting already qualified transactions).
+* **Public execution revoke**: Executed via:
+  ```sql
+  REVOKE EXECUTE ON FUNCTION public.qualify_order FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
+  ```
 
-### B. Explicit Workspace Match in Family Delegation RLS (P0-2 / BRD-BR-009)
-* The `family_delegations` schema requires `owner_profile_id`, `delegate_profile_id`, AND `workspace_id`.
-* Enforces that family delegation **never** grants cross-workspace visibility. The portfolios RLS policy explicitly matches workspace IDs and handles active expiration limits:
+### B. Explicit Consent in Family RLS Policy (P0-3 / BRD-BR-009)
+* The `family_delegations` schema requires `owner_profile_id`, `delegate_profile_id`, `workspace_id`, and `consent_status`.
+* Portfolios select policy requires explicit workspace ID matching and accepted consent status check to prevent leaks:
 
 ```sql
--- Allows family delegates read-only portfolio access matching specific workspace IDs
+-- Allows family delegates read-only portfolio access matching workspace and accepted consent status
 CREATE POLICY family_delegate_read_policy ON portfolios FOR SELECT TO authenticated
 USING (
     EXISTS (
-        SELECT 1 FROM family_delegations fd
+        SELECT 1 FROM public.family_delegations fd
         WHERE fd.owner_profile_id = portfolios.client_id
           AND fd.delegate_profile_id = auth.uid()
           AND fd.workspace_id = portfolios.workspace_id
+          AND fd.consent_status = 'accepted'
           AND fd.is_active = TRUE
           AND (fd.expires_at IS NULL OR fd.expires_at > now())
     )
@@ -307,7 +318,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 * **`ARCH-SLO-002`**: Central log queue write confirmation: `<100ms` async acknowledgment.
 
 ### F. Immutability Triggers & Explicit Audit Log Scopes
-* Every status change on `order_requests`, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The `workspace_audit_logs` and `ingestion_logs` tables enforce immutability via triggers blocking all update and delete queries.
+* Every status change on `order_requests`, qualify RPC actions, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The `workspace_audit_logs` and `ingestion_logs` tables enforce immutability via triggers blocking all update and delete queries.
 * **Explicit Audit Log Triggers (P0-3)**: The system writes immutable audit events to `workspace_audit_logs` upon:
   * Family delegation grant creation.
   * Consent acceptance for family guest access.
@@ -323,8 +334,8 @@ All sensitive attributes are classified and protected at rest and in transit:
 | **BC-001** (Identity) | Platform Admin, Distributor, Mapped Investor, Exploring Investor | `FR-002`, `FR-003`, `FR-004` | `BR-001`, `BR-007`, `BR-008` | `NFR-001` | `profiles`, `workspace_memberships` |
 | **BC-002** (Distributor) | Distributor | `FR-001` | N/A | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
 | **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | N/A | `profiles` |
-| **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004` | `NFR-003`, `NFR-005` | `workspace_memberships` |
-| **BC-005** (Portfolio) | Investor, Distributor | N/A | `BR-004` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
+| **BC-004** (Relationship) | Investor, Distributor | `FR-001`, `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004`, `BR-009` | `NFR-003` | `workspace_memberships` |
+| **BC-005** (Portfolio) | Investor, Distributor | `FR-005`, `FR-006` | `BR-004`, `BR-005`, `BR-006` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, Valuation & XIRR views |
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `NFR-004` | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | N/A | `support_tickets` |
@@ -336,7 +347,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 | **BC-014** (Analytics) | Distributor | N/A | `BR-004` (Enforced separation) | N/A | `mfd_dashboard_metrics` view |
 | **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | `NFR-002` | GIN search index projections, `searchable_tools` |
 | **BC-016** (Platform Config) | Platform Admin | N/A | BR-006, BR-010, BR-012 | N/A | platform_settings, feature_flags, notification_templates, registrar_configs, ai_guardrail_versions (Design Principle: "Configuration over Customisation") |
-| **BC-017** (AMFI Market Data) | Investor, Distributor | `FR-008` | `BR-012` | N/A | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
+| **BC-017** (AMFI Scheme Factsheets & Market Data) | Investor, Distributor | `FR-008` | `BR-012` | N/A | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
 | **BC-018** (Referral Engine) | Investor | `FR-011` | N/A | `NFR-005` | `investor_referrals`, `referral_rewards` |
 
 ---

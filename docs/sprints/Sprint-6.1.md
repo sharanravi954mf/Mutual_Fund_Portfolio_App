@@ -1,13 +1,13 @@
 # Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 
 ## Technical Specifications & Scope
-This sprint implements the core order execution engine, membership-based workspace isolation RLS, transactional event outbox, subscriber billing, referrals tracking, and frontend order queues in alignment with BRD v1.2.1 and SYSTEM_ARCHITECTURE v1.7.0-Canonical-Implementation-Baseline.
+This sprint implements the core order execution engine, membership-based workspace isolation RLS, transactional event outbox, subscriber billing, referrals tracking, and frontend order queues in alignment with BRD v1.2.1 and SYSTEM_ARCHITECTURE v1.8.0-Canonical-Production-Freeze.
 
 ### Target Migration File
 `supabase/migrations/20260801000000_brd_v1_2_1_execution_subscriptions_referrals.sql`
 
 ## Task Checklist & Tracking
-- [ ] **feat(database): create order_type and order_status ENUMs [BRD-FR-005, ARCH-Sec3]** (#28)
+- [ ] **feat(database): create order_status ENUM with canonical state machine [BRD-FR-005, ARCH-Sec5.A]** (#28)
 - [ ] **feat(database): create order_requests and workspace_audit_logs tables [BRD-BE-012, ARCH-Sec3]** (#29)
 - [ ] **feat(database): implement workspace isolation RLS policy on order_requests [BRD-BR-003, ARCH-Sec4.A]** (#30)
 - [ ] **feat(database): implement platform admin override and family delegation RLS policies [BRD-BR-007, BRD-BR-009, ARCH-Sec4.B, ARCH-Sec4.C]** (#31)
@@ -20,8 +20,8 @@ This sprint implements the core order execution engine, membership-based workspa
 - [ ] **test(database): add pgTAP automated tests for RLS membership isolation and auto-approval triggers [BR-003, BR-006]** (#41)
 - [ ] **feat(database): implement event_outbox table and transactional triggers [ARCH-Sec7]** (#43)
 - [ ] **feat(database): implement membership-based RLS policy for workspace isolation [BR-003, ARCH-Sec5.A]** (#44)
-- [ ] **feat(database): create role-segregated RLS policies and qualify_order RPC on order_requests [BRD-FR-005, ARCH-Sec5.A]** (#48)
-- [ ] **feat(database): create workspace-scoped family_delegations and RLS policies [BRD-BR-009, ARCH-Sec5.B]** (#49)
+- [ ] **feat(database): create qualify_order SECURITY DEFINER RPC with SELECT FOR UPDATE row locking [BRD-FR-005, ARCH-Sec5.A]** (#48)
+- [ ] **feat(database): create family_delegations table with consent_status and RLS policies [BRD-BR-009, ARCH-Sec5.B]** (#49)
 - [ ] **feat(database): create auto_approval_rules table and decision evaluation triggers [BRD-BR-006, ARCH-Sec6.B]** (#50)
-- [ ] **test(database): add pgTAP automated tests for RLS membership isolation and qualify_order RPC [BRD-BR-003, BRD-FR-005]** (#51)
+- [ ] **test(database): add pgTAP automated unit tests for qualify_order RPC and family consent RLS [BRD-BR-003, BRD-BR-009]** (#51)
 - [ ] **feat(database): create plan_entitlements table for feature gating [BRD-BR-011, ARCH-Sec12]** (#53)
