@@ -6,6 +6,18 @@ Detailed release notes and boundaries are maintained inside the [docs/changelog/
 
 ---
 
+## [v1.2.1-synthesized] — 2026-07-26
+
+### Summary
+Release v1.2.1 establishes the finalized canonical specification baseline for Business Requirements and System Architecture, and initializes Sprint 6.1 (Order Execution Engine, Subscriptions & Schema Extensions).
+
+### Major Additions & Changes
+- **Canonical Baseline Freeze**: Populated and froze `docs/business/BRD.md` (v1.2.1) and `docs/architecture/SYSTEM_ARCHITECTURE.md` (v1.2.1 Synthesized 17-layer format).
+- **Sprint 6.1 Backlog Setup**: Created and linked 8 core tasks on Project Board 1 (`MoneyBowl Development`) under the `Sprint Backlog` column.
+- **Repository Housekeeping**: Pruned legacy, redundant specs and documents to focus the repository scope.
+
+---
+
 ## [v1.1.0-alpha] — 2026-07-19
 
 ### Summary
