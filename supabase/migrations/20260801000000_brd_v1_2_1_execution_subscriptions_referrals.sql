@@ -10,7 +10,7 @@ BEGIN
     CREATE TYPE public.order_type AS ENUM ('buy', 'sell', 'switch');
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_status') THEN
-    CREATE TYPE public.order_status AS ENUM ('pending_qualification', 'auto_approved', 'approved', 'rejected', 'submitted_to_exchange');
+    CREATE TYPE public.order_status AS ENUM ('draft', 'pending_qualification', 'pending_review', 'auto_approved', 'approved', 'rejected', 'cancelled');
   END IF;
 END
 $$;
@@ -206,7 +206,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Restricted Qualification RPC Function (P0-1)
+-- Hardened qualify_order RPC with row locking & idempotent re-validation guards (P0-2)
 CREATE OR REPLACE FUNCTION public.qualify_order(
   p_order_id uuid,
   p_decision public.order_status,
@@ -218,28 +218,33 @@ DECLARE
   v_current_status public.order_status;
   v_order public.order_requests;
 BEGIN
+  -- 1. Pessimistic row locking for concurrency protection
   SELECT workspace_id, status INTO v_workspace_id, v_current_status 
-  FROM public.order_requests WHERE id = p_order_id;
+  FROM public.order_requests 
+  WHERE id = p_order_id 
+  FOR UPDATE;
   
   IF v_workspace_id IS NULL THEN
     RAISE EXCEPTION 'Order not found';
   END IF;
 
-  -- 1. Verify auth
-  IF NOT public.has_advisor_membership(v_workspace_id) AND (auth.jwt() -> 'app_metadata' ->> 'user_role') <> 'platform_admin' THEN
+  -- 2. Idempotent re-validation check
+  IF v_current_status IS DISTINCT FROM 'pending_qualification' AND v_current_status IS DISTINCT FROM 'pending_review' THEN
+    SELECT * INTO v_order FROM public.order_requests WHERE id = p_order_id;
+    RETURN v_order;
+  END IF;
+
+  -- 3. Verify auth
+  IF NOT public.has_advisor_membership(v_workspace_id) AND COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') <> 'platform_admin' THEN
     RAISE EXCEPTION 'Unauthorized: Only advisors or platform admins can qualify orders.';
   END IF;
 
-  -- 2. Enforce strict state machine transitions
-  IF v_current_status <> 'pending_qualification' THEN
-    RAISE EXCEPTION 'Invalid State: Only pending orders can be qualified.';
-  END IF;
-  
-  IF p_decision NOT IN ('approved', 'rejected') THEN
-    RAISE EXCEPTION 'Invalid Target State: Qualification target must be approved or rejected.';
+  -- 4. State validation check
+  IF p_decision NOT IN ('approved', 'rejected', 'pending_review') THEN
+    RAISE EXCEPTION 'Invalid Target State: Qualification target must be approved, rejected, or pending_review.';
   END IF;
 
-  -- 3. Update fields (blocking modifications to other attributes)
+  -- 5. Update fields (blocking modifications to other attributes)
   UPDATE public.order_requests
   SET status = p_decision,
       reviewed_by = auth.uid(),
@@ -249,7 +254,7 @@ BEGIN
   WHERE id = p_order_id
   RETURNING * INTO v_order;
 
-  -- 4. Insert audit log event
+  -- 6. Insert audit log event
   INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
   VALUES (
     v_workspace_id,
@@ -265,7 +270,11 @@ BEGIN
 
   RETURN v_order;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+
+-- Revoke default public execution & grant to authenticated
+REVOKE EXECUTE ON FUNCTION public.qualify_order FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
 
 -- 9. Create Investor Referrals Table
 CREATE TABLE public.investor_referrals (
@@ -301,6 +310,7 @@ CREATE TABLE public.family_delegations (
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
   owner_profile_id uuid not null references public.profiles(id) on delete cascade,
   delegate_profile_id uuid not null references public.profiles(id) on delete cascade,
+  consent_status text not null check (consent_status in ('pending', 'accepted', 'rejected')) default 'pending',
   is_active boolean not null default true,
   expires_at timestamptz,
   created_at timestamptz not null default now(),
@@ -324,26 +334,44 @@ BEGIN
       jsonb_build_object(
         'owner_profile_id', NEW.owner_profile_id,
         'delegate_profile_id', NEW.delegate_profile_id,
+        'consent_status', NEW.consent_status,
         'expires_at', NEW.expires_at
       )
     );
-  ELSIF TG_OP = 'UPDATE' AND OLD.is_active = TRUE AND NEW.is_active = FALSE THEN
-    INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
-    VALUES (
-      NEW.workspace_id,
-      auth.uid(),
-      'family_delegation.revoked',
-      'family_delegations',
-      NEW.id,
-      jsonb_build_object(
-        'owner_profile_id', NEW.owner_profile_id,
-        'delegate_profile_id', NEW.delegate_profile_id
-      )
-    );
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF OLD.consent_status IS DISTINCT FROM NEW.consent_status THEN
+      INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
+      VALUES (
+        NEW.workspace_id,
+        auth.uid(),
+        'family_delegation.consent_updated',
+        'family_delegations',
+        NEW.id,
+        jsonb_build_object(
+          'owner_profile_id', NEW.owner_profile_id,
+          'delegate_profile_id', NEW.delegate_profile_id,
+          'consent_status', NEW.consent_status
+        )
+      );
+    END IF;
+    IF OLD.is_active = TRUE AND NEW.is_active = FALSE THEN
+      INSERT INTO public.workspace_audit_logs (workspace_id, actor_id, action, target_type, target_id, payload)
+      VALUES (
+        NEW.workspace_id,
+        auth.uid(),
+        'family_delegation.revoked',
+        'family_delegations',
+        NEW.id,
+        jsonb_build_object(
+          'owner_profile_id', NEW.owner_profile_id,
+          'delegate_profile_id', NEW.delegate_profile_id
+        )
+      );
+    END IF;
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER log_family_delegation_audit_trg
   AFTER INSERT OR UPDATE ON public.family_delegations
@@ -463,7 +491,7 @@ CREATE POLICY order_requests_admin_select ON public.order_requests
   FOR SELECT
   TO authenticated
   USING (
-    (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   );
 
 -- Insert Policies
@@ -481,6 +509,7 @@ CREATE POLICY order_requests_investor_insert ON public.order_requests
       WHERE fd.delegate_profile_id = auth.uid()
         AND fd.owner_profile_id = investor_profile_id
         AND fd.workspace_id = workspace_id
+        AND fd.consent_status = 'accepted'
         AND fd.is_active = TRUE
     )
   );
@@ -493,10 +522,10 @@ CREATE POLICY order_requests_admin_update ON public.order_requests
   FOR UPDATE
   TO authenticated
   USING (
-    (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   )
   WITH CHECK (
-    (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   );
 
 -- 18. Family Delegations RLS Policies (P0-2)
@@ -511,7 +540,7 @@ CREATE POLICY family_delegations_delegate_select ON public.family_delegations
   TO authenticated
   USING (delegate_profile_id = auth.uid());
 
--- 19. Workspace-Matched portfolios family read RLS policy (P0-2)
+-- 19. Workspace-Matched portfolios family read RLS policy with explicit consent status check (P0-3)
 DROP POLICY IF EXISTS family_delegate_read_policy ON public.portfolios;
 CREATE POLICY family_delegate_read_policy ON public.portfolios
   FOR SELECT
@@ -522,6 +551,7 @@ CREATE POLICY family_delegate_read_policy ON public.portfolios
       WHERE fd.owner_profile_id = portfolios.client_id
         AND fd.delegate_profile_id = auth.uid()
         AND fd.workspace_id = portfolios.workspace_id
+        AND fd.consent_status = 'accepted'
         AND fd.is_active = TRUE
         AND (fd.expires_at IS NULL OR fd.expires_at > now())
     )
@@ -540,11 +570,11 @@ CREATE POLICY auto_approval_rules_admin_all ON public.auto_approval_rules
   TO authenticated
   USING (
     public.has_advisor_membership(workspace_id)
-    OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   )
   WITH CHECK (
     public.has_advisor_membership(workspace_id)
-    OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   );
 
 -- 21. Plan Entitlements RLS
@@ -559,7 +589,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'ingested_documents') THEN
     EXECUTE 'ALTER TABLE public.ingested_documents ENABLE ROW LEVEL SECURITY;';
     EXECUTE 'DROP POLICY IF EXISTS family_delegate_document_denial ON public.ingested_documents;';
-    EXECUTE 'CREATE POLICY family_delegate_document_denial ON public.ingested_documents FOR SELECT TO authenticated USING (NOT EXISTS (SELECT 1 FROM public.family_delegations fd WHERE fd.delegate_profile_id = auth.uid() AND fd.is_active = true));';
+    EXECUTE 'CREATE POLICY family_delegate_document_denial ON public.ingested_documents FOR SELECT TO authenticated USING (NOT EXISTS (SELECT 1 FROM public.family_delegations fd WHERE fd.delegate_profile_id = auth.uid() AND fd.consent_status = ''accepted'' AND fd.is_active = true));';
   END IF;
 END
 $$;
@@ -576,14 +606,14 @@ CREATE POLICY workspace_billing_select ON public.workspace_billing
   TO authenticated
   USING (
     public.has_active_workspace_membership(workspace_id)
-    OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   );
 
 CREATE POLICY workspace_billing_admin_all ON public.workspace_billing
   FOR ALL
   TO authenticated
-  USING ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin')
-  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin');
+  USING (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin')
+  WITH CHECK (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin');
 
 -- 25. Payment Events RLS
 CREATE POLICY payment_events_select ON public.payment_events
@@ -591,7 +621,7 @@ CREATE POLICY payment_events_select ON public.payment_events
   TO authenticated
   USING (
     public.has_active_workspace_membership(workspace_id)
-    OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
+    OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin'
   );
 
 -- 26. Referrals, Conversions, and Rewards RLS
@@ -642,8 +672,8 @@ CREATE POLICY advisor_profiles_read ON public.advisor_profiles
 CREATE POLICY advisor_profiles_advisor_all ON public.advisor_profiles
   FOR ALL
   TO authenticated
-  USING (profile_id = auth.uid() OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin')
-  WITH CHECK (profile_id = auth.uid() OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin');
+  USING (profile_id = auth.uid() OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin')
+  WITH CHECK (profile_id = auth.uid() OR COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin');
 
 CREATE POLICY advisor_euin_select ON public.advisor_euin_assignments
   FOR SELECT
@@ -670,8 +700,8 @@ CREATE POLICY crm_notes_insert ON public.crm_notes
 CREATE POLICY event_outbox_all ON public.event_outbox
   FOR ALL
   TO authenticated
-  USING ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin')
-  WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin');
+  USING (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin')
+  WITH CHECK (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin');
 
 -- 29. Trigger functions to maintain billing counters and status
 CREATE OR REPLACE FUNCTION public.sync_billing_workspace_limit()
