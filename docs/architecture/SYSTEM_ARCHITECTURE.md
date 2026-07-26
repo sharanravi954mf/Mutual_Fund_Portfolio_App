@@ -1,5 +1,5 @@
 # Money Bowl — System Architecture Specification
-Document Version: v2.0.0-Canonical-Production-Freeze  
+Document Version: v2.0.1-Canonical-Production-Freeze  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
 BRD Baseline: docs/business/BRD.md (v1.2.1)  
 
@@ -18,6 +18,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.8.0 | 2026-07-27 | BAI | Freezed baseline, standardized order status enum state machine lifecycle, implemented qualify_order RPC row locking, enforced accepted consent status checks on family delegations RLS, and standardized JWT claims. |
 | v1.9.0 | 2026-07-27 | BAI | Updated auto-approval fallback behavior, qualify_order RPC authorization safeguards, integrated cancel_order RPC function, and standardized family delegations as authoritative access sources. |
 | v2.0.0 | 2026-07-27 | BAI | Final permanent production freeze baseline, unified outbox-based auto-approval state flow, blocked direct advisor intervention on pending_qualification orders to prevent race conditions, and updated BC-005 taxonomy. |
+| v2.0.1 | 2026-07-27 | BAI | Incremented to address ChatGPT 5.5 review audit points. Corrected canonical order lifecycle, standardized outbox auto-approval workflow, added apply_auto_approval_decision RPC design, corrected qualify_order and cancel_order RPC definitions, expanded audit log coverage, and refined referral token security semantics. |
 
 ---
 
@@ -38,13 +39,13 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 
 ## 2. Master Business Capability Mapping Matrix
 
-| Capability ID | Capability Name | Target Services | Database Tables / Entities | Edge Functions |
+| Capability ID | Capability Name | Target Services | Database Tables / Entities / Components | Edge Functions |
 | :--- | :--- | :--- | :--- | :--- |
 | **BC-001** | Identity & Access Management | `AuthService` | `profiles`, `workspace_memberships` | None |
 | **BC-002** | Distributor Lifecycle Management | `WorkspaceService` | `workspaces`, `mfd_profiles`, `mfd_verification_documents`, `mfd_onboarding_reviews` | None |
 | **BC-003** | Investor Lifecycle Management | `MembershipService` | `profiles` | None |
-| **BC-004** | Relationship Management | `MembershipService` | `workspace_memberships` | None |
-| **BC-005** | Portfolio & Order Execution | `PortfolioService`, `OrderService` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, `order_requests`, `auto_approval_rules`, `qualify_order`, `cancel_order`, `event_outbox` | None |
+| **BC-004** | Relationship Management | `MembershipService` | `workspace_memberships`, `family_delegations` | None |
+| **BC-005** | Portfolio & Order Execution | `PortfolioService`, `OrderService` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, `order_requests`, `auto_approval_rules`, `event_outbox`, `qualify_order`, `cancel_order`, `apply_auto_approval_decision` | `order-auto-approval-worker` |
 | **BC-006** | Registrar Data Ingestion | `IngestionService` | `transactions`, `scheme_holdings` | `cams-kfintech-ingestion` |
 | **BC-007** | Educational AI Assistance | `AIProxyService` | None | `ai-helper` |
 | **BC-008** | Customer Servicing (Ticketing) | `TicketService` | `support_tickets` | None |
@@ -74,16 +75,15 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 * **Authentication**: Multi-factor Mobile/Email OTP authentication via GoTrue.
 * **Authorization & Multi-Tenancy**:
   * Enforced at the database engine level via PostgreSQL Row-Level Security (RLS).
-  * User JWT tokens carry `app_metadata.workspace_id`, `app_metadata.user_role`, and `app_metadata.subscription_tier`.
-  * **Important**: JWT `app_metadata.workspace_id` indicates active UI context; database authorization for multi-relationship investors is strictly enforced via `workspace_memberships` table queries to prevent access token hijacking.
+  * User JWT tokens carry `app_metadata.workspace_id`, `app_metadata.user_role`, and `app_metadata.subscription_tier` claims.
+  * **Important**: JWT `app_metadata.workspace_id` claim indicates active UI context; database authorization for multi-relationship investors is strictly enforced via `workspace_memberships` table queries to prevent access token hijacking.
 
 ### C. Serverless Execution & Edge Layer (Deno Edge Functions)
 * **Mailbag & Feed Ingestion Worker**:
   * Receives CAMS/KFintech WBR2 & WBR22 DBF feeds and CAS PDF files.
   * Processes files using in-memory RAM stream decoding (zero disk persistence for zero-trust security).
 * **Order Auto-Approval Engine**:
-  * Evaluates pending investor transaction requests against MFD-configured threshold rules (e.g., SIP amount limits).
-  * Automatically advances order statuses (`pending_qualification` ➔ `auto_approved` or `pending_review`).
+  * Deno serverless worker evaluating submitted client orders against rules to execute automated status transitions.
 * **AMFI Market Data Sync Worker**:
   * Scheduled cron worker pulling daily scheme NAVs and riskometer metadata directly from official AMFI data feeds.
 
@@ -121,86 +121,164 @@ The database is structured into 5 primary entity domains matching the business c
 
 ---
 
-## 6. Concrete Row Level Security (RLS) Mechanics
+## 6. Concrete Row Level Security (RLS) Mechanics & Transaction Contracts
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
-### A. Unified Order Lifecycle, Auto-Approval Outbox & Hardened Order RLS (P0-1, P0-2 / BRD-FR-005)
-* Order requests follow a standardized lifecycle state machine designed to prevent advisor race-conditions with the auto-approval worker:
-  $$\text{Client-side Draft} \longrightarrow \text{pending\_qualification} \longrightarrow (\text{auto\_approved} \mid \text{pending\_review}) \longrightarrow (\text{approved} \mid \text{rejected} \mid \text{cancelled})$$
-  * Direct advisor qualification of orders during `pending_qualification` is strictly blocked. Advisors can only qualify orders once they transition to `pending_review` (if bypassed by rules) or `auto_approved` triggers fail.
-* **Auto-Approval Decoupled Outbox Execution**:
-  1. Investor `INSERT` sets status to `pending_qualification` and inserts an `order.created` event into `event_outbox` in the same transaction.
-  2. The Deno auto-approval background worker claims the outbox event, evaluates active auto-approval rules, and triggers a restricted RPC to transition the order's status to `auto_approved` or `pending_review`.
-* Hardened RLS policies enforce access scopes:
+### A. Unified Order Lifecycle (Section 1.1)
+Order requests follow a single, unambiguous lifecycle flow to eliminate race conditions between auto-approval workers and manual MFD qualifications:
 
-```sql
--- Investor: View own orders within active workspace
-CREATE POLICY order_requests_investor_select ON order_requests FOR SELECT
-    USING (investor_profile_id = auth.uid() AND has_active_workspace_membership(workspace_id));
-
--- Investor: Create own orders (restricted to pending_qualification)
-CREATE POLICY order_requests_investor_insert ON order_requests FOR INSERT
-    WITH CHECK (
-        investor_profile_id = auth.uid() 
-        AND has_investor_membership(workspace_id) 
-        AND status = 'pending_qualification'
-    );
-
--- Distributor/Advisor: Read workspace orders
-CREATE POLICY order_requests_advisor_select ON order_requests FOR SELECT
-    TO authenticated
-    USING (has_advisor_membership(workspace_id));
+```text
+Client-only draft
+  → pending_qualification
+      ├── matching active auto-approval rule
+      │     → auto_approved
+      │         → external execution routing
+      │
+      ├── no matching auto-approval rule
+      │     → pending_review
+      │         ├── approved
+      │         ├── rejected
+      │         └── cancelled
+      │
+      └── investor cancellation
+            → cancelled
 ```
-* **Prohibition**: Direct `UPDATE` and `DELETE` queries on `order_requests` by authenticated normal users are blocked. Status mutations are executed exclusively via a hardened `SECURITY DEFINER` RPC `public.qualify_order` or `public.cancel_order` with set `search_path = ''` using fully qualified object names.
-* **qualify_order RPC internal safeguards**:
-  1. Set `search_path = ''`.
-  2. Acquire pessimistic row lock: `SELECT status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
-  3. Verify authorization: `IF NOT (public.has_advisor_membership(v_workspace_id) OR (COALESCE((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin')) THEN RAISE EXCEPTION 'Unauthorized'; END IF;`.
-  4. Validate state: Direct advisor transition requires status to be `pending_review`. The system blocks direct advisor changes during `pending_qualification` to prevent race conditions. Platform admin overrides or auto-approval service workers can transition orders from `pending_qualification` to `auto_approved` or `pending_review`.
-  5. Mutate ONLY `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason`.
-  6. Write immutable event to `public.workspace_audit_logs`.
-* **cancel_order RPC internal safeguards**:
-  1. Lock: `SELECT workspace_id, investor_profile_id, status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
-  2. Verify actor: Caller must be order owner or advisor in matching workspace.
-  3. Validate state: Permits cancellation on `pending_qualification` and `pending_review`. Rejects cancellation on `auto_approved`, `approved`, `rejected`, or `cancelled` orders.
-  4. Write immutable event to `public.workspace_audit_logs`.
-* **Privilege revocation contracts**:
+
+* **Constraints & Lifecycle Rules**:
+  * `draft` status is managed exclusively in Flutter client state. Orders are never written to the database in `draft` state.
+  * A database order record is initialized strictly in the `pending_qualification` status.
+  * `auto_approved` represents a terminal qualification state. Bypassing manual reviews, these orders route directly to external execution submission systems.
+  * Advisors may qualify ONLY orders with `status = 'pending_review'`. Direct advisor approval or rejection of orders in `pending_qualification` state is blocked.
+  * Investors can cancel only their own orders. Cancellation is permitted only while the order is in `pending_qualification` or `pending_review` status.
+  * Cancellations are rejected if the order is already in `auto_approved`, `approved`, `rejected`, or `cancelled` statuses.
+  * Status transitions between `auto_approved` ➔ `approved`, `auto_approved` ➔ `rejected`, or `pending_review` ➔ `auto_approved` are strictly prohibited.
+
+### B. Decoupled Event-Driven Auto-Approval Workflow (Section 1.2)
+To ensure reliable, race-free operation, rule evaluation is decoupled from the transactional database path:
+
+```text
+Investor inserts order_request
+→ order status = pending_qualification
+→ order.created event is written to event_outbox
+   in the same database transaction
+→ transaction commits
+→ Deno order-auto-approval-worker claims the event
+→ worker evaluates active auto_approval_rules
+→ worker calls a restricted service-only RPC
+→ order transitions to:
+     auto_approved
+     or pending_review
+→ rule ID, rule version and decision are audited
+```
+
+* **Workflow Mechanics & SLA**:
+  * A database trigger writes the `order.created` event into `event_outbox` in the same transaction as the order creation. The trigger must not evaluate business rules.
+  * The Deno `order-auto-approval-worker` is the exclusive evaluation engine. It polls the outbox, claims events safely, and processes rules.
+  * Worker execution must be idempotent; replaying an outbox event must not produce duplicate approval states or side-effects.
+  * Applied `rule_id` and `rule_version` details must be stored directly on the qualified `order_requests` row.
+  * Unmatched rules trigger a fallback status transition to `pending_review`.
+  * The entire workflow from insertion to state resolution must be completed within 5 seconds to satisfy the `NFR-003` queue availability SLA.
+
+### C. Service-Only Auto-Approval RPC: `apply_auto_approval_decision` (Section 1.3)
+Automated rule decisions are written via a dedicated, secure database interface:
+
+* **Signature**:
   ```sql
-  REVOKE ALL ON FUNCTION public.qualify_order FROM PUBLIC;
-  REVOKE ALL ON FUNCTION public.cancel_order FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION public.qualify_order TO authenticated;
-  GRANT EXECUTE ON FUNCTION public.cancel_order TO authenticated;
+  public.apply_auto_approval_decision(
+      p_order_id uuid,
+      p_decision public.order_status,
+      p_rule_id uuid,
+      p_rule_version integer,
+      p_correlation_id text
+  ) RETURNS public.order_requests
   ```
+* **Internal Safeguards & Rules**:
+  1. Must be declared as `SECURITY DEFINER` and enforce `SET search_path = ''`.
+  2. Uses fully qualified object references exclusively (`public.order_requests`, `public.workspace_audit_logs`).
+  3. Obtains a pessimistic row lock: `SELECT status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
+  4. Accepts transition processing only if the order's current status is `pending_qualification`.
+  5. Permits target state transitions to `auto_approved` or `pending_review` only.
+  6. Rejects duplicate or stale correlation IDs to guarantee worker idempotency.
+  7. Persists the worker correlation ID, decision timestamp, `rule_id`, and `rule_version` in `order_requests`.
+  8. Records an immutable audit payload in `public.workspace_audit_logs` in the same transaction.
+  9. Privilege Contract:
+     ```sql
+     REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) FROM PUBLIC;
+     GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(uuid, public.order_status, uuid, integer, text) TO authenticated;
+     ```
 
-### B. Authoritative Family Delegation Model (P0-3 / BRD-BR-009 / P1-2)
-* The `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative authorization source for family access. No secondary workspace membership is required for delegates to view linked portfolio datasets.
-* Portfolios select policy requires explicit workspace ID matching and accepted consent status check:
+### D. Hardened Advisor Qualification RPC: `qualify_order` (Section 1.4)
+Manual advisor qualification is routed through a separate, audited routine:
 
-```sql
--- Allows family delegates read-only portfolio access matching workspace and accepted consent status
-CREATE POLICY family_delegate_read_policy ON portfolios FOR SELECT TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM public.family_delegations fd
-        WHERE fd.owner_profile_id = portfolios.client_id
-          AND fd.delegate_profile_id = auth.uid()
-          AND fd.workspace_id = portfolios.workspace_id
-          AND fd.consent_status = 'accepted'
-          AND fd.is_active = TRUE
-          AND (fd.expires_at IS NULL OR fd.expires_at > now())
-    )
-);
-```
+* **Signature**:
+  ```sql
+  public.qualify_order(
+      p_order_id uuid,
+      p_decision public.order_status,
+      p_rejection_reason text DEFAULT null
+  ) RETURNS public.order_requests
+  ```
+* **Internal Safeguards & Rules**:
+  1. Must be declared as `SECURITY DEFINER` and enforce `SET search_path = ''`.
+  2. Acquires row lock querying all check fields:
+     ```sql
+     SELECT workspace_id, investor_profile_id, status
+     INTO v_workspace_id, v_investor_profile_id, v_status
+     FROM public.order_requests
+     WHERE id = p_order_id
+     FOR UPDATE;
+     ```
+  3. Verifies advisor membership in the target workspace (via `public.has_advisor_membership(v_workspace_id)`) or an audited `platform_admin` override.
+  4. Blocks execution attempts by investors, family guest delegates, or unrelated advisors.
+  5. Accepts transitions only if the order's locked status is exactly `pending_review`.
+  6. Restricts status mutations strictly to `approved` or `rejected`.
+  7. Mutates only `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason` columns.
+  8. Records an immutable log of the old state and new state in `public.workspace_audit_logs`.
+  9. Privilege Contract:
+     ```sql
+     REVOKE ALL ON FUNCTION public.qualify_order(uuid, public.order_status, text) FROM PUBLIC;
+     GRANT EXECUTE ON FUNCTION public.qualify_order(uuid, public.order_status, text) TO authenticated;
+     ```
 
-### C. Platform Admin Override Policy (BR-007)
-```sql
--- Platform admins bypass table-level workspace scoping to resolve accounts and overrides
-CREATE POLICY platform_admin_override_policy ON workspaces
-    FOR ALL
-    USING (
-        (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'platform_admin'
-    );
-```
+### E. Hardened Order Cancellation RPC: `cancel_order` (Section 1.5)
+* **Signature**:
+  ```sql
+  public.cancel_order(
+      p_order_id uuid,
+      p_reason text DEFAULT null
+  ) RETURNS public.order_requests
+  ```
+* **Internal Safeguards & Rules**:
+  1. Must be declared as `SECURITY DEFINER` and enforce `SET search_path = ''`.
+  2. Acquires row lock: `SELECT workspace_id, investor_profile_id, status INTO v_workspace_id, v_investor_profile_id, v_status FROM public.order_requests WHERE id = p_order_id FOR UPDATE;`.
+  3. Verifies caller is either the order owner (`investor_profile_id = auth.uid()`) or an advisor in the order's workspace.
+  4. Denies request permissions for family guests and unrelated advisors.
+  5. Allows cancellations only if status is `pending_qualification` or `pending_review`.
+  6. Rejects cancellation if status is `auto_approved`, `approved`, `rejected`, or `cancelled`.
+  7. Mutates status to `cancelled`, captures the reason, and writes an audit log inside the same transaction.
+  8. Privilege Contract:
+     ```sql
+     REVOKE ALL ON FUNCTION public.cancel_order(uuid, text) FROM PUBLIC;
+     GRANT EXECUTE ON FUNCTION public.cancel_order(uuid, text) TO authenticated;
+     ```
+
+### F. Workspace-Matched Family Delegation Policy (Section 1.5 / P1-2)
+* The accepted `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative source of truth for family guest read access. No secondary workspace membership is required.
+* Portfolios RLS matches workspace constraints:
+  ```sql
+  CREATE POLICY family_delegate_read_policy ON public.portfolios FOR SELECT TO authenticated
+  USING (
+      EXISTS (
+          SELECT 1 FROM public.family_delegations fd
+          WHERE fd.owner_profile_id = portfolios.client_id
+            AND fd.delegate_profile_id = auth.uid()
+            AND fd.workspace_id = portfolios.workspace_id
+            AND fd.consent_status = 'accepted'
+            AND fd.is_active = TRUE
+            AND (fd.expires_at IS NULL OR fd.expires_at > now())
+      )
+  );
+  ```
 
 ---
 
@@ -214,13 +292,6 @@ To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs dire
 * **Security & Credentials**: Mailbox credentials (OAuth tokens) are encrypted separately at rest.
 * **Vaulting Controls**: The encrypted object storage vault enforces file-size limits (<20MB), MIME validation (PDF/DBF), malware screening, SHA-256 content-hash deduplication, and single-use signed URLs expiring in 15 minutes.
 * **Retention Policy**: Retention is governed by configurable platform policy and applicable regulatory, contractual, and user-consent requirements. Automatic deletion shall not occur while a document is required for portfolio lineage, audit, active servicing, or legal retention. Temporary processing artefacts may be removed after 30 days, but original vault documents follow a separate compliance retention lifecycle.
-
-### B. Advanced Auto-Approval Rule Engine (BR-006 / P1-2)
-1. Mapped Investor submits a Buy/Sell/Switch `order_request`.
-2. The database trigger evaluates the request against rules defined in the `auto_approval_rules` table:
-   * Fields: `workspace_id`, `transaction_type`, `min_amount`, `max_amount`, `trusted_client_only`, `category_restrictions`, `effective_from`, `is_active`.
-3. If qualifying, status is updated to `auto_approved` and the trigger stamps the target `rule_id` and `rule_version` directly onto the `order_requests` row.
-4. **Fallback Flow**: If the order does not match auto-approval rule parameters, status is set to `pending_review` (routing to MFD advisor qualification queue) or falls back to standard qualification queues.
 
 ---
 
@@ -264,19 +335,22 @@ Support requests follow a rigid state machine layout:
 
 ---
 
-## 11. Encrypted Document Vaulting & Signed URL Lineage (BC-011, BC-013 / P0-3)
+## 11. Encrypted Document Vaulting & Signed URL Lineage (BC-011, BC-013)
 * **Encryption**: CAS PDF statements are encrypted at the object boundary using AES-256 keys.
 * **Access Control**: Users receive signed URLs with an expiry limit of 15 minutes. Decryption happens on-the-fly inside the Edge compute boundary.
 * **Denial Invariant**: Family delegates are strictly denied access to `ingested_documents`, original CAS files, or signed document download URLs unless an explicit, separate document-level consent grant exists.
 
 ---
 
-## 12. Viral Referral Engine & Fraud Detection Rules (BC-018 / FR-011)
-* **Attribution**: Referrals are tracked using Attributor mapping logic matching SHA-256 hashes.
-* **Fraud Detection rules**:
-  * Self-Referral block: Prevents users from registering with identical emails/phones.
-  * Collision block: Rejects referrals matching pre-existing PAN or bank accounts.
-* **Rewards**: Referrals award temporary subscription plan extensions (e.g. 30 days) to both parties upon successful conversion.
+## 12. Secure Referral Security Contract (Section 1.8)
+To protect user privacy and prevent tracking vulnerabilities, referrers are resolved under a strict security schema:
+* Referral codes are random, high-entropy, cryptographically secure tokens.
+* Plaintext token keys are visible only when required for sharing purposes.
+* Hashed token values (`token_hash`) are stored on the database to verify matches.
+* Referral attribution must never capture or store raw PAN or bank-account details.
+* Fraud collision validation checks use deterministic SHA-256 HMAC lookups against unique client identifiers.
+* Referral conversion and reward issuance workflows must be idempotent.
+* Reward creation, reversals, and expirations write immutable audit tracks.
 
 ---
 
@@ -336,13 +410,34 @@ All sensitive attributes are classified and protected at rest and in transit:
 * **`ARCH-SLO-001`**: Security engine key validation overhead latency: `<50ms`.
 * **`ARCH-SLO-002`**: Central log queue write confirmation: `<100ms` async acknowledgment.
 
-### F. Immutability Triggers & Explicit Audit Log Scopes
-* Every status change on `order_requests`, qualify RPC actions, workspace administrative resets, and billing overrides insert tracking records into `workspace_audit_logs`. The `workspace_audit_logs` and `ingestion_logs` tables enforce immutability via triggers blocking all update and delete queries.
-* **Explicit Audit Log Triggers (P0-3)**: The system writes immutable audit events to `workspace_audit_logs` upon:
-  * Family delegation grant creation.
-  * Consent acceptance for family guest access.
-  * Delegation revocation/expiration.
-  * Original CAS document download attempts.
+### F. Expanded Audit Logging Architecture (Section 1.7)
+The platform records immutable audit logs inside `public.workspace_audit_logs` (and `public.ingestion_logs` where relevant). Triggers block updates and deletions on audit tables.
+
+* **Audit Scopes & Events Table**:
+
+| Event / Action | Target Audit Fields | Location |
+| :--- | :--- | :--- |
+| **Order submission** | `actor_profile_id`, `workspace_id`, `entity_id`, `occurred_at` | `workspace_audit_logs` |
+| **Outbox event generation** | `entity_id`, `event_type`, `payload`, `occurred_at` | `event_outbox` |
+| **Auto-approval evaluation** | `rule_id`, `rule_version`, `entity_id`, `correlation_id` | `workspace_audit_logs` |
+| **Auto-approval match** | `rule_id`, `rule_version`, `entity_id`, `new_state` | `workspace_audit_logs` |
+| **Auto-approval fallback** | `entity_id`, `rule_id`, `rule_version`, `new_state` | `workspace_audit_logs` |
+| **Manual approval** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
+| **Manual rejection** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state`, `reason` | `workspace_audit_logs` |
+| **Order cancellation** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state`, `reason` | `workspace_audit_logs` |
+| **Auto-approval rule creation** | `actor_profile_id`, `entity_id` (`rule_id`), `new_state` | `workspace_audit_logs` |
+| **Auto-approval rule modification** | `actor_profile_id`, `entity_id` (`rule_id`), `previous_state`, `new_state` | `workspace_audit_logs` |
+| **Family delegation creation** | `actor_profile_id`, `entity_id`, `new_state` | `workspace_audit_logs` |
+| **Family consent acceptance** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
+| **Family delegation revocation** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
+| **Family delegation expiration** | `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
+| **Platform Admin override** | `actor_profile_id`, `entity_type`, `entity_id`, `action`, `reason` | `workspace_audit_logs` |
+| **Access reset** | `actor_profile_id`, `workspace_id`, `action` | `workspace_audit_logs` |
+| **Original CAS access** | `actor_profile_id`, `entity_id` (document), `action` | `workspace_audit_logs` |
+| **Original CAS download** | `actor_profile_id`, `entity_id` (document), `action` | `workspace_audit_logs` |
+| **Ingestion start** | `workspace_id`, `entity_id` (log), `action` | `ingestion_logs` |
+| **Ingestion completion** | `workspace_id`, `entity_id` (log), `action` | `ingestion_logs` |
+| **Ingestion failure** | `workspace_id`, `entity_id` (log), `action`, `reason` | `ingestion_logs` |
 
 ---
 
@@ -354,7 +449,7 @@ All sensitive attributes are classified and protected at rest and in transit:
 | **BC-002** (Distributor) | Distributor | `FR-001` | N/A | N/A | `mfd_profiles`, `mfd_onboarding_reviews` |
 | **BC-003** (Investor) | Investor | `FR-002` | `BR-001` | N/A | `profiles` |
 | **BC-004** (Relationship) | Investor, Distributor | `FR-005`, `FR-006` | `BR-002`, `BR-003`, `BR-004`, `BR-009` | `NFR-003` | `workspace_memberships`, `family_delegations` |
-| **BC-005** (Portfolio & Order Execution) | Investor, Distributor | `FR-005`, `FR-006` | `BR-004`, `BR-005`, `BR-006` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, `order_requests`, `auto_approval_rules`, `qualify_order`, `cancel_order`, `event_outbox` |
+| **BC-005** (Portfolio & Order Execution) | Investor, Distributor | `FR-005`, `FR-006` | `BR-004`, `BR-005`, `BR-006` | `NFR-003`, `NFR-005` | `portfolios`, `folios`, `scheme_holdings`, `transactions`, `order_requests`, `auto_approval_rules`, `qualify_order`, `cancel_order`, `apply_auto_approval_decision`, `event_outbox` |
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `NFR-004` | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | N/A | `support_tickets` |
