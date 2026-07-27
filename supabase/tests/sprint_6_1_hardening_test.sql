@@ -47,10 +47,10 @@ VALUES
   ('71000000-0000-0000-0000-000000000004', '72000000-0000-0000-0000-000000000004', 'verified_email', now(), 'active');
 
 -- Subscription Plans
-INSERT INTO public.subscription_plans (id, name, type, price, currency)
+INSERT INTO public.subscription_plans (id, name, client_limit, monthly_price)
 VALUES
-  ('74000000-0000-0000-0000-000000000001', 'MFD Growth', 'advisor', 2999.00, 'INR'),
-  ('74000000-0000-0000-0000-000000000002', 'Premium Investor', 'investor', 499.00, 'INR');
+  ('74000000-0000-0000-0000-000000000001', 'MFD Growth', 999999, 2999.00),
+  ('74000000-0000-0000-0000-000000000002', 'Premium Investor', 999999, 499.00);
 
 -- Workspace Billing details
 INSERT INTO public.workspace_billing (workspace_id, plan_id, status, current_client_count)
@@ -61,7 +61,7 @@ VALUES
 -- Auto Approval Rules
 INSERT INTO public.auto_approval_rules (id, workspace_id, transaction_type, min_amount, max_amount, is_active, rule_version)
 VALUES
-  ('75000000-0000-0000-0000-000000000001', '73000000-0000-0000-0000-000000000001', 'purchase', 0.00, 10000.00, true, 1);
+  ('75000000-0000-0000-0000-000000000001', '73000000-0000-0000-0000-000000000001', 'buy', 0.00, 10000.00, true, 1);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
 
@@ -85,7 +85,7 @@ BEGIN
   -- 2. Verify cancel_order validates state bounds and handles already_cancelled exception
   -- Insert a mock order request in pending_qualification
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('76000000-0000-0000-0000-000000000001', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'purchase', 5000.00, 'pending_qualification');
+  VALUES ('76000000-0000-0000-0000-000000000001', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 5000.00, 'pending_qualification');
 
   -- Verify client owner can cancel
   v_order := public.cancel_order('76000000-0000-0000-0000-000000000001', 'Test cancellation');
@@ -105,7 +105,7 @@ BEGIN
 
   -- 3. Verify qualify_order limits qualification strictly to pending_review and advisor roles
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('76000000-0000-0000-0000-000000000002', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'purchase', 5000.00, 'pending_review');
+  VALUES ('76000000-0000-0000-0000-000000000002', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 5000.00, 'pending_review');
 
   -- Verify advisor in workspace A can qualify
   PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000002', true);
@@ -126,7 +126,7 @@ BEGIN
 
   -- Verify platform admin cannot qualify order manually
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('76000000-0000-0000-0000-000000000003', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'purchase', 5000.00, 'pending_review');
+  VALUES ('76000000-0000-0000-0000-000000000003', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 5000.00, 'pending_review');
 
   PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000001', true);
   BEGIN
@@ -142,12 +142,19 @@ BEGIN
   -- Create order and find matching outbox event ID
   PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000003', true);
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('76000000-0000-0000-0000-000000000004', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'purchase', 2000.00, 'pending_qualification');
+  VALUES ('76000000-0000-0000-0000-000000000004', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 2000.00, 'pending_qualification');
 
   SELECT * INTO v_outbox FROM public.event_outbox WHERE entity_id = '76000000-0000-0000-0000-000000000004'::uuid LIMIT 1;
   IF v_outbox.id IS NULL THEN
     RAISE EXCEPTION 'Event outbox record not generated on order insert';
   END IF;
+
+  -- Claim the outbox event
+  UPDATE public.event_outbox 
+  SET status = 'processing',
+      claimed_at = now(),
+      claimed_by = '72000000-0000-0000-0000-000000000002'::uuid
+  WHERE id = v_outbox.id;
 
   -- Call apply_auto_approval_decision
   v_order := public.apply_auto_approval_decision(
