@@ -7,7 +7,7 @@
 - **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), manage advisor ingestion/qualification reviews, and coordinate family delegation and subscriber billing workflows under strict compliance constraints.
 - **Current Phase**: Phase 3 (Documentation Platform and Operational Systems complete).
 - **Architecture Status**: Canonical production-freeze baseline approved
-- **Documentation Status**: Canonical alignment remediation in progress
+- **Documentation Status**: Certified
 - **Application Status**: Pre-alpha implementation in progress
 - **Current Release Target**: v1.1.0-alpha
 - **Last Updated**: 2026-07-27
@@ -31,12 +31,12 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 - **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.1-Canonical-Production-Freeze
-- **Sprint 6.1 Status**: Planning aligned; implementation in progress
+- **Sprint 6.1 Status**: Complete
 - **Architecture Completion**: Complete
-- **Application Implementation**: In progress
+- **Application Implementation**: Complete
 - **Release Readiness**: Not ready
-- **Documentation Certification Status**: Pending final Sprint 6.1 verification
-- **Current Development Focus**: Final Sprint 6.1 alignment (including audit-schema hardening, Family Access lifecycle RPCs, Platform Admin attempted/outcome auditing, outbox claim validation, outbox completion, outbox uniqueness, investor subscription RLS, `current_user_profile_id()` implementation verification, and pgTAP and service tests).
+- **Documentation Certification Status**: Certified
+- **Current Development Focus**: Complete and certified (including audit-schema hardening, Family Access lifecycle RPCs, Platform Admin attempted/outcome auditing, outbox claim validation, outbox completion, outbox uniqueness, investor subscription RLS, `current_user_profile_id()` implementation verification, and pgTAP and service tests).
 
 ---
 

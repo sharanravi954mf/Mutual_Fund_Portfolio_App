@@ -720,9 +720,18 @@ BEGIN
     RAISE EXCEPTION 'delegation_not_found';
   END IF;
 
-  -- Owner or delegate can revoke
-  IF v_delegation.owner_profile_id <> v_caller_profile AND v_delegation.delegate_profile_id <> v_caller_profile THEN
+  -- Owner, delegate, or Platform Admin can revoke
+  IF v_delegation.owner_profile_id <> v_caller_profile 
+     AND v_delegation.delegate_profile_id <> v_caller_profile 
+     AND coalesce((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') <> 'platform_admin' THEN
     RAISE EXCEPTION 'not_authorized';
+  END IF;
+
+  -- Platform Admin must require step-up MFA
+  IF coalesce((auth.jwt() -> 'app_metadata' ->> 'user_role'), '') = 'platform_admin' THEN
+    IF NOT (coalesce(auth.jwt() -> 'amr', '[]'::jsonb) ? 'mfa') THEN
+      RAISE EXCEPTION 'platform_admin_step_up_required';
+    END IF;
   END IF;
 
   IF NOT v_delegation.is_active THEN
@@ -731,6 +740,7 @@ BEGIN
 
   UPDATE public.family_delegations
   SET is_active = false,
+      consent_status = 'revoked',
       updated_at = pg_catalog.now()
   WHERE id = p_delegation_id
   RETURNING * INTO v_delegation;
@@ -1100,5 +1110,22 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+
+-- 19. Dynamically drop old consent_status check constraint and add updated one allowing 'revoked'
+DO $$
+DECLARE
+  v_const_name pg_catalog.text;
+BEGIN
+  SELECT constraint_name INTO v_const_name
+  FROM information_schema.constraint_column_usage
+  WHERE table_name = 'family_delegations' AND column_name = 'consent_status' LIMIT 1;
+  
+  IF v_const_name IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE public.family_delegations DROP CONSTRAINT ' || pg_catalog.quote_ident(v_const_name);
+  END IF;
+END;
+$$;
+
+ALTER TABLE public.family_delegations ADD CONSTRAINT family_delegations_consent_status_check CHECK (consent_status IN ('pending', 'accepted', 'rejected', 'revoked'));
 
 COMMIT;

@@ -101,7 +101,7 @@ BEGIN
     '83000000-0000-0000-0000-000000000001',
     '82000000-0000-0000-0000-000000000001',
     'platform_admin',
-    'platform_admin.override_unlock',
+    'override.account_unlock',
     'profiles',
     '82000000-0000-0000-0000-000000000003',
     'profiles',
@@ -135,7 +135,7 @@ BEGIN
       '83000000-0000-0000-0000-000000000001',
       '82000000-0000-0000-0000-000000000001',
       'platform_admin',
-      'platform_admin.override_unlock',
+      'override.account_unlock',
       'profiles',
       '82000000-0000-0000-0000-000000000003',
       'profiles',
@@ -150,7 +150,7 @@ BEGIN
   SELECT * INTO v_audit_attempt FROM public.workspace_audit_logs 
   WHERE workspace_id = '83000000-0000-0000-0000-000000000001' 
     AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
-    AND action = 'platform_admin.override_unlock'
+    AND action = 'override.account_unlock'
     AND event_type = 'override.attempted'
   ORDER BY occurred_at DESC LIMIT 1;
   
@@ -161,7 +161,7 @@ BEGIN
   SELECT * INTO v_audit_succeed FROM public.workspace_audit_logs 
   WHERE workspace_id = '83000000-0000-0000-0000-000000000001' 
     AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
-    AND action = 'platform_admin.override_unlock'
+    AND action = 'override.account_unlock'
     AND event_type = 'override.denied'
   ORDER BY occurred_at DESC LIMIT 1;
 
@@ -188,7 +188,7 @@ BEGIN
     '83000000-0000-0000-0000-000000000001',
     '82000000-0000-0000-0000-000000000001',
     'platform_admin',
-    'platform_admin.override_unlock',
+    'override.account_unlock',
     'profiles',
     '82000000-0000-0000-0000-000000000003',
     'profiles',
@@ -202,7 +202,7 @@ BEGIN
   SELECT * INTO v_audit_succeed FROM public.workspace_audit_logs 
   WHERE workspace_id = '83000000-0000-0000-0000-000000000001' 
     AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
-    AND action = 'platform_admin.override_unlock'
+    AND action = 'override.account_unlock'
     AND event_type = 'override.succeeded'
   ORDER BY occurred_at DESC LIMIT 1;
 
@@ -245,6 +245,16 @@ BEGIN
     RAISE EXCEPTION 'Audit log missing for family delegation acceptance';
   END IF;
 
+  -- Test 3.4: Delegate consent revoke by owner
+  PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000003", "role": "authenticated", "app_metadata": {"user_role": "investor"}}', true);
+  v_delegation := public.delegate_consent_revoke('87000000-0000-0000-0000-000000000001');
+  IF v_delegation.consent_status <> 'revoked' OR v_delegation.is_active = TRUE THEN
+    RAISE EXCEPTION 'Owner revoke consent failed to change status/is_active fields';
+  END IF;
+
+  -- Clean up the first delegation record to respect unique key constraint
+  DELETE FROM public.family_delegations WHERE id = '87000000-0000-0000-0000-000000000001';
+
   -- Test 3.3: Delegate consent reject
   -- Insert another delegation in pending
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000003", "role": "authenticated", "app_metadata": {"user_role": "investor"}}', true);
@@ -258,12 +268,8 @@ BEGIN
     RAISE EXCEPTION 'Delegate reject consent failed to change status/is_active fields';
   END IF;
 
-  -- Test 3.4: Delegate consent revoke by owner
-  PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000003", "role": "authenticated", "app_metadata": {"user_role": "investor"}}', true);
-  v_delegation := public.delegate_consent_revoke('87000000-0000-0000-0000-000000000001');
-  IF v_delegation.consent_status <> 'revoked' OR v_delegation.is_active = TRUE THEN
-    RAISE EXCEPTION 'Owner revoke consent failed to change status/is_active fields';
-  END IF;
+  -- Clean up the second delegation record to respect unique key constraint
+  DELETE FROM public.family_delegations WHERE id = '87000000-0000-0000-0000-000000000002';
 
   -- Test 3.5: Platform Admin intervention via consent revoke (should require step-up MFA and log override attempts)
   -- Re-insert delegation and accept it
@@ -297,15 +303,15 @@ BEGIN
   -- ----------------------------------------------------
   -- Test 4.1: Outbox event uniqueness index check for order.created
   -- Attempt to insert duplicate order.created outbox event for the same order
-  INSERT INTO public.event_outbox (id, entity_type, entity_id, event_type, status)
-  VALUES ('88000000-0000-0000-0000-000000000001', 'order_requests', '86000000-0000-0000-0000-000000000001', 'order.created', 'pending');
+  INSERT INTO public.event_outbox (id, entity_type, entity_id, event_type, status, payload)
+  VALUES ('88000000-0000-0000-0000-000000000001', 'order_requests', '86000000-0000-0000-0000-000000000001', 'order.created', 'pending', '{}'::jsonb);
 
   BEGIN
-    INSERT INTO public.event_outbox (id, entity_type, entity_id, event_type, status)
-    VALUES ('88000000-0000-0000-0000-000000000002', 'order_requests', '86000000-0000-0000-0000-000000000001', 'order.created', 'pending');
+    INSERT INTO public.event_outbox (id, entity_type, entity_id, event_type, status, payload)
+    VALUES ('88000000-0000-0000-0000-000000000002', 'order_requests', '86000000-0000-0000-0000-000000000001', 'order.created', 'pending', '{}'::jsonb);
     RAISE EXCEPTION 'Event outbox uniqueness index contract check failed to prevent duplicate order.created';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT LIKE '%event_outbox_order_created_unique%' THEN
+    IF SQLERRM NOT LIKE '%event_outbox_order_created_uidx%' THEN
       RAISE EXCEPTION 'Unexpected error on outbox uniqueness check: %', SQLERRM;
     END IF;
   END;
@@ -357,8 +363,8 @@ BEGIN
   -- TEST 5: Subscription RLS and States
   -- ----------------------------------------------------
   -- Test 5.1: Create investor subscription with 'trialing' state
-  INSERT INTO public.investor_subscriptions (workspace_id, profile_id, plan_id, status, trial_start, trial_end)
-  VALUES ('83000000-0000-0000-0000-000000000001', '82000000-0000-0000-0000-000000000003', '84000000-0000-0000-0000-000000000002', 'trialing', now(), now() + interval '14 days');
+  INSERT INTO public.investor_subscriptions (investor_profile_id, plan_id, status, start_date, current_period_end)
+  VALUES ('82000000-0000-0000-0000-000000000003', '84000000-0000-0000-0000-000000000002', 'trialing', now(), now() + interval '14 days');
 
   -- Test 5.2: Verify billing/subscription RLS constraints for investor A
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000003", "role": "authenticated", "app_metadata": {"user_role": "investor"}}', true);
