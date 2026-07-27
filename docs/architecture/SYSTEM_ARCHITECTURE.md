@@ -126,6 +126,22 @@ The database is structured into 5 primary entity domains matching the business c
 ## 6. Concrete Row Level Security (RLS) Mechanics & Transaction Contracts
 The database layer uses specific PostgreSQL policies to guarantee Workspace Isolation (BR-003) and Role-Based Access Control (BR-007):
 
+### Canonical Application Profile Resolution
+* **Core Contract**:
+  * Supabase `auth.uid()` identifies the authenticated Auth account UUID.
+  * Business-domain foreign keys such as `investor_profile_id`, `owner_profile_id`, and `delegate_profile_id` identify rows in `public.profiles`.
+  * Whenever an authorization rule, policy, or RPC compares a business-domain profile foreign key with the current caller, the caller's profile must first be resolved through `public.current_user_profile_id()`.
+  * Direct comparison of a `profiles.id`-based foreign key with `auth.uid()` is prohibited unless a specific schema field is explicitly documented as storing the Auth user UUID.
+* **Invariant Guardrails for `public.current_user_profile_id()`**:
+  - `public.current_user_profile_id()` returns the caller's `public.profiles.id` (UUID).
+  - It derives the result from the authenticated caller's `auth.uid()`.
+  - It accepts no caller-supplied identity parameters (prevents impersonation).
+  - It returns exactly one application profile ID or null.
+  - Missing or ambiguous mappings fail closed.
+  - Security-sensitive callers, RLS policies, and RPCs must deny access when the helper returns null.
+  - The helper must use hardened execution permissions (`SECURITY DEFINER`, fixed search path `SET search_path = public, pg_temp`, revoking execution from `PUBLIC` except as explicitly authorised).
+  - The mapping from Auth account (`auth.users.id`) to application profile (`public.profiles.id`) is enforced as unique in the database schema.
+
 ### A. Unified Order Lifecycle
 Order requests follow a single, unambiguous lifecycle flow to eliminate race conditions between auto-approval workers and manual MFD qualifications:
 
@@ -371,14 +387,20 @@ Manual advisor qualification is routed through a separate, audited routine:
 
 ### F. Workspace-Matched Family Delegation Policy (Section 6.F)
 * The accepted `family_delegations` record (with `consent_status = 'accepted'`, `is_active = TRUE`, and unexpired timestamp) is the single authoritative source of truth for family guest read access. No secondary workspace membership is required.
+* **Identity Constraints**:
+  - `owner_profile_id` references and stores `public.profiles.id` (not `auth.users.id`).
+  - `delegate_profile_id` references and stores `public.profiles.id` (not `auth.users.id`).
+  - Access is immediately denied if profile resolution returns null.
+  - Family Guests remain read-only (SELECT access only) and are strictly denied access to `ingested_documents` and signed original CAS document URLs unless separate document-level consent is explicitly granted.
 * Portfolios RLS matches workspace constraints:
   ```sql
   CREATE POLICY family_delegate_read_policy ON public.portfolios FOR SELECT TO authenticated
   USING (
-      EXISTS (
+      public.current_user_profile_id() IS NOT NULL
+      AND EXISTS (
           SELECT 1 FROM public.family_delegations fd
           WHERE fd.owner_profile_id = portfolios.client_id
-            AND fd.delegate_profile_id = auth.uid()
+            AND fd.delegate_profile_id = public.current_user_profile_id()
             AND fd.workspace_id = portfolios.workspace_id
             AND fd.consent_status = 'accepted'
             AND fd.is_active = TRUE

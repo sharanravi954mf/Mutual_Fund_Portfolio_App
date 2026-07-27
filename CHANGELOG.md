@@ -9,6 +9,12 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Standardised application-profile authorization through `public.current_user_profile_id()`.
+- Replaced direct `delegate_profile_id = auth.uid()` Family Delegation RLS logic with resolved application profile identity.
+- Clarified that `owner_profile_id`, `delegate_profile_id`, and `investor_profile_id` reference `public.profiles.id`.
+- Corrected issue `#51` to test resolved application profile ownership rather than Auth-UUID equality.
+- Consolidated repeated-cancellation tests into the single `already_cancelled` denial contract.
+- Added implementation verification requirements for `public.current_user_profile_id()`.
 - Corrected issue `#28` traceability from stale Section 5.A/Section 4 references to Sections 6.A, 6.E, and 17.F.
 - Clarified that `cancel_order` resolves the authenticated caller through `public.current_user_profile_id()` rather than comparing `investor_profile_id` directly with `auth.uid()`.
 - Clarified that repeated cancellation from `cancelled` is denied and is not treated as a successful idempotent operation.
