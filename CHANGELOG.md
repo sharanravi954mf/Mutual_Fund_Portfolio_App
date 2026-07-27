@@ -1,6 +1,6 @@
 # Changelog
 
-All notable completed releases of Sharan Fincorp are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
+All notable completed releases of Money Bowl are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
 
 This CHANGELOG.md is the sole authoritative release-history document. Historical release references found elsewhere are non-authoritative.
 
@@ -9,6 +9,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## [v2.0.1] — 2026-07-27
 
 ### Changed
+- Implemented corrective database migration `20260801000001_sprint_6_1_canonical_hardening.sql` locally.
 - Standardised application-profile authorization through `public.current_user_profile_id()`.
 - Replaced direct `delegate_profile_id = auth.uid()` Family Delegation RLS logic with resolved application profile identity.
 - Clarified that `owner_profile_id`, `delegate_profile_id`, and `investor_profile_id` reference `public.profiles.id`.

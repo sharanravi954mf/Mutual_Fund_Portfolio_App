@@ -18,7 +18,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.8.0 | 2026-07-27 | BAI | Freezed baseline, standardized order status enum state machine lifecycle, implemented qualify_order RPC row locking, enforced accepted consent status checks on family delegations RLS, and standardized JWT claims. |
 | v1.9.0 | 2026-07-27 | BAI | Updated auto-approval fallback behavior, qualify_order RPC authorization safeguards, integrated cancel_order RPC function, and standardized family delegations as authoritative access sources. |
 | v2.0.0 | 2026-07-27 | BAI | Final permanent production freeze baseline, unified outbox-based auto-approval state flow, blocked direct advisor intervention on pending_qualification orders to prevent race conditions, and updated BC-005 taxonomy. |
-| v2.0.1 | 2026-07-27 | BAI | Incremented to address ChatGPT 5.5 review audit points. Corrected canonical order lifecycle, standardized outbox auto-approval workflow, added apply_auto_approval_decision RPC design, corrected qualify_order and cancel_order RPC definitions, expanded audit log coverage, and refined referral token security semantics. |
+| v2.0.1 | 2026-07-27 | BAI | Incremented to address ChatGPT 5.5 review audit points. Corrected canonical order lifecycle, standardized outbox auto-approval workflow, added apply_auto_approval_decision RPC design, corrected qualify_order and cancel_order RPC definitions, expanded audit log coverage, and refined referral token security semantics. Further expanded in final pass to document canonical application-profile resolution, Family Delegation profile-ID corrections, cancellation identity hardening, Platform Admin narrow-RPC restrictions, dual subscription scope details, and referral conversion scope clarifications. |
 
 ---
 

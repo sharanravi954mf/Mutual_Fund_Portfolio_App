@@ -83,6 +83,7 @@ void main() {
     });
 
     test('WorkspaceInvitation parsing', () {
+      final futureDate = DateTime.now().add(const Duration(days: 30)).toUtc().toIso8601String();
       final json = {
         'id': 'invite-uuid',
         'workspace_id': 'workspace-uuid',
@@ -91,7 +92,7 @@ void main() {
         'invited_by': 'inviter-uuid',
         'token_hash': 'sha256-hash-value',
         'status': 'pending',
-        'expires_at': '2026-07-26T12:00:00.000Z',
+        'expires_at': futureDate,
         'created_at': '2026-07-25T12:00:00.000Z',
         'updated_at': '2026-07-25T12:00:00.000Z',
       };

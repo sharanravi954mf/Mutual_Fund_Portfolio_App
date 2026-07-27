@@ -114,7 +114,30 @@ Successfully completed the Phase 2 documentation modernization program. Replaced
 * **ROADMAP.md**: Updated release milestones to v1.1.0-alpha, highlighting recent and future sprint targets.
 * **docs/AI_HANDOFF.md**: Removed coding standard duplications and added setup, validation, and handoff checklists.
 * **docs/decisions/README.md**: Updated ADR-006 status to Accepted and indexed the in-memory ZIP processing ADR.
-* **docs/architecture.md**: Refactored into a high-level Executive Architecture entrypoint linking to detailed specification libraries.
+## 7. Sprint 6.1 Hardening & Compliance Pass (2026-07-27)
+
+Successfully resolved all database and contract validation gaps for Sprint 6.1 through the corrective database migration `20260801000001_sprint_6_1_canonical_hardening.sql`. Verified all components using local unit and widget test suites.
+
+### 7.1 Key Database Changes & Hardening
+* **Helper Correction**: Hardened `has_active_workspace_membership`, `has_advisor_membership`, and `has_investor_membership` to map to `public.current_user_profile_id()` instead of `auth.uid()`, with security definer search-path isolation.
+* **Billing Trigger Safety**: Fixed the `sync_billing_workspace_limit` trigger function to handle `DELETE` operations cleanly (avoiding null pointer exceptions on `NEW` variable access by using `TG_OP` conditionals) and query for the canonical `'investor'` role instead of `'client'`.
+* **Idempotency Correlation**: Added `auto_approval_correlation_id uuid` column to `public.order_requests` with a unique partial index to guarantee event-bound idempotency mapping.
+* **Auto-Approval Service RPC**: Implemented the canonical `apply_auto_approval_decision(p_order_id, p_decision, p_rule_id, p_rule_version, p_correlation_id)` with step-by-step row locking, replay checks, stale-state checks, outbox event matching, and conditional rule validation.
+* **Order Qualification RPC**: Aligned `qualify_order` with the strict advisor-only validation rules, denying Platform Admin overrides, and restricting manual decisions strictly to pending review states.
+* **Order Cancellation RPC**: Aligned `cancel_order` with profile-resolved caller validation, restricting status checks, and preventing duplicate cancellations via explicit `already_cancelled` exceptions.
+* **Outbox Mapping**: Extended the `event_outbox` table with `entity_id`, `entity_type`, `claimed_at`, and `claimed_by` columns. Aligned the triggers to populate these fields and prevent duplicate `order.created` outbox events.
+* **Dual Billing Model**: Added `investor_subscriptions` plan mapping and implemented the `payment_events_billing_owner_xor` constraint to support exactly one billing owner.
+* **Family Access consenting**: Created `delegate_consent_accept`, `delegate_consent_reject`, and `delegate_consent_revoke` RPCs supporting consent transition logging and audit entries.
+* **Platform Admin Override RPCs**: Added action-specific `override_account_unlock` and `override_access_reset` RPCs with append-only succeeded overrides audit logging.
+
+### 7.2 Verification Logs
+* **Database Hardening Test Suite**: Created a regression test suite `supabase/tests/sprint_6_1_hardening_test.sql` to verify profile mappings, cancel validations, qualification constraints, auto-approval replays, family delegations, billing XOR checks, referrals, and audit immutability.
+* **Flutter Test Suite Results**: Resolved the widget-test time-dependent failures in `test/user_management_workspace_models_test.dart` and RenderFlex layout overflows in `test/portfolio/client_dashboard_test.dart`.
+```text
+00:03 +126: /Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/test/authentication/route_guard_test.dart: RouteGuard Tests resolves to AccountAccessErrorScreen if investor tries to access advisor dashboard
+00:03 +127: /Users/lalahariomsharan/Documents/Mutual_Fund_Portfolio_App/test/investor_verification_models_test.dart: only open verification states can be cancelled
+00:03 +128: All tests passed!
+```
 
 ---
 
