@@ -1,14 +1,31 @@
 # Changelog
 
-All notable completed releases of Sharan Fincorp are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
+All notable completed releases of Money Bowl are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
 
 This CHANGELOG.md is the sole authoritative release-history document. Historical release references found elsewhere are non-authoritative.
 
 ---
 
-## [v2.0.1] — 2026-07-27
+## Architecture and Documentation Baselines
 
-### Changed
+### [v2.0.1] — 2026-07-27
+
+#### Added
+- Added corrective Sprint 6.1 migrations `20260801000001_sprint_6_1_canonical_hardening.sql` and `20260801000002_sprint_6_1_final_hardening.sql`. No previously deployed migration was rewritten.
+- Platform Admin role wording correction in the role matrix notes.
+- Removal of broad Platform Admin policies on `auto_approval_rules` and `event_outbox`.
+- Family Access lifecycle RPC scope explicitly defined and restricted.
+- Removal of broad Family Delegation `FOR ALL` policy.
+- Step-up override auditing sequence enforced.
+- Outbox claim/completion validation contract defined.
+- Concurrency-safe event uniqueness index added for `order.created`.
+- RPC search-path alignment to `SET search_path = ''` for qualify, cancel, auto-approval, family access, and Platform Admin RPCs.
+- Audit-schema alignment adding canonical columns to `workspace_audit_logs`.
+- Investor subscription trial state machine and payment RLS defined.
+- Resolver verification result and unique mapping validation.
+- Issue and Kanban synchronisation.
+
+#### Changed
 - Standardised application-profile authorization through `public.current_user_profile_id()`.
 - Replaced direct `delegate_profile_id = auth.uid()` Family Delegation RLS logic with resolved application profile identity.
 - Clarified that `owner_profile_id`, `delegate_profile_id`, and `investor_profile_id` reference `public.profiles.id`.
@@ -54,134 +71,111 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 - Corrected Sprint 6.1 traceability for issues #29, #31, #51, and #59.
 - Clarified legacy mutable audit schema status.
 
-### Unchanged
-- BRD remains frozen at v1.2.1.
-- No Flutter code changed.
-- No Supabase migration changed.
-- No Edge Function implementation changed.
+### [v2.0.0-Canonical-Production-Freeze] — 2026-07-27
 
----
+#### Changed
+- Pessimistic Order Race Guard: Restricted advisor qualification actions in `qualify_order` strictly to orders in `pending_review` status, preventing race conditions with the auto-approval pipeline.
+- Unified Decoupled Outbox Flow: Configured the outbox auto-approval workflow triggering upon investor order insertion events.
+- Revoked RPC Privileges: Revoked public access privileges on `qualify_order` and `cancel_order` functions, restricting executions solely to authenticated roles.
+- Family Guest Workspace Exclusions: Standardized family delegation permissions mapping, allowing guest visibility checks without secondary workspace membership requirements.
+- Taxonomy Mappings Expansion: Expanded the capability `BC-005` definition mapping order execution components.
 
-## [v2.0.0-Canonical-Production-Freeze] — 2026-07-27
+### [v1.9.0-Canonical-Production-Freeze] — 2026-07-27
 
-### Summary
-Release v2.0.0-Canonical-Production-Freeze establishes the permanent production-freeze system architecture baseline, aligning outbox-decoupled auto-approval execution flows, blocking direct advisor actions on pending_qualification state to prevent race conditions, and setting explicit execution revoke and grants for transaction functions.
-
-### Major Additions & Changes
-- **Pessimistic Order Race Guard**: Restricted advisor qualification actions in `qualify_order` strictly to orders in `pending_review` status, preventing race conditions with the auto-approval pipeline.
-- **Unified Decoupled Outbox Flow**: Configured the outbox auto-approval workflow triggering upon investor order insertion events.
-- **Revoked RPC Privileges**: Revoked public access privileges on `qualify_order` and `cancel_order` functions, restricting executions solely to authenticated roles.
-- **Family Guest Workspace Exclusions**: Standardized family delegation permissions mapping, allowing guest visibility checks without secondary workspace membership requirements.
-- **Taxonomy Mappings Expansion**: Expanded the capability `BC-005` definition mapping order execution components.
-
----
-
-## [v1.9.0-Canonical-Production-Freeze] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.9.0-Canonical-Production-Freeze refines system-wide authorization safeguards, auto-approval engines fallbacks, introduces a secure cancellation path, and standardizes the JWT claim structure.
 
-### Major Additions & Changes
-- **Auto-Approval Fallbacks**: Non-matching transactions route explicitly to `pending_review` in the MFD queue.
-- **RPC Authorization & Row Locking Hardening**: verify advisor memberships and platform admin overrides inside `qualify_order` under pessimistic `FOR UPDATE` locks.
-- **cancel_order RPC Function**: Integrated `cancel_order` permitting investors and advisors to cancel orders in pending state and rejecting cancellation on finalized ones.
-- **Standardized JWT Claim Naming**: Realigned RLS checks to use `(auth.jwt() -> 'app_metadata' ->> 'user_role')` and `(auth.jwt() -> 'app_metadata' ->> 'subscription_tier')`.
-- **Authoritative Family Delegation**: Documented `family_delegations` accepted consent as the single authoritative source of truth for portfolio delegated access.
+#### Changed
+- Auto-Approval Fallbacks: Non-matching transactions route explicitly to `pending_review` in the MFD queue.
+- RPC Authorization & Row Locking Hardening: verify advisor memberships and platform admin overrides inside `qualify_order` under pessimistic `FOR UPDATE` locks.
+- cancel_order RPC Function: Integrated `cancel_order` permitting investors and advisors to cancel orders in pending state and rejecting cancellation on finalized ones.
+- Standardized JWT Claim Naming: Realigned RLS checks to use `(auth.jwt() -> 'app_metadata' ->> 'user_role')` and `(auth.jwt() -> 'app_metadata' ->> 'subscription_tier')`.
+- Authoritative Family Delegation: Documented `family_delegations` accepted consent as the single authoritative source of truth for portfolio delegated access.
 
----
+### [v1.8.0-Canonical-Production-Freeze] — 2026-07-27
 
-## [v1.8.0-Canonical-Production-Freeze] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.8.0-Canonical-Production-Freeze locks the System Architecture baseline, standardizing the order status lifecycles, hardening the qualify_order security-definer RPC with row locking and idempotent re-validation guards, enforcing consent verification for family delegation RLS, and detailing role-based sub-permissions.
 
-### Major Additions & Changes
-- **Standardized Order State Machine**: Configured the order lifecycle flow: `draft ➔ pending_qualification ➔ pending_review ➔ auto_approved / approved / rejected / cancelled`.
-- **Hardened qualify_order RPC**: Implemented concurrent row locking (`SELECT FOR UPDATE`), idempotent checks, set `search_path = ''` constraints, and revoked default execution permissions from PUBLIC.
-- **Enforced Consent checks on Family Delegation RLS**: Hardened portfolios select policies to check `consent_status = 'accepted'` to prevent unconsented family guest access.
-- **JWT Claim & Workspace Sub-role Hierarchy**: Standardized token validation logic and mapped workspace admin/operations sub-roles permissions.
+#### Changed
+- Standardized Order State Machine: Configured the order lifecycle flow: `draft ➔ pending_qualification ➔ pending_review ➔ auto_approved / approved / rejected / cancelled`.
+- Hardened qualify_order RPC: Implemented concurrent row locking (`SELECT FOR UPDATE`), idempotent checks, set `search_path = ''` constraints, and revoked default execution permissions from PUBLIC.
+- Enforced Consent checks on Family Delegation RLS: Hardened portfolios select policies to check `consent_status = 'accepted'` to prevent unconsented family guest access.
+- JWT Claim & Workspace Sub-role Hierarchy: Standardized token validation logic and mapped workspace admin/operations sub-roles permissions.
 
----
+### [v1.7.0-Canonical-Implementation-Baseline] — 2026-07-27
 
-## [v1.7.0-Canonical-Implementation-Baseline] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.7.0-Canonical-Implementation-Baseline applies final hardening adjustments to row-level security and service API boundaries. Specifically, it enforces RPC-only order qualifications for advisors (direct updates revoked), hardens the family RLS rules to match workspace and expiration filters explicitly, defines additional plan entitlement properties, and includes a searchable tools catalog projection in Section 15.
 
-### Major Additions & Changes
-- **RPC-Only Order Qualification**: Revoked direct `UPDATE` permissions on `order_requests` from authenticated roles. Mutating order statuses is routed exclusively through the `SECURITY DEFINER` RPC `qualify_order` with set `search_path = public`.
-- **Workspace-Matched & Expiration-Hardened Family Delegation RLS**: Hardened the portfolios read check to require explicit workspace ID matching and expiration limits validation (`expires_at IS NULL OR expires_at > now()`).
-- **Expanded Audit Log Scopes**: Configured system triggers logging immutable audit entries upon family delegation creation, acceptance, revocation, and original CAS file downloads.
-- **Entitlements Extension**: Added keys `advanced_analytics_enabled` and `support_sla_policy_id` to the `plan_entitlements` catalog.
-- **Searchable Tools Catalog**: Added `searchable_tools` to Universal Search projections mapping calculators and factsheet paths.
+#### Changed
+- RPC-Only Order Qualification: Revoked direct `UPDATE` permissions on `order_requests` from authenticated roles. Mutating order statuses is routed exclusively through the `SECURITY DEFINER` RPC `qualify_order` with set `search_path = public`.
+- Workspace-Matched & Expiration-Hardened Family Delegation RLS: Hardened the portfolios read check to require explicit workspace ID matching and expiration limits validation (`expires_at IS NULL OR expires_at > now()`).
+- Expanded Audit Log Scopes: Configured system triggers logging immutable audit entries upon family delegation creation, acceptance, revocation, and original CAS file downloads.
+- Entitlements Extension: Added keys `advanced_analytics_enabled` and `support_sla_policy_id` to the `plan_entitlements` catalog.
+- Searchable Tools Catalog: Added `searchable_tools` to Universal Search projections mapping calculators and factsheet paths.
 
----
+### [v1.6.0-Final-Approved-Baseline] — 2026-07-27
 
-## [v1.6.0-Final-Approved-Baseline] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.6.0-Final-Approved-Baseline updates the NFR identifiers to align 100% with the frozen BRD, enforces stricter RLS insert checking for investors, incorporates the qualify_order security-definer RPC design, explicitly classifies Aadhaar numbers as excluded PII elements, and introduces the plan entitlements data model.
 
-### Major Additions & Changes
-- **NFR ID Alignments**: Re-mapped all capabilities in Section 18 to NFR-001 through NFR-005, and defined internal SLO thresholds for key validation and central logging.
-- **Hardened Order RLS & qualification RPC**: Hardened the investor order insertion constraint to use `has_investor_membership(workspace_id)` and added explicit select RLS for advisors. Hardened transaction status mutation triggers to execute strictly via `qualify_order` RPC.
-- **Aadhaar PII classification**: Added Aadhaar number and Aadhaar-derived identifiers to Section 17.C, strictly prohibiting Aadhaar details from search and logging pools.
-- **Plan Entitlements Model**: Introduced the `plan_entitlements` entity supporting configurable gating options (Auto-approval limits, white-label flags, family-hub flags).
-- **Mailbox Health Notification Events**: Documented mailbox connection, authentication failure, and poll failure states inside Section 8/12 triggers.
+#### Changed
+- NFR ID Alignments: Re-mapped all capabilities in Section 18 to NFR-001 through NFR-005, and defined internal SLO thresholds for key validation and central logging.
+- Hardened Order RLS & qualification RPC: Hardened the investor order insertion constraint to use `has_investor_membership(workspace_id)` and added explicit select RLS for advisors. Hardened transaction status mutation triggers to execute strictly via `qualify_order` RPC.
+- Aadhaar PII classification: Added Aadhaar number and Aadhaar-derived identifiers to Section 17.C, strictly prohibiting Aadhaar details from search and logging pools.
+- Plan Entitlements Model: Introduced the `plan_entitlements` entity supporting configurable gating options (Auto-approval limits, white-label flags, family-hub flags).
+- Mailbox Health Notification Events: Documented mailbox connection, authentication failure, and poll failure states inside Section 8/12 triggers.
 
----
+### [v1.5.0-Final-Production-Baseline] — 2026-07-27
 
-## [v1.5.0-Final-Production-Baseline] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.5.0-Final-Production-Baseline refines the System Architecture Specifications to v1.5.0 security compliance baseline, establishing role-segregated RLS policies, workspace-scoped family visibility delegations, auto-approval rules schemas, global identity resolution markers, and out-of-scope product boundaries.
 
-### Major Additions & Changes
-- **Role-Segregated Order RLS**: Replaced generic order policies with distinct select, insert, and update policies for Investors, Advisors, and Admins, including explicit `WITH CHECK` clauses and normal user delete prohibitions.
-- **Workspace-Scoped Family Delegations**: Realignment of the family delegation model to link to specific workspaces and standardizing on profile ID selectors to prevent unlinked visibility leaks.
-- **Vault Security Realignment**: Added explicit document download denial constraints for family guest profiles.
-- **Advanced Auto-Approval Rule Table**: Implemented schema entities for the `auto_approval_rules` engine and triggers recording execution rules.
-- **Global Identity Matching**: Defined HMAC identity markers on profile entities (`pan_hmac`, `normalised_phone_hmac`, etc.) for deterministic resolution.
-- **Product Scope Boundaries**: Defined Section 19 specifying out-of-scope boundaries (direct stocks, insurance, FDs, crypto, tax filing, etc.).
+#### Changed
+- Role-Segregated Order RLS: Replaced generic order policies with distinct select, insert, and update policies for Investors, Advisors, and Admins, including explicit `WITH CHECK` clauses and normal user delete prohibitions.
+- Workspace-Scoped Family Delegations: Realignment of the family delegation model to link to specific workspaces and standardizing on profile ID selectors to prevent unlinked visibility leaks.
+- Vault Security Realignment: Added explicit document download denial constraints for family guest profiles.
+- Advanced Auto-Approval Rule Table: Implemented schema entities for the `auto_approval_rules` engine and triggers recording execution rules.
+- Global Identity Matching: Defined HMAC identity markers on profile entities (`pan_hmac`, `normalised_phone_hmac`, etc.) for deterministic resolution.
+- Product Scope Boundaries: Defined Section 19 specifying out-of-scope boundaries (direct stocks, insurance, FDs, crypto, tax filing, etc.).
 
----
+### [v1.4.0-Final-Baseline] — 2026-07-27
 
-## [v1.4.0-Final-Baseline] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.4.0-Final-Baseline updates the traceability matrix capability mappings and persona details, implements a compliant document retention lifecycle policy, updates the secure file ingestion scan workflow, and implements role-segregated Row-Level Security policies with explicit `WITH CHECK` conditions on order requests and family delegation transactional tables.
 
-### Major Additions & Changes
-- **Traceability Matrix & Persona Updates**: Map BC-016 Platform Config to N/A for functional requirements and associate with BRD Rules BR-006, BR-010, BR-012 under the "Configuration over Customisation" design principle. Refined BC-001 (Identity), BC-007 (AI Assistant), BC-009 (Subscriptions), and BC-012 (Notifications) mappings and personas.
-- **Document Retention Lifecycle Overhaul**: Replaced the automated 30-day deletion of original vault files with a compliance-driven retention policy allowing temporary artifact pruning but preserving original files for legal and audit lineage.
-- **Secure File Ingestion Scan Workflow**: Standardized file ingestion pipeline to explicitly run MIME & Magic-byte validation, malware screening, and SHA-256 hashing prior to encrypted object storage.
-- **Role-Segregated WITH CHECK RLS Policies**: Implemented secure, dynamic membership-based RLS isolation policies on `order_requests`, `family_delegations`, and `portfolios` tables with explicit `WITH CHECK` blocks to prevent write bypasses.
+#### Changed
+- Traceability Matrix & Persona Updates: Map BC-016 Platform Config to N/A for functional requirements and associate with BRD Rules BR-006, BR-010, BR-012 under the "Configuration over Customisation" design principle. Refined BC-001 (Identity), BC-007 (AI Assistant), BC-009 (Subscriptions), and BC-012 (Notifications) mappings and personas.
+- Document Retention Lifecycle Overhaul: Replaced the automated 30-day deletion of original vault files with a compliance-driven retention policy allowing temporary artifact pruning but preserving original files for legal and audit lineage.
+- Secure File Ingestion Scan Workflow: Standardized file ingestion pipeline to explicitly run MIME & Magic-byte validation, malware screening, and SHA-256 hashing prior to encrypted object storage.
+- Role-Segregated WITH CHECK RLS Policies: Implemented secure, dynamic membership-based RLS isolation policies on `order_requests`, `family_delegations`, and `portfolios` tables with explicit `WITH CHECK` blocks to prevent write bypasses.
 
----
+### [v1.3.1-Final-Baseline] — 2026-07-27
 
-## [v1.3.1-Final-Baseline] — 2026-07-27
-
-### Summary
+#### Summary
 Release v1.3.1-Final-Baseline applies precision improvements to the System Architecture baseline addressing all ChatGPT 5.5 review feedback points, logs the revision history, and updates the Sprint 6.1 issue traceability matrices.
 
-### Major Additions & Changes
-- **Many-to-Many Traceability Matrix**: Refined capability maps (BC-002, BC-004, BC-005, BC-006, BC-008, BC-011, BC-012, BC-016) to map cleanly to requirements and tables.
-- **Distributor Analytics Dashboard Projection**: Defined the schema and target fields for `mfd_dashboard_metrics` view/table aggregation.
-- **Canonical Persona Role Matrix**: Added explicit mapping of BRD user personas to PostgreSQL application membership and auth roles.
-- **Ticket SLA target definitions**: Updated static SLA targets to plan-configurable variables.
-- **Document Vault Security & Lineage**: Documented file limits, content hashing, deduplication, and added immutable rules to `ingestion_logs`.
+#### Changed
+- Many-to-Many Traceability Matrix: Refined capability maps (BC-002, BC-004, BC-005, BC-006, BC-008, BC-011, BC-012, BC-016) to map cleanly to requirements and tables.
+- Distributor Analytics Dashboard Projection: Defined the schema and target fields for `mfd_dashboard_metrics` view/table aggregation.
+- Canonical Persona Role Matrix: Added explicit mapping of BRD user personas to PostgreSQL application membership and auth roles.
+- Ticket SLA target definitions: Updated static SLA targets to plan-configurable variables.
+- Document Vault Security & Lineage: Documented file limits, content hashing, deduplication, and added immutable rules to `ingestion_logs`.
+
+### [v1.2.1-synthesized] — 2026-07-26
+
+#### Summary
+Release v1.2.1 establishes the finalized canonical specification baseline for Business Requirements and System Architecture, and initializes Sprint 6.1 (Order Execution Engine, Subscriptions & Schema Extensions).
+
+#### Changed
+- Canonical Baseline Freeze: Populated and froze `docs/business/BRD.md` (v1.2.1) and `docs/architecture/SYSTEM_ARCHITECTURE.md` (v1.2.1 Synthesized 17-layer format).
+- Sprint 6.1 Backlog Setup: Created and linked 8 core tasks on Project Board 1 (`MoneyBowl Development`) under the `Sprint Backlog` column.
+- Repository Housekeeping: Pruned legacy, redundant specs and documents to focus the repository scope.
 
 ---
 
-## [v1.2.1-synthesized] — 2026-07-26
-
-### Summary
-Release v1.2.1 establishes the finalized canonical specification baseline for Business Requirements and System Architecture, and initializes Sprint 6.1 (Order Execution Engine, Subscriptions & Schema Extensions).
-
-### Major Additions & Changes
-- **Canonical Baseline Freeze**: Populated and froze `docs/business/BRD.md` (v1.2.1) and `docs/architecture/SYSTEM_ARCHITECTURE.md` (v1.2.1 Synthesized 17-layer format).
-- **Sprint 6.1 Backlog Setup**: Created and linked 8 core tasks on Project Board 1 (`MoneyBowl Development`) under the `Sprint Backlog` column.
-- **Repository Housekeeping**: Pruned legacy, redundant specs and documents to focus the repository scope.
+## Application Releases
 
 ---
 

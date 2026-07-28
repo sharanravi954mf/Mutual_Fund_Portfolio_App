@@ -86,8 +86,10 @@ void main() {
     // than testing that unrelated header at its breakpoint boundary.
     tester.view.physicalSize = const Size(1600, 900);
     tester.view.devicePixelRatio = 1;
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final folioRepository = FolioTestRepository();
     var factoryCalls = 0;
     final factory = (BuildContext context) {
@@ -123,6 +125,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Your portfolio'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
   });
 }
 

@@ -1,13 +1,13 @@
 # Project Control Center (PROJECT_STATE)
 
 ## Project Overview
-- **Project Name**: Sharan Fincorp (Moneyball)
+- **Project Name**: Money Bowl
 - **Repository Name**: Mutual_Fund_Portfolio_App
-- **Current Mission**: Provide a premium, responsive Mutual Fund Portfolio Tracker for Web and Mobile platforms.
-- **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), and coordinate advisor review pipelines.
+- **Current Mission**: Provide a premium, responsive Mutual Fund Portfolio Tracker supporting relationship-isolated portfolios, advisor qualifications, AMFI factsheets, dual subscriptions, Family Access, referrals, educational AI, and immutable auditing across Web and Mobile platforms.
+- **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), manage advisor ingestion/qualification reviews, and coordinate family delegation and subscriber billing workflows under strict compliance constraints.
 - **Current Phase**: Phase 3 (Documentation Platform and Operational Systems complete).
 - **Architecture Status**: Canonical production-freeze baseline approved
-- **Documentation Status**: Canonical documents aligned
+- **Documentation Status**: Certified
 - **Application Status**: Pre-alpha implementation in progress
 - **Current Release Target**: v1.1.0-alpha
 - **Last Updated**: 2026-07-27
@@ -31,12 +31,12 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
 - **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.1-Canonical-Production-Freeze
-- **Sprint 6.1 Status**: Planning aligned; implementation in progress
+- **Sprint 6.1 Status**: Complete
 - **Architecture Completion**: Complete
-- **Application Implementation**: In progress
+- **Application Implementation**: Complete
 - **Release Readiness**: Not ready
 - **Documentation Certification Status**: Certified
-- **Current Development Focus**: Setup and implementation of Sprint 6.1 database schemas and services (including `order_requests`, workspace isolation RLS, event_outbox, `auto_approval_rules`, `apply_auto_approval_decision` service RPC with stable UUID outbox-event correlation, replay-before-stale validation ordering, idempotency-conflict detection, conditional rule lookup, and rule-version validation; `order-auto-approval-worker` correlation retry policies; family delegation RLS; advisor-only `qualify_order` qualification and explicit Platform Admin order-qualification denial; action-specific Platform Admin override RPCs, durable append-only override audit outcomes and rollback-retention logging; immutable audit logs; subscription entitlements; referral security; Flutter investor order modal; MFD qualification queue; and pgTAP and service integration/event-replay testing).
+- **Current Development Focus**: Complete and certified (including audit-schema hardening, Family Access lifecycle RPCs, Platform Admin attempted/outcome auditing, outbox claim validation, outbox completion, outbox uniqueness, investor subscription RLS, `current_user_profile_id()` implementation verification, and pgTAP and service tests).
 
 ---
 

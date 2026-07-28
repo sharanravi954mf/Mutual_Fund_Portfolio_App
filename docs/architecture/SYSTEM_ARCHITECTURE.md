@@ -18,7 +18,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.8.0 | 2026-07-27 | BAI | Freezed baseline, standardized order status enum state machine lifecycle, implemented qualify_order RPC row locking, enforced accepted consent status checks on family delegations RLS, and standardized JWT claims. |
 | v1.9.0 | 2026-07-27 | BAI | Updated auto-approval fallback behavior, qualify_order RPC authorization safeguards, integrated cancel_order RPC function, and standardized family delegations as authoritative access sources. |
 | v2.0.0 | 2026-07-27 | BAI | Final permanent production freeze baseline, unified outbox-based auto-approval state flow, blocked direct advisor intervention on pending_qualification orders to prevent race conditions, and updated BC-005 taxonomy. |
-| v2.0.1 | 2026-07-27 | BAI | Incremented to address ChatGPT 5.5 review audit points. Corrected canonical order lifecycle, standardized outbox auto-approval workflow, added apply_auto_approval_decision RPC design, corrected qualify_order and cancel_order RPC definitions, expanded audit log coverage, and refined referral token security semantics. |
+| v2.0.1 | 2026-07-27 | BAI | Incremented to address ChatGPT 5.5 review audit points. Corrected canonical order lifecycle, standardized outbox auto-approval workflow, added apply_auto_approval_decision RPC design, corrected qualify_order and cancel_order RPC definitions, expanded audit log coverage, and refined referral token security semantics. Further expanded in final pass to document canonical application-profile resolution, Family Delegation profile-ID corrections, cancellation identity hardening, Platform Admin narrow-RPC restrictions, dual subscription scope details, and referral conversion scope clarifications. |
 
 ---
 
@@ -101,7 +101,7 @@ The following matrix maps Business Requirements Document (BRD) user personas to 
 | **Mapped Investor** | `investor` | `investor` | Active membership required to view details or initiate transactions. |
 | **Exploring Investor** | `investor` | `none` | Standalone explore access only; cannot access specific workspace datasets. |
 | **Family Guest** | `investor` | `none` required | Read-only delegated access driven strictly by an active, accepted family delegations record. |
-| **Platform Admin** | `platform_admin` | `none` | Audited system-wide override access. Bypass check triggers log warnings. |
+| **Platform Admin** | `platform_admin` | `none` | Narrow, action-specific support overrides through audited SECURITY DEFINER RPCs. No general business-table bypass. No unrestricted cross-workspace extraction. No order qualification, approval or rejection authority. |
 
 ### A. Sub-Role Mappings & Permissions Hierarchy
 Within any workspace context, the `workspace_memberships` table defines granular permissions underneath `workspace_owner` / `advisor`:
@@ -251,12 +251,16 @@ Automated rule decisions are written via a dedicated, secure database interface:
              id,
              entity_id,
              event_type,
-             status
+             status,
+             claimed_at,
+             claimed_by
          INTO
              v_event_id,
              v_event_entity_id,
              v_event_type,
-             v_event_status
+             v_event_status,
+             v_claimed_at,
+             v_claimed_by
          FROM public.event_outbox
          WHERE id = p_correlation_id
          FOR UPDATE;
@@ -265,7 +269,8 @@ Automated rule decisions are written via a dedicated, secure database interface:
          - Event does not exist: `event_not_found`.
          - Event type is not `order.created`: `invalid_event_type`.
          - Event targets a different order (`v_event_entity_id != p_order_id`): `event_order_mismatch`.
-         - Event has not been claimed for processing or is already bound to another order request.
+         - Event status is `completed`: `event_already_completed`.
+         - Event status is not `processing`, or `claimed_at` is null, or `claimed_by` is null: `event_not_claimed`.
      - **Step 5: Conditional Rule Validation**:
        - **IF** `p_decision = 'auto_approved'` **THEN**:
          - Require `p_rule_id` and `p_rule_version` to be non-null (else raise exception).
@@ -279,16 +284,19 @@ Automated rule decisions are written via a dedicated, secure database interface:
        - **ELSE**:
          - Raise exception for unsupported decision.
        - **END IF;**
-     - **Step 6: Apply state transition**:
-       - Update status, save validated rule ID, validated rule version, correlation ID, and timestamps.
-     - **Step 7: Record append-only audit log**:
-       - Record an immutable audit log payload in `public.workspace_audit_logs` using strictly values loaded from the locked database record (`v_workspace_id`, `v_investor_profile_id`).
+      - **Step 6: Apply state transition**:
+        - Update status, save validated rule ID, validated rule version, correlation ID, and timestamps on the `order_requests` row.
+        - Update the `event_outbox` row setting `status = 'completed'` and `updated_at = now()`.
+      - **Step 7: Record append-only audit log**:
+        - Record an immutable audit log payload in `public.workspace_audit_logs` using strictly values loaded from the locked database record (`v_workspace_id`, `v_investor_profile_id`).
   4. Stable Machine-Readable Error Codes:
      - `idempotency_conflict`
      - `stale_order_state`
      - `event_not_found`
      - `event_order_mismatch`
      - `invalid_event_type`
+     - `event_not_claimed`
+     - `event_already_completed`
      - `rule_not_found`
      - `rule_inactive`
      - `rule_workspace_mismatch`
@@ -391,7 +399,15 @@ Manual advisor qualification is routed through a separate, audited routine:
   - `owner_profile_id` references and stores `public.profiles.id` (not `auth.users.id`).
   - `delegate_profile_id` references and stores `public.profiles.id` (not `auth.users.id`).
   - Access is immediately denied if profile resolution returns null.
-  - Family Guests remain read-only (SELECT access only) and are strictly denied access to `ingested_documents` and signed original CAS document URLs unless separate document-level consent is explicitly granted.
+* **Granular Lifecycle & Mutation Rules**:
+  - **Creation**: Allowed only for the portfolio owner or an authorised MFD-assisted workflow with recorded owner authority.
+  - **Consent**: Only the proposed delegate may accept or reject a pending delegation.
+  - **Revocation**: Allowed for the portfolio owner, the delegate revoking their own access, or an authorised MFD-assisted workflow with recorded owner authority.
+  - **Platform Admin Support**: Platform Admins must not silently create or activate Family Access. Platform Admin intervention is allowed only through narrow, audited support RPCs for identity-link resolution, access restoration, or exceptional support cases. Every support action requires step-up authentication, a mandatory reason, a correlation ID, and follows the `override.attempted` to `override.succeeded` / `override.denied` / `override.failed` durable append-only audit lifecycle.
+  - **Table Mutation Constraints**: Broad `FOR ALL` policies on `family_delegations` are strictly prohibited. The system must enforce explicit, role-segregated policies or lifecycle RPCs for creation, consent acceptance/rejection, and revocation. Direct table updates must not bypass lifecycle validation.
+* **Document Access Boundary**:
+  - Family Guest access to portfolio summaries does not grant access to `ingested_documents`, original CAS files, or signed document URLs. Access requires separate, explicit document-level consent.
+  - Document-access policies must exclude Family Guests by default unless separate consent is explicitly recorded.
 * Portfolios RLS matches workspace constraints:
   ```sql
   CREATE POLICY family_delegate_read_policy ON public.portfolios FOR SELECT TO authenticated
@@ -431,12 +447,15 @@ Platform Admin actions bypass standard table-level workspace restrictions under 
     * `occurred_at` (Timestamp)
 * **Append-Only Platform Admin Override Auditing**:
   * To guarantee that all attempts are audit-logged and cannot be bypassed via rollbacks, auditing uses a strictly append-only sequence (no records are ever updated or deleted):
-    1. A Platform Admin override request is initiated.
-    2. Edge/service layer authenticates actor and verifies step-up state.
-    3. The service appends an initial `override.attempted` attempt event (outcome = `attempted`, `error_code` is null) to `public.workspace_audit_logs` using a separate database call committed before invoking the mutation RPC. This ensures it survives any mutation rollbacks.
-    4. Service invokes the narrowly scoped mutation RPC.
-    5. Mutation RPC writes a successful domain audit inside its database transaction.
-    6. The service appends a separate final outcome event to `public.workspace_audit_logs` sharing the same `correlation_id` (outcome = `succeeded` with null error code, `denied` with mandatory error code, or `failed` with mandatory error code).
+    1. Verify Platform Admin role
+    2. Verify step-up authentication
+    3. Validate action-specific permission
+    4. Validate mandatory reason
+    5. Validate correlation ID
+    6. Commit override.attempted in a separate transaction
+    7. Invoke narrow mutation RPC
+    8. Append override.succeeded, override.denied or override.failed
+    9. Keep attempted event even if mutation rolls back
 * **Prohibition of Broad Mutation Bypass**:
   * Generic Platform Admin `FOR ALL` policies on protected business tables are strictly prohibited.
   * Silent direct `UPDATE` or `DELETE` mutation access is prohibited.
@@ -444,7 +463,7 @@ Platform Admin actions bypass standard table-level workspace restrictions under 
   * Direct order approval, rejection, or qualification by Platform Admins is strictly prohibited.
   * Platform Admins must not qualify, approve, or reject order requests; Platform Admin status does not satisfy `qualify_order` authorization.
   * Audit-table mutations are prohibited.
-  * Overrides are implemented strictly via narrow read-only policies where operationally necessary, and hardened `SECURITY DEFINER` RPCs for mutations with explicit action-specific authorization, mandatory reason, correlation ID, step-up verification, and durable auditing.
+  * Overrides are implemented strictly via narrow read-only policies where operationally necessary, and hardened `SECURITY DEFINER` RPCs (enforcing `SET search_path = ''` and fully qualified references) for mutations with explicit action-specific authorization, mandatory reason, correlation ID, step-up verification, and durable auditing.
 * **Permitted Override Use Cases**:
   - Account unlock
   - Access reset
@@ -562,6 +581,7 @@ To drive dashboard metric summaries without executing heavy aggregate queries on
 
 ### A. Architectural Invariant for BR-004 ("No Consolidation")
 Cross-workspace portfolio aggregation, consolidated XIRR calculations, or merged performance APIs across multiple MFD relationships are strictly prohibited at database, view, and API levels.
+Specifically, "Family Portfolio aggregation" within the Family Hub refers to showing separately authorised family portfolios with context switching between isolated portfolios and workspace- or distributor-specific views. It does not mean merged holdings across distributors, consolidated XIRR across workspaces, merged returns, or cross-distributor performance concealment. BR-004 must be strictly preserved.
 
 ### B. Global Identity Resolution (BR-001 / P1-3)
 Single digital investor records use deterministic SHA-256 HMAC attributes inside profiles (`pan_hmac`, `normalised_phone_hmac`, `normalised_email_hmac`, and `identity_match_status`) to resolve matches.
