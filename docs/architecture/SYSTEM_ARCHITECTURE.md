@@ -1,7 +1,7 @@
 # Money Bowl — System Architecture Specification
-Document Version: v2.0.1-Canonical-Production-Freeze  
+Document Version: v2.1.0-Canonical-Production-Freeze  
 Target Repository Path: docs/architecture/SYSTEM_ARCHITECTURE.md  
-BRD Baseline: docs/business/BRD.md (v1.2.1)  
+BRD Baseline: docs/business/BRD.md (v1.3.0)  
 
 ## Revision History
 
@@ -19,6 +19,7 @@ BRD Baseline: docs/business/BRD.md (v1.2.1)
 | v1.9.0 | 2026-07-27 | BAI | Updated auto-approval fallback behavior, qualify_order RPC authorization safeguards, integrated cancel_order RPC function, and standardized family delegations as authoritative access sources. |
 | v2.0.0 | 2026-07-27 | BAI | Final permanent production freeze baseline, unified outbox-based auto-approval state flow, blocked direct advisor intervention on pending_qualification orders to prevent race conditions, and updated BC-005 taxonomy. |
 | v2.0.1 | 2026-07-27 | BAI | Incremented to address ChatGPT 5.5 review audit points. Corrected canonical order lifecycle, standardized outbox auto-approval workflow, added apply_auto_approval_decision RPC design, corrected qualify_order and cancel_order RPC definitions, expanded audit log coverage, and refined referral token security semantics. Further expanded in final pass to document canonical application-profile resolution, Family Delegation profile-ID corrections, cancellation identity hardening, Platform Admin narrow-RPC restrictions, dual subscription scope details, and referral conversion scope clarifications. |
+| v2.1.0 | 2026-07-28 | RAI | Aligned order execution schema and qualify_order permissions with BRD v1.3.0. Captured initiator and reviewer profile parameters allowing same MFD-side profile to both initiate and qualify. Expanded audit fields matrix and dual-subscription details. |
 
 ---
 
@@ -70,7 +71,7 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 * **Architecture Pattern**: Clean Architecture with BLoC / Provider state management organized into structured features (Data ➔ Domain ➔ Presentation).
 * **Core Modules**:
   * *Investor Workspace*: Portfolio view, Buy/Sell/Switch order initiation, Family delegation hub.
-  * *MFD Command Hub*: Transaction qualification queue, auto-approval threshold configuration, client onboarding.
+  * *MFD Command Hub*: Transaction qualification queue, auto-approval threshold configuration, client onboarding, and Distributor-assisted Buy/Sell/Switch initiation for actively mapped investors.
   * *PII Guardrails*: UI renders strictly server-authorized masked projections by default. Client-side formatting is supplementary and is never treated as a security boundary.
 
 ### B. Security & Identity Layer (Supabase Auth & RLS)
@@ -97,7 +98,7 @@ The following matrix maps Business Requirements Document (BRD) user personas to 
 
 | BRD Persona | Auth Role | Membership Role | Notes |
 | :--- | :--- | :--- | :--- |
-| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Role-authorised servicing and order-initiation capabilities within the Distributor’s own workspace, including initiating orders for actively mapped investors. No unrestricted business-table access. |
+| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Role-authorised servicing and order-initiation capabilities within the Distributor’s own workspace, including initiating orders for actively mapped investors. No unrestricted business-table access. The same authorised MFD-side profile may initiate and later qualify the same order. |
 | **Mapped Investor** | `investor` | `investor` | Active membership required to view details or initiate transactions. |
 | **Exploring Investor** | `investor` | `none` | Standalone explore access only; cannot access specific workspace datasets. |
 | **Family Guest** | `investor` | `none` required | Read-only delegated access driven strictly by an active, accepted family delegations record. |
@@ -146,7 +147,7 @@ The database layer uses specific PostgreSQL policies to guarantee Workspace Isol
 Order requests follow a single, unambiguous lifecycle flow to eliminate race conditions between auto-approval workers and manual MFD qualifications:
 
 ```text
-Client-only draft
+Initiator-side draft
   → pending_qualification
       ├── matching active auto-approval rule
       │     → auto_approved
@@ -158,7 +159,7 @@ Client-only draft
       │         ├── rejected
       │         └── cancelled
       │
-      └── investor cancellation
+      └── investor or MFD cancellation
             → cancelled
 ```
 
@@ -178,9 +179,12 @@ Client-only draft
     * `initiated_by_profile_id`: Identifies the authenticated profile of the user who created the request.
     * `initiated_by_role`: Captures the role of the initiator (`investor` or `distributor/advisor`).
     * `initiation_channel`: Records the origin/channel of the request (e.g., `investor_portal` or `advisor_portal`).
+    * `reviewed_by_profile_id`: Identifies the MFD user profile who qualified the order.
+    * `reviewed_at`: Enforces timestamp logging upon qualification outcomes.
   - The platform enforces the following server-side security checks:
     * **Investor Self-Initiation**: Investor-initiated orders must resolve the caller profile using `public.current_user_profile_id()` and bind it to `investor_profile_id` and `initiated_by_profile_id`. The workspace ID must match the investor's active workspace.
     * **Distributor-Assisted Initiation**: Distributor-initiated orders require that the caller has an active `workspace_owner` or `advisor` membership role in the target workspace. The target investor must have an active relationship record in that same workspace.
+    * **Same-Profile Initiation & Review Invariant**: `initiated_by_profile_id` and `reviewed_by_profile_id` may contain the same MFD-side profile ID. This is a valid workflow and must not be blocked.
     * **Caller Workspace Boundary**: The caller is prohibited from submitting an order request for any workspace other than the active one.
     * **Platform Admin Block**: Platform Admins are strictly prohibited from initiating or qualifying investor orders.
     * **Family Guest Block**: Family Guests are strictly prohibited from initiating orders for other family members' portfolios.
@@ -190,7 +194,7 @@ Client-only draft
 To ensure reliable, race-free operation, rule evaluation is decoupled from the transactional database path:
 
 ```text
-Investor inserts order_request
+Investor or authorised Distributor inserts order_request
 → order status = pending_qualification
 → order.created event is written to event_outbox
    in the same database transaction
@@ -402,6 +406,8 @@ Manual advisor qualification is routed through a separate, audited routine:
   7. Rejects cancellation attempts with `invalid_cancellation_state` if status is `auto_approved`, `approved`, or `rejected`.
   8. Rejects cancellation attempts with `already_cancelled` if status is `cancelled`. Repeated cancellation is strictly denied.
   9. Mutates status to `cancelled`, captures the reason, and writes an immutable audit record in `public.workspace_audit_logs` using database-loaded values inside the same transaction.
+      
+      *Note: The cancel_order function represents investor-owner cancellation or authorised MFD cancellation, subject to valid pending states and workspace authorization. Platform Admins and Family Guests have no order cancellation rights.*
   10. Privilege Contract:
       ```sql
       REVOKE ALL ON FUNCTION public.cancel_order(uuid, text) FROM PUBLIC;
@@ -511,7 +517,7 @@ DB Transaction ➔ [Write Business Data + Write event_outbox] ➔ Commit ➔ Pos
 
 All domain events are written to the `event_outbox` table within the primary database transaction. A listener or background agent dispatches these to Deno Edge workers with exponential retry policies.
 
-* **`order.created`**: Fired when an investor creates an order request. Triggers the auto-approval engine.
+* **`order.created`**: Fired when a mapped investor or authorised Distributor creates an order request. Triggers the auto-approval engine.
 * **`ticket.raised`**: Fired on customer support request. Routes alert notifications to the assigned advisor.
 * **`statement.imported`**: Fired upon statement completion. Re-calculates valuation history and updates the analytics dashboard.
 * **Mailbox Health Events**: Explicit system notification payloads:
@@ -627,14 +633,16 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 
 | Event / Action | Target Audit Fields | Location |
 | :--- | :--- | :--- |
-| **Order submission** | `actor_profile_id`, `workspace_id`, `entity_id`, `occurred_at` | `workspace_audit_logs` |
+| **Order submission** | `actor_profile_id`, `investor_profile_id`, `initiated_by_role`, `initiation_channel`, `workspace_id`, `entity_id`, `occurred_at` | `workspace_audit_logs` |
 | **Outbox event generation** | `entity_id`, `event_type`, `payload`, `occurred_at` | `event_outbox` |
 | **Auto-approval evaluation** | `rule_id`, `rule_version`, `entity_id`, `correlation_id` | `workspace_audit_logs` |
 | **Auto-approval match** | `rule_id`, `rule_version`, `entity_id`, `new_state` | `workspace_audit_logs` |
 | **Auto-approval fallback** | `entity_id`, `rule_id`, `rule_version`, `new_state` | `workspace_audit_logs` |
-| **Manual approval** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state` | `workspace_audit_logs` |
-| **Manual rejection** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state`, `reason` | `workspace_audit_logs` |
+| **Manual approval** | `actor_profile_id`, `investor_profile_id`, `initiated_by_profile_id`, `reviewed_by_profile_id`, `previous_state`, `new_state`, `occurred_at` | `workspace_audit_logs` |
+| **Manual rejection** | `actor_profile_id`, `investor_profile_id`, `initiated_by_profile_id`, `reviewed_by_profile_id`, `previous_state`, `new_state`, `reason`, `occurred_at` | `workspace_audit_logs` |
 | **Order cancellation** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state`, `reason` | `workspace_audit_logs` |
+
+*Note: initiated_by_profile_id and reviewed_by_profile_id may be equal for an authorised MFD-side workflow.*
 | **Auto-approval rule creation** | `actor_profile_id`, `entity_id` (`rule_id`), `new_state` | `workspace_audit_logs` |
 | **Auto-approval rule modification** | `actor_profile_id`, `entity_id` (`rule_id`), `previous_state`, `new_state` | `workspace_audit_logs` |
 | **Family delegation creation** | `actor_profile_id`, `entity_id`, `new_state` | `workspace_audit_logs` |
