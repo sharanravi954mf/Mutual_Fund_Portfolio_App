@@ -7,12 +7,18 @@ LINK_PATTERN = re.compile(r'\[([^\]]*)\]\(([^)]+)\)')
 
 # Required directories in the documentation structure
 REQUIRED_DIRS = [
-    "docs/product",
+    "docs/business",
     "docs/architecture",
-    "docs/engineering",
-    "docs/governance",
-    "docs/ai",
-    "docs/audit"
+    "docs/sprints",
+]
+
+# Canonical documentation files required by repository governance
+REQUIRED_FILES = [
+    "docs/PROJECT_STATE.md",
+    "docs/CHANGELOG.md",
+    "docs/business/BRD.md",
+    "docs/architecture/SYSTEM_ARCHITECTURE.md",
+    "docs/sprints/Sprint-6.1.md",
 ]
 
 def check_utf8(filepath):
@@ -98,7 +104,7 @@ def main():
     print("========================================")
 
     # 1. Check folder structure
-    print("\n[1/4] Verifying folder structure...")
+    print("\n[1/5] Verifying folder structure...")
     for folder in REQUIRED_DIRS:
         target = os.path.join(root_dir, folder)
         if not os.path.isdir(target):
@@ -108,7 +114,17 @@ def main():
             print(f"✅ Found directory: {folder}")
 
     # 2. Walk and audit files
-    print("\n[2/4] Auditing markdown files...")
+    print("\n[2/5] Verifying canonical documentation files...")
+    for doc_file in REQUIRED_FILES:
+        target = os.path.join(root_dir, doc_file)
+        if not os.path.isfile(target):
+            print(f"❌ Error: Required documentation file missing: {doc_file}")
+            has_errors = True
+        else:
+            print(f"✅ Found file: {doc_file}")
+
+    # 3. Walk and audit files
+    print("\n[3/5] Auditing markdown files...")
     all_files = []
     for root, dirs, files in os.walk(root_dir):
         # Exclude directories like .git, .dart_tool, build, node_modules
@@ -152,12 +168,12 @@ def main():
 
     print("\n")
 
-    # 3. Check for specific anchor rules (no duplicate headers)
-    print("[3/4] Validating anchor rules...")
+    # 4. Check for specific anchor rules (no duplicate headers)
+    print("[4/5] Validating anchor rules...")
     print("✅ Header anchors validated.")
 
-    # 4. Final verification status
-    print("\n[4/4] Verification Summary:")
+    # 5. Final verification status
+    print("\n[5/5] Verification Summary:")
     if has_errors:
         print("❌ Documentation Quality check FAILED. Please resolve the errors listed above.")
         sys.exit(1)

@@ -1,6 +1,8 @@
 import sys
 import re
 import subprocess
+import json
+import os
 
 # Regex to match Conventional Commits format
 CONVENTIONAL_PATTERN = re.compile(
@@ -12,6 +14,58 @@ def validate_msg(msg):
     if msg.startswith("Merge branch") or msg.startswith("Merge pull request") or msg.startswith("Merge commit"):
         return True
     return bool(CONVENTIONAL_PATTERN.match(msg))
+
+def commits_from_push_event():
+    if os.environ.get("GITHUB_EVENT_NAME") != "push":
+        return None
+
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return None
+
+    try:
+        with open(event_path, "r", encoding="utf-8") as event_file:
+            event = json.load(event_file)
+    except Exception as e:
+        print(f"Failed to read GitHub push event payload: {e}")
+        return None
+
+    before = event.get("before")
+    after = event.get("after")
+    if not after:
+        return None
+
+    zero_sha = "0" * 40
+    revision = after if not before or before == zero_sha else f"{before}..{after}"
+
+    try:
+        return subprocess.check_output(
+            ["git", "log", "--format=%s", revision],
+            universal_newlines=True
+        ).splitlines()
+    except Exception as e:
+        print(f"Failed to read pushed commit range {revision}: {e}")
+        return None
+
+def commits_from_develop_range():
+    try:
+        base = subprocess.check_output(
+            ["git", "merge-base", "HEAD", "origin/develop"],
+            universal_newlines=True
+        ).strip()
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            universal_newlines=True
+        ).strip()
+        if not base or base == head:
+            return None
+        return subprocess.check_output(
+            ["git", "log", "--format=%s", f"{base}..HEAD"],
+            universal_newlines=True
+        ).splitlines()
+    except Exception as e:
+        print(f"Failed to read branch commits against origin/develop: {e}")
+        return None
 
 def main():
     if len(sys.argv) > 1:
@@ -25,16 +79,25 @@ def main():
         print(f"✅ Valid format: '{msg}'")
         sys.exit(0)
     else:
-        # Validate the last 5 commits locally
-        print("Checking recent commits...")
-        try:
-            commits = subprocess.check_output(
-                ["git", "log", "-n", "5", "--format=%s"],
-                universal_newlines=True
-            ).splitlines()
-        except Exception as e:
-            print(f"Failed to read git logs: {e}")
-            sys.exit(1)
+        # Validate only the pushed range in CI. Locally, prefer the branch range
+        # against develop before falling back to recent history.
+        commits = commits_from_push_event()
+        if commits is None:
+            commits = commits_from_develop_range()
+            if commits is None:
+                print("Checking recent commits...")
+                try:
+                    commits = subprocess.check_output(
+                        ["git", "log", "-n", "5", "--format=%s"],
+                        universal_newlines=True
+                    ).splitlines()
+                except Exception as e:
+                    print(f"Failed to read git logs: {e}")
+                    sys.exit(1)
+            else:
+                print("Checking branch commits against origin/develop...")
+        else:
+            print("Checking pushed commits...")
 
         has_errors = False
         for commit in commits:
