@@ -7,8 +7,8 @@ Target Repository Path: docs/PROJECT_STATE.md
 - **Current Mission**: Provide a premium, responsive Mutual Fund Portfolio Tracker supporting relationship-isolated portfolios, advisor qualifications, AMFI factsheets, dual subscriptions, Family Access, referrals, educational AI, and immutable auditing across Web and Mobile platforms.
 - **Current Vision**: Securely track investor mutual fund portfolios, compile transaction histories, analyze annualized returns (XIRR), manage advisor ingestion/qualification reviews, and coordinate family delegation and subscriber billing workflows under strict compliance constraints.
 - **Current Phase**: Phase 3 (Documentation Platform and Operational Systems).
-- **Architecture Status**: Canonical baseline approved
-- **Documentation Status**: Aligned after this correction
+- **Architecture Status**: Canonical v2.1.0 baseline approved
+- **Documentation Status**: Aligned and certified
 - **Application Status**: Pre-alpha implementation in progress
 - **Application Implementation**: In Progress
 - **Current Release Target**: v1.2.0-alpha
@@ -33,7 +33,7 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Current Epic**: Core Platform Implementation
 - **Current Milestone**: User Management & Workspace Foundation Implemented
 - **Current Sprint**: Sprint 6.1 — Order Execution Engine, Subscriptions & Schema Extensions
-- **Active Baselines**: BRD v1.2.1 | SYSTEM_ARCHITECTURE v2.0.1-Canonical-Production-Freeze
+- **Active Baselines**: BRD v1.3.0 | SYSTEM_ARCHITECTURE v2.1.0
 - **Sprint 6.1 Status**: Ready to Start
 - **Architecture Completion**: Complete
 - **Release Readiness**: Not Ready

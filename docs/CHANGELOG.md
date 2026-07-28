@@ -9,6 +9,16 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ## Architecture and Documentation Baselines
 
+### [v2.1.0 / v1.3.0] — 2026-07-28
+
+#### Changed
+- **Distributor-Assisted Initiation**: Authorized MFD-side users (workspace owners/advisors) can now initiate orders on behalf of actively mapped investors within their workspace.
+- **Same-Profile Initiation & Qualification**: Explicitly permitted MFD-side profile to both initiate and qualify/approve/reject the same order request. Visible trace preserved in audit record (maker-checker requirement removed).
+- **Metadata & Audit Hardening**: Expanded order submission and manual qualification audit fields matrix (actor, investor, initiator, reviewer, states, reason).
+- **Subscription Domain Wording**: Clarified billing ownership, subscription lifecycle, and feature entitlements tracking across both MFD and Investor tiers.
+- **Family Portfolio viewing limits**: Standardized viewing to consent-backed separate workspace switching, preserving no cross-distributor consolidation rules (BR-004).
+- **GitHub Issue alignment**: Synchronized checklist and Issue scopes (#29, #30, #34, #35, #48, #51, #60).
+
 ### [v2.0.1] — 2026-07-27
 
 #### Added
@@ -200,24 +210,26 @@ Release v1.1.0 introduces significant upgrades to the Admin Dashboard (Invoice S
 
 ---
 
-## [v0.7.0-alpha] — 2026-07-22
+## Historical Development Milestones
 
-### Summary
+### [v0.7.0-alpha] — 2026-07-22 (Internal Milestone)
+
+#### Summary
 Sprint 5.2 – Secure PAN Verification for client account linking.
 
-### Major Additions & Changes
+#### Major Additions & Changes
 - **PAN Verification Workflow**: Masked PAN lookups and Vault-backed encryption at rest.
 - **Opaque Candidate-Tokens**: Token-bound approval mechanisms preventing UUID leak.
 - **Immutable Request Evidence**: Safe conflict categorizations and audit records.
 
 ---
 
-## [v0.6.1-alpha] — 2026-07-22
+### [v0.6.1-alpha] — 2026-07-22 (Internal Milestone)
 
-### Summary
+#### Summary
 Sprint 4 – Onboarding and Identity Foundations.
 
-### Major Additions & Changes
+#### Major Additions & Changes
 - **Separated Identities**: Isolated Supabase Auth credentials from business profile records.
 - **Advisor verification queues**: Verification assignment structures.
 - **Row Level Security (RLS)**: Enforced client select filters based on active investor links.

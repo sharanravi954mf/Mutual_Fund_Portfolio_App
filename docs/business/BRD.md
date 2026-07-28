@@ -1,8 +1,15 @@
 # Money Bowl (Codename) — Business Requirements Document (BRD)
-Document Version: v1.2.1 (Final Approved Baseline)  
+Document Version: v1.3.0 (Final Approved Baseline)  
 Product Category: AI-Powered Mutual Fund Relationship & Execution Platform  
 Target Repository Path: docs/business/BRD.md  
 Status: Canonical Bible — Frozen for Technical Architecture & Implementation  
+
+## Revision History
+
+| Version | Date | Author | Description |
+| :--- | :--- | :--- | :--- |
+| v1.2.1 | 2026-07-25 | BAI | Approved canonical requirements baseline. |
+| v1.3.0 | 2026-07-28 | RAI | Updated BR-005, FR-005, FR-006, and role matrix to support distributor-assisted order initiation and same MFD-side initiator/qualifier rule. Clarified Family Portfolio Viewing limits and PII masking criteria. |
 
 ## 1. Product Vision & Executive Summary
 Money Bowl (Codename) is an AI-powered Mutual Fund Relationship & Execution Management Platform that enables distributors and investors to manage, understand, service, explore, and transact mutual fund portfolios through intelligent automation, secure collaboration, AMFI scheme intelligence, and educational AI assistance.  
@@ -64,7 +71,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 
 **Investor Tiers**:
 * *Free Exploring Tier*: Single distributor portfolio view, public scheme search & factsheet navigation, basic AI companion access, and referral privileges.
-* *Premium Investor Tier*: Multi-advisor portfolio flipping, consent-backed Family Portfolio aggregation, advanced capital gains/tax projections, and priority support routing.
+* *Premium Investor Tier*: Multi-advisor portfolio flipping, consent-backed Family Portfolio viewing with separate portfolio context switching; no merged holdings, returns or XIRR across Distributor relationships, advanced capital gains/tax projections, and priority support routing.
 
 ### 3.2 Referral & Viral Growth Engine
 * **Investor Referral System**: Every registered investor receives a unique referral code/link.
@@ -81,7 +88,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 | View MFD Dashboard & Order Queue | ❌ No | ✅ Own Book | ❌ No | ❌ No | ❌ No |
 | View Mapped Client Portfolios | ❌ No | ✅ Own Clients | ✅ Own View | ❌ No | ✅ Delegated |
 | Initiate Buy / Sell / Switch Orders | ❌ No | ✅ Yes — for own actively mapped investors | ✅ Yes — within active mapped relationship | ❌ No | ❌ No |
-| Approve / Qualify Order Requests | ❌ No | ✅ Assigned | ❌ No | ❌ No | ❌ No |
+| Approve / Qualify Order Requests | ❌ No | ✅ Yes — assigned or authorised within own workspace | ❌ No | ❌ No | ❌ No |
 | Configure Auto-Approval Rules | ❌ No | ✅ Own Workspace | ❌ No | ❌ No | ❌ No |
 | Navigate Scheme Factsheets (AMFI) | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
 | Global App Search & Discovery Bar | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
@@ -89,12 +96,14 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 | Grant / Revoke Family Access | ✅ Audited support intervention only | ✅ Assisted | ✅ Owner | ❌ No | ❌ No |
 | Interact with Educational AI | ✅ Testing | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Read-Only |
 
+*Note: The same authorised MFD-side user may initiate and later qualify the same order. This does not grant investors any qualification authority.*
+
 ## 5. Business Capabilities Taxonomy (BC-001 – BC-018)
 * **BC-001 Identity & Access Management**: Secure multi-role authentication (Admin, Advisor, Investor), session management, and password recovery.  
 * **BC-002 Distributor Lifecycle Management**: MFD self-registration, ARN/certificate upload, Admin review, approval/rejection, and subscription activation.  
 * **BC-003 Investor Lifecycle Management**: Single logical digital identity management for mapped and exploring standalone investors.  
 * **BC-004 Relationship Management**: Binding investors to distributors, enforcing relationship isolation, and enabling relationship context switching.  
-* **BC-005 Portfolio Management**: Presenting scheme holdings, transactions, current NAV, returns (XIRR, absolute gains), and capital gains per relationship.  
+* **BC-005 Portfolio & Order Execution**: Presenting scheme holdings, transactions, returns (XIRR, absolute gains), and capital gains per relationship; initiating Buy, Sell, and Switch order requests (both investor self-initiated and distributor-assisted), managing queue qualification, auto-approvals, and the complete execution lifecycle.  
 * **BC-006 Registrar Data Ingestion**: Background IMAP mailbag polling, PDF/CAS statement extraction, and parser normalization (CAMS / KFintech).  
 * **BC-007 Educational AI Assistance**: AI companion providing financial jargon decoding, portfolio mechanics explanations, static calculators, and ticket handoff.  
 * **BC-008 Customer Servicing (Ticketing)**: Servicing desk allowing investors to raise queries routed directly to their assigned distributor's queue.  
@@ -133,7 +142,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **BR-002 Multi-Tenancy**: An Investor can have N distributor relationships attached to their single master profile under isolated views.  
 * **BR-003 Isolation**: A Distributor can never view or query investor holdings executed under another distributor's ARN.  
 * **BR-004 No Consolidation**: Money Bowl shall not present a merged return view across different distributors to prevent concealing advisor performance.  
-* **BR-005 Transactions**: Buy, Sell and Switch order requests may be initiated by a mapped investor or by an authorised Distributor acting for an actively mapped investor within the Distributor’s workspace. All transaction requests require Distributor approval or active Auto-Approval rules.  
+* **BR-005 Transactions**: Buy, Sell and Switch order requests may be initiated by a mapped investor or by an authorised Distributor acting for an actively mapped investor within the Distributor’s own workspace. Orders require an active auto-approval rule or manual qualification by an authorised MFD user. The same MFD-side user may initiate and later qualify the order. Investors, Platform Admins and Family Guests cannot qualify orders.  
 * **BR-006 Auto-Approval**: Distributors can configure Auto-Approval rules for specific transaction types, amounts, or trusted clients.  
 * **BR-007 Admin Override**: Platform Admins possess supersede access rights to unlock accounts, assist uneducated users, and perform access resets.  
 * **BR-008 Data Masking**: PII data (PAN, Bank Accounts) must be masked by default across all portal views.  
@@ -151,8 +160,8 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **FR-004**: Platform shall strictly mask sensitive PII (PAN, Bank details) by default across UI screens (e.g., XXXXX1234F).  
 
 ### 8.2 Order Execution, AMFI Factsheets & Universal Search (BC-004, BC-005, BC-015, BC-017)
-* **FR-005**: Platform shall enable Mapped Investors to initiate Buy, Sell, and Switch order requests within their assigned distributor relationship view, and enable authorised Distributors to initiate Buy, Sell, and Switch order requests on behalf of actively mapped investors within their own workspace and relationship boundary.  
-* **FR-006**: Platform shall route order requests directly to the mapped Distributor's Transaction Approval Queue.  
+* **FR-005**: Platform shall enable Mapped Investors to initiate self-initiated Buy, Sell, and Switch order requests, and enable authorised Distributors to initiate order requests on behalf of actively mapped investors within the same workspace. The platform must capture both initiator and investor beneficiary identity parameters, while denying order initiation privileges to Platform Admins, Family Guests, and unrelated MFDs.
+* **FR-006**: Platform shall route order requests directly to the mapped Distributor's Transaction Approval Queue. The approval queue interface must display the target investor, initiator, initiator role, initiation channel, order status, and an informational marker indicating whether the reviewing MFD user is also the initiator (same-user initiation and qualification is permitted and must not be blocked).  
 * **FR-007**: Platform shall provide a Universal Search & Discovery Bar in the top navigation bar to query schemes, folios, transactions, documents, and support tickets.  
 * **FR-008**: Platform shall render detailed Scheme Factsheets (backed by local PostgreSQL tables and updated via free AMFI public APIs) displaying AMC details, category, NAV history, expense ratio, riskometer, and top holdings.  
 
@@ -167,7 +176,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **FR-014**: Platform shall enable Investors to raise support tickets directly or via AI Assistant handoff to their Distributor's queue.  
 
 ## 9. Product Scope Boundaries (v1.2 Baseline)
-* **In Scope**: Mutual Fund Portfolio Management, Investor Order Requests (Buy/Sell/Switch), MFD Transaction Approval Queue, Dual Subscription Engine, AMFI Scheme Factsheets (Free API Sync), Universal Search & Discovery Bar, Investor Referral System, Exploring Standalone Investor Flow, Admin Supersede & Override, Mandatory PII Security & Masking.
+* **In Scope**: Mutual Fund Portfolio Management, Investor and Distributor-assisted Order Requests (Buy/Sell/Switch), MFD Transaction Approval Queue, Dual Subscription Engine, AMFI Scheme Factsheets (Free API Sync), Universal Search & Discovery Bar, Investor Referral System, Exploring Standalone Investor Flow, Admin Supersede & Override, Mandatory PII Security & Masking.
 * **Out of Scope**: Direct Unassisted / Unadvised Order Execution (Without MFD), Direct Stock/Equity Tracking, Insurance, FDs, or Crypto, Personalized AI Investment Advice / Scheme Routing, Automated Portfolio Rebalancing, Tax Filing & IT Returns.
 
 ## 10. Non-Functional Requirements & Business SLAs
