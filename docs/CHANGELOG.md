@@ -1,4 +1,5 @@
 # Changelog
+Target Repository Path: docs/CHANGELOG.md
 
 All notable completed releases of Money Bowl are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
 
@@ -11,7 +12,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ### [v2.0.1] — 2026-07-27
 
 #### Added
-- Added corrective Sprint 6.1 migrations `20260801000001_sprint_6_1_canonical_hardening.sql` and `20260801000002_sprint_6_1_final_hardening.sql`. No previously deployed migration was rewritten.
+- Corrective Sprint 6.1 migration files were added to the repository.
 - Platform Admin role wording correction in the role matrix notes.
 - Removal of broad Platform Admin policies on `auto_approval_rules` and `event_outbox`.
 - Family Access lifecycle RPC scope explicitly defined and restricted.
@@ -176,6 +177,11 @@ Release v1.2.1 establishes the finalized canonical specification baseline for Bu
 ---
 
 ## Application Releases
+
+## [Unreleased] — Target v1.2.0-alpha
+
+### Planned
+- Sprint 6.1 implementation outcomes.
 
 ---
 

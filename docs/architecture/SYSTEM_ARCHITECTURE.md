@@ -97,7 +97,7 @@ The following matrix maps Business Requirements Document (BRD) user personas to 
 
 | BRD Persona | Auth Role | Membership Role | Notes |
 | :--- | :--- | :--- | :--- |
-| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Own workspace scope. Full write capabilities within workspace boundaries. |
+| **Distributor** | `mfd` | `workspace_owner` / `advisor` | Role-authorised servicing and order-initiation capabilities within the Distributor’s own workspace, including initiating orders for actively mapped investors. No unrestricted business-table access. |
 | **Mapped Investor** | `investor` | `investor` | Active membership required to view details or initiate transactions. |
 | **Exploring Investor** | `investor` | `none` | Standalone explore access only; cannot access specific workspace datasets. |
 | **Family Guest** | `investor` | `none` required | Read-only delegated access driven strictly by an active, accepted family delegations record. |
@@ -139,7 +139,7 @@ The database layer uses specific PostgreSQL policies to guarantee Workspace Isol
   - It returns exactly one application profile ID or null.
   - Missing or ambiguous mappings fail closed.
   - Security-sensitive callers, RLS policies, and RPCs must deny access when the helper returns null.
-  - The helper must use hardened execution permissions (`SECURITY DEFINER`, fixed search path `SET search_path = public, pg_temp`, revoking execution from `PUBLIC` except as explicitly authorised).
+  - The helper must use hardened execution permissions (`SECURITY DEFINER`, fixed search path `SET search_path = ''`, revoking execution from `PUBLIC` except as explicitly authorised).
   - The mapping from Auth account (`auth.users.id`) to application profile (`public.profiles.id`) is enforced as unique in the database schema.
 
 ### A. Unified Order Lifecycle
@@ -170,6 +170,21 @@ Client-only draft
   * Investors can cancel only their own orders. Cancellation is permitted only while the order is in `pending_qualification` or `pending_review` status.
   * Cancellations are rejected if the order is already in `auto_approved`, `approved`, `rejected`, or `cancelled` statuses.
   * Status transitions between `auto_approved` ➔ `approved`, `auto_approved` ➔ `rejected`, or `pending_review` ➔ `auto_approved` are strictly prohibited.
+
+* **Order Execution Security & Metadata Boundary**:
+  - The `order_requests` database table explicitly separates and maps the following identifiers:
+    * `workspace_id`: Identifies the target workspace where the order request belongs.
+    * `investor_profile_id`: Identifies the investor whose portfolio and mutual fund assets are affected by the order.
+    * `initiated_by_profile_id`: Identifies the authenticated profile of the user who created the request.
+    * `initiated_by_role`: Captures the role of the initiator (`investor` or `distributor/advisor`).
+    * `initiation_channel`: Records the origin/channel of the request (e.g., `investor_portal` or `advisor_portal`).
+  - The platform enforces the following server-side security checks:
+    * **Investor Self-Initiation**: Investor-initiated orders must resolve the caller profile using `public.current_user_profile_id()` and bind it to `investor_profile_id` and `initiated_by_profile_id`. The workspace ID must match the investor's active workspace.
+    * **Distributor-Assisted Initiation**: Distributor-initiated orders require that the caller has an active `workspace_owner` or `advisor` membership role in the target workspace. The target investor must have an active relationship record in that same workspace.
+    * **Caller Workspace Boundary**: The caller is prohibited from submitting an order request for any workspace other than the active one.
+    * **Platform Admin Block**: Platform Admins are strictly prohibited from initiating or qualifying investor orders.
+    * **Family Guest Block**: Family Guests are strictly prohibited from initiating orders for other family members' portfolios.
+    * **Audit Trait Persistence**: The initiator's profile, role, and the beneficiary investor's profile must be recorded immutably in the central workspace audit logs.
 
 ### B. Decoupled Event-Driven Auto-Approval Workflow
 To ensure reliable, race-free operation, rule evaluation is decoupled from the transactional database path:
@@ -547,8 +562,10 @@ To protect user privacy and prevent tracking vulnerabilities, referrers are reso
 ---
 
 ## 13. Dual Subscription & Feature Gating Engine (BC-009 / BR-011)
-* **State Machine**: `trialing` ➔ `active` ➔ `past_due` ➔ `suspended` ➔ `cancelled`.
-* **Starter limits**: Gated at 25 mapped clients. Upgrades require active checkout session confirmations.
+* **Tiers & State Machine**:
+  - State Machine: `trialing` ➔ `active` ➔ `past_due` ➔ `suspended` ➔ `cancelled`.
+  - Enforces feature entitlements, billing ownership, subscription lifecycle, and usage limits for both Distributor and Investor subscription tiers.
+* **Distributor Starter limits**: Gated at 25 mapped clients. Upgrades require active checkout session confirmations.
 * **Plan Entitlements Model (P1-1)**: Subscription features are gated via `plan_entitlements` records mappings:
   * Keys: `max_active_investors`, `mailbag_ingestion_enabled`, `auto_approval_enabled`, `white_label_enabled`, `crm_enabled`, `multi_advisor_enabled`, `family_hub_enabled`, `capital_gain_projection_enabled`, `priority_support_enabled`, `advanced_analytics_enabled`, `support_sla_policy_id`.
 * **Idempotency**: Webhook payment events use unique payment IDs to prevent double-charging or double-crediting.
@@ -581,7 +598,7 @@ To drive dashboard metric summaries without executing heavy aggregate queries on
 
 ### A. Architectural Invariant for BR-004 ("No Consolidation")
 Cross-workspace portfolio aggregation, consolidated XIRR calculations, or merged performance APIs across multiple MFD relationships are strictly prohibited at database, view, and API levels.
-Specifically, "Family Portfolio aggregation" within the Family Hub refers to showing separately authorised family portfolios with context switching between isolated portfolios and workspace- or distributor-specific views. It does not mean merged holdings across distributors, consolidated XIRR across workspaces, merged returns, or cross-distributor performance concealment. BR-004 must be strictly preserved.
+Specifically, the platform enforces consent-backed Family Portfolio viewing with separate portfolio context switching; no merged holdings, returns or XIRR across Distributor relationships. The architecture strictly prohibits cross-workspace portfolio merging, consolidated XIRR across Distributors, merged return views, and concealment of individual Distributor performance, in strict preservation of BR-004.
 
 ### B. Global Identity Resolution (BR-001 / P1-3)
 Single digital investor records use deterministic SHA-256 HMAC attributes inside profiles (`pan_hmac`, `normalised_phone_hmac`, `normalised_email_hmac`, and `identity_match_status`) to resolve matches.
@@ -590,7 +607,7 @@ Single digital investor records use deterministic SHA-256 HMAC attributes inside
 All sensitive attributes are classified and protected at rest and in transit:
 * **Target List**: `Aadhaar number` (and Aadhaar-derived identifiers), `PAN`, `Bank Account Numbers`, `IFSC`, `Phone`, `Email`, `Date of Birth`, `Nominee Details`, `Statement Passwords`, and `Mailbox OAuth Credentials`.
 * **Aadhaar Exclusion Rule**: Aadhaar is strictly excluded from general database search indexes or application log payloads, displaying strictly as masked projections.
-* **Remediation Policy**: Encrypted using AES-256 keys managed by the Supabase Vault. Returns strictly server-authorized masked projections by default. Reveals trigger step-up MFA/OTP validations, writing immutable audit logs to `pii.revealed` in the central audit queue.
+* **Remediation Policy**: Encrypted using AES-256 keys managed by the Supabase Vault. Returns strictly server-authorized masked projections by default. Revealing sensitive information requires explicit step-up authentication and immutable audit logging to `pii.revealed` in the central audit queue.
 
 ### D. System-Wide Non-Functional Requirements (NFR-001 - NFR-005)
 * **`NFR-001` (Data Security & Masking)**: Sensitive PII attributes encrypted at rest & masked by default; step-up MFA reveal.
@@ -646,7 +663,7 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **BC-006** (Ingestion) | Distributor | `FR-009` | `BR-003` (Secondary check) | `NFR-004` | `cams-kfintech-ingestion` Edge function, `transactions`, `folios` |
 | **BC-007** (Educational AI) | Distributor, Mapped Investor, Exploring Investor, Family Guest (read-only), Platform Admin (testing) | `FR-012`, `FR-013`, `FR-014` | `BR-010` | N/A | `ai-helper` Edge worker, declination guard gate |
 | **BC-008** (Ticketing) | Investor, Distributor | `FR-014` | N/A | N/A | `support_tickets` |
-| **BC-009** (Subscriptions) | Distributor, Mapped Investor, Exploring Investor | `FR-010` | `BR-011` | N/A | `subscription_plans`, `workspace_billing`, `payment_events`, `plan_entitlements` |
+| **BC-009** (Subscriptions) | Distributor, Mapped Investor, Exploring Investor | `FR-010` | `BR-011` | N/A | `subscription_plans`, `workspace_billing`, `investor_subscriptions`, `payment_events`, `plan_entitlements` |
 | **BC-010** (Platform Admin) | Platform Admin | `FR-003` | `BR-007` | `NFR-005` | `platform_admin_read_policies`, `platform_admin_override_rpcs`, `workspace_audit_logs` |
 | **BC-011** (Lineage) | None | N/A | Auditability Principle | `NFR-005` | `ingestion_logs` (Immutable) |
 | **BC-012** (Notifications) | Investor, Distributor | FR-014 plus BC-triggered events | BR-009 (family consent notifications) | N/A | `notifications`, `notification_retry_queue` |
@@ -655,7 +672,7 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **BC-015** (Search) | Investor, Distributor | `FR-007` | N/A | `NFR-002` | GIN search index projections, `searchable_tools` |
 | **BC-016** (Platform Config) | Platform Admin | N/A | BR-006, BR-010, BR-012 | N/A | platform_settings, feature_flags, notification_templates, registrar_configs, ai_guardrail_versions (Design Principle: "Configuration over Customisation") |
 | **BC-017** (AMFI Scheme Factsheets & Market Data) | Investor, Distributor | `FR-008` | `BR-012` | N/A | `amfi_factsheets` table, `amfi-nav-worker` cron Edge function |
-| **BC-018** (Referral Engine) | Investor | `FR-011` | Product Design Principle #5 | N/A | `investor_referrals`, `referral_rewards` |
+| **BC-018** (Referral Engine) | Investor | `FR-011` | Product Design Principle #5 | N/A | `investor_referrals`, `referral_conversions`, `referral_rewards` |
 
 ---
 

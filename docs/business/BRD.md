@@ -80,13 +80,13 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 | Configure Mailbag Connection (IMAP) | ❌ No | ✅ Own Mailbox | ❌ No | ❌ No | ❌ No |
 | View MFD Dashboard & Order Queue | ❌ No | ✅ Own Book | ❌ No | ❌ No | ❌ No |
 | View Mapped Client Portfolios | ❌ No | ✅ Own Clients | ✅ Own View | ❌ No | ✅ Delegated |
-| Initiate Buy / Sell / Switch Orders | ❌ No | ❌ No | ✅ Mapped MFD | ❌ No | ❌ No |
+| Initiate Buy / Sell / Switch Orders | ❌ No | ✅ Yes — for own actively mapped investors | ✅ Yes — within active mapped relationship | ❌ No | ❌ No |
 | Approve / Qualify Order Requests | ❌ No | ✅ Assigned | ❌ No | ❌ No | ❌ No |
 | Configure Auto-Approval Rules | ❌ No | ✅ Own Workspace | ❌ No | ❌ No | ❌ No |
 | Navigate Scheme Factsheets (AMFI) | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
 | Global App Search & Discovery Bar | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
 | Generate & Share Referral Links | ❌ No | ❌ No | ✅ Yes | ✅ Yes | ❌ No |
-| Grant / Revoke Family Access | ✅ Override | ✅ Assisted | ✅ Owner | ❌ No | ❌ No |
+| Grant / Revoke Family Access | ✅ Audited support intervention only | ✅ Assisted | ✅ Owner | ❌ No | ❌ No |
 | Interact with Educational AI | ✅ Testing | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Read-Only |
 
 ## 5. Business Capabilities Taxonomy (BC-001 – BC-018)
@@ -133,7 +133,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **BR-002 Multi-Tenancy**: An Investor can have N distributor relationships attached to their single master profile under isolated views.  
 * **BR-003 Isolation**: A Distributor can never view or query investor holdings executed under another distributor's ARN.  
 * **BR-004 No Consolidation**: Money Bowl shall not present a merged return view across different distributors to prevent concealing advisor performance.  
-* **BR-005 Transactions**: All Investor transaction requests (Buy/Sell/Switch) require Distributor approval or active Auto-Approval rules.  
+* **BR-005 Transactions**: Buy, Sell and Switch order requests may be initiated by a mapped investor or by an authorised Distributor acting for an actively mapped investor within the Distributor’s workspace. All transaction requests require Distributor approval or active Auto-Approval rules.  
 * **BR-006 Auto-Approval**: Distributors can configure Auto-Approval rules for specific transaction types, amounts, or trusted clients.  
 * **BR-007 Admin Override**: Platform Admins possess supersede access rights to unlock accounts, assist uneducated users, and perform access resets.  
 * **BR-008 Data Masking**: PII data (PAN, Bank Accounts) must be masked by default across all portal views.  
@@ -151,7 +151,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **FR-004**: Platform shall strictly mask sensitive PII (PAN, Bank details) by default across UI screens (e.g., XXXXX1234F).  
 
 ### 8.2 Order Execution, AMFI Factsheets & Universal Search (BC-004, BC-005, BC-015, BC-017)
-* **FR-005**: Platform shall enable Mapped Investors to initiate Buy, Sell, and Switch order requests within their assigned distributor relationship view.  
+* **FR-005**: Platform shall enable Mapped Investors to initiate Buy, Sell, and Switch order requests within their assigned distributor relationship view, and enable authorised Distributors to initiate Buy, Sell, and Switch order requests on behalf of actively mapped investors within their own workspace and relationship boundary.  
 * **FR-006**: Platform shall route order requests directly to the mapped Distributor's Transaction Approval Queue.  
 * **FR-007**: Platform shall provide a Universal Search & Discovery Bar in the top navigation bar to query schemes, folios, transactions, documents, and support tickets.  
 * **FR-008**: Platform shall render detailed Scheme Factsheets (backed by local PostgreSQL tables and updated via free AMFI public APIs) displaying AMC details, category, NAV history, expense ratio, riskometer, and top holdings.  
@@ -171,7 +171,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **Out of Scope**: Direct Unassisted / Unadvised Order Execution (Without MFD), Direct Stock/Equity Tracking, Insurance, FDs, or Crypto, Personalized AI Investment Advice / Scheme Routing, Automated Portfolio Rebalancing, Tax Filing & IT Returns.
 
 ## 10. Non-Functional Requirements & Business SLAs
-* **NFR-001 Data Security & Masking**: All sensitive user attributes (PAN, Aadhaar, Bank Account Numbers) must be masked at rest and on UI screens (XXXXX1234F), requiring explicit step-up authentication to reveal.
+* **NFR-001 Data Security & Masking**: All sensitive user attributes (PAN, Aadhaar, Bank Account Numbers) must be encrypted at rest and masked by default in user-facing views. Revealing sensitive information requires explicit step-up authentication and immutable audit logging.
 * **NFR-002 Universal Search Latency**: Universal search queries across schemes, folios, and documents must return filtered results within 200 milliseconds.
 * **NFR-003 Order Routing SLA**: Submitted Buy/Sell/Switch order requests must appear in the Distributor's approval queue in under 5 seconds.
 * **NFR-004 Statement Processing SLA**: Ingested mailbag CAS attachments must be processed into updated portfolio records within 15 minutes.  
