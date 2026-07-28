@@ -51,6 +51,7 @@ DECLARE
   v_reviewer_mismatch_count pg_catalog.int8;
   v_reviewed_at_without_reviewer_count pg_catalog.int8;
   v_reviewer_without_reviewed_at_count pg_catalog.int8;
+  v_incomplete_reviewer_count pg_catalog.int8;
   v_reviewer_relationship_count pg_catalog.int8;
 BEGIN
   SELECT pg_catalog.count(*) INTO v_missing_count
@@ -109,6 +110,22 @@ BEGIN
     RAISE EXCEPTION 'advisor_workspace_relationship_required_existing_rows: % offending rows', v_advisor_initiator_count;
   END IF;
 
+  SELECT pg_catalog.count(*) INTO v_reviewer_mismatch_count
+  FROM public.order_requests AS o
+  WHERE o.reviewed_by IS NOT NULL
+    AND o.reviewed_by_profile_id IS NOT NULL
+    AND o.reviewed_by <> o.reviewed_by_profile_id;
+
+  IF v_reviewer_mismatch_count > 0 THEN
+    RAISE EXCEPTION 'reviewer_profile_mismatch_existing_rows: % offending rows', v_reviewer_mismatch_count;
+  END IF;
+
+  UPDATE public.order_requests AS o
+  SET reviewed_by_profile_id = o.reviewed_by
+  WHERE o.reviewed_by IS NOT NULL
+    AND o.reviewed_by_profile_id IS NULL
+    AND o.reviewed_at IS NOT NULL;
+
   SELECT pg_catalog.count(*) INTO v_reviewed_at_without_reviewer_count
   FROM public.order_requests AS o
   WHERE o.reviewed_at IS NOT NULL
@@ -128,23 +145,19 @@ BEGIN
     RAISE EXCEPTION 'reviewer_without_reviewed_at_existing_rows: % offending rows', v_reviewer_without_reviewed_at_count;
   END IF;
 
-  SELECT pg_catalog.count(*) INTO v_reviewer_mismatch_count
+  SELECT pg_catalog.count(*) INTO v_incomplete_reviewer_count
   FROM public.order_requests AS o
-  WHERE o.reviewed_by IS NOT NULL
-    AND o.reviewed_by_profile_id IS NOT NULL
-    AND o.reviewed_by <> o.reviewed_by_profile_id;
+  WHERE (o.reviewed_by IS NOT NULL OR o.reviewed_by_profile_id IS NOT NULL OR o.reviewed_at IS NOT NULL)
+    AND (o.reviewed_by IS NULL OR o.reviewed_by_profile_id IS NULL OR o.reviewed_at IS NULL);
 
-  IF v_reviewer_mismatch_count > 0 THEN
-    RAISE EXCEPTION 'reviewer_profile_mismatch_existing_rows: % offending rows', v_reviewer_mismatch_count;
+  IF v_incomplete_reviewer_count > 0 THEN
+    RAISE EXCEPTION 'incomplete_reviewer_metadata_existing_rows: % offending rows', v_incomplete_reviewer_count;
   END IF;
 
   SELECT pg_catalog.count(*) INTO v_reviewer_relationship_count
   FROM public.order_requests AS o
-  WHERE COALESCE(o.reviewed_by_profile_id, o.reviewed_by) IS NOT NULL
-    AND NOT public.is_order_mfd_profile(
-      o.workspace_id,
-      COALESCE(o.reviewed_by_profile_id, o.reviewed_by)
-    );
+  WHERE o.reviewed_by_profile_id IS NOT NULL
+    AND NOT public.is_order_mfd_profile(o.workspace_id, o.reviewed_by_profile_id);
 
   IF v_reviewer_relationship_count > 0 THEN
     RAISE EXCEPTION 'reviewer_workspace_relationship_required_existing_rows: % offending rows', v_reviewer_relationship_count;
@@ -203,9 +216,18 @@ DECLARE
   v_caller_user_id pg_catalog.uuid;
   v_caller_profile_id pg_catalog.uuid;
   v_is_service_role pg_catalog.bool;
+  v_request_claims pg_catalog.text;
+  v_request_role pg_catalog.text;
 BEGIN
+  v_request_claims := NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '');
+  v_request_role := NULLIF(pg_catalog.current_setting('request.jwt.claim.role', true), '');
+
+  IF v_request_role IS NULL AND v_request_claims IS NOT NULL THEN
+    v_request_role := NULLIF((v_request_claims::pg_catalog.jsonb ->> 'role'), '');
+  END IF;
+
   v_caller_user_id := auth.uid();
-  v_is_service_role := COALESCE(auth.role(), '') = 'service_role';
+  v_is_service_role := COALESCE(auth.role(), v_request_role, '') = 'service_role';
 
   IF NEW.reviewed_by IS NOT NULL
      AND NEW.reviewed_by_profile_id IS NOT NULL
@@ -220,6 +242,20 @@ BEGIN
   END IF;
 
   IF TG_OP = 'INSERT' THEN
+    IF (
+      v_caller_user_id IS NOT NULL
+      OR v_request_role IN ('anon', 'authenticated', 'service_role')
+      OR v_is_service_role
+    )
+       AND NEW.status IN (
+      'auto_approved'::public.order_status,
+      'approved'::public.order_status,
+      'rejected'::public.order_status,
+      'cancelled'::public.order_status
+    ) THEN
+      RAISE EXCEPTION 'invalid_initial_order_status';
+    END IF;
+
     IF NEW.status = 'draft'::public.order_status THEN
       RETURN NEW;
     END IF;
@@ -275,6 +311,24 @@ BEGIN
         RAISE EXCEPTION 'order_initiator_not_authorized';
       END IF;
     ELSIF v_is_service_role THEN
+      IF NEW.initiated_by_profile_id IS NULL
+         OR NEW.initiated_by_role IS NULL
+         OR NEW.initiation_channel IS NULL THEN
+        RAISE EXCEPTION 'order_request_canonical_metadata_missing';
+      END IF;
+
+      IF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_by IS NOT NULL THEN
+        NEW.reviewed_by_profile_id := NEW.reviewed_by;
+      ELSIF NEW.reviewed_by IS NULL AND NEW.reviewed_by_profile_id IS NOT NULL THEN
+        NEW.reviewed_by := NEW.reviewed_by_profile_id;
+      END IF;
+
+      IF NEW.reviewed_by_profile_id IS NOT NULL AND NEW.reviewed_at IS NULL THEN
+        RAISE EXCEPTION 'reviewed_at_required';
+      ELSIF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'reviewer_profile_required';
+      END IF;
+    ELSIF COALESCE(pg_catalog.current_setting('role', true), '') NOT IN ('anon', 'authenticated', 'service_role') THEN
       IF NEW.initiated_by_profile_id IS NULL
          OR NEW.initiated_by_role IS NULL
          OR NEW.initiation_channel IS NULL THEN
@@ -457,6 +511,69 @@ CREATE TRIGGER order_request_initiation_audit_trigger
   FOR EACH ROW
   EXECUTE FUNCTION public.log_order_request_initiation_audit();
 
+CREATE OR REPLACE FUNCTION public.can_insert_order_request(
+  p_workspace_id pg_catalog.uuid,
+  p_investor_profile_id pg_catalog.uuid,
+  p_status public.order_status
+)
+RETURNS pg_catalog.bool AS $$
+DECLARE
+  v_profile_id pg_catalog.uuid;
+BEGIN
+  IF p_status IN (
+    'auto_approved'::public.order_status,
+    'approved'::public.order_status,
+    'rejected'::public.order_status,
+    'cancelled'::public.order_status
+  ) THEN
+    RAISE EXCEPTION 'invalid_initial_order_status';
+  END IF;
+
+  IF p_status <> 'pending_qualification'::public.order_status THEN
+    RETURN false;
+  END IF;
+
+  v_profile_id := public.current_user_profile_id();
+
+  IF v_profile_id IS NULL OR p_investor_profile_id <> v_profile_id THEN
+    RETURN false;
+  END IF;
+
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.workspace_memberships AS wm
+    WHERE wm.workspace_id = p_workspace_id
+      AND wm.profile_id = v_profile_id
+      AND wm.role = 'investor'
+      AND wm.status = 'active'
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.family_delegations AS fd
+    WHERE fd.delegate_profile_id = v_profile_id
+      AND fd.owner_profile_id = p_investor_profile_id
+      AND fd.workspace_id = p_workspace_id
+      AND fd.consent_status = 'accepted'
+      AND fd.is_active = true
+      AND (fd.expires_at IS NULL OR fd.expires_at > pg_catalog.now())
+  );
+END;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '';
+
+REVOKE ALL ON FUNCTION public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, public.order_status) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, public.order_status) FROM anon;
+REVOKE ALL ON FUNCTION public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, public.order_status) FROM authenticated;
+REVOKE ALL ON FUNCTION public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, public.order_status) FROM service_role;
+GRANT EXECUTE ON FUNCTION public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, public.order_status) TO authenticated;
+
+DROP POLICY IF EXISTS order_requests_investor_insert ON public.order_requests;
+CREATE POLICY order_requests_investor_insert ON public.order_requests
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    public.can_insert_order_request(workspace_id, investor_profile_id, status)
+  );
+
 CREATE OR REPLACE FUNCTION public.qualify_order(
   p_order_id pg_catalog.uuid,
   p_decision public.order_status,
@@ -595,7 +712,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 REVOKE ALL ON FUNCTION public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text) FROM anon;
 REVOKE ALL ON FUNCTION public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text) FROM authenticated;
+REVOKE ALL ON FUNCTION public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text) FROM service_role;
 GRANT EXECUTE ON FUNCTION public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.apply_auto_approval_decision(
@@ -847,7 +966,22 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
 
 REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid) FROM anon;
 REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid) FROM authenticated;
+REVOKE ALL ON FUNCTION public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid) FROM service_role;
 GRANT EXECUTE ON FUNCTION public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.cancel_order(pg_catalog.uuid, pg_catalog.text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.cancel_order(pg_catalog.uuid, pg_catalog.text) FROM anon;
+REVOKE ALL ON FUNCTION public.cancel_order(pg_catalog.uuid, pg_catalog.text) FROM authenticated;
+REVOKE ALL ON FUNCTION public.cancel_order(pg_catalog.uuid, pg_catalog.text) FROM service_role;
+GRANT EXECUTE ON FUNCTION public.cancel_order(pg_catalog.uuid, pg_catalog.text) TO authenticated;
+
+REVOKE ALL ON TABLE public.order_requests FROM PUBLIC;
+REVOKE ALL ON TABLE public.order_requests FROM anon;
+REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.order_requests FROM authenticated;
+REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.order_requests FROM service_role;
+GRANT SELECT, INSERT ON TABLE public.order_requests TO authenticated;
+GRANT SELECT, INSERT ON TABLE public.order_requests TO service_role;
 
 COMMIT;

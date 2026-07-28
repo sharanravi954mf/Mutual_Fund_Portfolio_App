@@ -446,11 +446,28 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
 
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  )
   VALUES
-    ('96000000-0000-0000-0000-000000000004', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH104', 'buy', 1000.00, 'auto_approved'),
-    ('96000000-0000-0000-0000-000000000005', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH105', 'buy', 1000.00, 'approved'),
-    ('96000000-0000-0000-0000-000000000006', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH106', 'buy', 1000.00, 'rejected');
+    ('96000000-0000-0000-0000-000000000004', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', '92000000-0000-0000-0000-000000000003', 'investor', 'investor_portal', 'SCH104', 'buy', 1000.00, 'auto_approved'),
+    ('96000000-0000-0000-0000-000000000005', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', '92000000-0000-0000-0000-000000000003', 'investor', 'investor_portal', 'SCH105', 'buy', 1000.00, 'approved'),
+    ('96000000-0000-0000-0000-000000000006', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', '92000000-0000-0000-0000-000000000003', 'investor', 'investor_portal', 'SCH106', 'buy', 1000.00, 'rejected');
+
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
 
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000004', 'Auto approved');

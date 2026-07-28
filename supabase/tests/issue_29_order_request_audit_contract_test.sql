@@ -93,18 +93,72 @@ VALUES ('99400000-0000-0000-0000-000000000001', '99200000-0000-0000-0000-0000000
 INSERT INTO public.auto_approval_rules (id, workspace_id, transaction_type, min_amount, max_amount, is_active, rule_version)
 VALUES ('99500000-0000-0000-0000-000000000001', '99200000-0000-0000-0000-000000000001', 'buy', 0.00, 10000.00, true, 1);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
-
 DO $$
 DECLARE
   v_order public.order_requests;
-  v_audit public.workspace_audit_logs;
-  v_outbox public.event_outbox;
-  v_count pg_catalog.int4;
-BEGIN
-  IF pg_catalog.has_function_privilege('anon', 'public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
-    RAISE EXCEPTION 'anon can execute internal is_order_mfd_profile helper';
-  END IF;
+	  v_audit public.workspace_audit_logs;
+	  v_outbox public.event_outbox;
+	  v_count pg_catalog.int4;
+	  v_total_count pg_catalog.int4;
+	  v_distinct_count pg_catalog.int4;
+	BEGIN
+	  IF EXISTS (
+	    SELECT 1
+	    FROM pg_catalog.pg_class AS c
+	    CROSS JOIN pg_catalog.aclexplode(
+	      COALESCE(c.relacl, pg_catalog.acldefault('r', c.relowner))
+	    ) AS p
+	    WHERE c.oid = 'public.order_requests'::pg_catalog.regclass
+	      AND p.grantee = 0
+	      AND p.privilege_type IN ('UPDATE', 'DELETE')
+	  ) THEN
+	    RAISE EXCEPTION 'PUBLIC has direct lifecycle mutation privilege on order_requests';
+	  END IF;
+
+	  IF pg_catalog.has_table_privilege('anon', 'public.order_requests', 'UPDATE')
+	     OR pg_catalog.has_table_privilege('anon', 'public.order_requests', 'DELETE') THEN
+	    RAISE EXCEPTION 'anon has direct lifecycle mutation privilege on order_requests';
+	  END IF;
+
+	  IF NOT pg_catalog.has_table_privilege('authenticated', 'public.order_requests', 'INSERT') THEN
+	    RAISE EXCEPTION 'authenticated cannot insert canonical order_requests';
+	  END IF;
+
+	  IF pg_catalog.has_table_privilege('authenticated', 'public.order_requests', 'UPDATE')
+	     OR pg_catalog.has_table_privilege('authenticated', 'public.order_requests', 'DELETE') THEN
+	    RAISE EXCEPTION 'authenticated has direct lifecycle mutation privilege on order_requests';
+	  END IF;
+
+	  IF NOT pg_catalog.has_function_privilege('authenticated', 'public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'authenticated cannot execute qualify_order';
+	  END IF;
+
+	  IF pg_catalog.has_function_privilege('anon', 'public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text)', 'EXECUTE')
+	     OR pg_catalog.has_function_privilege('service_role', 'public.qualify_order(pg_catalog.uuid, public.order_status, pg_catalog.text)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'qualify_order has an unexpected non-authenticated execution grant';
+	  END IF;
+
+	  IF NOT pg_catalog.has_function_privilege('authenticated', 'public.cancel_order(pg_catalog.uuid, pg_catalog.text)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'authenticated cannot execute cancel_order';
+	  END IF;
+
+	  IF pg_catalog.has_function_privilege('anon', 'public.cancel_order(pg_catalog.uuid, pg_catalog.text)', 'EXECUTE')
+	     OR pg_catalog.has_function_privilege('service_role', 'public.cancel_order(pg_catalog.uuid, pg_catalog.text)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'cancel_order has an unexpected non-authenticated execution grant';
+	  END IF;
+
+	  IF NOT pg_catalog.has_function_privilege('service_role', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'service_role cannot execute apply_auto_approval_decision';
+	  END IF;
+
+	  IF pg_catalog.has_function_privilege('anon', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE')
+	     OR pg_catalog.has_function_privilege('authenticated', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'apply_auto_approval_decision has an unexpected client execution grant';
+	  END IF;
+
+	  IF pg_catalog.has_function_privilege('anon', 'public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
+	    RAISE EXCEPTION 'anon can execute internal is_order_mfd_profile helper';
+	  END IF;
 
   IF pg_catalog.has_function_privilege('authenticated', 'public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'authenticated can execute internal is_order_mfd_profile helper';
@@ -257,6 +311,69 @@ BEGIN
 	    initiated_by_profile_id,
 	    initiated_by_role,
 	    initiation_channel,
+	    reviewed_by,
+	    reviewed_at
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    '99100000-0000-0000-0000-000000000004',
+	    now()
+	  );
+
+	  UPDATE issue29_preflight_existing_orders AS o
+	  SET reviewed_by_profile_id = o.reviewed_by
+	  WHERE o.reviewed_by IS NOT NULL
+	    AND o.reviewed_by_profile_id IS NULL
+	    AND o.reviewed_at IS NOT NULL;
+
+	  IF EXISTS (
+	    SELECT 1
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE o.reviewed_by_profile_id IS DISTINCT FROM o.reviewed_by
+	  ) THEN
+	    RAISE EXCEPTION 'legacy reviewer backfill did not canonicalise reviewed_by_profile_id';
+	  END IF;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    reviewed_by,
+	    reviewed_by_profile_id,
+	    reviewed_at
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    '99100000-0000-0000-0000-000000000004',
+	    '99100000-0000-0000-0000-000000000004',
+	    now()
+	  );
+
+	  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	  FROM issue29_preflight_existing_orders AS o
+	  WHERE (o.reviewed_by IS NOT NULL OR o.reviewed_by_profile_id IS NOT NULL OR o.reviewed_at IS NOT NULL)
+	    AND (o.reviewed_by IS NULL OR o.reviewed_by_profile_id IS NULL OR o.reviewed_at IS NULL);
+
+	  IF v_count <> 0 THEN
+	    RAISE EXCEPTION 'canonical reviewed row was treated as incomplete';
+	  END IF;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
 	    reviewed_at
 	  ) VALUES (
 	    '99200000-0000-0000-0000-000000000001',
@@ -316,6 +433,42 @@ BEGIN
 	  EXCEPTION WHEN OTHERS THEN
 	    IF SQLERRM NOT LIKE 'reviewer_without_reviewed_at_existing_rows: 1%' THEN
 	      RAISE EXCEPTION 'Unexpected existing-row reviewer timestamp preflight error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    reviewed_by_profile_id,
+	    reviewed_at
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    '99100000-0000-0000-0000-000000000004',
+	    now()
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE (o.reviewed_by IS NOT NULL OR o.reviewed_by_profile_id IS NOT NULL OR o.reviewed_at IS NOT NULL)
+	      AND (o.reviewed_by IS NULL OR o.reviewed_by_profile_id IS NULL OR o.reviewed_at IS NULL);
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'incomplete_reviewer_metadata_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row reviewed_by_profile_id-only preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'incomplete_reviewer_metadata_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row reviewer profile-only preflight error: %', SQLERRM;
 	    END IF;
 	  END;
 
@@ -507,13 +660,50 @@ BEGIN
   )
   RETURNING * INTO v_order;
 
-  IF v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
-     OR v_order.initiated_by_role <> 'advisor'
-     OR v_order.initiation_channel <> 'advisor_portal' THEN
-    RAISE EXCEPTION 'trusted service-role insert did not preserve explicit initiator metadata';
-  END IF;
+	  IF v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
+	     OR v_order.initiated_by_role <> 'advisor'
+	     OR v_order.initiation_channel <> 'advisor_portal' THEN
+	    RAISE EXCEPTION 'trusted service-role insert did not preserve explicit initiator metadata';
+	  END IF;
 
-  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+	  BEGIN
+	    INSERT INTO public.order_requests (
+	      id,
+	      workspace_id,
+	      investor_profile_id,
+	      initiated_by_profile_id,
+	      initiated_by_role,
+	      initiation_channel,
+	      reviewed_by,
+	      reviewed_by_profile_id,
+	      reviewed_at,
+	      scheme_code,
+	      type,
+	      amount,
+	      status
+	    ) VALUES (
+	      '99300000-0000-0000-0000-000000000025',
+	      '99200000-0000-0000-0000-000000000001',
+	      '99100000-0000-0000-0000-000000000003',
+	      '99100000-0000-0000-0000-000000000004',
+	      'advisor',
+	      'advisor_portal',
+	      '99100000-0000-0000-0000-000000000004',
+	      '99100000-0000-0000-0000-000000000004',
+	      now(),
+	      'SCH29-SERVICE-FINAL',
+	      'buy',
+	      100.00,
+	      'approved'
+	    );
+	    RAISE EXCEPTION 'service-role inserted a final-state order without complete audit sequence';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'invalid_initial_order_status' THEN
+	      RAISE EXCEPTION 'Unexpected service-role final insert error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
   VALUES (
@@ -1076,14 +1266,21 @@ BEGIN
 	    END IF;
 	  END;
 
-  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
-  FROM public.workspace_audit_logs
-  WHERE entity_id = '99300000-0000-0000-0000-000000000010'
-    AND action IN ('order.initiated', 'order.qualified', 'order.approved');
+	  SELECT
+	    pg_catalog.count(*)::pg_catalog.int4,
+	    pg_catalog.count(*) FILTER (
+	      WHERE action IN ('order.initiated', 'order.qualified', 'order.approved')
+	    )::pg_catalog.int4,
+	    pg_catalog.count(DISTINCT action) FILTER (
+	      WHERE action IN ('order.initiated', 'order.qualified', 'order.approved')
+	    )::pg_catalog.int4
+	  INTO v_total_count, v_count, v_distinct_count
+	  FROM public.workspace_audit_logs
+	  WHERE entity_id = '99300000-0000-0000-0000-000000000010';
 
-  IF v_count <> 3 THEN
-    RAISE EXCEPTION 'manual approval audit events were not separated: %', v_count;
-  END IF;
+	  IF v_total_count <> 3 OR v_count <> 3 OR v_distinct_count <> 3 THEN
+	    RAISE EXCEPTION 'manual approval audit events were not exact: total %, expected %, distinct %', v_total_count, v_count, v_distinct_count;
+	  END IF;
 
   SELECT * INTO v_audit
   FROM public.workspace_audit_logs
@@ -1151,14 +1348,21 @@ BEGIN
     RAISE EXCEPTION 'different authorised advisor rejection was not persisted';
   END IF;
 
-  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
-  FROM public.workspace_audit_logs
-  WHERE entity_id = '99300000-0000-0000-0000-000000000011'
-    AND action IN ('order.initiated', 'order.qualified', 'order.rejected');
+	  SELECT
+	    pg_catalog.count(*)::pg_catalog.int4,
+	    pg_catalog.count(*) FILTER (
+	      WHERE action IN ('order.initiated', 'order.qualified', 'order.rejected')
+	    )::pg_catalog.int4,
+	    pg_catalog.count(DISTINCT action) FILTER (
+	      WHERE action IN ('order.initiated', 'order.qualified', 'order.rejected')
+	    )::pg_catalog.int4
+	  INTO v_total_count, v_count, v_distinct_count
+	  FROM public.workspace_audit_logs
+	  WHERE entity_id = '99300000-0000-0000-0000-000000000011';
 
-  IF v_count <> 3 THEN
-    RAISE EXCEPTION 'manual rejection audit events were not separated: %', v_count;
-  END IF;
+	  IF v_total_count <> 3 OR v_count <> 3 OR v_distinct_count <> 3 THEN
+	    RAISE EXCEPTION 'manual rejection audit events were not exact: total %, expected %, distinct %', v_total_count, v_count, v_distinct_count;
+	  END IF;
 
   PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
@@ -1214,14 +1418,21 @@ BEGIN
     RAISE EXCEPTION 'auto-approval decision did not persist expected final status';
   END IF;
 
-  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
-  FROM public.workspace_audit_logs
-  WHERE entity_id = '99300000-0000-0000-0000-000000000013'
-    AND action IN ('order.initiated', 'order.auto_qualified', 'order.approved');
+	  SELECT
+	    pg_catalog.count(*)::pg_catalog.int4,
+	    pg_catalog.count(*) FILTER (
+	      WHERE action IN ('order.initiated', 'order.auto_qualified', 'order.approved')
+	    )::pg_catalog.int4,
+	    pg_catalog.count(DISTINCT action) FILTER (
+	      WHERE action IN ('order.initiated', 'order.auto_qualified', 'order.approved')
+	    )::pg_catalog.int4
+	  INTO v_total_count, v_count, v_distinct_count
+	  FROM public.workspace_audit_logs
+	  WHERE entity_id = '99300000-0000-0000-0000-000000000013';
 
-  IF v_count <> 3 THEN
-    RAISE EXCEPTION 'auto-approval evaluation/outcome audit events were not separated: %', v_count;
-  END IF;
+	  IF v_total_count <> 3 OR v_count <> 3 OR v_distinct_count <> 3 THEN
+	    RAISE EXCEPTION 'auto-approval evaluation/outcome audit events were not exact: total %, expected %, distinct %', v_total_count, v_count, v_distinct_count;
+	  END IF;
 
   SELECT * INTO v_audit
   FROM public.workspace_audit_logs
@@ -1286,14 +1497,21 @@ BEGIN
     RAISE EXCEPTION 'Issue #28 cancellation fields regressed under Issue #29 metadata hardening';
   END IF;
 
-  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
-  FROM public.workspace_audit_logs
-  WHERE entity_id = '99300000-0000-0000-0000-000000000012'
-    AND action IN ('order.initiated', 'order.cancelled');
+	  SELECT
+	    pg_catalog.count(*)::pg_catalog.int4,
+	    pg_catalog.count(*) FILTER (
+	      WHERE action IN ('order.initiated', 'order.cancelled')
+	    )::pg_catalog.int4,
+	    pg_catalog.count(DISTINCT action) FILTER (
+	      WHERE action IN ('order.initiated', 'order.cancelled')
+	    )::pg_catalog.int4
+	  INTO v_total_count, v_count, v_distinct_count
+	  FROM public.workspace_audit_logs
+	  WHERE entity_id = '99300000-0000-0000-0000-000000000012';
 
-  IF v_count <> 2 THEN
-    RAISE EXCEPTION 'cancellation audit separation was not preserved: %', v_count;
-  END IF;
+	  IF v_total_count <> 2 OR v_count <> 2 OR v_distinct_count <> 2 THEN
+	    RAISE EXCEPTION 'cancellation audit sequence was not exact: total %, expected %, distinct %', v_total_count, v_count, v_distinct_count;
+	  END IF;
 
   BEGIN
     UPDATE public.order_requests
@@ -1306,6 +1524,84 @@ BEGIN
     END IF;
   END;
 END;
+$$;
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
+
+DO $$
+DECLARE
+  v_bad_status public.order_status;
+  v_idx pg_catalog.int4 := 25;
+BEGIN
+  FOREACH v_bad_status IN ARRAY ARRAY[
+    'auto_approved'::public.order_status,
+    'approved'::public.order_status,
+    'rejected'::public.order_status,
+    'cancelled'::public.order_status
+  ] LOOP
+    v_idx := v_idx + 1;
+    BEGIN
+      INSERT INTO public.order_requests (
+        id,
+        workspace_id,
+        investor_profile_id,
+        initiated_by_profile_id,
+        initiated_by_role,
+        initiation_channel,
+        scheme_code,
+        type,
+        amount,
+        status
+      ) VALUES (
+        ('99300000-0000-0000-0000-0000000000' || pg_catalog.lpad(v_idx::pg_catalog.text, 2, '0'))::pg_catalog.uuid,
+        '99200000-0000-0000-0000-000000000001',
+        '99100000-0000-0000-0000-000000000003',
+        '99100000-0000-0000-0000-000000000003',
+        'investor',
+        'investor_portal',
+        'SCH29-BAD-INITIAL',
+        'buy',
+        100.00,
+        v_bad_status
+      );
+      RAISE EXCEPTION 'authenticated inserted invalid initial order status: %', v_bad_status;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM <> 'invalid_initial_order_status' THEN
+        RAISE EXCEPTION 'Unexpected invalid initial status error for %: %', v_bad_status, SQLERRM;
+      END IF;
+    END;
+  END LOOP;
+
+  BEGIN
+    UPDATE public.order_requests
+    SET amount = amount + 1
+    WHERE id = '99300000-0000-0000-0000-000000000001';
+    RAISE EXCEPTION 'authenticated directly updated order_requests';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END
+$$;
+
+SELECT set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.order_requests
+    SET status = 'approved',
+        reviewed_by = '99100000-0000-0000-0000-000000000004',
+        reviewed_by_profile_id = '99100000-0000-0000-0000-000000000004',
+        reviewed_at = pg_catalog.now()
+    WHERE id = '99300000-0000-0000-0000-000000000024';
+    RAISE EXCEPTION 'authorised advisor bypassed qualify_order with direct UPDATE';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END
 $$;
 
 RESET ROLE;
