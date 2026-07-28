@@ -119,7 +119,7 @@ The database is structured into 5 primary entity domains matching the business c
 | **Identity & Access** | `workspaces`, `profiles`, `workspace_memberships`, `mfd_profiles`, `mfd_verification_documents`, `mfd_onboarding_reviews`, `advisor_profiles`, `workspace_branding` | Manages multi-tenant workspace boundaries, user profiles, and roles (`platform_admin`, `admin`, `advisor`, `investor`, `operations`). |
 | **Portfolio & Holdings** | `portfolios`, `folios`, `scheme_holdings`, `transactions` | Stores unit balances, scheme choices, NAV pricing historical tracks, and raw statement data. |
 | **Order Execution** | `order_requests`, `workspace_invitations`, `workspace_audit_logs`, `event_outbox`, `auto_approval_rules` | Manages Buy/Sell/Switch initiation, MFD approval queues, and immutable security audit trails. |
-| **Subscriptions & Billing** | `subscription_plans`, `workspace_billing`, `investor_subscriptions`, `payment_events`, `plan_entitlements` | Enforces feature gates and client limit verification triggers for MFD subscription tiers. |
+| **Subscriptions & Billing** | `subscription_plans`, `workspace_billing`, `investor_subscriptions`, `payment_events`, `plan_entitlements` | Enforces feature entitlements, billing ownership, subscription lifecycle states and usage limits for both Distributor and Investor subscription tiers. |
 | **Referrals & Delegations** | `investor_referrals`, `referral_conversions`, `referral_rewards`, `family_delegations` | Manages asymmetric read-only sharing controls and viral registration attribution. |
 
 ---
