@@ -7,6 +7,8 @@ ALTER TABLE public.order_requests
   ADD COLUMN IF NOT EXISTS cancelled_at timestamp with time zone;
 
 DO $$
+DECLARE
+  v_draft_count pg_catalog.int8;
 BEGIN
   IF NOT EXISTS (
     SELECT 1
@@ -14,6 +16,14 @@ BEGIN
     WHERE c.conname = 'order_requests_status_not_draft'
       AND c.conrelid = 'public.order_requests'::pg_catalog.regclass
   ) THEN
+    SELECT pg_catalog.count(*) INTO v_draft_count
+    FROM public.order_requests AS o
+    WHERE o.status = 'draft'::public.order_status;
+
+    IF v_draft_count > 0 THEN
+      RAISE EXCEPTION 'persisted_draft_orders_exist: % offending order_requests rows', v_draft_count;
+    END IF;
+
     ALTER TABLE public.order_requests
       ADD CONSTRAINT order_requests_status_not_draft
       CHECK (status <> 'draft'::public.order_status);
@@ -32,6 +42,8 @@ DECLARE
   v_current_status public.order_status;
   v_current_profile_id pg_catalog.uuid;
   v_cancellation_reason pg_catalog.text;
+  v_is_workspace_owner pg_catalog.bool;
+  v_is_active_advisor pg_catalog.bool;
   v_order public.order_requests;
 BEGIN
   SELECT
@@ -59,16 +71,30 @@ BEGIN
     RAISE EXCEPTION 'not_authorized';
   END IF;
 
-  IF v_investor_profile_id = v_current_profile_id THEN
-    -- Investor-owner cancellation path.
-  ELSIF EXISTS (
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.workspaces AS w
+    JOIN public.workspace_memberships AS wm
+      ON wm.workspace_id = w.id
+     AND wm.profile_id = v_current_profile_id
+     AND wm.role = 'admin'
+     AND wm.status = 'active'
+    WHERE w.id = v_workspace_id
+      AND w.owner_profile_id = v_current_profile_id
+  ) INTO v_is_workspace_owner;
+
+  SELECT EXISTS (
     SELECT 1
     FROM public.workspace_memberships AS wm
     WHERE wm.workspace_id = v_workspace_id
       AND wm.profile_id = v_current_profile_id
-      AND wm.role IN ('advisor', 'admin', 'workspace_owner')
+      AND wm.role = 'advisor'
       AND wm.status = 'active'
-  ) THEN
+  ) INTO v_is_active_advisor;
+
+  IF v_investor_profile_id = v_current_profile_id THEN
+    -- Investor-owner cancellation path.
+  ELSIF v_is_workspace_owner OR v_is_active_advisor THEN
     -- Authorised MFD-side cancellation path.
   ELSE
     RAISE EXCEPTION 'not_authorized';
@@ -86,7 +112,6 @@ BEGIN
 
   UPDATE public.order_requests AS o
   SET status = 'cancelled',
-      rejection_reason = v_cancellation_reason,
       cancellation_reason = v_cancellation_reason,
       cancelled_at = pg_catalog.now(),
       updated_at = pg_catalog.now()

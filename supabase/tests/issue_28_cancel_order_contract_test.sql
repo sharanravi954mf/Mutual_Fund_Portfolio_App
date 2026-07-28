@@ -5,17 +5,25 @@ BEGIN;
 INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
   ('91000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'issue28-admin@moneybowl.test', '{"user_role":"platform_admin"}', '{}', now(), now()),
-  ('91000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'issue28-advisor-a@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
+  ('91000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'issue28-workspace-owner@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
   ('91000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'issue28-investor-owner@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now()),
   ('91000000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'issue28-family-guest@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now()),
-  ('91000000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'issue28-advisor-b@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now());
+  ('91000000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'issue28-unrelated-advisor@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
+  ('91000000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 'issue28-active-advisor@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
+  ('91000000-0000-0000-0000-000000000007', 'authenticated', 'authenticated', 'issue28-nonowner-admin@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
+  ('91000000-0000-0000-0000-000000000008', 'authenticated', 'authenticated', 'issue28-inactive-advisor@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
+  ('91000000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 'issue28-operations@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now());
 
 UPDATE public.user_accounts
 SET account_state = 'advisor'
 WHERE user_id IN (
   '91000000-0000-0000-0000-000000000001',
   '91000000-0000-0000-0000-000000000002',
-  '91000000-0000-0000-0000-000000000005'
+  '91000000-0000-0000-0000-000000000005',
+  '91000000-0000-0000-0000-000000000006',
+  '91000000-0000-0000-0000-000000000007',
+  '91000000-0000-0000-0000-000000000008',
+  '91000000-0000-0000-0000-000000000009'
 );
 
 UPDATE public.user_accounts
@@ -30,7 +38,7 @@ SET id = '92000000-0000-0000-0000-000000000001', role = 'platform_admin', full_n
 WHERE user_id = '91000000-0000-0000-0000-000000000001';
 
 UPDATE public.profiles
-SET id = '92000000-0000-0000-0000-000000000002', role = 'advisor', full_name = 'Issue 28 Advisor A'
+SET id = '92000000-0000-0000-0000-000000000002', role = 'advisor', full_name = 'Issue 28 Workspace Owner'
 WHERE user_id = '91000000-0000-0000-0000-000000000002';
 
 UPDATE public.profiles
@@ -42,8 +50,24 @@ SET id = '92000000-0000-0000-0000-000000000004', role = 'investor', full_name = 
 WHERE user_id = '91000000-0000-0000-0000-000000000004';
 
 UPDATE public.profiles
-SET id = '92000000-0000-0000-0000-000000000005', role = 'advisor', full_name = 'Issue 28 Advisor B'
+SET id = '92000000-0000-0000-0000-000000000005', role = 'advisor', full_name = 'Issue 28 Unrelated Advisor'
 WHERE user_id = '91000000-0000-0000-0000-000000000005';
+
+UPDATE public.profiles
+SET id = '92000000-0000-0000-0000-000000000006', role = 'advisor', full_name = 'Issue 28 Active Advisor'
+WHERE user_id = '91000000-0000-0000-0000-000000000006';
+
+UPDATE public.profiles
+SET id = '92000000-0000-0000-0000-000000000007', role = 'advisor', full_name = 'Issue 28 Nonowner Admin'
+WHERE user_id = '91000000-0000-0000-0000-000000000007';
+
+UPDATE public.profiles
+SET id = '92000000-0000-0000-0000-000000000008', role = 'advisor', full_name = 'Issue 28 Inactive Advisor'
+WHERE user_id = '91000000-0000-0000-0000-000000000008';
+
+UPDATE public.profiles
+SET id = '92000000-0000-0000-0000-000000000009', role = 'operations', full_name = 'Issue 28 Operations'
+WHERE user_id = '91000000-0000-0000-0000-000000000009';
 
 INSERT INTO public.workspaces (id, name, slug, owner_profile_id, workspace_status)
 VALUES
@@ -56,14 +80,22 @@ WHERE profile_id IN (
   '92000000-0000-0000-0000-000000000002',
   '92000000-0000-0000-0000-000000000003',
   '92000000-0000-0000-0000-000000000004',
-  '92000000-0000-0000-0000-000000000005'
+  '92000000-0000-0000-0000-000000000005',
+  '92000000-0000-0000-0000-000000000006',
+  '92000000-0000-0000-0000-000000000007',
+  '92000000-0000-0000-0000-000000000008',
+  '92000000-0000-0000-0000-000000000009'
 );
 
 INSERT INTO public.workspace_memberships (workspace_id, profile_id, role, status)
 VALUES
   ('93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000002', 'admin', 'active'),
   ('93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'investor', 'active'),
-  ('93000000-0000-0000-0000-000000000002', '92000000-0000-0000-0000-000000000005', 'advisor', 'active');
+  ('93000000-0000-0000-0000-000000000002', '92000000-0000-0000-0000-000000000005', 'advisor', 'active'),
+  ('93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000006', 'advisor', 'active'),
+  ('93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000007', 'admin', 'active'),
+  ('93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000008', 'advisor', 'inactive'),
+  ('93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000009', 'operations', 'active');
 
 INSERT INTO public.investor_account_links (user_id, profile_id, verification_method, verified_at, link_status)
 VALUES
@@ -125,6 +157,29 @@ BEGIN
     END IF;
   END;
 
+  CREATE TEMP TABLE issue28_preflight_orders (
+    status public.order_status NOT NULL
+  ) ON COMMIT DROP;
+
+  INSERT INTO issue28_preflight_orders (status)
+  VALUES ('draft');
+
+  BEGIN
+    SELECT count(*)::integer INTO v_count
+    FROM issue28_preflight_orders
+    WHERE status = 'draft'::public.order_status;
+
+    IF v_count > 0 THEN
+      RAISE EXCEPTION 'persisted_draft_orders_exist: % offending order_requests rows', v_count;
+    END IF;
+
+    RAISE EXCEPTION 'persisted draft preflight did not fail closed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'persisted_draft_orders_exist: 1%' THEN
+      RAISE EXCEPTION 'Unexpected persisted draft preflight error: %', SQLERRM;
+    END IF;
+  END;
+
   SELECT p.prosecdef, p.proconfig
   INTO v_prosecdef, v_proconfig
   FROM pg_catalog.pg_proc p
@@ -167,7 +222,7 @@ BEGIN
 
   IF v_order.status <> 'cancelled'
      OR v_order.cancellation_reason <> 'Owner requested cancellation'
-     OR v_order.rejection_reason <> 'Owner requested cancellation'
+     OR v_order.rejection_reason IS NOT NULL
      OR v_order.cancelled_at IS NULL THEN
     RAISE EXCEPTION 'owner cancellation did not persist status, reason, and timestamp';
   END IF;
@@ -189,6 +244,27 @@ BEGIN
   END IF;
 
   BEGIN
+    UPDATE public.workspace_audit_logs
+    SET reason = 'tampered'
+    WHERE id = v_audit.id;
+    RAISE EXCEPTION 'cancellation audit update was not blocked';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'Audit logs are immutable and cannot be updated or deleted' THEN
+      RAISE EXCEPTION 'Unexpected cancellation audit update error: %', SQLERRM;
+    END IF;
+  END;
+
+  BEGIN
+    DELETE FROM public.workspace_audit_logs
+    WHERE id = v_audit.id;
+    RAISE EXCEPTION 'cancellation audit delete was not blocked';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'Audit logs are immutable and cannot be updated or deleted' THEN
+      RAISE EXCEPTION 'Unexpected cancellation audit delete error: %', SQLERRM;
+    END IF;
+  END;
+
+  BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000001', 'Repeated cancel');
     RAISE EXCEPTION 'repeated cancellation did not fail';
   EXCEPTION WHEN OTHERS THEN
@@ -201,12 +277,13 @@ BEGIN
   VALUES ('96000000-0000-0000-0000-000000000002', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH102', 'sell', 1000.00, 'pending_review');
 
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000002","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
-  v_order := public.cancel_order('96000000-0000-0000-0000-000000000002', 'Advisor cancelled pending review');
+  v_order := public.cancel_order('96000000-0000-0000-0000-000000000002', 'Workspace owner cancelled pending review');
 
   IF v_order.status <> 'cancelled'
-     OR v_order.cancellation_reason <> 'Advisor cancelled pending review'
+     OR v_order.cancellation_reason <> 'Workspace owner cancelled pending review'
+     OR v_order.rejection_reason IS NOT NULL
      OR v_order.cancelled_at IS NULL THEN
-    RAISE EXCEPTION 'advisor cancellation did not persist status, reason, and timestamp';
+    RAISE EXCEPTION 'actual workspace owner cancellation did not persist status, reason, and timestamp';
   END IF;
 
   SELECT * INTO v_audit
@@ -219,15 +296,71 @@ BEGIN
   IF v_audit.actor_profile_id <> '92000000-0000-0000-0000-000000000002'
      OR v_audit.actor_type <> 'advisor'
      OR v_audit.previous_state <> 'pending_review' THEN
+    RAISE EXCEPTION 'actual workspace owner cancellation audit is incorrect';
+  END IF;
+
+  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
+  VALUES ('96000000-0000-0000-0000-000000000003', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH103', 'sell', 1000.00, 'pending_review');
+
+  PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000006","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+  v_order := public.cancel_order('96000000-0000-0000-0000-000000000003', 'Advisor cancelled pending review');
+
+  IF v_order.status <> 'cancelled'
+     OR v_order.cancellation_reason <> 'Advisor cancelled pending review'
+     OR v_order.rejection_reason IS NOT NULL
+     OR v_order.cancelled_at IS NULL THEN
+    RAISE EXCEPTION 'advisor cancellation did not persist status, reason, and timestamp';
+  END IF;
+
+  SELECT * INTO v_audit
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '96000000-0000-0000-0000-000000000003'
+    AND action = 'order.cancelled'
+  ORDER BY occurred_at DESC
+  LIMIT 1;
+
+  IF v_audit.actor_profile_id <> '92000000-0000-0000-0000-000000000006'
+     OR v_audit.actor_type <> 'advisor'
+     OR v_audit.previous_state <> 'pending_review' THEN
     RAISE EXCEPTION 'advisor cancellation audit is incorrect';
   END IF;
 
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('96000000-0000-0000-0000-000000000003', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH103', 'buy', 1000.00, 'pending_review');
+  VALUES ('96000000-0000-0000-0000-000000000007', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH107', 'buy', 1000.00, 'pending_review');
+
+  PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000007","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+  BEGIN
+    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Nonowner admin');
+    RAISE EXCEPTION 'nonowner admin cancelled order';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'not_authorized' THEN
+      RAISE EXCEPTION 'Unexpected nonowner admin error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000008","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+  BEGIN
+    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Inactive advisor');
+    RAISE EXCEPTION 'inactive advisor cancelled order';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'not_authorized' THEN
+      RAISE EXCEPTION 'Unexpected inactive advisor error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000009","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+  BEGIN
+    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Operations');
+    RAISE EXCEPTION 'operations member cancelled order';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'not_authorized' THEN
+      RAISE EXCEPTION 'Unexpected operations error: %', SQLERRM;
+    END IF;
+  END;
 
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000005","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
-    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000003', 'Unrelated advisor');
+    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Unrelated advisor');
     RAISE EXCEPTION 'unrelated advisor cancelled cross-workspace order';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'not_authorized' THEN
@@ -237,7 +370,7 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   BEGIN
-    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000003', 'Family guest');
+    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Family guest');
     RAISE EXCEPTION 'family guest cancelled delegated owner order';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'not_authorized' THEN
@@ -247,7 +380,7 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000001","role":"authenticated","app_metadata":{"user_role":"platform_admin"}}', true);
   BEGIN
-    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000003', 'Platform admin');
+    PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Platform admin');
     RAISE EXCEPTION 'platform admin cancelled order without MFD/investor authority';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'not_authorized' THEN

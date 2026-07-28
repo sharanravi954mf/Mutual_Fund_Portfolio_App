@@ -47,6 +47,26 @@ def commits_from_push_event():
         print(f"Failed to read pushed commit range {revision}: {e}")
         return None
 
+def commits_from_develop_range():
+    try:
+        base = subprocess.check_output(
+            ["git", "merge-base", "HEAD", "origin/develop"],
+            universal_newlines=True
+        ).strip()
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            universal_newlines=True
+        ).strip()
+        if not base or base == head:
+            return None
+        return subprocess.check_output(
+            ["git", "log", "--format=%s", f"{base}..HEAD"],
+            universal_newlines=True
+        ).splitlines()
+    except Exception as e:
+        print(f"Failed to read branch commits against origin/develop: {e}")
+        return None
+
 def main():
     if len(sys.argv) > 1:
         # Validate specific input (e.g. PR Title or Git Hook input)
@@ -59,18 +79,23 @@ def main():
         print(f"✅ Valid format: '{msg}'")
         sys.exit(0)
     else:
-        # Validate only the pushed range in CI. Keep the last-5 fallback for local runs.
+        # Validate only the pushed range in CI. Locally, prefer the branch range
+        # against develop before falling back to recent history.
         commits = commits_from_push_event()
         if commits is None:
-            print("Checking recent commits...")
-            try:
-                commits = subprocess.check_output(
-                    ["git", "log", "-n", "5", "--format=%s"],
-                    universal_newlines=True
-                ).splitlines()
-            except Exception as e:
-                print(f"Failed to read git logs: {e}")
-                sys.exit(1)
+            commits = commits_from_develop_range()
+            if commits is None:
+                print("Checking recent commits...")
+                try:
+                    commits = subprocess.check_output(
+                        ["git", "log", "-n", "5", "--format=%s"],
+                        universal_newlines=True
+                    ).splitlines()
+                except Exception as e:
+                    print(f"Failed to read git logs: {e}")
+                    sys.exit(1)
+            else:
+                print("Checking branch commits against origin/develop...")
         else:
             print("Checking pushed commits...")
 
