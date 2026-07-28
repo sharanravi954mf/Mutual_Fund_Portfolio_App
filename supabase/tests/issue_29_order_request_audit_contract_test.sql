@@ -102,6 +102,89 @@ DECLARE
   v_outbox public.event_outbox;
   v_count pg_catalog.int4;
 BEGIN
+  IF pg_catalog.has_function_privilege('anon', 'public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'anon can execute internal is_order_mfd_profile helper';
+  END IF;
+
+  IF pg_catalog.has_function_privilege('authenticated', 'public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'authenticated can execute internal is_order_mfd_profile helper';
+  END IF;
+
+  IF pg_catalog.has_function_privilege('service_role', 'public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'service_role can execute internal is_order_mfd_profile helper';
+  END IF;
+
+  CREATE TEMP TABLE issue29_preflight_existing_orders (
+    workspace_id pg_catalog.uuid,
+    investor_profile_id pg_catalog.uuid,
+    initiated_by_profile_id pg_catalog.uuid,
+    initiated_by_role pg_catalog.text,
+    initiation_channel pg_catalog.text,
+    reviewed_by pg_catalog.uuid,
+    reviewed_by_profile_id pg_catalog.uuid
+  ) ON COMMIT DROP;
+
+  INSERT INTO issue29_preflight_existing_orders (workspace_id, investor_profile_id)
+  VALUES ('99200000-0000-0000-0000-000000000001', '99100000-0000-0000-0000-000000000003');
+
+  BEGIN
+    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+    FROM issue29_preflight_existing_orders AS o
+    WHERE o.workspace_id IS NULL
+       OR o.investor_profile_id IS NULL
+       OR o.initiated_by_profile_id IS NULL
+       OR o.initiated_by_role IS NULL
+       OR o.initiation_channel IS NULL;
+
+    IF v_count > 0 THEN
+      RAISE EXCEPTION 'order_request_initiator_unresolved_existing_rows: % offending rows', v_count;
+    END IF;
+
+    RAISE EXCEPTION 'existing-row initiator preflight did not fail closed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'order_request_initiator_unresolved_existing_rows: 1%' THEN
+      RAISE EXCEPTION 'Unexpected existing-row initiator preflight error: %', SQLERRM;
+    END IF;
+  END;
+
+  INSERT INTO issue29_preflight_existing_orders (
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    reviewed_by,
+    reviewed_by_profile_id
+  ) VALUES (
+    '99200000-0000-0000-0000-000000000001',
+    '99100000-0000-0000-0000-000000000003',
+    '99100000-0000-0000-0000-000000000004',
+    'advisor',
+    'advisor_portal',
+    '99100000-0000-0000-0000-000000000004',
+    '99100000-0000-0000-0000-000000000005'
+  );
+
+  BEGIN
+    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+    FROM issue29_preflight_existing_orders AS o
+    WHERE o.reviewed_by IS NOT NULL
+      AND o.reviewed_by_profile_id IS NOT NULL
+      AND o.reviewed_by <> o.reviewed_by_profile_id;
+
+    IF v_count > 0 THEN
+      RAISE EXCEPTION 'reviewer_profile_mismatch_existing_rows: % offending rows', v_count;
+    END IF;
+
+    RAISE EXCEPTION 'existing-row reviewer preflight did not fail closed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'reviewer_profile_mismatch_existing_rows: 1%' THEN
+      RAISE EXCEPTION 'Unexpected existing-row reviewer preflight error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -145,6 +228,79 @@ BEGIN
     RAISE EXCEPTION 'investor self-initiation audit metadata not persisted';
   END IF;
 
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000000', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000000","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
+  BEGIN
+    INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
+    VALUES (
+      '99300000-0000-0000-0000-000000000014',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000003',
+      'SCH29-UNRESOLVED',
+      'buy',
+      100.00,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'unresolved caller inserted an order';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'profile_resolution_failed' THEN
+      RAISE EXCEPTION 'Unexpected unresolved caller error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  BEGIN
+    INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
+    VALUES (
+      '99300000-0000-0000-0000-000000000015',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000003',
+      'SCH29-SERVICE-MISSING',
+      'buy',
+      100.00,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'service-role legacy insert without initiator metadata was accepted';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'order_request_canonical_metadata_missing' THEN
+      RAISE EXCEPTION 'Unexpected service-role missing metadata error: %', SQLERRM;
+    END IF;
+  END;
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  ) VALUES (
+    '99300000-0000-0000-0000-000000000016',
+    '99200000-0000-0000-0000-000000000001',
+    '99100000-0000-0000-0000-000000000003',
+    '99100000-0000-0000-0000-000000000004',
+    'advisor',
+    'advisor_portal',
+    'SCH29-SERVICE-OK',
+    'buy',
+    100.00,
+    'pending_qualification'
+  )
+  RETURNING * INTO v_order;
+
+  IF v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
+     OR v_order.initiated_by_role <> 'advisor'
+     OR v_order.initiation_channel <> 'advisor_portal' THEN
+    RAISE EXCEPTION 'trusted service-role insert did not preserve explicit initiator metadata';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
   VALUES (
     '99300000-0000-0000-0000-000000000002',
@@ -163,6 +319,138 @@ BEGIN
     RAISE EXCEPTION 'legacy-style order insert was not safely defaulted';
   END IF;
 
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      status
+    ) VALUES (
+      '99300000-0000-0000-0000-000000000017',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000007',
+      '99100000-0000-0000-0000-000000000007',
+      'investor',
+      'investor_portal',
+      'SCH29-INV-SPOOF',
+      'buy',
+      100.00,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'authenticated investor claimed another investor initiator';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'initiator_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected investor spoofing error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      status
+    ) VALUES (
+      '99300000-0000-0000-0000-000000000018',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000003',
+      '99100000-0000-0000-0000-000000000005',
+      'advisor',
+      'advisor_portal',
+      'SCH29-ADV-SPOOF',
+      'buy',
+      100.00,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'authenticated advisor claimed another advisor initiator';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'initiator_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected advisor spoofing error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000001', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000001","role":"authenticated","app_metadata":{"user_role":"platform_admin"}}', true);
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      status
+    ) VALUES (
+      '99300000-0000-0000-0000-000000000019',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000003',
+      '99100000-0000-0000-0000-000000000004',
+      'advisor',
+      'advisor_portal',
+      'SCH29-ADMIN-SPOOF',
+      'buy',
+      100.00,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'platform admin spoofed an authorised advisor initiator';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'initiator_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected platform admin spoofing error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000007', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000007","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      status
+    ) VALUES (
+      '99300000-0000-0000-0000-000000000020',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000003',
+      '99100000-0000-0000-0000-000000000004',
+      'advisor',
+      'advisor_portal',
+      'SCH29-GUEST-SPOOF',
+      'buy',
+      100.00,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'family guest spoofed an authorised advisor initiator';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'initiator_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected family guest spoofing error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -194,6 +482,8 @@ BEGIN
     RAISE EXCEPTION 'advisor-assisted initiation metadata not persisted';
   END IF;
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   BEGIN
     INSERT INTO public.order_requests (
       id,
@@ -225,6 +515,8 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     INSERT INTO public.order_requests (
       id,
@@ -256,6 +548,8 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000008', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000008","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   BEGIN
     INSERT INTO public.order_requests (
       id,
@@ -287,6 +581,8 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     INSERT INTO public.order_requests (
       id,
@@ -313,11 +609,13 @@ BEGIN
     );
     RAISE EXCEPTION 'order with unrelated advisor initiator was accepted';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM <> 'advisor_workspace_relationship_required' THEN
-      RAISE EXCEPTION 'Unexpected missing advisor relationship error: %', SQLERRM;
+    IF SQLERRM <> 'initiator_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected advisor spoofing error: %', SQLERRM;
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     INSERT INTO public.order_requests (
       id,
@@ -353,6 +651,82 @@ BEGIN
     END IF;
   END;
 
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      reviewed_by,
+      reviewed_by_profile_id,
+      reviewed_at,
+      scheme_code,
+      type,
+      amount,
+      status
+    ) VALUES (
+      '99300000-0000-0000-0000-000000000021',
+      '99200000-0000-0000-0000-000000000001',
+      '99100000-0000-0000-0000-000000000003',
+      '99100000-0000-0000-0000-000000000004',
+      'advisor',
+      'advisor_portal',
+      '99100000-0000-0000-0000-000000000004',
+      '99100000-0000-0000-0000-000000000005',
+      now(),
+      'SCH29-REVIEWER-MISMATCH',
+      'buy',
+      100.00,
+      'pending_review'
+    );
+    RAISE EXCEPTION 'mismatched reviewer fields were accepted on insert';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'reviewer_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected reviewer insert mismatch error: %', SQLERRM;
+    END IF;
+  END;
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  ) VALUES (
+    '99300000-0000-0000-0000-000000000022',
+    '99200000-0000-0000-0000-000000000001',
+    '99100000-0000-0000-0000-000000000003',
+    '99100000-0000-0000-0000-000000000004',
+    'advisor',
+    'advisor_portal',
+    'SCH29-REVIEWER-MISMATCH-UPD',
+    'buy',
+    100.00,
+    'pending_review'
+  );
+
+  BEGIN
+    UPDATE public.order_requests
+    SET reviewed_by = '99100000-0000-0000-0000-000000000004',
+        reviewed_by_profile_id = '99100000-0000-0000-0000-000000000005',
+        reviewed_at = now()
+    WHERE id = '99300000-0000-0000-0000-000000000022';
+    RAISE EXCEPTION 'mismatched reviewer fields were accepted on update';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'reviewer_profile_mismatch' THEN
+      RAISE EXCEPTION 'Unexpected reviewer update mismatch error: %', SQLERRM;
+    END IF;
+  END;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -452,6 +826,7 @@ BEGIN
     'pending_review'
   );
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000005', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000005","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   v_order := public.qualify_order('99300000-0000-0000-0000-000000000011', 'rejected', 'Needs offline confirmation');
 
@@ -470,6 +845,8 @@ BEGIN
     RAISE EXCEPTION 'manual rejection audit events were not separated: %', v_count;
   END IF;
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -531,6 +908,36 @@ BEGIN
     RAISE EXCEPTION 'auto-approval evaluation/outcome audit events were not separated: %', v_count;
   END IF;
 
+  SELECT * INTO v_audit
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '99300000-0000-0000-0000-000000000013'
+    AND action = 'order.auto_qualified'
+  LIMIT 1;
+
+  IF v_audit.actor_type <> 'system'
+     OR v_audit.actor_id IS NOT NULL
+     OR v_audit.actor_profile_id IS NOT NULL
+     OR v_audit.payload ->> 'investor_profile_id' <> '99100000-0000-0000-0000-000000000003'
+     OR v_audit.payload ->> 'claimed_by_profile_id' <> '99100000-0000-0000-0000-000000000004' THEN
+    RAISE EXCEPTION 'auto-approval evaluation audit incorrectly attributed system actor';
+  END IF;
+
+  SELECT * INTO v_audit
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '99300000-0000-0000-0000-000000000013'
+    AND action = 'order.approved'
+  LIMIT 1;
+
+  IF v_audit.actor_type <> 'system'
+     OR v_audit.actor_id IS NOT NULL
+     OR v_audit.actor_profile_id IS NOT NULL
+     OR v_audit.payload ->> 'investor_profile_id' <> '99100000-0000-0000-0000-000000000003'
+     OR v_audit.payload ->> 'claimed_by_profile_id' <> '99100000-0000-0000-0000-000000000004' THEN
+    RAISE EXCEPTION 'auto-approval outcome audit incorrectly attributed system actor';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,

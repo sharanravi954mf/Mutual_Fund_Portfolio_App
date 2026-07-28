@@ -8,21 +8,60 @@ ALTER TABLE public.order_requests
   ADD COLUMN IF NOT EXISTS initiation_channel pg_catalog.text,
   ADD COLUMN IF NOT EXISTS reviewed_by_profile_id pg_catalog.uuid REFERENCES public.profiles(id) ON DELETE SET NULL ON UPDATE CASCADE;
 
+CREATE OR REPLACE FUNCTION public.is_order_mfd_profile(
+  p_workspace_id pg_catalog.uuid,
+  p_profile_id pg_catalog.uuid
+)
+RETURNS pg_catalog.bool AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.workspace_memberships AS wm
+    WHERE wm.workspace_id = p_workspace_id
+      AND wm.profile_id = p_profile_id
+      AND wm.role = 'advisor'
+      AND wm.status = 'active'
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM public.workspaces AS w
+    JOIN public.workspace_memberships AS wm
+      ON wm.workspace_id = w.id
+     AND wm.profile_id = p_profile_id
+     AND wm.role = 'admin'
+     AND wm.status = 'active'
+    WHERE w.id = p_workspace_id
+      AND w.owner_profile_id = p_profile_id
+  );
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '';
+
+REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM authenticated;
+REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM service_role;
+
 UPDATE public.order_requests AS o
-SET initiated_by_profile_id = COALESCE(o.initiated_by_profile_id, o.investor_profile_id),
-    initiated_by_role = COALESCE(o.initiated_by_role, 'investor'),
-    initiation_channel = COALESCE(o.initiation_channel, 'investor_portal'),
-    reviewed_by_profile_id = COALESCE(o.reviewed_by_profile_id, o.reviewed_by)
-WHERE o.initiated_by_profile_id IS NULL
-   OR o.initiated_by_role IS NULL
-   OR o.initiation_channel IS NULL
-   OR (o.reviewed_by_profile_id IS NULL AND o.reviewed_by IS NOT NULL);
+SET reviewed_by_profile_id = o.reviewed_by
+WHERE o.reviewed_by_profile_id IS NULL
+  AND o.reviewed_by IS NOT NULL;
 
 DO $$
 DECLARE
   v_missing_count pg_catalog.int8;
   v_invalid_combo_count pg_catalog.int8;
+  v_reviewer_mismatch_count pg_catalog.int8;
 BEGIN
+  SELECT pg_catalog.count(*) INTO v_reviewer_mismatch_count
+  FROM public.order_requests AS o
+  WHERE o.reviewed_by IS NOT NULL
+    AND o.reviewed_by_profile_id IS NOT NULL
+    AND o.reviewed_by <> o.reviewed_by_profile_id;
+
+  IF v_reviewer_mismatch_count > 0 THEN
+    RAISE EXCEPTION 'reviewer_profile_mismatch_existing_rows: % offending rows', v_reviewer_mismatch_count;
+  END IF;
+
   SELECT pg_catalog.count(*) INTO v_missing_count
   FROM public.order_requests AS o
   WHERE o.workspace_id IS NULL
@@ -32,7 +71,7 @@ BEGIN
      OR o.initiation_channel IS NULL;
 
   IF v_missing_count > 0 THEN
-    RAISE EXCEPTION 'order_request_canonical_metadata_missing: % offending rows', v_missing_count;
+    RAISE EXCEPTION 'order_request_initiator_unresolved_existing_rows: % offending rows', v_missing_count;
   END IF;
 
   SELECT pg_catalog.count(*) INTO v_invalid_combo_count
@@ -93,57 +132,86 @@ BEGIN
 END
 $$;
 
-CREATE OR REPLACE FUNCTION public.is_order_mfd_profile(
-  p_workspace_id pg_catalog.uuid,
-  p_profile_id pg_catalog.uuid
-)
-RETURNS pg_catalog.bool AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1
-    FROM public.workspace_memberships AS wm
-    WHERE wm.workspace_id = p_workspace_id
-      AND wm.profile_id = p_profile_id
-      AND wm.role = 'advisor'
-      AND wm.status = 'active'
-  )
-  OR EXISTS (
-    SELECT 1
-    FROM public.workspaces AS w
-    JOIN public.workspace_memberships AS wm
-      ON wm.workspace_id = w.id
-     AND wm.profile_id = p_profile_id
-     AND wm.role = 'admin'
-     AND wm.status = 'active'
-    WHERE w.id = p_workspace_id
-      AND w.owner_profile_id = p_profile_id
-  );
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '';
-
-REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) TO service_role;
-
 CREATE OR REPLACE FUNCTION public.validate_order_request_canonical_contract()
 RETURNS trigger AS $$
+DECLARE
+  v_caller_user_id pg_catalog.uuid;
+  v_caller_profile_id pg_catalog.uuid;
+  v_is_service_role pg_catalog.bool;
 BEGIN
+  IF NEW.reviewed_by IS NOT NULL
+     AND NEW.reviewed_by_profile_id IS NOT NULL
+     AND NEW.reviewed_by <> NEW.reviewed_by_profile_id THEN
+    RAISE EXCEPTION 'reviewer_profile_mismatch';
+  END IF;
+
+  IF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_by IS NOT NULL THEN
+    NEW.reviewed_by_profile_id := NEW.reviewed_by;
+  ELSIF NEW.reviewed_by IS NULL AND NEW.reviewed_by_profile_id IS NOT NULL THEN
+    NEW.reviewed_by := NEW.reviewed_by_profile_id;
+  END IF;
+
   IF TG_OP = 'INSERT' THEN
-    NEW.initiated_by_profile_id := COALESCE(NEW.initiated_by_profile_id, NEW.investor_profile_id);
-    NEW.initiated_by_role := COALESCE(
-      NEW.initiated_by_role,
-      CASE
-        WHEN NEW.initiated_by_profile_id = NEW.investor_profile_id THEN 'investor'
-        ELSE 'advisor'
-      END
-    );
-    NEW.initiation_channel := COALESCE(
-      NEW.initiation_channel,
-      CASE
-        WHEN NEW.initiated_by_role = 'investor' THEN 'investor_portal'
-        ELSE 'advisor_portal'
-      END
-    );
+    IF NEW.status = 'draft'::public.order_status THEN
+      RETURN NEW;
+    END IF;
+
+    v_caller_user_id := auth.uid();
+    v_is_service_role := COALESCE(auth.role(), '') = 'service_role';
+
+    IF v_caller_user_id IS NOT NULL THEN
+      v_caller_profile_id := public.current_user_profile_id();
+
+      IF v_caller_profile_id IS NULL THEN
+        RAISE EXCEPTION 'profile_resolution_failed';
+      END IF;
+
+      IF NEW.initiated_by_profile_id IS NULL THEN
+        NEW.initiated_by_profile_id := v_caller_profile_id;
+      ELSIF NEW.initiated_by_profile_id <> v_caller_profile_id THEN
+        RAISE EXCEPTION 'initiator_profile_mismatch';
+      END IF;
+
+      IF public.is_platform_admin() THEN
+        RAISE EXCEPTION 'not_authorized';
+      END IF;
+
+      IF v_caller_profile_id = NEW.investor_profile_id THEN
+        IF NEW.initiated_by_role IS NULL THEN
+          NEW.initiated_by_role := 'investor';
+        ELSIF NEW.initiated_by_role <> 'investor' THEN
+          RAISE EXCEPTION 'invalid_order_initiation_metadata';
+        END IF;
+
+        IF NEW.initiation_channel IS NULL THEN
+          NEW.initiation_channel := 'investor_portal';
+        ELSIF NEW.initiation_channel <> 'investor_portal' THEN
+          RAISE EXCEPTION 'invalid_order_initiation_metadata';
+        END IF;
+      ELSIF public.is_order_mfd_profile(NEW.workspace_id, v_caller_profile_id) THEN
+        IF NEW.initiated_by_role IS NULL THEN
+          NEW.initiated_by_role := 'advisor';
+        ELSIF NEW.initiated_by_role <> 'advisor' THEN
+          RAISE EXCEPTION 'invalid_order_initiation_metadata';
+        END IF;
+
+        IF NEW.initiation_channel IS NULL THEN
+          NEW.initiation_channel := 'advisor_portal';
+        ELSIF NEW.initiation_channel <> 'advisor_portal' THEN
+          RAISE EXCEPTION 'invalid_order_initiation_metadata';
+        END IF;
+      ELSE
+        RAISE EXCEPTION 'order_initiator_not_authorized';
+      END IF;
+    ELSIF v_is_service_role THEN
+      IF NEW.initiated_by_profile_id IS NULL
+         OR NEW.initiated_by_role IS NULL
+         OR NEW.initiation_channel IS NULL THEN
+        RAISE EXCEPTION 'order_request_canonical_metadata_missing';
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'profile_resolution_failed';
+    END IF;
   ELSE
     IF NEW.workspace_id IS DISTINCT FROM OLD.workspace_id
        OR NEW.investor_profile_id IS DISTINCT FROM OLD.investor_profile_id
@@ -152,12 +220,6 @@ BEGIN
        OR NEW.initiation_channel IS DISTINCT FROM OLD.initiation_channel THEN
       RAISE EXCEPTION 'order_initiation_metadata_immutable';
     END IF;
-  END IF;
-
-  IF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_by IS NOT NULL THEN
-    NEW.reviewed_by_profile_id := NEW.reviewed_by;
-  ELSIF NEW.reviewed_by IS NULL AND NEW.reviewed_by_profile_id IS NOT NULL THEN
-    NEW.reviewed_by := NEW.reviewed_by_profile_id;
   END IF;
 
   IF NEW.workspace_id IS NULL
@@ -587,8 +649,8 @@ BEGIN
     payload
   ) VALUES (
     v_workspace_id,
-    v_investor_profile_id,
-    v_investor_profile_id,
+    null,
+    null,
     'system',
     'order.auto_qualified',
     'order.auto_approval_evaluated',
@@ -605,7 +667,9 @@ BEGIN
       'rule_version', p_rule_version,
       'correlation_id', p_correlation_id,
       'investor_profile_id', v_investor_profile_id,
-      'initiated_by_profile_id', v_initiated_by_profile_id
+      'initiated_by_profile_id', v_initiated_by_profile_id,
+      'claimed_by_profile_id', v_claimed_by,
+      'claimed_at', v_claimed_at
     )
   );
 
@@ -627,8 +691,8 @@ BEGIN
       payload
     ) VALUES (
       v_workspace_id,
-      v_investor_profile_id,
-      v_investor_profile_id,
+      null,
+      null,
       'system',
       'order.approved',
       'order.approved',
@@ -645,7 +709,9 @@ BEGIN
         'rule_version', p_rule_version,
         'correlation_id', p_correlation_id,
         'investor_profile_id', v_investor_profile_id,
-        'initiated_by_profile_id', v_initiated_by_profile_id
+        'initiated_by_profile_id', v_initiated_by_profile_id,
+        'claimed_by_profile_id', v_claimed_by,
+        'claimed_at', v_claimed_at
       )
     );
   END IF;
