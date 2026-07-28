@@ -90,12 +90,16 @@ VALUES
 INSERT INTO public.family_delegations (id, workspace_id, owner_profile_id, delegate_profile_id, consent_status, is_active)
 VALUES ('99400000-0000-0000-0000-000000000001', '99200000-0000-0000-0000-000000000001', '99100000-0000-0000-0000-000000000003', '99100000-0000-0000-0000-000000000007', 'accepted', true);
 
+INSERT INTO public.auto_approval_rules (id, workspace_id, transaction_type, min_amount, max_amount, is_active, rule_version)
+VALUES ('99500000-0000-0000-0000-000000000001', '99200000-0000-0000-0000-000000000001', 'buy', 0.00, 10000.00, true, 1);
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
 
 DO $$
 DECLARE
   v_order public.order_requests;
   v_audit public.workspace_audit_logs;
+  v_outbox public.event_outbox;
   v_count pg_catalog.int4;
 BEGIN
   INSERT INTO public.order_requests (
@@ -464,6 +468,67 @@ BEGIN
 
   IF v_count <> 3 THEN
     RAISE EXCEPTION 'manual rejection audit events were not separated: %', v_count;
+  END IF;
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  ) VALUES (
+    '99300000-0000-0000-0000-000000000013',
+    '99200000-0000-0000-0000-000000000001',
+    '99100000-0000-0000-0000-000000000003',
+    '99100000-0000-0000-0000-000000000003',
+    'investor',
+    'investor_portal',
+    'SCH29-AUTO',
+    'buy',
+    500.00,
+    'pending_qualification'
+  );
+
+  SELECT * INTO v_outbox
+  FROM public.event_outbox
+  WHERE entity_id = '99300000-0000-0000-0000-000000000013'
+    AND event_type = 'order.created'
+  LIMIT 1;
+
+  IF v_outbox.id IS NULL THEN
+    RAISE EXCEPTION 'auto-approval outbox event not generated for Issue #29 order';
+  END IF;
+
+  UPDATE public.event_outbox
+  SET status = 'processing',
+      claimed_at = now(),
+      claimed_by = '99100000-0000-0000-0000-000000000004'
+  WHERE id = v_outbox.id;
+
+  v_order := public.apply_auto_approval_decision(
+    '99300000-0000-0000-0000-000000000013',
+    'auto_approved',
+    '99500000-0000-0000-0000-000000000001',
+    1,
+    v_outbox.id
+  );
+
+  IF v_order.status <> 'auto_approved' THEN
+    RAISE EXCEPTION 'auto-approval decision did not persist expected final status';
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '99300000-0000-0000-0000-000000000013'
+    AND action IN ('order.initiated', 'order.auto_qualified', 'order.approved');
+
+  IF v_count <> 3 THEN
+    RAISE EXCEPTION 'auto-approval evaluation/outcome audit events were not separated: %', v_count;
   END IF;
 
   INSERT INTO public.order_requests (
