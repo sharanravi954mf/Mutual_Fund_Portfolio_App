@@ -362,7 +362,7 @@ Manual advisor qualification is routed through a separate, audited routine:
   4. Blocks execution attempts by Platform Admins, investors, family guest delegates, or unrelated advisors.
   5. Accepts transitions only if the order's locked status is exactly `pending_review`.
   6. Restricts status mutations strictly to `approved` or `rejected`.
-  7. Mutates only `status`, `reviewed_by`, `reviewed_at`, and `rejection_reason` columns.
+  7. Mutates only `status`, `reviewed_by_profile_id`, `reviewed_at`, and `rejection_reason` columns.
   8. Records an immutable log of the old state and new state in `public.workspace_audit_logs`.
   9. Privilege Contract:
      ```sql
@@ -641,8 +641,6 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **Manual approval** | `actor_profile_id`, `investor_profile_id`, `initiated_by_profile_id`, `reviewed_by_profile_id`, `previous_state`, `new_state`, `occurred_at` | `workspace_audit_logs` |
 | **Manual rejection** | `actor_profile_id`, `investor_profile_id`, `initiated_by_profile_id`, `reviewed_by_profile_id`, `previous_state`, `new_state`, `reason`, `occurred_at` | `workspace_audit_logs` |
 | **Order cancellation** | `actor_profile_id`, `entity_id`, `previous_state`, `new_state`, `reason` | `workspace_audit_logs` |
-
-*Note: initiated_by_profile_id and reviewed_by_profile_id may be equal for an authorised MFD-side workflow.*
 | **Auto-approval rule creation** | `actor_profile_id`, `entity_id` (`rule_id`), `new_state` | `workspace_audit_logs` |
 | **Auto-approval rule modification** | `actor_profile_id`, `entity_id` (`rule_id`), `previous_state`, `new_state` | `workspace_audit_logs` |
 | **Family delegation creation** | `actor_profile_id`, `entity_id`, `new_state` | `workspace_audit_logs` |
@@ -656,6 +654,8 @@ The platform records immutable audit logs inside `public.workspace_audit_logs` (
 | **Ingestion start** | `workspace_id`, `entity_id` (log), `action` | `ingestion_logs` |
 | **Ingestion completion** | `workspace_id`, `entity_id` (log), `action` | `ingestion_logs` |
 | **Ingestion failure** | `workspace_id`, `entity_id` (log), `action`, `reason` | `ingestion_logs` |
+
+*Note: initiated_by_profile_id and reviewed_by_profile_id may be equal for an authorised MFD-side workflow.*
 
 ---
 
