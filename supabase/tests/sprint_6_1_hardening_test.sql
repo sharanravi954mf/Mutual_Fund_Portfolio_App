@@ -101,14 +101,37 @@ BEGIN
     IF SQLERRM <> 'already_cancelled' THEN
       RAISE EXCEPTION 'Unexpected error on repeated cancellation: %', SQLERRM;
     END IF;
-  END;
+	  END;
 
-  -- 3. Verify qualify_order limits qualification strictly to pending_review and advisor roles
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('76000000-0000-0000-0000-000000000002', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 5000.00, 'pending_review');
+	  -- 3. Verify qualify_order limits qualification strictly to pending_review and advisor roles
+	  PERFORM set_config('request.jwt.claim.sub', '', true);
+	  PERFORM set_config('request.jwt.claims', '{}', true);
+	  INSERT INTO public.order_requests (
+	    id,
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    scheme_code,
+	    type,
+	    amount,
+	    status
+	  ) VALUES (
+	    '76000000-0000-0000-0000-000000000002',
+	    '73000000-0000-0000-0000-000000000001',
+	    '72000000-0000-0000-0000-000000000003',
+	    '72000000-0000-0000-0000-000000000002',
+	    'advisor',
+	    'advisor_portal',
+	    'SCH101',
+	    'buy',
+	    5000.00,
+	    'pending_review'
+	  );
 
-  -- Verify advisor in workspace A can qualify
-  PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000002', true);
+	  -- Verify advisor in workspace A can qualify
+	  PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000002', true);
   v_order := public.qualify_order('76000000-0000-0000-0000-000000000002', 'approved', 'Verified order');
   IF v_order.status <> 'approved' THEN
     RAISE EXCEPTION 'qualify_order failed to approve pending_review order';
@@ -124,11 +147,34 @@ BEGIN
     END IF;
   END;
 
-  -- Verify platform admin cannot qualify order manually
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('76000000-0000-0000-0000-000000000003', '73000000-0000-0000-0000-000000000001', '72000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 5000.00, 'pending_review');
+	  -- Verify platform admin cannot qualify order manually
+	  PERFORM set_config('request.jwt.claim.sub', '', true);
+	  PERFORM set_config('request.jwt.claims', '{}', true);
+	  INSERT INTO public.order_requests (
+	    id,
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    scheme_code,
+	    type,
+	    amount,
+	    status
+	  ) VALUES (
+	    '76000000-0000-0000-0000-000000000003',
+	    '73000000-0000-0000-0000-000000000001',
+	    '72000000-0000-0000-0000-000000000003',
+	    '72000000-0000-0000-0000-000000000002',
+	    'advisor',
+	    'advisor_portal',
+	    'SCH101',
+	    'buy',
+	    5000.00,
+	    'pending_review'
+	  );
 
-  PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000001', true);
+	  PERFORM set_config('request.jwt.claim.sub', '71000000-0000-0000-0000-000000000001', true);
   BEGIN
     PERFORM public.qualify_order('76000000-0000-0000-0000-000000000003', 'approved', 'Admin qualification attempt');
     RAISE EXCEPTION 'Platform Admin bypass occurred during manual qualification';

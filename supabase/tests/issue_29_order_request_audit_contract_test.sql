@@ -98,9 +98,11 @@ DECLARE
   v_order public.order_requests;
 	  v_audit public.workspace_audit_logs;
 	  v_outbox public.event_outbox;
-	  v_count pg_catalog.int4;
-	  v_total_count pg_catalog.int4;
-	  v_distinct_count pg_catalog.int4;
+  v_count pg_catalog.int4;
+  v_total_count pg_catalog.int4;
+  v_distinct_count pg_catalog.int4;
+  v_bad_status public.order_status;
+  v_bad_status_index pg_catalog.int4 := 40;
 	BEGIN
 	  IF EXISTS (
 	    SELECT 1
@@ -548,7 +550,7 @@ DECLARE
 	    IF SQLERRM NOT LIKE 'reviewer_workspace_relationship_required_existing_rows: 1%' THEN
 	      RAISE EXCEPTION 'Unexpected existing-row reviewer relationship preflight error: %', SQLERRM;
 	    END IF;
-	  END;
+  END;
 
   PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
@@ -662,46 +664,57 @@ DECLARE
 
 	  IF v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
 	     OR v_order.initiated_by_role <> 'advisor'
-	     OR v_order.initiation_channel <> 'advisor_portal' THEN
+	     OR v_order.initiation_channel <> 'advisor_portal'
+	     OR v_order.status <> 'pending_qualification' THEN
 	    RAISE EXCEPTION 'trusted service-role insert did not preserve explicit initiator metadata';
 	  END IF;
 
-	  BEGIN
-	    INSERT INTO public.order_requests (
-	      id,
-	      workspace_id,
-	      investor_profile_id,
-	      initiated_by_profile_id,
-	      initiated_by_role,
-	      initiation_channel,
-	      reviewed_by,
-	      reviewed_by_profile_id,
-	      reviewed_at,
-	      scheme_code,
-	      type,
-	      amount,
-	      status
-	    ) VALUES (
-	      '99300000-0000-0000-0000-000000000025',
-	      '99200000-0000-0000-0000-000000000001',
-	      '99100000-0000-0000-0000-000000000003',
-	      '99100000-0000-0000-0000-000000000004',
-	      'advisor',
-	      'advisor_portal',
-	      '99100000-0000-0000-0000-000000000004',
-	      '99100000-0000-0000-0000-000000000004',
-	      now(),
-	      'SCH29-SERVICE-FINAL',
-	      'buy',
-	      100.00,
-	      'approved'
-	    );
-	    RAISE EXCEPTION 'service-role inserted a final-state order without complete audit sequence';
-	  EXCEPTION WHEN OTHERS THEN
-	    IF SQLERRM <> 'invalid_initial_order_status' THEN
-	      RAISE EXCEPTION 'Unexpected service-role final insert error: %', SQLERRM;
-	    END IF;
-	  END;
+  FOREACH v_bad_status IN ARRAY ARRAY[
+    'draft'::public.order_status,
+    'pending_review'::public.order_status,
+    'auto_approved'::public.order_status,
+    'approved'::public.order_status,
+    'rejected'::public.order_status,
+    'cancelled'::public.order_status
+  ] LOOP
+    v_bad_status_index := v_bad_status_index + 1;
+    BEGIN
+      INSERT INTO public.order_requests (
+        id,
+        workspace_id,
+        investor_profile_id,
+        initiated_by_profile_id,
+        initiated_by_role,
+        initiation_channel,
+        reviewed_by,
+        reviewed_by_profile_id,
+        reviewed_at,
+        scheme_code,
+        type,
+        amount,
+        status
+      ) VALUES (
+        ('99300000-0000-0000-0000-0000000000' || pg_catalog.lpad(v_bad_status_index::pg_catalog.text, 2, '0'))::pg_catalog.uuid,
+        '99200000-0000-0000-0000-000000000001',
+        '99100000-0000-0000-0000-000000000003',
+        '99100000-0000-0000-0000-000000000004',
+        'advisor',
+        'advisor_portal',
+        CASE WHEN v_bad_status IN ('approved'::public.order_status, 'rejected'::public.order_status) THEN '99100000-0000-0000-0000-000000000004'::pg_catalog.uuid ELSE NULL END,
+        CASE WHEN v_bad_status IN ('approved'::public.order_status, 'rejected'::public.order_status) THEN '99100000-0000-0000-0000-000000000004'::pg_catalog.uuid ELSE NULL END,
+        CASE WHEN v_bad_status IN ('approved'::public.order_status, 'rejected'::public.order_status) THEN now() ELSE NULL END,
+        'SCH29-SERVICE-BAD-INITIAL',
+        'buy',
+        100.00,
+        v_bad_status
+      );
+      RAISE EXCEPTION 'service-role inserted invalid initial order status: %', v_bad_status;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM <> 'invalid_initial_order_status' THEN
+        RAISE EXCEPTION 'Unexpected service-role invalid initial status error for %: %', v_bad_status, SQLERRM;
+      END IF;
+    END;
+  END LOOP;
 
 	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
@@ -783,8 +796,8 @@ DECLARE
 	      now(),
 	      'SCH29-INV-PRE-REVIEW',
 	      'buy',
-	      100.00,
-	      'pending_review'
+      100.00,
+      'pending_qualification'
 	    );
 	    RAISE EXCEPTION 'investor pre-populated advisor review metadata on insert';
 	  EXCEPTION WHEN OTHERS THEN
@@ -1087,7 +1100,7 @@ DECLARE
 	      'SCH29-BAD-REVIEWER',
 	      'buy',
       100.00,
-      'pending_review'
+      'pending_qualification'
 	    );
 	    RAISE EXCEPTION 'advisor pre-populated another advisor review metadata on insert';
 	  EXCEPTION WHEN OTHERS THEN
@@ -1124,7 +1137,7 @@ DECLARE
       'SCH29-REVIEWER-MISMATCH',
       'buy',
       100.00,
-      'pending_review'
+      'pending_qualification'
     );
     RAISE EXCEPTION 'mismatched reviewer fields were accepted on insert';
   EXCEPTION WHEN OTHERS THEN
@@ -1133,6 +1146,8 @@ DECLARE
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -1157,6 +1172,8 @@ DECLARE
     'pending_review'
   );
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     UPDATE public.order_requests
     SET reviewed_by = '99100000-0000-0000-0000-000000000004',
@@ -1170,6 +1187,8 @@ DECLARE
 	    END IF;
 	  END;
 
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
 	  INSERT INTO public.order_requests (
 	    id,
 	    workspace_id,
@@ -1194,6 +1213,8 @@ DECLARE
 	    'pending_review'
 	  );
 
+	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+	  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
 	  BEGIN
 	    UPDATE public.order_requests
 	    SET status = 'approved',
@@ -1208,8 +1229,8 @@ DECLARE
 	    END IF;
 	  END;
 
-	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
-  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -1234,6 +1255,7 @@ DECLARE
     'pending_review'
   );
 
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   v_order := public.qualify_order('99300000-0000-0000-0000-000000000010', 'approved', null);
 
@@ -1314,6 +1336,8 @@ DECLARE
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
   INSERT INTO public.order_requests (
     id,
     workspace_id,
@@ -1363,6 +1387,99 @@ DECLARE
 	  IF v_total_count <> 3 OR v_count <> 3 OR v_distinct_count <> 3 THEN
 	    RAISE EXCEPTION 'manual rejection audit events were not exact: total %, expected %, distinct %', v_total_count, v_count, v_distinct_count;
 	  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  ) VALUES (
+    '99300000-0000-0000-0000-000000000033',
+    '99200000-0000-0000-0000-000000000001',
+    '99100000-0000-0000-0000-000000000003',
+    '99100000-0000-0000-0000-000000000003',
+    'investor',
+    'investor_portal',
+    'SCH29-AUTO-REVIEW',
+    'buy',
+    10500.00,
+    'pending_qualification'
+  );
+
+  SELECT * INTO v_outbox
+  FROM public.event_outbox
+  WHERE entity_id = '99300000-0000-0000-0000-000000000033'
+    AND event_type = 'order.created'
+  LIMIT 1;
+
+  IF v_outbox.id IS NULL THEN
+    RAISE EXCEPTION 'auto-review outbox event not generated for Issue #29 order';
+  END IF;
+
+  UPDATE public.event_outbox
+  SET status = 'processing',
+      claimed_at = now(),
+      claimed_by = '99100000-0000-0000-0000-000000000004'
+  WHERE id = v_outbox.id;
+
+  v_order := public.apply_auto_approval_decision(
+    '99300000-0000-0000-0000-000000000033',
+    'pending_review',
+    null,
+    null,
+    v_outbox.id
+  );
+
+  IF v_order.status <> 'pending_review' THEN
+    RAISE EXCEPTION 'auto-approval decision did not persist pending_review';
+  END IF;
+
+  SELECT
+    pg_catalog.count(*)::pg_catalog.int4,
+    pg_catalog.count(*) FILTER (
+      WHERE action IN ('order.initiated', 'order.auto_qualified')
+    )::pg_catalog.int4,
+    pg_catalog.count(DISTINCT action) FILTER (
+      WHERE action IN ('order.initiated', 'order.auto_qualified')
+    )::pg_catalog.int4
+  INTO v_total_count, v_count, v_distinct_count
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '99300000-0000-0000-0000-000000000033';
+
+  IF v_total_count <> 2 OR v_count <> 2 OR v_distinct_count <> 2 THEN
+    RAISE EXCEPTION 'pending_review auto-evaluation audit events were not exact: total %, expected %, distinct %', v_total_count, v_count, v_distinct_count;
+  END IF;
+
+  SELECT * INTO v_audit
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '99300000-0000-0000-0000-000000000033'
+    AND action = 'order.auto_qualified'
+  LIMIT 1;
+
+  IF v_audit.event_type <> 'order.auto_approval_evaluated'
+     OR v_audit.actor_type <> 'system'
+     OR v_audit.actor_id IS NOT NULL
+     OR v_audit.actor_profile_id IS NOT NULL
+     OR v_audit.payload ->> 'claimed_by_profile_id' <> '99100000-0000-0000-0000-000000000004' THEN
+    RAISE EXCEPTION 'pending_review auto-evaluation audit metadata was incorrect';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.workspace_audit_logs
+    WHERE entity_id = '99300000-0000-0000-0000-000000000033'
+      AND action IN ('order.approved', 'order.rejected', 'order.cancelled')
+  ) THEN
+    RAISE EXCEPTION 'pending_review auto-evaluation wrote a final-outcome audit';
+  END IF;
 
   PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
@@ -1536,6 +1653,8 @@ DECLARE
   v_idx pg_catalog.int4 := 25;
 BEGIN
   FOREACH v_bad_status IN ARRAY ARRAY[
+    'draft'::public.order_status,
+    'pending_review'::public.order_status,
     'auto_approved'::public.order_status,
     'approved'::public.order_status,
     'rejected'::public.order_status,

@@ -247,12 +247,7 @@ BEGIN
       OR v_request_role IN ('anon', 'authenticated', 'service_role')
       OR v_is_service_role
     )
-       AND NEW.status IN (
-      'auto_approved'::public.order_status,
-      'approved'::public.order_status,
-      'rejected'::public.order_status,
-      'cancelled'::public.order_status
-    ) THEN
+       AND NEW.status <> 'pending_qualification'::public.order_status THEN
       RAISE EXCEPTION 'invalid_initial_order_status';
     END IF;
 
@@ -520,17 +515,8 @@ RETURNS pg_catalog.bool AS $$
 DECLARE
   v_profile_id pg_catalog.uuid;
 BEGIN
-  IF p_status IN (
-    'auto_approved'::public.order_status,
-    'approved'::public.order_status,
-    'rejected'::public.order_status,
-    'cancelled'::public.order_status
-  ) THEN
-    RAISE EXCEPTION 'invalid_initial_order_status';
-  END IF;
-
   IF p_status <> 'pending_qualification'::public.order_status THEN
-    RETURN false;
+    RAISE EXCEPTION 'invalid_initial_order_status';
   END IF;
 
   v_profile_id := public.current_user_profile_id();
