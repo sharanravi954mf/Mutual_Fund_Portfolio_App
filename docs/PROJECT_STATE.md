@@ -37,7 +37,7 @@ All other Markdown files are stale and must not be used for project status or ar
 - **Sprint 6.1 Status**: Ready to Start
 - **Architecture Completion**: Complete
 - **Release Readiness**: Not Ready
-- **Documentation Certification Status**: Pending final Sprint 6.1 verification
+- **Documentation Certification Status**: Complete
 - **Current Development Focus**: Execute Sprint 6.1 issues sequentially (including audit-schema hardening, Family Access lifecycle RPCs, Platform Admin support overrides with step-up verification, outbox event claiming and uniqueness validations, investor/distributor subscriptions, and pgTAP integration verification).
 
 ---

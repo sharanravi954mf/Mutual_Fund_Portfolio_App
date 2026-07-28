@@ -142,7 +142,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **BR-002 Multi-Tenancy**: An Investor can have N distributor relationships attached to their single master profile under isolated views.  
 * **BR-003 Isolation**: A Distributor can never view or query investor holdings executed under another distributor's ARN.  
 * **BR-004 No Consolidation**: Money Bowl shall not present a merged return view across different distributors to prevent concealing advisor performance.  
-* **BR-005 Transactions**: Buy, Sell and Switch order requests may be initiated by a mapped investor or by an authorised Distributor acting for an actively mapped investor within the Distributor’s own workspace. Orders require an active auto-approval rule or manual qualification by an authorised MFD user. The same MFD-side user may initiate and later qualify the order. Investors, Platform Admins and Family Guests cannot qualify orders.  
+* **BR-005 Transactions**: Buy, Sell and Switch order requests may be initiated by a mapped investor or by an authorised Distributor acting for an actively mapped investor within the Distributor’s own workspace. Platform Admins and Family Guests cannot initiate order requests. Orders require an active auto-approval rule or manual qualification by an authorised MFD user. The same MFD-side user may initiate and later qualify the order. Investors, Platform Admins, and Family Guests cannot qualify orders. Cross-workspace order initiation and qualification are strictly prohibited.  
 * **BR-006 Auto-Approval**: Distributors can configure Auto-Approval rules for specific transaction types, amounts, or trusted clients.  
 * **BR-007 Admin Override**: Platform Admins possess supersede access rights to unlock accounts, assist uneducated users, and perform access resets.  
 * **BR-008 Data Masking**: PII data (PAN, Bank Accounts) must be masked by default across all portal views.  
@@ -160,7 +160,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **FR-004**: Platform shall strictly mask sensitive PII (PAN, Bank details) by default across UI screens (e.g., XXXXX1234F).  
 
 ### 8.2 Order Execution, AMFI Factsheets & Universal Search (BC-004, BC-005, BC-015, BC-017)
-* **FR-005**: Platform shall enable Mapped Investors to initiate self-initiated Buy, Sell, and Switch order requests, and enable authorised Distributors to initiate order requests on behalf of actively mapped investors within the same workspace. The platform must capture both initiator and investor beneficiary identity parameters, while denying order initiation privileges to Platform Admins, Family Guests, and unrelated MFDs.
+* **FR-005**: Platform shall enable Mapped Investors to initiate their own Buy, Sell and Switch order requests, and enable authorised Distributors to initiate order requests on behalf of actively mapped investors within the same workspace. The platform must capture both initiator and investor beneficiary identity parameters, while denying order initiation privileges to Platform Admins, Family Guests, and unrelated MFDs.
 * **FR-006**: Platform shall route order requests directly to the mapped Distributor's Transaction Approval Queue. The approval queue interface must display the target investor, initiator, initiator role, initiation channel, order status, and an informational marker indicating whether the reviewing MFD user is also the initiator (same-user initiation and qualification is permitted and must not be blocked).  
 * **FR-007**: Platform shall provide a Universal Search & Discovery Bar in the top navigation bar to query schemes, folios, transactions, documents, and support tickets.  
 * **FR-008**: Platform shall render detailed Scheme Factsheets (backed by local PostgreSQL tables and updated via free AMFI public APIs) displaying AMC details, category, NAV history, expense ratio, riskometer, and top holdings.  
@@ -175,7 +175,7 @@ Money Bowl implements a multi-tier commercial strategy serving both B2B and B2C 
 * **FR-013**: Platform AI shall decline prompts requesting scheme recommendations, fund switches, or personal financial advice.  
 * **FR-014**: Platform shall enable Investors to raise support tickets directly or via AI Assistant handoff to their Distributor's queue.  
 
-## 9. Product Scope Boundaries (v1.2 Baseline)
+## 9. Product Scope Boundaries (v1.3 Baseline)
 * **In Scope**: Mutual Fund Portfolio Management, Investor and Distributor-assisted Order Requests (Buy/Sell/Switch), MFD Transaction Approval Queue, Dual Subscription Engine, AMFI Scheme Factsheets (Free API Sync), Universal Search & Discovery Bar, Investor Referral System, Exploring Standalone Investor Flow, Admin Supersede & Override, Mandatory PII Security & Masking.
 * **Out of Scope**: Direct Unassisted / Unadvised Order Execution (Without MFD), Direct Stock/Equity Tracking, Insurance, FDs, or Crypto, Personalized AI Investment Advice / Scheme Routing, Automated Portfolio Rebalancing, Tax Filing & IT Returns.
 
