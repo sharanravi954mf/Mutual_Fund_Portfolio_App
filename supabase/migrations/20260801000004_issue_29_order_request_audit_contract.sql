@@ -41,27 +41,18 @@ REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.u
 REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM authenticated;
 REVOKE ALL ON FUNCTION public.is_order_mfd_profile(pg_catalog.uuid, pg_catalog.uuid) FROM service_role;
 
-UPDATE public.order_requests AS o
-SET reviewed_by_profile_id = o.reviewed_by
-WHERE o.reviewed_by_profile_id IS NULL
-  AND o.reviewed_by IS NOT NULL;
-
 DO $$
 DECLARE
   v_missing_count pg_catalog.int8;
+  v_investor_workspace_count pg_catalog.int8;
   v_invalid_combo_count pg_catalog.int8;
+  v_investor_initiator_count pg_catalog.int8;
+  v_advisor_initiator_count pg_catalog.int8;
   v_reviewer_mismatch_count pg_catalog.int8;
+  v_reviewed_at_without_reviewer_count pg_catalog.int8;
+  v_reviewer_without_reviewed_at_count pg_catalog.int8;
+  v_reviewer_relationship_count pg_catalog.int8;
 BEGIN
-  SELECT pg_catalog.count(*) INTO v_reviewer_mismatch_count
-  FROM public.order_requests AS o
-  WHERE o.reviewed_by IS NOT NULL
-    AND o.reviewed_by_profile_id IS NOT NULL
-    AND o.reviewed_by <> o.reviewed_by_profile_id;
-
-  IF v_reviewer_mismatch_count > 0 THEN
-    RAISE EXCEPTION 'reviewer_profile_mismatch_existing_rows: % offending rows', v_reviewer_mismatch_count;
-  END IF;
-
   SELECT pg_catalog.count(*) INTO v_missing_count
   FROM public.order_requests AS o
   WHERE o.workspace_id IS NULL
@@ -74,6 +65,21 @@ BEGIN
     RAISE EXCEPTION 'order_request_initiator_unresolved_existing_rows: % offending rows', v_missing_count;
   END IF;
 
+  SELECT pg_catalog.count(*) INTO v_investor_workspace_count
+  FROM public.order_requests AS o
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM public.workspace_memberships AS wm
+    WHERE wm.workspace_id = o.workspace_id
+      AND wm.profile_id = o.investor_profile_id
+      AND wm.role = 'investor'
+      AND wm.status = 'active'
+  );
+
+  IF v_investor_workspace_count > 0 THEN
+    RAISE EXCEPTION 'investor_workspace_relationship_required_existing_rows: % offending rows', v_investor_workspace_count;
+  END IF;
+
   SELECT pg_catalog.count(*) INTO v_invalid_combo_count
   FROM public.order_requests AS o
   WHERE NOT (
@@ -83,6 +89,65 @@ BEGIN
 
   IF v_invalid_combo_count > 0 THEN
     RAISE EXCEPTION 'invalid_order_initiation_metadata: % offending rows', v_invalid_combo_count;
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_investor_initiator_count
+  FROM public.order_requests AS o
+  WHERE o.initiated_by_role = 'investor'
+    AND o.initiated_by_profile_id <> o.investor_profile_id;
+
+  IF v_investor_initiator_count > 0 THEN
+    RAISE EXCEPTION 'investor_initiator_mismatch_existing_rows: % offending rows', v_investor_initiator_count;
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_advisor_initiator_count
+  FROM public.order_requests AS o
+  WHERE o.initiated_by_role = 'advisor'
+    AND NOT public.is_order_mfd_profile(o.workspace_id, o.initiated_by_profile_id);
+
+  IF v_advisor_initiator_count > 0 THEN
+    RAISE EXCEPTION 'advisor_workspace_relationship_required_existing_rows: % offending rows', v_advisor_initiator_count;
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_reviewed_at_without_reviewer_count
+  FROM public.order_requests AS o
+  WHERE o.reviewed_at IS NOT NULL
+    AND o.reviewed_by IS NULL
+    AND o.reviewed_by_profile_id IS NULL;
+
+  IF v_reviewed_at_without_reviewer_count > 0 THEN
+    RAISE EXCEPTION 'reviewed_at_without_reviewer_existing_rows: % offending rows', v_reviewed_at_without_reviewer_count;
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_reviewer_without_reviewed_at_count
+  FROM public.order_requests AS o
+  WHERE o.reviewed_at IS NULL
+    AND (o.reviewed_by IS NOT NULL OR o.reviewed_by_profile_id IS NOT NULL);
+
+  IF v_reviewer_without_reviewed_at_count > 0 THEN
+    RAISE EXCEPTION 'reviewer_without_reviewed_at_existing_rows: % offending rows', v_reviewer_without_reviewed_at_count;
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_reviewer_mismatch_count
+  FROM public.order_requests AS o
+  WHERE o.reviewed_by IS NOT NULL
+    AND o.reviewed_by_profile_id IS NOT NULL
+    AND o.reviewed_by <> o.reviewed_by_profile_id;
+
+  IF v_reviewer_mismatch_count > 0 THEN
+    RAISE EXCEPTION 'reviewer_profile_mismatch_existing_rows: % offending rows', v_reviewer_mismatch_count;
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_reviewer_relationship_count
+  FROM public.order_requests AS o
+  WHERE COALESCE(o.reviewed_by_profile_id, o.reviewed_by) IS NOT NULL
+    AND NOT public.is_order_mfd_profile(
+      o.workspace_id,
+      COALESCE(o.reviewed_by_profile_id, o.reviewed_by)
+    );
+
+  IF v_reviewer_relationship_count > 0 THEN
+    RAISE EXCEPTION 'reviewer_workspace_relationship_required_existing_rows: % offending rows', v_reviewer_relationship_count;
   END IF;
 END
 $$;
@@ -139,16 +204,19 @@ DECLARE
   v_caller_profile_id pg_catalog.uuid;
   v_is_service_role pg_catalog.bool;
 BEGIN
+  v_caller_user_id := auth.uid();
+  v_is_service_role := COALESCE(auth.role(), '') = 'service_role';
+
   IF NEW.reviewed_by IS NOT NULL
      AND NEW.reviewed_by_profile_id IS NOT NULL
      AND NEW.reviewed_by <> NEW.reviewed_by_profile_id THEN
-    RAISE EXCEPTION 'reviewer_profile_mismatch';
-  END IF;
-
-  IF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_by IS NOT NULL THEN
-    NEW.reviewed_by_profile_id := NEW.reviewed_by;
-  ELSIF NEW.reviewed_by IS NULL AND NEW.reviewed_by_profile_id IS NOT NULL THEN
-    NEW.reviewed_by := NEW.reviewed_by_profile_id;
+    IF TG_OP = 'INSERT' THEN
+      RAISE EXCEPTION 'reviewer_profile_mismatch';
+    ELSIF OLD.reviewed_by IS NULL
+          AND OLD.reviewed_by_profile_id IS NULL
+          AND OLD.reviewed_at IS NULL THEN
+      RAISE EXCEPTION 'reviewer_profile_mismatch';
+    END IF;
   END IF;
 
   IF TG_OP = 'INSERT' THEN
@@ -156,10 +224,13 @@ BEGIN
       RETURN NEW;
     END IF;
 
-    v_caller_user_id := auth.uid();
-    v_is_service_role := COALESCE(auth.role(), '') = 'service_role';
-
     IF v_caller_user_id IS NOT NULL THEN
+      IF NEW.reviewed_by IS NOT NULL
+         OR NEW.reviewed_by_profile_id IS NOT NULL
+         OR NEW.reviewed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'review_metadata_requires_qualification';
+      END IF;
+
       v_caller_profile_id := public.current_user_profile_id();
 
       IF v_caller_profile_id IS NULL THEN
@@ -209,6 +280,18 @@ BEGIN
          OR NEW.initiation_channel IS NULL THEN
         RAISE EXCEPTION 'order_request_canonical_metadata_missing';
       END IF;
+
+      IF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_by IS NOT NULL THEN
+        NEW.reviewed_by_profile_id := NEW.reviewed_by;
+      ELSIF NEW.reviewed_by IS NULL AND NEW.reviewed_by_profile_id IS NOT NULL THEN
+        NEW.reviewed_by := NEW.reviewed_by_profile_id;
+      END IF;
+
+      IF NEW.reviewed_by_profile_id IS NOT NULL AND NEW.reviewed_at IS NULL THEN
+        RAISE EXCEPTION 'reviewed_at_required';
+      ELSIF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'reviewer_profile_required';
+      END IF;
     ELSE
       RAISE EXCEPTION 'profile_resolution_failed';
     END IF;
@@ -219,6 +302,50 @@ BEGIN
        OR NEW.initiated_by_role IS DISTINCT FROM OLD.initiated_by_role
        OR NEW.initiation_channel IS DISTINCT FROM OLD.initiation_channel THEN
       RAISE EXCEPTION 'order_initiation_metadata_immutable';
+    END IF;
+
+    IF OLD.reviewed_by IS NOT NULL
+       OR OLD.reviewed_by_profile_id IS NOT NULL
+       OR OLD.reviewed_at IS NOT NULL THEN
+      IF NEW.reviewed_by IS DISTINCT FROM OLD.reviewed_by
+         OR NEW.reviewed_by_profile_id IS DISTINCT FROM OLD.reviewed_by_profile_id
+         OR NEW.reviewed_at IS DISTINCT FROM OLD.reviewed_at THEN
+        RAISE EXCEPTION 'review_metadata_immutable';
+      END IF;
+    ELSIF NEW.reviewed_by IS NOT NULL
+          OR NEW.reviewed_by_profile_id IS NOT NULL
+          OR NEW.reviewed_at IS NOT NULL THEN
+      IF NEW.reviewed_by IS NULL
+         OR NEW.reviewed_by_profile_id IS NULL
+         OR NEW.reviewed_at IS NULL THEN
+        RAISE EXCEPTION 'review_metadata_incomplete';
+      END IF;
+
+      IF OLD.status <> 'pending_review'::public.order_status
+         OR NEW.status NOT IN ('approved'::public.order_status, 'rejected'::public.order_status) THEN
+        RAISE EXCEPTION 'review_metadata_requires_qualification';
+      END IF;
+
+      IF v_caller_user_id IS NOT NULL THEN
+        v_caller_profile_id := public.current_user_profile_id();
+
+        IF v_caller_profile_id IS NULL THEN
+          RAISE EXCEPTION 'profile_resolution_failed';
+        END IF;
+
+        IF NEW.reviewed_by_profile_id <> v_caller_profile_id THEN
+          RAISE EXCEPTION 'reviewer_profile_mismatch';
+        END IF;
+
+        IF public.is_platform_admin() OR NOT public.is_order_mfd_profile(NEW.workspace_id, v_caller_profile_id) THEN
+          RAISE EXCEPTION 'not_authorized';
+        END IF;
+      ELSIF NOT v_is_service_role THEN
+        RAISE EXCEPTION 'profile_resolution_failed';
+      END IF;
+    ELSIF OLD.status = 'pending_review'::public.order_status
+          AND NEW.status IN ('approved'::public.order_status, 'rejected'::public.order_status) THEN
+      RAISE EXCEPTION 'review_metadata_requires_qualification';
     END IF;
   END IF;
 
@@ -263,9 +390,8 @@ BEGIN
 
   IF NEW.reviewed_by_profile_id IS NOT NULL THEN
     IF NEW.reviewed_at IS NULL THEN
-      NEW.reviewed_at := pg_catalog.now();
+      RAISE EXCEPTION 'reviewed_at_required';
     END IF;
-
     IF NOT public.is_order_mfd_profile(NEW.workspace_id, NEW.reviewed_by_profile_id) THEN
       RAISE EXCEPTION 'reviewer_workspace_relationship_required';
     END IF;

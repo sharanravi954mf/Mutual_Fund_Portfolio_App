@@ -119,10 +119,11 @@ BEGIN
     investor_profile_id pg_catalog.uuid,
     initiated_by_profile_id pg_catalog.uuid,
     initiated_by_role pg_catalog.text,
-    initiation_channel pg_catalog.text,
-    reviewed_by pg_catalog.uuid,
-    reviewed_by_profile_id pg_catalog.uuid
-  ) ON COMMIT DROP;
+	    initiation_channel pg_catalog.text,
+	    reviewed_by pg_catalog.uuid,
+	    reviewed_by_profile_id pg_catalog.uuid,
+	    reviewed_at pg_catalog.timestamptz
+	  ) ON COMMIT DROP;
 
   INSERT INTO issue29_preflight_existing_orders (workspace_id, investor_profile_id)
   VALUES ('99200000-0000-0000-0000-000000000001', '99100000-0000-0000-0000-000000000003');
@@ -145,25 +146,199 @@ BEGIN
     IF SQLERRM NOT LIKE 'order_request_initiator_unresolved_existing_rows: 1%' THEN
       RAISE EXCEPTION 'Unexpected existing-row initiator preflight error: %', SQLERRM;
     END IF;
-  END;
+	  END;
 
-  INSERT INTO issue29_preflight_existing_orders (
-    workspace_id,
-    investor_profile_id,
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000008',
+	    '99100000-0000-0000-0000-000000000008',
+	    'investor',
+	    'investor_portal'
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE NOT EXISTS (
+	      SELECT 1
+	      FROM public.workspace_memberships AS wm
+	      WHERE wm.workspace_id = o.workspace_id
+	        AND wm.profile_id = o.investor_profile_id
+	        AND wm.role = 'investor'
+	        AND wm.status = 'active'
+	    );
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'investor_workspace_relationship_required_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row investor workspace preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'investor_workspace_relationship_required_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row investor workspace preflight error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'investor',
+	    'investor_portal'
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE o.initiated_by_role = 'investor'
+	      AND o.initiated_by_profile_id <> o.investor_profile_id;
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'investor_initiator_mismatch_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row investor initiator preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'investor_initiator_mismatch_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row investor initiator preflight error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000006',
+	    'advisor',
+	    'advisor_portal'
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE o.initiated_by_role = 'advisor'
+	      AND NOT public.is_order_mfd_profile(o.workspace_id, o.initiated_by_profile_id);
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'advisor_workspace_relationship_required_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row advisor initiator preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'advisor_workspace_relationship_required_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row advisor initiator preflight error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    reviewed_at
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    now()
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE o.reviewed_at IS NOT NULL
+	      AND o.reviewed_by IS NULL
+	      AND o.reviewed_by_profile_id IS NULL;
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'reviewed_at_without_reviewer_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row reviewed_at preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'reviewed_at_without_reviewer_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row reviewed_at preflight error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    reviewed_by_profile_id
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    '99100000-0000-0000-0000-000000000004'
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE o.reviewed_at IS NULL
+	      AND (o.reviewed_by IS NOT NULL OR o.reviewed_by_profile_id IS NOT NULL);
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'reviewer_without_reviewed_at_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row reviewer timestamp preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'reviewer_without_reviewed_at_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row reviewer timestamp preflight error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
     initiated_by_profile_id,
     initiated_by_role,
-    initiation_channel,
-    reviewed_by,
-    reviewed_by_profile_id
-  ) VALUES (
+	    initiation_channel,
+	    reviewed_by,
+	    reviewed_by_profile_id,
+	    reviewed_at
+	  ) VALUES (
     '99200000-0000-0000-0000-000000000001',
     '99100000-0000-0000-0000-000000000003',
     '99100000-0000-0000-0000-000000000004',
-    'advisor',
-    'advisor_portal',
-    '99100000-0000-0000-0000-000000000004',
-    '99100000-0000-0000-0000-000000000005'
-  );
+	    'advisor',
+	    'advisor_portal',
+	    '99100000-0000-0000-0000-000000000004',
+	    '99100000-0000-0000-0000-000000000005',
+	    now()
+	  );
 
   BEGIN
     SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
@@ -180,8 +355,47 @@ BEGIN
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT LIKE 'reviewer_profile_mismatch_existing_rows: 1%' THEN
       RAISE EXCEPTION 'Unexpected existing-row reviewer preflight error: %', SQLERRM;
-    END IF;
-  END;
+	    END IF;
+	  END;
+
+	  TRUNCATE issue29_preflight_existing_orders;
+	  INSERT INTO issue29_preflight_existing_orders (
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    reviewed_by_profile_id,
+	    reviewed_at
+	  ) VALUES (
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    '99100000-0000-0000-0000-000000000006',
+	    now()
+	  );
+
+	  BEGIN
+	    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+	    FROM issue29_preflight_existing_orders AS o
+	    WHERE COALESCE(o.reviewed_by_profile_id, o.reviewed_by) IS NOT NULL
+	      AND NOT public.is_order_mfd_profile(
+	        o.workspace_id,
+	        COALESCE(o.reviewed_by_profile_id, o.reviewed_by)
+	      );
+
+	    IF v_count > 0 THEN
+	      RAISE EXCEPTION 'reviewer_workspace_relationship_required_existing_rows: % offending rows', v_count;
+	    END IF;
+
+	    RAISE EXCEPTION 'existing-row reviewer relationship preflight did not fail closed';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM NOT LIKE 'reviewer_workspace_relationship_required_existing_rows: 1%' THEN
+	      RAISE EXCEPTION 'Unexpected existing-row reviewer relationship preflight error: %', SQLERRM;
+	    END IF;
+	  END;
 
   PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
@@ -348,11 +562,50 @@ BEGIN
     IF SQLERRM <> 'initiator_profile_mismatch' THEN
       RAISE EXCEPTION 'Unexpected investor spoofing error: %', SQLERRM;
     END IF;
-  END;
+	  END;
 
-  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
-  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
-  BEGIN
+	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000003', true);
+	  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
+	  BEGIN
+	    INSERT INTO public.order_requests (
+	      id,
+	      workspace_id,
+	      investor_profile_id,
+	      initiated_by_profile_id,
+	      initiated_by_role,
+	      initiation_channel,
+	      reviewed_by,
+	      reviewed_by_profile_id,
+	      reviewed_at,
+	      scheme_code,
+	      type,
+	      amount,
+	      status
+	    ) VALUES (
+	      '99300000-0000-0000-0000-000000000023',
+	      '99200000-0000-0000-0000-000000000001',
+	      '99100000-0000-0000-0000-000000000003',
+	      '99100000-0000-0000-0000-000000000003',
+	      'investor',
+	      'investor_portal',
+	      '99100000-0000-0000-0000-000000000004',
+	      '99100000-0000-0000-0000-000000000004',
+	      now(),
+	      'SCH29-INV-PRE-REVIEW',
+	      'buy',
+	      100.00,
+	      'pending_review'
+	    );
+	    RAISE EXCEPTION 'investor pre-populated advisor review metadata on insert';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'review_metadata_requires_qualification' THEN
+	      RAISE EXCEPTION 'Unexpected investor reviewer pre-population error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+	  PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
+	  BEGIN
     INSERT INTO public.order_requests (
       id,
       workspace_id,
@@ -621,12 +874,13 @@ BEGIN
       id,
       workspace_id,
       investor_profile_id,
-      initiated_by_profile_id,
-      initiated_by_role,
-      initiation_channel,
-      reviewed_by_profile_id,
-      reviewed_at,
-      scheme_code,
+	      initiated_by_profile_id,
+	      initiated_by_role,
+	      initiation_channel,
+	      reviewed_by,
+	      reviewed_by_profile_id,
+	      reviewed_at,
+	      scheme_code,
       type,
       amount,
       status
@@ -634,22 +888,23 @@ BEGIN
       '99300000-0000-0000-0000-000000000008',
       '99200000-0000-0000-0000-000000000001',
       '99100000-0000-0000-0000-000000000003',
-      '99100000-0000-0000-0000-000000000004',
-      'advisor',
-      'advisor_portal',
-      '99100000-0000-0000-0000-000000000006',
-      now(),
-      'SCH29-BAD-REVIEWER',
-      'buy',
+	      '99100000-0000-0000-0000-000000000004',
+	      'advisor',
+	      'advisor_portal',
+	      '99100000-0000-0000-0000-000000000005',
+	      '99100000-0000-0000-0000-000000000005',
+	      now(),
+	      'SCH29-BAD-REVIEWER',
+	      'buy',
       100.00,
       'pending_review'
-    );
-    RAISE EXCEPTION 'order with unrelated reviewer was accepted';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM <> 'reviewer_workspace_relationship_required' THEN
-      RAISE EXCEPTION 'Unexpected missing reviewer relationship error: %', SQLERRM;
-    END IF;
-  END;
+	    );
+	    RAISE EXCEPTION 'advisor pre-populated another advisor review metadata on insert';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'review_metadata_requires_qualification' THEN
+	      RAISE EXCEPTION 'Unexpected advisor reviewer pre-population error: %', SQLERRM;
+	    END IF;
+	  END;
 
   BEGIN
     INSERT INTO public.order_requests (
@@ -719,13 +974,51 @@ BEGIN
         reviewed_at = now()
     WHERE id = '99300000-0000-0000-0000-000000000022';
     RAISE EXCEPTION 'mismatched reviewer fields were accepted on update';
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM <> 'reviewer_profile_mismatch' THEN
-      RAISE EXCEPTION 'Unexpected reviewer update mismatch error: %', SQLERRM;
-    END IF;
-  END;
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'reviewer_profile_mismatch' THEN
+	      RAISE EXCEPTION 'Unexpected reviewer update mismatch error: %', SQLERRM;
+	    END IF;
+	  END;
 
-  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
+	  INSERT INTO public.order_requests (
+	    id,
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    scheme_code,
+	    type,
+	    amount,
+	    status
+	  ) VALUES (
+	    '99300000-0000-0000-0000-000000000024',
+	    '99200000-0000-0000-0000-000000000001',
+	    '99100000-0000-0000-0000-000000000003',
+	    '99100000-0000-0000-0000-000000000004',
+	    'advisor',
+	    'advisor_portal',
+	    'SCH29-REVIEWER-SPOOF-UPD',
+	    'buy',
+	    100.00,
+	    'pending_review'
+	  );
+
+	  BEGIN
+	    UPDATE public.order_requests
+	    SET status = 'approved',
+	        reviewed_by = '99100000-0000-0000-0000-000000000005',
+	        reviewed_by_profile_id = '99100000-0000-0000-0000-000000000005',
+	        reviewed_at = now()
+	    WHERE id = '99300000-0000-0000-0000-000000000024';
+	    RAISE EXCEPTION 'advisor attributed qualification to another MFD profile';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'reviewer_profile_mismatch' THEN
+	      RAISE EXCEPTION 'Unexpected reviewer spoofing update error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  PERFORM set_config('request.jwt.claim.sub', '99000000-0000-0000-0000-000000000004', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   INSERT INTO public.order_requests (
     id,
@@ -754,12 +1047,34 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '{"sub":"99000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   v_order := public.qualify_order('99300000-0000-0000-0000-000000000010', 'approved', null);
 
-  IF v_order.status <> 'approved'
-     OR v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
-     OR v_order.reviewed_by_profile_id <> '99100000-0000-0000-0000-000000000004'
-     OR v_order.reviewed_at IS NULL THEN
-    RAISE EXCEPTION 'same-profile MFD initiation and review was not persisted';
-  END IF;
+	  IF v_order.status <> 'approved'
+	     OR v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
+	     OR v_order.reviewed_by_profile_id <> '99100000-0000-0000-0000-000000000004'
+	     OR v_order.reviewed_at IS NULL THEN
+	    RAISE EXCEPTION 'same-profile MFD initiation and review was not persisted';
+	  END IF;
+
+	  BEGIN
+	    UPDATE public.order_requests
+	    SET reviewed_by_profile_id = '99100000-0000-0000-0000-000000000005'
+	    WHERE id = '99300000-0000-0000-0000-000000000010';
+	    RAISE EXCEPTION 'reviewed_by_profile_id changed after qualification';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'review_metadata_immutable' THEN
+	      RAISE EXCEPTION 'Unexpected reviewer profile immutability error: %', SQLERRM;
+	    END IF;
+	  END;
+
+	  BEGIN
+	    UPDATE public.order_requests
+	    SET reviewed_at = now() + interval '1 minute'
+	    WHERE id = '99300000-0000-0000-0000-000000000010';
+	    RAISE EXCEPTION 'reviewed_at changed after qualification';
+	  EXCEPTION WHEN OTHERS THEN
+	    IF SQLERRM <> 'review_metadata_immutable' THEN
+	      RAISE EXCEPTION 'Unexpected reviewed_at immutability error: %', SQLERRM;
+	    END IF;
+	  END;
 
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
   FROM public.workspace_audit_logs
