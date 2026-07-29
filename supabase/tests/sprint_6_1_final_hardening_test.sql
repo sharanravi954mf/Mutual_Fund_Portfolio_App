@@ -82,133 +82,85 @@ BEGIN
   -- ----------------------------------------------------
   -- TEST 2: Platform Admin Step-Up Override Auditing
   -- ----------------------------------------------------
-  -- Test 2.1: Call override function WITHOUT step-up amr (should fail and log override.attempted + override.denied)
+  INSERT INTO public.family_delegations (id, workspace_id, owner_profile_id, delegate_profile_id, consent_status, is_active)
+  VALUES ('87000000-0000-0000-0000-000000000009', '83000000-0000-0000-0000-000000000001', '82000000-0000-0000-0000-000000000003', '82000000-0000-0000-0000-000000000004', 'accepted', false);
+
+  -- Test 2.1: Begin override WITHOUT step-up amr (must fail closed before attempted audit)
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd"]}', true);
-  
-  -- Log the attempt (attempt-first service call)
-  INSERT INTO public.workspace_audit_logs (
-    workspace_id,
-    actor_profile_id,
-    actor_type,
-    action,
-    entity_type,
-    entity_id,
-    target_type,
-    target_id,
-    correlation_id,
-    event_type
-  ) VALUES (
-    '83000000-0000-0000-0000-000000000001',
-    '82000000-0000-0000-0000-000000000001',
-    'platform_admin',
-    'override.account_unlock',
-    'profiles',
-    '82000000-0000-0000-0000-000000000003',
-    'profiles',
-    '82000000-0000-0000-0000-000000000003',
-    '99000000-0000-0000-0000-000000000009',
-    'override.attempted'
-  );
 
   BEGIN
-    PERFORM public.override_account_unlock('82000000-0000-0000-0000-000000000003', 'Testing unlock without MFA', '99000000-0000-0000-0000-000000000009'::uuid, '83000000-0000-0000-0000-000000000001');
-    RAISE EXCEPTION 'override_account_unlock succeeded without step-up verification';
+    PERFORM public.begin_platform_admin_override_attempt(
+      '83000000-0000-0000-0000-000000000001',
+      'family_delegations',
+      '87000000-0000-0000-0000-000000000009',
+      'family_delegation.restore_access',
+      'Testing restore without MFA',
+      '99000000-0000-0000-0000-000000000009'
+    );
+    RAISE EXCEPTION 'override begin succeeded without step-up verification';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM <> 'platform_admin_step_up_required' THEN
-      RAISE EXCEPTION 'Unexpected error on unlock step-up check: %', SQLERRM;
+      RAISE EXCEPTION 'Unexpected error on override step-up check: %', SQLERRM;
     END IF;
-    
-    -- Log the denial outcome
-    INSERT INTO public.workspace_audit_logs (
-      workspace_id,
-      actor_profile_id,
-      actor_type,
-      action,
-      entity_type,
-      entity_id,
-      target_type,
-      target_id,
-      correlation_id,
-      event_type,
-      error_code
-    ) VALUES (
-      '83000000-0000-0000-0000-000000000001',
-      '82000000-0000-0000-0000-000000000001',
-      'platform_admin',
-      'override.account_unlock',
-      'profiles',
-      '82000000-0000-0000-0000-000000000003',
-      'profiles',
-      '82000000-0000-0000-0000-000000000003',
-      '99000000-0000-0000-0000-000000000009',
-      'override.denied',
-      'platform_admin_step_up_required'
-    );
   END;
 
-  -- Verify audit logs are logged properly for override attempt and denial
-  SELECT * INTO v_audit_attempt FROM public.workspace_audit_logs 
-  WHERE workspace_id = '83000000-0000-0000-0000-000000000001' 
-    AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
-    AND action = 'override.account_unlock'
-    AND event_type = 'override.attempted'
-  ORDER BY occurred_at DESC LIMIT 1;
-  
-  IF v_audit_attempt.id IS NULL THEN
-    RAISE EXCEPTION 'override.attempted audit log missing for failed step-up override attempt';
+  IF EXISTS (
+    SELECT 1
+    FROM public.workspace_audit_logs
+    WHERE correlation_id = '99000000-0000-0000-0000-000000000009'
+  ) THEN
+    RAISE EXCEPTION 'override attempt was logged before step-up verification';
   END IF;
 
-  SELECT * INTO v_audit_succeed FROM public.workspace_audit_logs 
-  WHERE workspace_id = '83000000-0000-0000-0000-000000000001' 
-    AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
-    AND action = 'override.account_unlock'
-    AND event_type = 'override.denied'
-  ORDER BY occurred_at DESC LIMIT 1;
-
-  IF v_audit_succeed.id IS NULL THEN
-    RAISE EXCEPTION 'override.denied audit log missing for failed step-up override attempt';
-  END IF;
-
-  -- Test 2.2: Call override function WITH step-up amr (should succeed and log override.attempted + override.succeeded)
+  -- Test 2.2: Attempt-first restore WITH step-up amr logs attempted + succeeded
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd", "mfa"]}', true);
-  
-  -- Log the attempt (attempt-first service call)
-  INSERT INTO public.workspace_audit_logs (
-    workspace_id,
-    actor_profile_id,
-    actor_type,
-    action,
-    entity_type,
-    entity_id,
-    target_type,
-    target_id,
-    correlation_id,
-    event_type
-  ) VALUES (
+
+  PERFORM public.begin_platform_admin_override_attempt(
     '83000000-0000-0000-0000-000000000001',
-    '82000000-0000-0000-0000-000000000001',
-    'platform_admin',
-    'override.account_unlock',
-    'profiles',
-    '82000000-0000-0000-0000-000000000003',
-    'profiles',
-    '82000000-0000-0000-0000-000000000003',
-    '99000000-0000-0000-0000-000000000009',
-    'override.attempted'
+    'family_delegations',
+    '87000000-0000-0000-0000-000000000009',
+    'family_delegation.restore_access',
+    'Restore consent-backed family access with MFA',
+    '99000000-0000-0000-0000-000000000010'
   );
 
-  PERFORM public.override_account_unlock('82000000-0000-0000-0000-000000000003', 'Unlocking with MFA', '99000000-0000-0000-0000-000000000009'::uuid, '83000000-0000-0000-0000-000000000001');
+  PERFORM public.platform_admin_restore_family_delegation_access(
+    '99000000-0000-0000-0000-000000000010',
+    '83000000-0000-0000-0000-000000000001',
+    '87000000-0000-0000-0000-000000000009',
+    '82000000-0000-0000-0000-000000000003',
+    '82000000-0000-0000-0000-000000000004'
+  );
+
+  PERFORM public.finish_platform_admin_override_attempt(
+    '99000000-0000-0000-0000-000000000010',
+    'override.succeeded',
+    NULL
+  );
+
+  SELECT * INTO v_audit_attempt FROM public.workspace_audit_logs
+  WHERE workspace_id = '83000000-0000-0000-0000-000000000001'
+    AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
+    AND action = 'family_delegation.restore_access'
+    AND event_type = 'override.attempted'
+  ORDER BY occurred_at DESC LIMIT 1;
+
+  IF v_audit_attempt.id IS NULL THEN
+    RAISE EXCEPTION 'override.attempted audit log missing for successful restore override';
+  END IF;
 
   SELECT * INTO v_audit_succeed FROM public.workspace_audit_logs 
   WHERE workspace_id = '83000000-0000-0000-0000-000000000001' 
     AND actor_profile_id = '82000000-0000-0000-0000-000000000001'
-    AND action = 'override.account_unlock'
+    AND action = 'family_delegation.restore_access'
     AND event_type = 'override.succeeded'
   ORDER BY occurred_at DESC LIMIT 1;
 
   IF v_audit_succeed.id IS NULL THEN
-    RAISE EXCEPTION 'override.succeeded audit log missing for successful step-up override';
+    RAISE EXCEPTION 'override.succeeded audit log missing for successful family restore override';
   END IF;
+
+  DELETE FROM public.family_delegations WHERE id = '87000000-0000-0000-0000-000000000009';
 
   -- Test 2.3: Attempt to update or delete override audit logs (must fail)
   BEGIN
@@ -271,7 +223,7 @@ BEGIN
   -- Clean up the second delegation record to respect unique key constraint
   DELETE FROM public.family_delegations WHERE id = '87000000-0000-0000-0000-000000000002';
 
-  -- Test 3.5: Platform Admin intervention via consent revoke (should require step-up MFA and log override attempts)
+  -- Test 3.5: Platform Admin cannot directly mutate family delegation lifecycle
   -- Re-insert delegation and accept it
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000003", "role": "authenticated", "app_metadata": {"user_role": "investor"}}', true);
   INSERT INTO public.family_delegations (id, workspace_id, owner_profile_id, delegate_profile_id, consent_status, is_active)
@@ -280,23 +232,27 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000004", "role": "authenticated", "app_metadata": {"user_role": "investor"}}', true);
   PERFORM public.delegate_consent_accept('87000000-0000-0000-0000-000000000003');
 
-  -- platform admin calls revoke without MFA (denied, but attempt logged)
+  -- Platform Admin calls revoke without MFA (direct lifecycle mutation is denied)
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd"]}', true);
   BEGIN
     PERFORM public.delegate_consent_revoke('87000000-0000-0000-0000-000000000003');
-    RAISE EXCEPTION 'Platform Admin override call delegate_consent_revoke bypassed step-up verification';
+    RAISE EXCEPTION 'Platform Admin direct delegate_consent_revoke without MFA succeeded';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM <> 'platform_admin_step_up_required' THEN
-      RAISE EXCEPTION 'Unexpected error on admin revoke step-up check: %', SQLERRM;
+    IF SQLERRM <> 'not_authorized' THEN
+      RAISE EXCEPTION 'Unexpected error on admin revoke direct denial check: %', SQLERRM;
     END IF;
   END;
 
-  -- Platform Admin calls revoke WITH MFA (succeeds)
+  -- Platform Admin calls revoke WITH MFA (still denied; support intervention must use override RPC path)
   PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd", "mfa"]}', true);
-  v_delegation := public.delegate_consent_revoke('87000000-0000-0000-0000-000000000003');
-  IF v_delegation.consent_status <> 'revoked' OR v_delegation.is_active = TRUE THEN
-    RAISE EXCEPTION 'Platform Admin delegate_consent_revoke failed';
-  END IF;
+  BEGIN
+    PERFORM public.delegate_consent_revoke('87000000-0000-0000-0000-000000000003');
+    RAISE EXCEPTION 'Platform Admin direct delegate_consent_revoke with MFA succeeded';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM <> 'not_authorized' THEN
+      RAISE EXCEPTION 'Unexpected error on admin revoke with MFA denial check: %', SQLERRM;
+    END IF;
+  END;
 
   -- ----------------------------------------------------
   -- TEST 4: Outbox Concurrency/Claiming/Uniqueness

@@ -100,15 +100,15 @@ BEGIN
   END IF;
 
   -------------------------------------------------------------
-  -- TEST 2: Platform Admin Global Access                     --
+  -- TEST 2: Platform Admin No Global Business-Table Bypass   --
   -------------------------------------------------------------
   -- Login as Platform Admin
   PERFORM set_config('request.jwt.claim.sub', '61000000-0000-0000-0000-000000000001', true);
   
-  -- Should view all profiles
+  -- Issue #31: Platform Admin must not receive unrestricted cross-workspace extraction.
   SELECT count(*) INTO v_count FROM public.profiles;
-  IF v_count < 6 THEN
-    RAISE EXCEPTION 'Platform Admin failed global access check. Visible profiles count: %', v_count;
+  IF v_count >= 6 THEN
+    RAISE EXCEPTION 'Platform Admin retained global profile extraction. Visible profiles count: %', v_count;
   END IF;
 
   -------------------------------------------------------------
