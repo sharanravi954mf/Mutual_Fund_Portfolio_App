@@ -16,8 +16,10 @@ import {
   type FailureLineageInput,
   IngestionError,
   type IngestionRunClaimInput,
+  type IngestionRunClaimResult,
   type IngestionRunContext,
   type IngestionRunFinalizeInput,
+  type IngestionRunSummary,
   type MailMessage,
   type PersistenceInput,
   type PersistenceResult,
@@ -30,12 +32,15 @@ const knownFailureCodes: Set<string> = new Set([
   "attachment_hash_mismatch",
   "duplicate_attachment",
   "correlation_conflict",
+  "ingestion_run_not_claimed",
+  "ingestion_run_finalized",
   "previous_ingestion_failed",
   "processing_incomplete",
   "investor_mapping_unresolved",
   "investor_mapping_ambiguous",
   "investor_workspace_relationship_required",
   "amc_mapping_unresolved",
+  "amc_mapping_conflict",
   "portfolio_mapping_ambiguous",
   "folio_relationship_conflict",
   "storage_object_conflict",
@@ -47,6 +52,14 @@ const knownFailureCodes: Set<string> = new Set([
   "persistence_conflict",
   "persistence_failed",
 ]);
+
+function errorCodeFromRpc(error: { message?: string } | null): FailureCode {
+  const code = error?.message?.match(/([a-z][a-z0-9_]+)$/)?.[1] ??
+    "persistence_failed";
+  return knownFailureCodes.has(code)
+    ? code as FailureCode
+    : "persistence_failed";
+}
 
 type CredentialEnvelopeRow = {
   credential_ciphertext: string;
@@ -119,7 +132,7 @@ async function importAesKey(rawBase64: string): Promise<CryptoKey> {
   }
   return await crypto.subtle.importKey(
     "raw",
-    keyBytes,
+    new Uint8Array(keyBytes),
     "AES-GCM",
     false,
     ["encrypt", "decrypt"],
@@ -152,11 +165,11 @@ async function decryptAesGcm(
     const plaintext = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv: nonce,
+        iv: new Uint8Array(nonce),
         additionalData: new TextEncoder().encode(aad),
       },
       key,
-      ciphertext,
+      new Uint8Array(ciphertext),
     );
     return bytesToText(plaintext);
   } catch (error) {
@@ -836,7 +849,7 @@ export class HttpMalwareScanner {
           "X-Content-SHA256": context.sha256Hex,
           "X-File-Name": context.filename,
         },
-        body: bytes,
+        body: new Uint8Array(bytes),
         signal: controller.signal,
       });
       if (response.status >= 300 && response.status < 400) {
@@ -929,8 +942,10 @@ export class SupabaseEncryptedStorage {
 export class SupabasePersistence {
   constructor(private readonly client: SupabaseClient) {}
 
-  async claimRun(input: IngestionRunClaimInput): Promise<void> {
-    const { error } = await this.client.rpc(
+  async claimRun(
+    input: IngestionRunClaimInput,
+  ): Promise<IngestionRunClaimResult> {
+    const { data, error } = await this.client.rpc(
       "claim_cams_kfintech_ingestion_run",
       {
         p_workspace_id: input.workspaceId,
@@ -940,18 +955,15 @@ export class SupabasePersistence {
       },
     );
     if (error != null) {
-      const code = error.message?.match(/([a-z][a-z0-9_]+)$/)?.[1] ??
-        "persistence_failed";
-      throw new IngestionError(
-        knownFailureCodes.has(code)
-          ? code as FailureCode
-          : "persistence_failed",
-      );
+      throw new IngestionError(errorCodeFromRpc(error));
     }
+    return (Array.isArray(data) ? data[0] : data) as IngestionRunClaimResult;
   }
 
-  async finalizeRun(input: IngestionRunFinalizeInput): Promise<void> {
-    const { error } = await this.client.rpc(
+  async finalizeRun(
+    input: IngestionRunFinalizeInput,
+  ): Promise<IngestionRunSummary> {
+    const { data, error } = await this.client.rpc(
       "finalize_cams_kfintech_ingestion_run",
       {
         p_workspace_id: input.workspaceId,
@@ -959,17 +971,13 @@ export class SupabasePersistence {
         p_ingestion_run_id: input.ingestionRunId,
         p_registrar: input.registrar,
         p_stopped_reason: input.stoppedReason ?? null,
+        p_failure_code: input.failureCode ?? null,
       },
     );
     if (error != null) {
-      const code = error.message?.match(/([a-z][a-z0-9_]+)$/)?.[1] ??
-        "persistence_failed";
-      throw new IngestionError(
-        knownFailureCodes.has(code)
-          ? code as FailureCode
-          : "persistence_failed",
-      );
+      throw new IngestionError(errorCodeFromRpc(error));
     }
+    return (Array.isArray(data) ? data[0] : data) as IngestionRunSummary;
   }
 
   async persist(input: PersistenceInput): Promise<PersistenceResult> {
@@ -995,15 +1003,13 @@ export class SupabasePersistence {
       },
     );
     if (error != null) {
-      const code = error.message?.match(/([a-z][a-z0-9_]+)$/)?.[1] ??
-        "persistence_failed";
-      throw new IngestionError(
-        knownFailureCodes.has(code)
-          ? code as FailureCode
-          : "persistence_failed",
-      );
+      throw new IngestionError(errorCodeFromRpc(error));
     }
-    return (Array.isArray(data) ? data[0] : data) as PersistenceResult;
+    const result = (Array.isArray(data) ? data[0] : data) as PersistenceResult;
+    if (result.failure_code != null) {
+      throw new IngestionError(result.failure_code);
+    }
+    return result;
   }
 
   async recordFailure(input: FailureLineageInput): Promise<void> {
@@ -1028,7 +1034,7 @@ export class SupabasePersistence {
       },
     );
     if (error != null) {
-      throw new IngestionError("persistence_failed");
+      throw new IngestionError(errorCodeFromRpc(error));
     }
   }
 }
@@ -1080,7 +1086,7 @@ export class RemotePdfTextExtractor implements PdfTextExtractor {
           "X-Statement-Format": input.fileType,
           "X-File-Name": input.filename,
         },
-        body: input.bytes,
+        body: new Uint8Array(input.bytes),
         signal: controller.signal,
       });
       if (response.status >= 300 && response.status < 400) {

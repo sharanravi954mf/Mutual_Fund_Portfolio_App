@@ -101,9 +101,14 @@ function deps(options: {
   failContext?: IngestionError;
   failureCodes?: string[];
   claimedRuns?: string[];
-  finalizedRuns?: { runId: string; stoppedReason?: string }[];
+  finalizedRuns?: {
+    runId: string;
+    stoppedReason?: string;
+    failureCode?: string;
+  }[];
   downloadCount?: { count: number };
   registrarConfig?: Partial<RegistrarConfig>;
+  claimRun?: HandlerDependencies["persistence"]["claimRun"];
   recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
 } = {}): HandlerDependencies {
   const stages = options.stages ?? [];
@@ -187,16 +192,42 @@ function deps(options: {
       new KfintechParser(),
     ]),
     persistence: {
-      claimRun: (input) => {
+      claimRun: options.claimRun ?? ((input) => {
         claimedRuns.push(input.ingestionRunId);
-        return Promise.resolve();
-      },
+        return Promise.resolve({
+          ingestion_run_id: input.ingestionRunId,
+          status: "claimed",
+          replay_state: "newly_claimed",
+          attempted_attachment_count: 0,
+          successful_attachment_count: 0,
+          failed_attachment_count: 0,
+          duplicate_attachment_count: 0,
+          stopped_attachment_count: 0,
+          stopped_reason: null,
+          run_failure_code: null,
+        });
+      }),
       finalizeRun: (input) => {
         finalizedRuns.push({
           runId: input.ingestionRunId,
           stoppedReason: input.stoppedReason,
+          failureCode: input.failureCode,
         });
-        return Promise.resolve();
+        return Promise.resolve({
+          ingestion_run_id: input.ingestionRunId,
+          status: input.stoppedReason != null
+            ? "stopped"
+            : input.failureCode != null
+            ? "failed"
+            : "completed",
+          attempted_attachment_count: 0,
+          successful_attachment_count: 0,
+          failed_attachment_count: input.failureCode != null ? 1 : 0,
+          duplicate_attachment_count: 0,
+          stopped_attachment_count: input.stoppedReason != null ? 1 : 0,
+          stopped_reason: input.stoppedReason ?? null,
+          run_failure_code: input.failureCode ?? null,
+        });
       },
       persist: options.persist ??
         (() =>
@@ -271,8 +302,8 @@ Deno.test("pipeline stages execute in the required order", async () => {
   assertEquals(response.status, 200);
   assertEquals(stages, [
     "internal_authorization",
-    "load_credentials",
     "claim_ingestion_run",
+    "load_credentials",
     "imap_oauth_connector",
     "poll_mailbox",
     "validate_sender",
@@ -288,6 +319,39 @@ Deno.test("pipeline stages execute in the required order", async () => {
     "complete_lineage",
     "finalize_ingestion_run",
   ]);
+});
+
+Deno.test("terminal run replay returns immutable summary without mailbox polling", async () => {
+  const stages: string[] = [];
+  const downloadCount = { count: 0 };
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    downloadCount,
+    failContext: new IngestionError("oauth_credentials_unavailable"),
+    claimRun: (input) =>
+      Promise.resolve({
+        ingestion_run_id: input.ingestionRunId,
+        status: "completed",
+        replay_state: "terminal_replay",
+        attempted_attachment_count: 2,
+        successful_attachment_count: 1,
+        failed_attachment_count: 0,
+        duplicate_attachment_count: 1,
+        stopped_attachment_count: 0,
+        stopped_reason: null,
+        run_failure_code: null,
+      }),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.replay_state, "terminal_replay");
+  assertEquals(body.data.attempted_attachments, 2);
+  assertEquals(body.data.duplicate_attachments, 1);
+  assertEquals(downloadCount.count, 0);
+  assertEquals(stages, ["internal_authorization", "claim_ingestion_run"]);
 });
 
 Deno.test("sender validation precedes scan storage and parse", async () => {
@@ -540,14 +604,23 @@ Deno.test("credentials are loaded by trusted identifier and missing credentials 
     (await response.json()).error.code,
     "oauth_credentials_unavailable",
   );
-  assertEquals(stages, ["internal_authorization", "load_credentials"]);
+  assertEquals(stages, [
+    "internal_authorization",
+    "claim_ingestion_run",
+    "load_credentials",
+    "finalize_ingestion_run",
+  ]);
 });
 
 Deno.test("run is claimed before polling and finalized after poll failure", async () => {
   const stages: string[] = [];
   const failureCodes: string[] = [];
   const claimedRuns: string[] = [];
-  const finalizedRuns: { runId: string; stoppedReason?: string }[] = [];
+  const finalizedRuns: {
+    runId: string;
+    stoppedReason?: string;
+    failureCode?: string;
+  }[] = [];
   const handler = createCamsKfintechIngestionHandler(deps({
     stages,
     failureCodes,
@@ -563,15 +636,16 @@ Deno.test("run is claimed before polling and finalized after poll failure", asyn
   assertEquals(body.error.code, "mailbox_poll_failed");
   assertEquals(stages.slice(0, 4), [
     "internal_authorization",
-    "load_credentials",
     "claim_ingestion_run",
+    "load_credentials",
     "imap_oauth_connector",
   ]);
   assertEquals(claimedRuns, [correlationId]);
-  assertEquals(failureCodes, ["mailbox_poll_failed"]);
+  assertEquals(failureCodes, []);
   assertEquals(finalizedRuns, [{
     runId: correlationId,
-    stoppedReason: "mailbox_poll_failed",
+    stoppedReason: undefined,
+    failureCode: "mailbox_poll_failed",
   }]);
 });
 
@@ -818,7 +892,7 @@ Deno.test("attachment download timeout stops later retrieval", async () => {
 
   assertEquals(response.status, 200);
   assertEquals(body.data.results[0].error.code, "mailbox_poll_failed");
-  assertEquals(body.data.stopped, true);
+  assertEquals(body.data.stopped, false);
   assertEquals(downloadCount.count, 1);
 });
 

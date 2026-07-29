@@ -37,7 +37,7 @@ export function bearerToken(req: Request): string | null {
 }
 
 async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
   return new Uint8Array(digest);
 }
 
@@ -253,9 +253,11 @@ export function errorStatus(code: FailureCode): number {
     case "sender_not_allowed":
     case "duplicate_attachment":
     case "correlation_conflict":
+    case "ingestion_run_finalized":
     case "previous_ingestion_failed":
     case "processing_incomplete":
     case "persistence_conflict":
+    case "amc_mapping_conflict":
     case "folio_relationship_conflict":
     case "portfolio_mapping_ambiguous":
       return 409;

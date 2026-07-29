@@ -13,12 +13,15 @@ export type FailureCode =
   | "attachment_hash_mismatch"
   | "duplicate_attachment"
   | "correlation_conflict"
+  | "ingestion_run_not_claimed"
+  | "ingestion_run_finalized"
   | "previous_ingestion_failed"
   | "processing_incomplete"
   | "investor_mapping_unresolved"
   | "investor_mapping_ambiguous"
   | "investor_workspace_relationship_required"
   | "amc_mapping_unresolved"
+  | "amc_mapping_conflict"
   | "portfolio_mapping_ambiguous"
   | "folio_relationship_conflict"
   | "configuration_ambiguous"
@@ -167,6 +170,7 @@ export type PersistenceResult = {
   outbox_event_id: string | null;
   transaction_count: number;
   idempotent: boolean;
+  failure_code?: FailureCode | null;
 };
 
 export type IngestionRunClaimInput = {
@@ -177,13 +181,37 @@ export type IngestionRunClaimInput = {
 };
 
 export type IngestionRunFinalStatus =
+  | "claimed"
   | "completed"
   | "partially_failed"
   | "failed"
   | "stopped";
 
+export type IngestionRunReplayState =
+  | "newly_claimed"
+  | "active_claimed"
+  | "terminal_replay";
+
+export type IngestionRunSummary = {
+  ingestion_run_id: string;
+  status: IngestionRunFinalStatus;
+  replay_state?: IngestionRunReplayState;
+  attempted_attachment_count: number;
+  successful_attachment_count: number;
+  failed_attachment_count: number;
+  duplicate_attachment_count: number;
+  stopped_attachment_count: number;
+  stopped_reason: FailureCode | null;
+  run_failure_code: FailureCode | null;
+};
+
+export type IngestionRunClaimResult = IngestionRunSummary & {
+  replay_state: IngestionRunReplayState;
+};
+
 export type IngestionRunFinalizeInput = IngestionRunClaimInput & {
   stoppedReason?: FailureCode;
+  failureCode?: FailureCode;
 };
 
 export type FailureLineageInput = {

@@ -70,9 +70,9 @@ INSERT INTO public.profile_pan_records (
 ) VALUES (
   '93210000-0000-0000-0000-000000000001',
   '93300000-0000-0000-0000-000000000002',
-  extensions.pgp_sym_encrypt('ABCDE1234F', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
-  extensions.hmac('ABCDE1234F', public.pan_lookup_hmac_key(), 'sha256'),
-  public.mask_pan('ABCDE1234F'),
+  extensions.pgp_sym_encrypt('QWERT1234Y', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
+  extensions.hmac('QWERT1234Y', public.pan_lookup_hmac_key(), 'sha256'),
+  public.mask_pan('QWERT1234Y'),
   'INVESTOR',
   'MANUAL',
   'VERIFIED',
@@ -178,7 +178,8 @@ BEGIN
       'public.mailbox_connections'::pg_catalog.regclass,
       'public.mailbox_oauth_credentials'::pg_catalog.regclass,
       'public.ingested_documents'::pg_catalog.regclass,
-      'public.ingestion_logs'::pg_catalog.regclass
+      'public.ingestion_logs'::pg_catalog.regclass,
+      'public.cams_kfintech_ingestion_attempts'::pg_catalog.regclass
     )
       AND acl.grantee = 0
       AND acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
@@ -242,7 +243,12 @@ BEGIN
      OR NOT EXISTS (
 	       SELECT 1 FROM pg_catalog.pg_indexes
 	       WHERE schemaname = 'public'
-	         AND indexname = 'ingestion_logs_failure_attempt_uidx'
+         AND indexname = 'ingestion_logs_failure_run_attempt_uidx'
+     )
+     OR NOT EXISTS (
+	     SELECT 1 FROM pg_catalog.pg_indexes
+	     WHERE schemaname = 'public'
+         AND indexname = 'cams_kfintech_ingestion_attempts_run_outcome_idx'
 	     )
      OR NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_indexes
@@ -410,6 +416,26 @@ INSERT INTO public.portfolios (
 
 SET ROLE service_role;
 
+SELECT public.claim_cams_kfintech_ingestion_run(
+  run.workspace_id,
+  run.mailbox_connection_id,
+  run.ingestion_run_id,
+  run.registrar
+)
+FROM (
+  VALUES
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000100'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000002'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000002'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000200'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000300'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000002'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000002'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000306'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000400'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000003'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000401'::pg_catalog.uuid, 'KFINTECH'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000502'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000503'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000504'::pg_catalog.uuid, 'CAMS'::pg_catalog.text),
+    ('93400000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93700000-0000-0000-0000-000000000001'::pg_catalog.uuid, '93900000-0000-0000-0000-000000000505'::pg_catalog.uuid, 'CAMS'::pg_catalog.text)
+) AS run(workspace_id, mailbox_connection_id, ingestion_run_id, registrar);
+
 SELECT *
 FROM public.persist_cams_kfintech_statement_ingestion(
   '93400000-0000-0000-0000-000000000001',
@@ -430,7 +456,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   pg_catalog.jsonb_build_array(
     pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Issue 32 Imported Investor',
       'folioNumber', 'FOLIO-32-A',
       'schemeCode', 'MF32A',
@@ -470,7 +496,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   pg_catalog.jsonb_build_array(
     pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Issue 32 Imported Investor',
       'folioNumber', 'FOLIO-32-A',
       'schemeCode', 'MF32A',
@@ -510,7 +536,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   pg_catalog.jsonb_build_array(
     pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Issue 32 Imported Investor',
       'folioNumber', 'FOLIO-32-B',
       'schemeCode', 'MF32B',
@@ -588,7 +614,7 @@ BEGIN
     pg_catalog.jsonb_build_array(
       pg_catalog.jsonb_build_object(
         'registrar', 'CAMS',
-        'clientPan', 'ABCDE1234F',
+        'clientPan', 'QWERT1234Y',
         'investorName', 'Issue 32 Imported Investor',
         'folioNumber', 'FOLIO-32-C',
         'schemeCode', 'MF32C',
@@ -606,10 +632,10 @@ BEGIN
       )
     )
   );
-  RAISE EXCEPTION 'failed document replay returned idempotent success';
+  RAISE EXCEPTION 'failed attempt replay returned idempotent success';
 EXCEPTION
   WHEN others THEN
-    IF SQLERRM NOT LIKE '%previous_ingestion_failed%' THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
       RAISE;
     END IF;
 END;
@@ -657,7 +683,7 @@ BEGIN
       '2026-07-29T00:00:00Z',
       pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
         'registrar', 'CAMS',
-        'clientPan', 'ABCDE1234F',
+        'clientPan', 'QWERT1234Y',
         'investorName', 'Overlapping Statement',
         'folioNumber', 'FOLIO-32-A',
         'schemeCode', 'MF32A',
@@ -716,7 +742,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   '2026-07-29T00:00:00Z',
   pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
     'registrar', 'CAMS',
-    'clientPan', 'ABCDE1234F',
+    'clientPan', 'QWERT1234Y',
     'investorName', 'Permitted Same ID',
     'folioNumber', 'FOLIO-32-PERMITTED',
     'schemeCode', 'MF32PERM',
@@ -775,7 +801,7 @@ BEGIN
     pg_catalog.jsonb_build_array(
       pg_catalog.jsonb_build_object(
         'registrar', 'CAMS',
-        'clientPan', 'ABCDE1234F',
+        'clientPan', 'QWERT1234Y',
         'investorName', 'Issue 32 Imported Investor',
         'folioNumber', 'FOLIO-32-D',
         'schemeCode', 'MF32D',
@@ -862,7 +888,7 @@ BEGIN
     '2026-07-29T00:00:00Z',
     pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Invalid Direction',
       'folioNumber', 'FOLIO-BAD-DIRECTION',
       'schemeCode', 'MF32NEG',
@@ -907,7 +933,7 @@ BEGIN
     pg_catalog.jsonb_build_array(
       pg_catalog.jsonb_build_object(
         'registrar', 'CAMS',
-        'clientPan', 'ABCDE1234F',
+        'clientPan', 'QWERT1234Y',
         'investorName', 'Issue 32 Imported Investor',
         'folioNumber', 'FOLIO-32-E',
         'schemeCode', 'MF32E',
@@ -1121,7 +1147,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   pg_catalog.jsonb_build_array(
     pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Switch Investor',
       'folioNumber', 'FOLIO-SWITCH-CAMS',
       'schemeCode', 'MF32SWC',
@@ -1140,7 +1166,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
     ),
     pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Switch Investor',
       'folioNumber', 'FOLIO-SWITCH-CAMS',
       'schemeCode', 'MF32SWC',
@@ -1164,7 +1190,7 @@ SELECT *
 FROM public.persist_cams_kfintech_statement_ingestion(
   '93400000-0000-0000-0000-000000000001',
   '93700000-0000-0000-0000-000000000003',
-  '93900000-0000-0000-0000-000000000400',
+  '93900000-0000-0000-0000-000000000401',
   '93900000-0000-0000-0000-000000000402',
   'provider-message-switch-kfin',
   'provider-attachment-switch-kfin',
@@ -1180,7 +1206,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   pg_catalog.jsonb_build_array(
     pg_catalog.jsonb_build_object(
       'registrar', 'KFINTECH',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Switch Investor',
       'folioNumber', 'KFOLIO-SWITCH',
       'schemeCode', 'MF32SWK',
@@ -1199,7 +1225,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
     ),
     pg_catalog.jsonb_build_object(
       'registrar', 'KFINTECH',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Switch Investor',
       'folioNumber', 'KFOLIO-SWITCH',
       'schemeCode', 'MF32SWK',
@@ -1328,7 +1354,7 @@ BEGIN
   FROM public.persist_cams_kfintech_statement_ingestion(
     '93400000-0000-0000-0000-000000000002',
     '93700000-0000-0000-0000-000000000002',
-    '93900000-0000-0000-0000-000000000300',
+    '93900000-0000-0000-0000-000000000306',
     '93900000-0000-0000-0000-000000000302',
     'provider-message-negative',
     'provider-attachment-wrong-workspace',
@@ -1343,7 +1369,7 @@ BEGIN
     '2026-07-29T00:00:00Z',
     pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Wrong Workspace',
       'folioNumber', 'FOLIO-WRONG-WS',
       'schemeCode', 'MF32NEG',
@@ -1381,9 +1407,9 @@ INSERT INTO public.profile_pan_records (
 ) VALUES (
   '93210000-0000-0000-0000-000000000002',
   '93300000-0000-0000-0000-000000000003',
-  extensions.pgp_sym_encrypt('ABCDE1234F', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
-  extensions.hmac('ABCDE1234F', public.pan_lookup_hmac_key(), 'sha256'),
-  public.mask_pan('ABCDE1234F'),
+  extensions.pgp_sym_encrypt('QWERT1234Y', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
+  extensions.hmac('QWERT1234Y', public.pan_lookup_hmac_key(), 'sha256'),
+  public.mask_pan('QWERT1234Y'),
   'INVESTOR',
   'MANUAL',
   'VERIFIED',
@@ -1417,7 +1443,7 @@ BEGIN
     '2026-07-29T00:00:00Z',
     pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Ambiguous PAN',
       'folioNumber', 'FOLIO-AMBIG',
       'schemeCode', 'MF32NEG',
@@ -1488,7 +1514,7 @@ BEGIN
       pg_catalog.jsonb_build_array(
         pg_catalog.jsonb_build_object(
           'registrar', 'CAMS',
-          'clientPan', 'ABCDE1234F',
+          'clientPan', 'QWERT1234Y',
           'investorName', 'Duplicate Row',
           'folioNumber', 'FOLIO-DUP',
           'schemeCode', 'MF32NEG',
@@ -1505,7 +1531,7 @@ BEGIN
         ),
         pg_catalog.jsonb_build_object(
           'registrar', 'CAMS',
-          'clientPan', 'ABCDE1234F',
+          'clientPan', 'QWERT1234Y',
           'investorName', 'Duplicate Row',
           'folioNumber', 'FOLIO-DUP',
           'schemeCode', 'MF32NEG',
@@ -1580,7 +1606,7 @@ BEGIN
       pg_catalog.jsonb_build_array(
         pg_catalog.jsonb_build_object(
           'registrar', 'CAMS',
-          'clientPan', 'ABCDE1234F',
+          'clientPan', 'QWERT1234Y',
           'investorName', 'Duplicate Registrar Transaction',
           'folioNumber', 'FOLIO-DUP-TXN',
           'schemeCode', 'MF32NEG',
@@ -1597,7 +1623,7 @@ BEGIN
         ),
         pg_catalog.jsonb_build_object(
           'registrar', 'CAMS',
-          'clientPan', 'ABCDE1234F',
+          'clientPan', 'QWERT1234Y',
           'investorName', 'Duplicate Registrar Transaction',
           'folioNumber', 'FOLIO-DUP-TXN',
           'schemeCode', 'MF32NEG',
@@ -1706,26 +1732,36 @@ SELECT public.claim_cams_kfintech_ingestion_run(
   'CAMS'
 );
 
-SELECT public.record_cams_kfintech_ingestion_failure(
-  '93400000-0000-0000-0000-000000000001',
-  '93700000-0000-0000-0000-000000000001',
-  '93900000-0000-0000-0000-000000000501',
-  '93900000-0000-0000-0000-000000000501',
-  NULL,
-  NULL,
-  NULL,
-  'CAMS',
-  'mailbox_poll_failed'
-);
-
 SELECT *
 FROM public.finalize_cams_kfintech_ingestion_run(
   '93400000-0000-0000-0000-000000000001',
   '93700000-0000-0000-0000-000000000001',
   '93900000-0000-0000-0000-000000000501',
   'CAMS',
+  NULL,
   'mailbox_poll_failed'
 );
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_status pg_catalog.text;
+  v_attempted pg_catalog.int4;
+  v_failure_code pg_catalog.text;
+BEGIN
+  SELECT status, attempted_attachment_count, run_failure_code
+  INTO v_status, v_attempted, v_failure_code
+  FROM public.cams_kfintech_ingestion_runs
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000501';
+
+  IF v_status <> 'failed' OR v_attempted <> 0 OR v_failure_code <> 'mailbox_poll_failed' THEN
+    RAISE EXCEPTION 'poll-level failure did not finalize as failed run-level code: %, %, %', v_status, v_attempted, v_failure_code;
+  END IF;
+END;
+$$;
+
+SET ROLE service_role;
 
 DO $$
 BEGIN
@@ -1807,16 +1843,20 @@ DECLARE
   v_docs_before pg_catalog.int4;
   v_logs_before pg_catalog.int4;
   v_events_before pg_catalog.int4;
+  v_attempts_before pg_catalog.int4;
   v_docs_after pg_catalog.int4;
   v_logs_after pg_catalog.int4;
   v_events_after pg_catalog.int4;
+  v_attempts_after pg_catalog.int4;
+  v_failure_code pg_catalog.text;
 BEGIN
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_before FROM public.ingested_documents;
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_before FROM public.ingestion_logs;
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_before FROM public.event_outbox;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_before FROM public.cams_kfintech_ingestion_attempts;
 
   BEGIN
-    PERFORM *
+    SELECT failure_code INTO v_failure_code
     FROM public.persist_cams_kfintech_statement_ingestion(
       '93400000-0000-0000-0000-000000000001',
       '93700000-0000-0000-0000-000000000001',
@@ -1835,7 +1875,7 @@ BEGIN
       '2026-07-29T00:00:00Z',
       pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
         'registrar', 'CAMS',
-        'clientPan', 'ABCDE1234F',
+        'clientPan', 'QWERT1234Y',
         'investorName', 'Changed Digest',
         'folioNumber', 'FOLIO-32-A',
         'schemeCode', 'MF32A',
@@ -1850,7 +1890,9 @@ BEGIN
         'sourceRowNumber', 1
       ))
     );
-    RAISE EXCEPTION 'same provider attachment accepted changed bytes';
+    IF v_failure_code <> 'attachment_hash_mismatch' THEN
+      RAISE EXCEPTION 'same provider changed bytes did not return attachment_hash_mismatch: %', v_failure_code;
+    END IF;
   EXCEPTION
     WHEN others THEN
       IF SQLERRM NOT LIKE '%attachment_hash_mismatch%' AND SQLERRM NOT LIKE '%correlation_conflict%' THEN
@@ -1859,7 +1901,7 @@ BEGIN
   END;
 
   BEGIN
-    PERFORM *
+    SELECT failure_code INTO v_failure_code
     FROM public.persist_cams_kfintech_statement_ingestion(
       '93400000-0000-0000-0000-000000000001',
       '93700000-0000-0000-0000-000000000001',
@@ -1878,7 +1920,7 @@ BEGIN
       '2026-07-29T00:00:00Z',
       pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
         'registrar', 'CAMS',
-        'clientPan', 'ABCDE1234F',
+        'clientPan', 'QWERT1234Y',
         'investorName', 'Digest Duplicate',
         'folioNumber', 'FOLIO-DIGEST-DUP',
         'schemeCode', 'MF32A',
@@ -1893,10 +1935,12 @@ BEGIN
         'sourceRowNumber', 1
       ))
     );
-    RAISE EXCEPTION 'same digest under different provider identity was accepted';
+    IF v_failure_code <> 'duplicate_attachment' THEN
+      RAISE EXCEPTION 'same digest under different provider identity did not return duplicate_attachment: %', v_failure_code;
+    END IF;
   EXCEPTION
     WHEN others THEN
-      IF SQLERRM NOT LIKE '%duplicate_attachment%' THEN
+      IF SQLERRM NOT LIKE '%duplicate_attachment%' AND SQLERRM NOT LIKE '%correlation_conflict%' THEN
         RAISE;
       END IF;
   END;
@@ -1948,7 +1992,7 @@ BEGIN
     RAISE EXCEPTION 'failure lineage accepted duplicate digest as a new document';
   EXCEPTION
     WHEN others THEN
-      IF SQLERRM NOT LIKE '%duplicate_attachment%' THEN
+      IF SQLERRM NOT LIKE '%duplicate_attachment%' AND SQLERRM NOT LIKE '%correlation_conflict%' THEN
         RAISE;
       END IF;
   END;
@@ -1956,9 +2000,13 @@ BEGIN
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_after FROM public.ingested_documents;
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_after FROM public.ingestion_logs;
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_after FROM public.event_outbox;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_after FROM public.cams_kfintech_ingestion_attempts;
 
-  IF v_docs_after <> v_docs_before OR v_logs_after <> v_logs_before OR v_events_after <> v_events_before THEN
-    RAISE EXCEPTION 'provider identity conflicts left document/log/event side effects';
+  IF v_docs_after <> v_docs_before
+     OR v_logs_after <> v_logs_before + 2
+     OR v_attempts_after <> v_attempts_before + 2
+     OR v_events_after <> v_events_before THEN
+    RAISE EXCEPTION 'provider identity conflicts did not preserve durable attempt lineage without document/event side effects';
   END IF;
 END;
 $$;
@@ -1984,7 +2032,7 @@ BEGIN
     '2026-07-29T00:00:00Z',
     pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'AMC Conflict',
       'folioNumber', 'FOLIO-32-A',
       'schemeCode', 'MF32AMCCONFLICT',
@@ -2029,7 +2077,7 @@ BEGIN
     '2026-07-29T00:00:00Z',
     pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
       'registrar', 'CAMS',
-      'clientPan', 'ABCDE1234F',
+      'clientPan', 'QWERT1234Y',
       'investorName', 'Missing AMC',
       'folioNumber', 'FOLIO-MISSING-AMC',
       'schemeCode', 'MF32MISSINGAMC',
@@ -2074,7 +2122,7 @@ FROM public.persist_cams_kfintech_statement_ingestion(
   '2026-07-29T00:00:00Z',
   pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
     'registrar', 'CAMS',
-    'clientPan', 'ABCDE1234F',
+    'clientPan', 'QWERT1234Y',
     'investorName', 'Trusted AMC',
     'folioNumber', 'FOLIO-TRUSTED-AMC',
     'schemeCode', 'MF32TRUST',
