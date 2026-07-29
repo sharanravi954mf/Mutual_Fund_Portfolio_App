@@ -7,10 +7,17 @@ export type FailureCode =
   | "mailbox_connection_not_found"
   | "oauth_credentials_unavailable"
   | "mailbox_poll_failed"
+  | "attachment_limit_exceeded"
   | "sender_not_allowed"
   | "attachment_too_large"
   | "attachment_hash_mismatch"
   | "duplicate_attachment"
+  | "correlation_conflict"
+  | "previous_ingestion_failed"
+  | "processing_incomplete"
+  | "configuration_ambiguous"
+  | "connector_untrusted_origin"
+  | "credential_refresh_failed"
   | "unsupported_media_type"
   | "magic_byte_mismatch"
   | "malware_detected"
@@ -49,10 +56,20 @@ export type CredentialBundle = {
   expiresAt?: string;
 };
 
+export type EncryptedCredentialEnvelope = {
+  credentialCiphertext: string;
+  credentialNonce: string;
+  keyVersion: number;
+};
+
 export type RegistrarConfig = {
   registrar: Registrar;
   allowedSenderAddresses: string[];
   maxAttachmentBytes: number;
+  maxMessagesPerPoll: number;
+  maxAttachmentsPerMessage: number;
+  maxAttachmentsPerRun: number;
+  totalBytesPerRun: number;
   supportedFileTypes: StatementFileType[];
 };
 
@@ -66,11 +83,11 @@ export type IngestionRunContext = {
 };
 
 export type EmailAttachment = {
+  attachmentId: string;
   filename: string;
   declaredMime: string;
   receivedAt: string;
   expectedSha256Hex?: string;
-  stream: ReadableStream<Uint8Array>;
 };
 
 export type MailMessage = {
@@ -78,6 +95,10 @@ export type MailMessage = {
   messageId: string;
   receivedAt: string;
   attachments: EmailAttachment[];
+};
+
+export type DownloadedAttachment = EmailAttachment & {
+  stream: ReadableStream<Uint8Array>;
 };
 
 export type DetectedFormat = {
@@ -111,7 +132,11 @@ export type NormalizedTransaction = {
 export type PersistenceInput = {
   workspaceId: string;
   mailboxConnectionId: string;
-  correlationId: string;
+  ingestionRunId: string;
+  documentCorrelationId: string;
+  providerMessageId: string;
+  providerAttachmentId: string;
+  attachmentAttemptKey: string;
   registrar: Registrar;
   sha256Hex: string;
   storage: StoredObject;
@@ -133,7 +158,11 @@ export type PersistenceResult = {
 export type FailureLineageInput = {
   workspaceId: string;
   mailboxConnectionId: string;
-  correlationId: string;
+  ingestionRunId: string;
+  documentCorrelationId: string;
+  providerMessageId?: string;
+  providerAttachmentId?: string;
+  attachmentAttemptKey?: string;
   registrar: Registrar;
   failureCode: FailureCode;
   sha256Hex?: string;

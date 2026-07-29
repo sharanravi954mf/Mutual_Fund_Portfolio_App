@@ -6,6 +6,8 @@ import type { PdfTextExtractor } from "./parser.ts";
 import { DEFAULT_MAX_ATTACHMENT_BYTES } from "./security.ts";
 import {
   type CredentialBundle,
+  type DownloadedAttachment,
+  type EncryptedCredentialEnvelope,
   type FailureCode,
   type FailureLineageInput,
   IngestionError,
@@ -21,69 +23,259 @@ const knownFailureCodes: Set<string> = new Set([
   "mailbox_connection_not_found",
   "attachment_hash_mismatch",
   "duplicate_attachment",
+  "correlation_conflict",
+  "previous_ingestion_failed",
+  "processing_incomplete",
   "unsupported_registrar",
   "unsupported_statement_format",
   "parse_failed",
   "persistence_failed",
 ]);
 
-type CipherRow = {
-  access_token_ciphertext: string;
-  refresh_token_ciphertext: string | null;
-  nonce: string;
+type CredentialEnvelopeRow = {
+  credential_ciphertext: string;
+  credential_nonce: string;
   key_version: number;
-  expires_at: string | null;
+};
+
+type RegistrarConfigRow = {
+  registrar: Registrar;
+  allowed_sender_addresses: string[];
+  max_attachment_bytes: number | null;
+  max_messages_per_poll: number | null;
+  max_attachments_per_message: number | null;
+  max_attachments_per_run: number | null;
+  total_bytes_per_run: number | null;
+  supported_file_types: ("CAS_PDF" | "DBF")[] | null;
 };
 
 function b64ToBytes(value: string): Uint8Array {
-  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+  try {
+    return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+  } catch (_error) {
+    throw new IngestionError("oauth_credentials_unavailable");
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function bytesToText(value: ArrayBuffer): string {
   return new TextDecoder().decode(value);
 }
 
+function validPositive(
+  value: number | null | undefined,
+  fallback: number,
+): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.floor(value);
+}
+
 async function importAesKey(rawBase64: string): Promise<CryptoKey> {
-  if (rawBase64.trim() === "") {
+  const keyBytes = b64ToBytes(rawBase64);
+  if (keyBytes.byteLength !== 32) {
     throw new IngestionError("oauth_credentials_unavailable");
   }
   return await crypto.subtle.importKey(
     "raw",
-    b64ToBytes(rawBase64),
+    keyBytes,
     "AES-GCM",
     false,
-    ["decrypt"],
+    ["encrypt", "decrypt"],
   );
+}
+
+function additionalData(
+  workspaceId: string,
+  mailboxConnectionId: string,
+  keyVersion: number,
+): string {
+  if (keyVersion !== 1) {
+    throw new IngestionError("oauth_credentials_unavailable");
+  }
+  return `${workspaceId}:${mailboxConnectionId}:${keyVersion}`;
 }
 
 async function decryptAesGcm(
   ciphertextBase64: string,
   nonceBase64: string,
   key: CryptoKey,
-  additionalData: string,
+  aad: string,
 ): Promise<string> {
   try {
+    const nonce = b64ToBytes(nonceBase64);
+    if (nonce.byteLength !== 12) {
+      throw new IngestionError("oauth_credentials_unavailable");
+    }
+    const ciphertext = b64ToBytes(ciphertextBase64);
     const plaintext = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv: b64ToBytes(nonceBase64),
-        additionalData: new TextEncoder().encode(additionalData),
+        iv: nonce,
+        additionalData: new TextEncoder().encode(aad),
       },
       key,
-      b64ToBytes(ciphertextBase64),
+      ciphertext,
     );
     return bytesToText(plaintext);
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof IngestionError) throw error;
     throw new IngestionError("oauth_credentials_unavailable");
   }
 }
 
-function recordFromUnknown(value: unknown): Record<string, unknown> {
+async function encryptAesGcm(
+  plaintext: string,
+  key: CryptoKey,
+  aad: string,
+): Promise<{ ciphertext: string; nonce: string }> {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: nonce,
+      additionalData: new TextEncoder().encode(aad),
+    },
+    key,
+    new TextEncoder().encode(plaintext),
+  );
+  return {
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    nonce: bytesToBase64(nonce),
+  };
+}
+
+function recordFromUnknown(
+  value: unknown,
+  code: FailureCode = "mailbox_poll_failed",
+): Record<string, unknown> {
   if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    throw new IngestionError("mailbox_poll_failed");
+    throw new IngestionError(code);
   }
   return value as Record<string, unknown>;
 }
+
+function parseTrustedConnectorUrl(
+  connectorUrl: string,
+  allowInsecureConnector: boolean,
+): URL {
+  try {
+    const parsed = new URL(connectorUrl);
+    const isLocalhost = parsed.hostname === "localhost" ||
+      parsed.hostname === "127.0.0.1";
+    if (
+      parsed.protocol !== "https:" &&
+      !(allowInsecureConnector && parsed.protocol === "http:" && isLocalhost)
+    ) {
+      throw new IngestionError("connector_untrusted_origin");
+    }
+    return parsed;
+  } catch (error) {
+    if (error instanceof IngestionError) throw error;
+    throw new IngestionError("connector_untrusted_origin");
+  }
+}
+
+function endpoint(baseUrl: URL, suffix: string): URL {
+  const basePath = baseUrl.pathname.endsWith("/")
+    ? baseUrl.pathname.slice(0, -1)
+    : baseUrl.pathname;
+  const next = new URL(baseUrl.toString());
+  next.pathname = `${basePath}${suffix}`;
+  next.search = "";
+  next.hash = "";
+  return next;
+}
+
+function assertSameOrigin(url: URL, expectedOrigin: string): void {
+  if (url.origin !== expectedOrigin) {
+    throw new IngestionError("connector_untrusted_origin");
+  }
+}
+
+function isExpiringSoon(
+  expiresAt: string | undefined,
+  now = Date.now(),
+): boolean {
+  if (expiresAt == null || expiresAt.trim() === "") return false;
+  const expires = Date.parse(expiresAt);
+  if (!Number.isFinite(expires)) return true;
+  return expires - now <= 5 * 60 * 1000;
+}
+
+export class CredentialEnvelopeCrypto {
+  constructor(private readonly keyBase64: string) {}
+
+  async decrypt(
+    envelope: EncryptedCredentialEnvelope,
+    workspaceId: string,
+    mailboxConnectionId: string,
+  ): Promise<CredentialBundle> {
+    const key = await importAesKey(this.keyBase64);
+    const plaintext = await decryptAesGcm(
+      envelope.credentialCiphertext,
+      envelope.credentialNonce,
+      key,
+      additionalData(workspaceId, mailboxConnectionId, envelope.keyVersion),
+    );
+    const parsed = recordFromUnknown(
+      JSON.parse(plaintext),
+      "oauth_credentials_unavailable",
+    );
+    if (typeof parsed.accessToken !== "string" || parsed.accessToken === "") {
+      throw new IngestionError("oauth_credentials_unavailable");
+    }
+    return {
+      accessToken: parsed.accessToken,
+      refreshToken: typeof parsed.refreshToken === "string"
+        ? parsed.refreshToken
+        : undefined,
+      expiresAt: typeof parsed.expiresAt === "string"
+        ? parsed.expiresAt
+        : undefined,
+    };
+  }
+
+  async encrypt(
+    bundle: CredentialBundle,
+    workspaceId: string,
+    mailboxConnectionId: string,
+    keyVersion = 1,
+  ): Promise<EncryptedCredentialEnvelope> {
+    if (bundle.accessToken.trim() === "") {
+      throw new IngestionError("oauth_credentials_unavailable");
+    }
+    const key = await importAesKey(this.keyBase64);
+    const encrypted = await encryptAesGcm(
+      JSON.stringify(bundle),
+      key,
+      additionalData(workspaceId, mailboxConnectionId, keyVersion),
+    );
+    return {
+      credentialCiphertext: encrypted.ciphertext,
+      credentialNonce: encrypted.nonce,
+      keyVersion,
+    };
+  }
+}
+
+export type CredentialRefreshClient = {
+  refresh(
+    context: {
+      workspaceId: string;
+      mailboxConnectionId: string;
+      connectorRef: string;
+      registrar: Registrar;
+    },
+    credentials: CredentialBundle,
+  ): Promise<CredentialBundle>;
+};
 
 export function supabaseClient(serviceRoleKey: string): SupabaseClient {
   return createClient(Deno.env.get("SUPABASE_URL") || "", serviceRoleKey, {
@@ -95,10 +287,15 @@ export function supabaseClient(serviceRoleKey: string): SupabaseClient {
 }
 
 export class SupabaseConfigRepository {
+  private readonly crypto: CredentialEnvelopeCrypto;
+
   constructor(
     private readonly client: SupabaseClient,
-    private readonly credentialKeyBase64: string,
-  ) {}
+    credentialKeyBase64: string,
+    private readonly credentialRefresher?: CredentialRefreshClient,
+  ) {
+    this.crypto = new CredentialEnvelopeCrypto(credentialKeyBase64);
+  }
 
   async loadRunContext(input: {
     workspaceId: string;
@@ -121,24 +318,15 @@ export class SupabaseConfigRepository {
       throw new IngestionError("mailbox_connection_not_found");
     }
 
-    const { data: config, error: configError } = await this.client
-      .from("registrar_configs")
-      .select(
-        "registrar, allowed_sender_addresses, max_attachment_bytes, supported_file_types",
-      )
-      .eq("registrar", input.registrar)
-      .eq("is_active", true)
-      .or(`workspace_id.eq.${input.workspaceId},workspace_id.is.null`)
-      .limit(1)
-      .maybeSingle();
-
-    if (configError != null || config == null) {
-      throw new IngestionError("unsupported_registrar");
-    }
-
+    const config = await this.loadRegistrarConfig(
+      input.workspaceId,
+      input.registrar,
+    );
     const credentials = await this.loadCredentials(
       input.workspaceId,
       input.mailboxConnectionId,
+      mailbox.connector_ref,
+      input.registrar,
     );
     return {
       workspaceId: input.workspaceId,
@@ -158,67 +346,223 @@ export class SupabaseConfigRepository {
       registrarConfig: {
         registrar: config.registrar,
         allowedSenderAddresses: config.allowed_sender_addresses ?? [],
-        maxAttachmentBytes: config.max_attachment_bytes ??
+        maxAttachmentBytes: validPositive(
+          config.max_attachment_bytes,
           DEFAULT_MAX_ATTACHMENT_BYTES,
+        ),
+        maxMessagesPerPoll: validPositive(config.max_messages_per_poll, 25),
+        maxAttachmentsPerMessage: validPositive(
+          config.max_attachments_per_message,
+          5,
+        ),
+        maxAttachmentsPerRun: validPositive(config.max_attachments_per_run, 25),
+        totalBytesPerRun: validPositive(
+          config.total_bytes_per_run,
+          DEFAULT_MAX_ATTACHMENT_BYTES,
+        ),
         supportedFileTypes: config.supported_file_types ?? ["CAS_PDF", "DBF"],
       },
     };
   }
 
+  private async loadRegistrarConfig(
+    workspaceId: string,
+    registrar: Registrar,
+  ): Promise<RegistrarConfigRow> {
+    const selectList =
+      "registrar, allowed_sender_addresses, max_attachment_bytes, max_messages_per_poll, max_attachments_per_message, max_attachments_per_run, total_bytes_per_run, supported_file_types";
+    const workspace = await this.client
+      .from("registrar_configs")
+      .select(selectList)
+      .eq("workspace_id", workspaceId)
+      .eq("registrar", registrar)
+      .eq("is_active", true)
+      .limit(2);
+
+    if (workspace.error != null) {
+      throw new IngestionError("unsupported_registrar");
+    }
+    if ((workspace.data ?? []).length > 1) {
+      throw new IngestionError("configuration_ambiguous");
+    }
+    if ((workspace.data ?? []).length === 1) {
+      return workspace.data![0] as RegistrarConfigRow;
+    }
+
+    const global = await this.client
+      .from("registrar_configs")
+      .select(selectList)
+      .is("workspace_id", null)
+      .eq("registrar", registrar)
+      .eq("is_active", true)
+      .limit(2);
+    if (global.error != null) {
+      throw new IngestionError("unsupported_registrar");
+    }
+    if ((global.data ?? []).length > 1) {
+      throw new IngestionError("configuration_ambiguous");
+    }
+    if ((global.data ?? []).length === 1) {
+      return global.data![0] as RegistrarConfigRow;
+    }
+    throw new IngestionError("unsupported_registrar");
+  }
+
   private async loadCredentials(
     workspaceId: string,
     mailboxConnectionId: string,
+    connectorRef: string,
+    registrar: Registrar,
   ): Promise<CredentialBundle> {
-    const { data, error } = await this.client
-      .from("mailbox_oauth_credentials")
-      .select(
-        "access_token_ciphertext, refresh_token_ciphertext, nonce, key_version, expires_at",
-      )
-      .eq("workspace_id", workspaceId)
-      .eq("mailbox_connection_id", mailboxConnectionId)
-      .maybeSingle<CipherRow>();
+    const { data, error } = await this.client.rpc(
+      "load_mailbox_oauth_credential_envelope",
+      {
+        p_workspace_id: workspaceId,
+        p_mailbox_connection_id: mailboxConnectionId,
+      },
+    );
 
     if (error != null || data == null) {
       throw new IngestionError("oauth_credentials_unavailable");
     }
 
-    const key = await importAesKey(this.credentialKeyBase64);
-    const aad = `${workspaceId}:${mailboxConnectionId}:${data.key_version}`;
-    const accessToken = await decryptAesGcm(
-      data.access_token_ciphertext,
-      data.nonce,
-      key,
-      aad,
+    const row = (Array.isArray(data) ? data[0] : data) as CredentialEnvelopeRow;
+    let credentials = await this.crypto.decrypt(
+      {
+        credentialCiphertext: row.credential_ciphertext,
+        credentialNonce: row.credential_nonce,
+        keyVersion: row.key_version,
+      },
+      workspaceId,
+      mailboxConnectionId,
     );
-    const refreshToken = data.refresh_token_ciphertext == null
-      ? undefined
-      : await decryptAesGcm(
-        data.refresh_token_ciphertext,
-        data.nonce,
-        key,
-        aad,
-      );
 
+    if (isExpiringSoon(credentials.expiresAt)) {
+      if (this.credentialRefresher == null) {
+        throw new IngestionError("credential_refresh_failed");
+      }
+      credentials = await this.credentialRefresher.refresh({
+        workspaceId,
+        mailboxConnectionId,
+        connectorRef,
+        registrar,
+      }, credentials);
+      const refreshed = await this.crypto.encrypt(
+        credentials,
+        workspaceId,
+        mailboxConnectionId,
+        row.key_version,
+      );
+      const replace = await this.client.rpc(
+        "replace_mailbox_oauth_credential_envelope",
+        {
+          p_workspace_id: workspaceId,
+          p_mailbox_connection_id: mailboxConnectionId,
+          p_credential_ciphertext: refreshed.credentialCiphertext,
+          p_credential_nonce: refreshed.credentialNonce,
+          p_key_version: refreshed.keyVersion,
+          p_expires_at: credentials.expiresAt ?? null,
+        },
+      );
+      if (replace.error != null) {
+        throw new IngestionError("credential_refresh_failed");
+      }
+    }
+
+    return credentials;
+  }
+}
+
+export class ConnectorCredentialRefresher implements CredentialRefreshClient {
+  private readonly baseUrl: URL;
+
+  constructor(
+    connectorUrl: string,
+    private readonly connectorServiceToken: string,
+    allowInsecureConnector = false,
+  ) {
+    this.baseUrl = parseTrustedConnectorUrl(
+      connectorUrl,
+      allowInsecureConnector,
+    );
+  }
+
+  async refresh(
+    context: {
+      workspaceId: string;
+      mailboxConnectionId: string;
+      connectorRef: string;
+      registrar: Registrar;
+    },
+    credentials: CredentialBundle,
+  ): Promise<CredentialBundle> {
+    const response = await fetch(endpoint(this.baseUrl, "/oauth/refresh"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.connectorServiceToken}`,
+      },
+      body: JSON.stringify({
+        workspace_id: context.workspaceId,
+        mailbox_connection_id: context.mailboxConnectionId,
+        connector_ref: context.connectorRef,
+        registrar: context.registrar,
+        refresh_token: credentials.refreshToken,
+      }),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      throw new IngestionError("connector_untrusted_origin");
+    }
+    if (!response.ok) {
+      throw new IngestionError("credential_refresh_failed");
+    }
+    const payload = recordFromUnknown(
+      await response.json(),
+      "credential_refresh_failed",
+    );
+    if (
+      typeof payload.access_token !== "string" || payload.access_token === ""
+    ) {
+      throw new IngestionError("credential_refresh_failed");
+    }
     return {
-      accessToken,
-      refreshToken,
-      expiresAt: data.expires_at ?? undefined,
+      accessToken: payload.access_token,
+      refreshToken: typeof payload.refresh_token === "string"
+        ? payload.refresh_token
+        : credentials.refreshToken,
+      expiresAt: typeof payload.expires_at === "string"
+        ? payload.expires_at
+        : undefined,
     };
   }
 }
 
 export class ConnectorMailboxClient {
-  constructor(private readonly connectorUrl: string) {}
+  private readonly baseUrl: URL;
+
+  constructor(
+    connectorUrl: string,
+    private readonly connectorServiceToken: string,
+    allowInsecureConnector = false,
+  ) {
+    if (connectorServiceToken.trim() === "") {
+      throw new IngestionError("connector_untrusted_origin");
+    }
+    this.baseUrl = parseTrustedConnectorUrl(
+      connectorUrl,
+      allowInsecureConnector,
+    );
+  }
 
   async poll(context: IngestionRunContext): Promise<MailMessage[]> {
-    if (this.connectorUrl.trim() === "") {
-      throw new IngestionError("mailbox_poll_failed");
-    }
-    const response = await fetch(this.connectorUrl, {
+    const response = await fetch(endpoint(this.baseUrl, "/poll"), {
       method: "POST",
+      redirect: "manual",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${context.credentials.accessToken}`,
+        Authorization: `Bearer ${this.connectorServiceToken}`,
+        "X-Mailbox-OAuth-Token": context.credentials.accessToken,
       },
       body: JSON.stringify({
         connector_ref: context.mailbox.connectorRef,
@@ -226,6 +570,9 @@ export class ConnectorMailboxClient {
         registrar: context.mailbox.registrar,
       }),
     });
+    if (response.status >= 300 && response.status < 400) {
+      throw new IngestionError("connector_untrusted_origin");
+    }
     if (!response.ok) {
       throw new IngestionError("mailbox_poll_failed");
     }
@@ -235,50 +582,79 @@ export class ConnectorMailboxClient {
       throw new IngestionError("mailbox_poll_failed");
     }
 
-    return await Promise.all(
-      messages.map(async (rawMessage): Promise<MailMessage> => {
-        const message = recordFromUnknown(rawMessage);
-        const attachments = message.attachments;
-        if (!Array.isArray(attachments)) {
-          throw new IngestionError("mailbox_poll_failed");
-        }
-        return {
-          senderAddress: String(message.sender_address ?? ""),
-          messageId: String(message.message_id ?? ""),
-          receivedAt: String(message.received_at ?? new Date().toISOString()),
-          attachments: await Promise.all(
-            attachments.map(async (rawAttachment) => {
-              const attachment = recordFromUnknown(rawAttachment);
-              const attachmentResponse = await fetch(
-                String(attachment.download_url ?? ""),
-                {
-                  headers: {
-                    Authorization: `Bearer ${context.credentials.accessToken}`,
-                  },
-                },
-              );
-              if (!attachmentResponse.ok || attachmentResponse.body == null) {
-                throw new IngestionError("mailbox_poll_failed");
-              }
-              return {
-                filename: String(attachment.filename ?? "statement"),
-                declaredMime: String(
-                  attachment.declared_mime ?? "application/octet-stream",
-                ),
-                receivedAt: String(
-                  attachment.received_at ?? message.received_at ??
-                    new Date().toISOString(),
-                ),
-                expectedSha256Hex: attachment.expected_sha256_hex == null
-                  ? undefined
-                  : String(attachment.expected_sha256_hex),
-                stream: attachmentResponse.body,
-              };
-            }),
-          ),
-        };
+    return messages.map((rawMessage): MailMessage => {
+      const message = recordFromUnknown(rawMessage);
+      const attachments = message.attachments;
+      if (!Array.isArray(attachments)) {
+        throw new IngestionError("mailbox_poll_failed");
+      }
+      return {
+        senderAddress: String(message.sender_address ?? ""),
+        messageId: String(message.message_id ?? ""),
+        receivedAt: String(message.received_at ?? new Date().toISOString()),
+        attachments: attachments.map(
+          (rawAttachment): MailMessage["attachments"][number] => {
+            const attachment = recordFromUnknown(rawAttachment);
+            if (typeof attachment.attachment_id !== "string") {
+              throw new IngestionError("mailbox_poll_failed");
+            }
+            if (attachment.download_url != null) {
+              throw new IngestionError("connector_untrusted_origin");
+            }
+            return {
+              attachmentId: attachment.attachment_id,
+              filename: String(attachment.filename ?? "statement"),
+              declaredMime: String(
+                attachment.declared_mime ?? "application/octet-stream",
+              ),
+              receivedAt: String(
+                attachment.received_at ?? message.received_at ??
+                  new Date().toISOString(),
+              ),
+              expectedSha256Hex: attachment.expected_sha256_hex == null
+                ? undefined
+                : String(attachment.expected_sha256_hex),
+            };
+          },
+        ),
+      };
+    });
+  }
+
+  async downloadAttachment(
+    context: IngestionRunContext,
+    message: MailMessage,
+    attachment: MailMessage["attachments"][number],
+  ): Promise<DownloadedAttachment> {
+    const response = await fetch(endpoint(this.baseUrl, "/attachments/fetch"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.connectorServiceToken}`,
+      },
+      body: JSON.stringify({
+        connector_ref: context.mailbox.connectorRef,
+        mailbox_connection_id: context.mailboxConnectionId,
+        registrar: context.mailbox.registrar,
+        message_id: message.messageId,
+        attachment_id: attachment.attachmentId,
       }),
-    );
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (location != null) {
+        assertSameOrigin(new URL(location, this.baseUrl), this.baseUrl.origin);
+      }
+      throw new IngestionError("connector_untrusted_origin");
+    }
+    if (!response.ok || response.body == null) {
+      throw new IngestionError("mailbox_poll_failed");
+    }
+    if (response.url !== "") {
+      assertSameOrigin(new URL(response.url), this.baseUrl.origin);
+    }
+    return { ...attachment, stream: response.body };
   }
 }
 
@@ -378,7 +754,11 @@ export class SupabasePersistence {
       {
         p_workspace_id: input.workspaceId,
         p_mailbox_connection_id: input.mailboxConnectionId,
-        p_correlation_id: input.correlationId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_document_correlation_id: input.documentCorrelationId,
+        p_provider_message_id: input.providerMessageId,
+        p_provider_attachment_id: input.providerAttachmentId,
+        p_attachment_attempt_key: input.attachmentAttemptKey,
         p_registrar: input.registrar,
         p_attachment_sha256: input.sha256Hex,
         p_storage_bucket: input.storage.bucket,
@@ -403,19 +783,29 @@ export class SupabasePersistence {
   }
 
   async recordFailure(input: FailureLineageInput): Promise<void> {
-    await this.client.rpc("record_cams_kfintech_ingestion_failure", {
-      p_workspace_id: input.workspaceId,
-      p_mailbox_connection_id: input.mailboxConnectionId,
-      p_correlation_id: input.correlationId,
-      p_registrar: input.registrar,
-      p_failure_code: input.failureCode,
-      p_attachment_sha256: input.sha256Hex ?? null,
-      p_storage_bucket: input.storage?.bucket ?? null,
-      p_storage_object_path: input.storage?.path ?? null,
-      p_detected_mime: input.detectedMime ?? null,
-      p_file_type: input.fileType ?? null,
-      p_size_bytes: input.sizeBytes ?? null,
-    });
+    const { error } = await this.client.rpc(
+      "record_cams_kfintech_ingestion_failure",
+      {
+        p_workspace_id: input.workspaceId,
+        p_mailbox_connection_id: input.mailboxConnectionId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_document_correlation_id: input.documentCorrelationId,
+        p_provider_message_id: input.providerMessageId ?? null,
+        p_provider_attachment_id: input.providerAttachmentId ?? null,
+        p_attachment_attempt_key: input.attachmentAttemptKey ?? null,
+        p_registrar: input.registrar,
+        p_failure_code: input.failureCode,
+        p_attachment_sha256: input.sha256Hex ?? null,
+        p_storage_bucket: input.storage?.bucket ?? null,
+        p_storage_object_path: input.storage?.path ?? null,
+        p_detected_mime: input.detectedMime ?? null,
+        p_file_type: input.fileType ?? null,
+        p_size_bytes: input.sizeBytes ?? null,
+      },
+    );
+    if (error != null) {
+      throw new IngestionError("persistence_failed");
+    }
   }
 }
 

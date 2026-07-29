@@ -4,6 +4,7 @@ import {
   assertRegistrar,
   DEFAULT_MAX_ATTACHMENT_BYTES,
   detectAndValidateFormat,
+  deterministicUuid,
   errorStatus,
   jsonResponse,
   readBoundedStream,
@@ -12,6 +13,7 @@ import {
   verifyInternalInvocation,
 } from "./security.ts";
 import {
+  type DownloadedAttachment,
   type EmailAttachment,
   type FailureCode,
   type FailureLineageInput,
@@ -23,6 +25,21 @@ import {
   type Registrar,
   type StoredObject,
 } from "./types.ts";
+
+export type AttachmentProcessingResult =
+  | (PersistenceResult & {
+    ok: true;
+    message_id: string;
+    attachment_id: string;
+    document_correlation_id: string;
+  })
+  | {
+    ok: false;
+    message_id: string;
+    attachment_id: string;
+    document_correlation_id: string;
+    error: { code: FailureCode };
+  };
 
 export type HandlerDependencies = {
   internalToken: string;
@@ -36,6 +53,11 @@ export type HandlerDependencies = {
   };
   mailboxClient: {
     poll(context: IngestionRunContext): Promise<MailMessage[]>;
+    downloadAttachment(
+      context: IngestionRunContext,
+      message: MailMessage,
+      attachment: EmailAttachment,
+    ): Promise<DownloadedAttachment>;
   };
   malwareScanner: {
     scan(
@@ -68,6 +90,10 @@ type RequestBody = {
   registrar?: unknown;
 };
 
+type RunByteCounter = {
+  consumed: number;
+};
+
 function requiredString(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new IngestionError("not_authorized");
@@ -86,33 +112,109 @@ function combineAllowlist(context: IngestionRunContext): string[] {
   ];
 }
 
+function positiveLimit(value: number | undefined, fallback: number): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.floor(value);
+}
+
+function maxAttachmentBytes(context: IngestionRunContext): number {
+  return Math.min(
+    positiveLimit(
+      context.registrarConfig.maxAttachmentBytes,
+      DEFAULT_MAX_ATTACHMENT_BYTES,
+    ),
+    DEFAULT_MAX_ATTACHMENT_BYTES,
+  );
+}
+
+function attachmentAttemptKey(input: {
+  context: IngestionRunContext;
+  message: MailMessage;
+  attachment: EmailAttachment;
+  sha?: string;
+}): string {
+  return [
+    input.context.workspaceId,
+    input.context.mailboxConnectionId,
+    input.message.messageId,
+    input.attachment.attachmentId,
+    input.sha ?? "pending-digest",
+  ].join(":");
+}
+
+async function documentCorrelationId(input: {
+  context: IngestionRunContext;
+  message: MailMessage;
+  attachment: EmailAttachment;
+  sha?: string;
+}): Promise<string> {
+  return await deterministicUuid(attachmentAttemptKey(input));
+}
+
+async function recordFailure(
+  deps: HandlerDependencies,
+  input: FailureLineageInput,
+): Promise<void> {
+  await deps.persistence.recordFailure(input);
+}
+
 async function processAttachment(
   deps: HandlerDependencies,
   context: IngestionRunContext,
   message: MailMessage,
   attachment: EmailAttachment,
-): Promise<PersistenceResult> {
+  counter: RunByteCounter,
+): Promise<AttachmentProcessingResult> {
   let sha: string | undefined;
   let storageObject: StoredObject | undefined;
   let detectedMime: string | undefined;
   let fileType: "CAS_PDF" | "DBF" | undefined;
   let sizeBytes: number | undefined;
+  let correlationId = await documentCorrelationId({
+    context,
+    message,
+    attachment,
+  });
+  let attemptKey = attachmentAttemptKey({ context, message, attachment });
 
   try {
     stage(deps, "validate_sender");
     validateSender(message.senderAddress, combineAllowlist(context));
 
+    stage(deps, "retrieve_attachment");
+    const downloaded = await deps.mailboxClient.downloadAttachment(
+      context,
+      message,
+      attachment,
+    );
+
     stage(deps, "read_attachment_stream");
-    const maxBytes = Math.min(
-      context.registrarConfig.maxAttachmentBytes ||
-        DEFAULT_MAX_ATTACHMENT_BYTES,
+    const totalBytesPerRun = positiveLimit(
+      context.registrarConfig.totalBytesPerRun,
       DEFAULT_MAX_ATTACHMENT_BYTES,
     );
-    const bytes = await readBoundedStream(attachment.stream, maxBytes);
+    const remainingBytes = totalBytesPerRun - counter.consumed;
+    if (remainingBytes <= 0) {
+      throw new IngestionError("attachment_too_large");
+    }
+    const bytes = await readBoundedStream(
+      downloaded.stream,
+      Math.min(maxAttachmentBytes(context), remainingBytes),
+    );
     sizeBytes = bytes.byteLength;
+    counter.consumed += sizeBytes;
 
     stage(deps, "calculate_sha256");
     sha = await sha256Hex(bytes);
+    correlationId = await documentCorrelationId({
+      context,
+      message,
+      attachment,
+      sha,
+    });
+    attemptKey = attachmentAttemptKey({ context, message, attachment, sha });
     if (
       attachment.expectedSha256Hex != null &&
       attachment.expectedSha256Hex !== sha
@@ -158,7 +260,11 @@ async function processAttachment(
     const result = await deps.persistence.persist({
       workspaceId: context.workspaceId,
       mailboxConnectionId: context.mailboxConnectionId,
-      correlationId: context.correlationId,
+      ingestionRunId: context.correlationId,
+      documentCorrelationId: correlationId,
+      providerMessageId: message.messageId,
+      providerAttachmentId: attachment.attachmentId,
+      attachmentAttemptKey: attemptKey,
       registrar: context.mailbox.registrar,
       sha256Hex: sha,
       storage: storageObject,
@@ -170,15 +276,25 @@ async function processAttachment(
     });
 
     stage(deps, "complete_lineage");
-    return result;
+    return {
+      ...result,
+      ok: true,
+      message_id: message.messageId,
+      attachment_id: attachment.attachmentId,
+      document_correlation_id: correlationId,
+    };
   } catch (error) {
     const code = error instanceof IngestionError
       ? error.code
       : "persistence_failed";
-    await deps.persistence.recordFailure({
+    await recordFailure(deps, {
       workspaceId: context.workspaceId,
       mailboxConnectionId: context.mailboxConnectionId,
-      correlationId: context.correlationId,
+      ingestionRunId: context.correlationId,
+      documentCorrelationId: correlationId,
+      providerMessageId: message.messageId,
+      providerAttachmentId: attachment.attachmentId,
+      attachmentAttemptKey: attemptKey,
       registrar: context.mailbox.registrar,
       failureCode: code,
       sha256Hex: sha,
@@ -187,12 +303,54 @@ async function processAttachment(
       fileType,
       sizeBytes,
     });
-    throw error;
+    return {
+      ok: false,
+      message_id: message.messageId,
+      attachment_id: attachment.attachmentId,
+      document_correlation_id: correlationId,
+      error: { code },
+    };
   }
 }
 
 function classifyUnknownError(error: unknown): FailureCode {
   return error instanceof IngestionError ? error.code : "persistence_failed";
+}
+
+function validateMessageAndAttachmentLimits(
+  context: IngestionRunContext,
+  messages: MailMessage[],
+): void {
+  const maxMessages = positiveLimit(
+    context.registrarConfig.maxMessagesPerPoll,
+    25,
+  );
+  const maxAttachmentsPerMessage = positiveLimit(
+    context.registrarConfig.maxAttachmentsPerMessage,
+    5,
+  );
+  const maxAttachmentsPerRun = positiveLimit(
+    context.registrarConfig.maxAttachmentsPerRun,
+    25,
+  );
+  if (messages.length === 0 || messages.length > maxMessages) {
+    throw new IngestionError("mailbox_poll_failed");
+  }
+
+  let totalAttachments = 0;
+  for (const message of messages) {
+    if (message.attachments.length > maxAttachmentsPerMessage) {
+      throw new IngestionError("attachment_limit_exceeded");
+    }
+    totalAttachments += message.attachments.length;
+    if (totalAttachments > maxAttachmentsPerRun) {
+      throw new IngestionError("attachment_limit_exceeded");
+    }
+  }
+
+  if (totalAttachments === 0) {
+    throw new IngestionError("mailbox_poll_failed");
+  }
 }
 
 export function createCamsKfintechIngestionHandler(
@@ -233,48 +391,52 @@ export function createCamsKfintechIngestionHandler(
       stage(deps, "imap_oauth_connector");
       stage(deps, "poll_mailbox");
       const messages = await deps.mailboxClient.poll(context);
-      const attachments = messages.flatMap((message) =>
-        message.attachments.map((attachment) => ({ message, attachment }))
-      );
-      if (attachments.length === 0) {
-        await deps.persistence.recordFailure({
-          workspaceId: context.workspaceId,
-          mailboxConnectionId: context.mailboxConnectionId,
-          correlationId: context.correlationId,
-          registrar: context.mailbox.registrar,
-          failureCode: "mailbox_poll_failed",
-        });
-        pollFailureRecorded = true;
-        throw new IngestionError("mailbox_poll_failed");
-      }
+      validateMessageAndAttachmentLimits(context, messages);
 
-      const results: PersistenceResult[] = [];
-      for (const item of attachments) {
-        results.push(
-          await processAttachment(deps, context, item.message, item.attachment),
-        );
+      const results: AttachmentProcessingResult[] = [];
+      const counter: RunByteCounter = { consumed: 0 };
+      for (const message of messages) {
+        for (const attachment of message.attachments) {
+          const result = await processAttachment(
+            deps,
+            context,
+            message,
+            attachment,
+            counter,
+          );
+          results.push(result);
+          if (!result.ok && result.error.code === "attachment_too_large") {
+            break;
+          }
+        }
       }
 
       return jsonResponse({
         data: {
-          processed_attachments: results.length,
+          ingestion_run_id: correlationId,
+          processed_attachments: results.filter((result) => result.ok).length,
+          attempted_attachments: results.length,
+          continuation_policy: "continue_after_attachment_failure",
           results,
-          correlation_id: correlationId,
         },
       });
     } catch (error) {
       const code = classifyUnknownError(error);
       if (
-        context != null && code === "mailbox_poll_failed" &&
+        context != null &&
+        (code === "mailbox_poll_failed" ||
+          code === "attachment_limit_exceeded") &&
         !pollFailureRecorded
       ) {
-        await deps.persistence.recordFailure({
+        await recordFailure(deps, {
           workspaceId: context.workspaceId,
           mailboxConnectionId: context.mailboxConnectionId,
-          correlationId: context.correlationId,
+          ingestionRunId: context.correlationId,
+          documentCorrelationId: context.correlationId,
           registrar: context.mailbox.registrar,
           failureCode: code,
         });
+        pollFailureRecorded = true;
       }
       return jsonResponse({ error: { code } }, errorStatus(code));
     }

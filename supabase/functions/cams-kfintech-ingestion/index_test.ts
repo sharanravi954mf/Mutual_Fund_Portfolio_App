@@ -21,9 +21,12 @@ import {
   type MailMessage,
   type PersistenceInput,
   type PersistenceResult,
+  type RegistrarConfig,
 } from "./types.ts";
 
 const internalToken = "internal-ingestion-token";
+let fixtureCounter = 0;
+const attachmentFixtureBytes = new Map<string, Uint8Array>();
 
 function request(
   body: Record<string, unknown>,
@@ -55,16 +58,36 @@ function message(
   bytes = camsDbfFixture(),
   overrides: Partial<MailMessage> = {},
 ): MailMessage {
+  fixtureCounter += 1;
+  const messageId = overrides.messageId ?? `message-${fixtureCounter}`;
+  const attachmentId = `attachment-${fixtureCounter}`;
+  attachmentFixtureBytes.set(`${messageId}:${attachmentId}`, bytes);
   return {
     senderAddress: "reports@camsonline.com",
-    messageId: "message-1",
+    messageId,
     receivedAt: "2026-07-29T00:00:00Z",
     attachments: [{
+      attachmentId,
       filename: "cams.dbf",
       declaredMime: "application/x-dbase",
       receivedAt: "2026-07-29T00:00:00Z",
-      stream: streamFromBytes(bytes),
     }],
+    ...overrides,
+  };
+}
+
+function attachmentFixture(
+  bytes: Uint8Array,
+  messageId: string,
+  attachmentId: string,
+  overrides: Partial<MailMessage["attachments"][number]> = {},
+): MailMessage["attachments"][number] {
+  attachmentFixtureBytes.set(`${messageId}:${attachmentId}`, bytes);
+  return {
+    attachmentId,
+    filename: "cams.dbf",
+    declaredMime: "application/x-dbase",
+    receivedAt: "2026-07-29T00:00:00Z",
     ...overrides,
   };
 }
@@ -77,6 +100,9 @@ function deps(options: {
   persist?: (input: PersistenceInput) => Promise<PersistenceResult>;
   failContext?: IngestionError;
   failureCodes?: string[];
+  downloadCount?: { count: number };
+  registrarConfig?: Partial<RegistrarConfig>;
+  recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
 } = {}): HandlerDependencies {
   const stages = options.stages ?? [];
   const failureCodes = options.failureCodes ?? [];
@@ -111,13 +137,30 @@ function deps(options: {
             registrar: input.registrar,
             allowedSenderAddresses: ["statements@kfintech.com"],
             maxAttachmentBytes: 1024 * 1024,
+            maxMessagesPerPoll: 25,
+            maxAttachmentsPerMessage: 5,
+            maxAttachmentsPerRun: 25,
+            totalBytesPerRun: 1024 * 1024,
             supportedFileTypes: ["CAS_PDF", "DBF"],
+            ...options.registrarConfig,
           },
         });
       },
     },
     mailboxClient: {
       poll: () => Promise.resolve(options.messages ?? [message()]),
+      downloadAttachment: (_context, message, attachment) => {
+        if (options.downloadCount != null) {
+          options.downloadCount.count += 1;
+        }
+        const bytes = attachmentFixtureBytes.get(
+          `${message.messageId}:${attachment.attachmentId}`,
+        ) ?? camsDbfFixture();
+        return Promise.resolve({
+          ...attachment,
+          stream: streamFromBytes(bytes),
+        });
+      },
     },
     malwareScanner: {
       scan: options.scan ?? (() => Promise.resolve("clean")),
@@ -149,10 +192,10 @@ function deps(options: {
             transaction_count: 1,
             idempotent: false,
           })),
-      recordFailure: (input) => {
+      recordFailure: options.recordFailure ?? ((input) => {
         failureCodes.push(input.failureCode);
         return Promise.resolve();
-      },
+      }),
     },
   };
 }
@@ -217,6 +260,7 @@ Deno.test("pipeline stages execute in the required order", async () => {
     "imap_oauth_connector",
     "poll_mailbox",
     "validate_sender",
+    "retrieve_attachment",
     "read_attachment_stream",
     "calculate_sha256",
     "validate_mime_magic",
@@ -243,8 +287,9 @@ Deno.test("sender validation precedes scan storage and parse", async () => {
   const response = await handler(request(validBody()));
   const body = await response.json();
 
-  assertEquals(response.status, 409);
-  assertEquals(body.error.code, "sender_not_allowed");
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "sender_not_allowed");
+  assertEquals(stages.includes("retrieve_attachment"), false);
   assertEquals(stages.includes("malware_scan"), false);
   assertEquals(stages.includes("encrypted_storage_write"), false);
   assertEquals(stages.includes("parse"), false);
@@ -262,36 +307,41 @@ Deno.test("digest and MIME magic validation precede malware scan", async () => {
   const response = await handler(request(validBody()));
   const body = await response.json();
 
-  assertEquals(response.status, 422);
-  assertEquals(body.error.code, "attachment_hash_mismatch");
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "attachment_hash_mismatch");
   assertEquals(stages.includes("malware_scan"), false);
 });
 
 Deno.test("MIME and magic mismatch is rejected", async () => {
+  const messageId = "mime-message";
+  const attachmentId = "mime-attachment";
   const handler = createCamsKfintechIngestionHandler(deps({
     messages: [message(camsDbfFixture(), {
+      messageId,
       attachments: [{
+        ...attachmentFixture(camsDbfFixture(), messageId, attachmentId),
         filename: "cams.pdf",
         declaredMime: "application/pdf",
-        receivedAt: "2026-07-29T00:00:00Z",
-        stream: streamFromBytes(camsDbfFixture()),
       }],
     })],
   }));
 
   const response = await handler(request(validBody()));
-  assertEquals(response.status, 422);
-  assertEquals((await response.json()).error.code, "magic_byte_mismatch");
+  const body = await response.json();
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "magic_byte_mismatch");
 });
 
 Deno.test("application/octet-stream is accepted only for valid DBF magic bytes", async () => {
+  const messageId = "octet-message";
+  const attachmentId = "octet-attachment";
   const handler = createCamsKfintechIngestionHandler(deps({
     messages: [message(camsDbfFixture(), {
+      messageId,
       attachments: [{
+        ...attachmentFixture(camsDbfFixture(), messageId, attachmentId),
         filename: "cams.dbf",
         declaredMime: "application/octet-stream",
-        receivedAt: "2026-07-29T00:00:00Z",
-        stream: streamFromBytes(camsDbfFixture()),
       }],
     })],
   }));
@@ -306,8 +356,9 @@ Deno.test("unsupported file format is rejected", async () => {
   }));
 
   const response = await handler(request(validBody()));
-  assertEquals(response.status, 422);
-  assertEquals((await response.json()).error.code, "unsupported_media_type");
+  const body = await response.json();
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "unsupported_media_type");
 });
 
 Deno.test("malware scan result controls progression", async () => {
@@ -321,9 +372,21 @@ Deno.test("malware scan result controls progression", async () => {
     scan: () => Promise.reject(new IngestionError("malware_scan_unavailable")),
   }));
 
-  assertEquals((await infected(request(validBody()))).status, 409);
-  assertEquals((await unavailable(request(validBody()))).status, 422);
-  assertEquals((await invalid(request(validBody()))).status, 422);
+  const infectedResponse = await infected(request(validBody()));
+  const unavailableResponse = await unavailable(request(validBody()));
+  const invalidResponse = await invalid(request(validBody()));
+  assertEquals(
+    (await infectedResponse.json()).data.results[0].error.code,
+    "malware_detected",
+  );
+  assertEquals(
+    (await unavailableResponse.json()).data.results[0].error.code,
+    "malware_scan_unavailable",
+  );
+  assertEquals(
+    (await invalidResponse.json()).data.results[0].error.code,
+    "malware_scan_unavailable",
+  );
 });
 
 Deno.test("storage precedes parsing and parsing failure prevents persistence", async () => {
@@ -347,7 +410,7 @@ Deno.test("storage precedes parsing and parsing failure prevents persistence", a
   const response = await handler(request(validBody()));
   const body = await response.json();
 
-  assertEquals(body.error.code, "parse_failed");
+  assertEquals(body.data.results[0].error.code, "parse_failed");
   assertEquals(
     stages.indexOf("encrypted_storage_read") < stages.indexOf("parse"),
     true,
@@ -363,7 +426,9 @@ Deno.test("completion event occurs only after persistence", async () => {
   }));
 
   const response = await handler(request(validBody()));
-  assertEquals(response.status, 422);
+  const body = await response.json();
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "persistence_failed");
   assertEquals(stages.includes("complete_lineage"), false);
 });
 
@@ -404,8 +469,16 @@ Deno.test("empty and truncated files fail closed", async () => {
     messages: [message(new Uint8Array([0x03, 0x01]))],
   }));
 
-  assertEquals((await empty(request(validBody()))).status, 422);
-  assertEquals((await truncated(request(validBody()))).status, 422);
+  const emptyResponse = await empty(request(validBody()));
+  const truncatedResponse = await truncated(request(validBody()));
+  assertEquals(
+    (await emptyResponse.json()).data.results[0].error.code,
+    "unsupported_statement_format",
+  );
+  assertEquals(
+    (await truncatedResponse.json()).data.results[0].error.code,
+    "unsupported_media_type",
+  );
 });
 
 Deno.test("credentials are loaded by trusted identifier and missing credentials fail closed", async () => {
@@ -466,8 +539,9 @@ Deno.test("conflicting digest correlation binding is rejected", async () => {
   }));
 
   const response = await handler(request(validBody()));
-  assertEquals(response.status, 409);
-  assertEquals((await response.json()).error.code, "duplicate_attachment");
+  const body = await response.json();
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "duplicate_attachment");
 });
 
 Deno.test("concurrent identical ingestion resolves idempotently", async () => {
@@ -524,6 +598,123 @@ Deno.test("validation malware and parsing failures record stable lineage", async
   assertEquals(senderFailures, ["sender_not_allowed"]);
   assertEquals(malwareFailures, ["malware_detected"]);
   assertEquals(parseFailures, ["parse_failed"]);
+});
+
+Deno.test("two valid attachments in one run both persist with separate document correlations", async () => {
+  const messageId = "multi-message";
+  const first = attachmentFixture(camsDbfFixture(), messageId, "attachment-a");
+  const second = attachmentFixture(
+    camsDbfFixture({ FOLIO_NO: "FOLIO2002", AMOUNT: "300.00" }),
+    messageId,
+    "attachment-b",
+  );
+  const documentCorrelations: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    messages: [message(camsDbfFixture(), {
+      messageId,
+      attachments: [first, second],
+    })],
+    persist: (input) => {
+      documentCorrelations.push(input.documentCorrelationId);
+      return Promise.resolve({
+        document_id: `document-${documentCorrelations.length}`,
+        ingestion_log_id: `log-${documentCorrelations.length}`,
+        outbox_event_id: `event-${documentCorrelations.length}`,
+        transaction_count: input.transactions.length,
+        idempotent: false,
+      });
+    },
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.attempted_attachments, 2);
+  assertEquals(body.data.processed_attachments, 2);
+  assertEquals(documentCorrelations.length, 2);
+  assertEquals(documentCorrelations[0] === documentCorrelations[1], false);
+});
+
+Deno.test("retrying a run reports per-attachment idempotent results without duplicate persistence side effects", async () => {
+  const handler = createCamsKfintechIngestionHandler(deps({
+    persist: () =>
+      Promise.resolve({
+        document_id: "document-id",
+        ingestion_log_id: "log-id",
+        outbox_event_id: "event-id",
+        transaction_count: 1,
+        idempotent: true,
+      }),
+  }));
+
+  const first = await handler(request(validBody()));
+  const second = await handler(request(validBody()));
+
+  assertEquals((await first.json()).data.results[0].idempotent, true);
+  assertEquals((await second.json()).data.results[0].idempotent, true);
+});
+
+Deno.test("attachment-count limit stops before any attachment retrieval", async () => {
+  const downloadCount = { count: 0 };
+  const messageId = "limit-message";
+  const handler = createCamsKfintechIngestionHandler(deps({
+    downloadCount,
+    registrarConfig: { maxAttachmentsPerRun: 1 },
+    messages: [message(camsDbfFixture(), {
+      messageId,
+      attachments: [
+        attachmentFixture(camsDbfFixture(), messageId, "limit-a"),
+        attachmentFixture(camsDbfFixture(), messageId, "limit-b"),
+      ],
+    })],
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 422);
+  assertEquals(body.error.code, "attachment_limit_exceeded");
+  assertEquals(downloadCount.count, 0);
+});
+
+Deno.test("oversized attachment stops further fetching", async () => {
+  const downloadCount = { count: 0 };
+  const messageId = "oversize-message";
+  const handler = createCamsKfintechIngestionHandler(deps({
+    downloadCount,
+    registrarConfig: { maxAttachmentBytes: 8 },
+    messages: [message(camsDbfFixture(), {
+      messageId,
+      attachments: [
+        attachmentFixture(camsDbfFixture(), messageId, "oversize-a"),
+        attachmentFixture(camsDbfFixture(), messageId, "oversize-b"),
+      ],
+    })],
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "attachment_too_large");
+  assertEquals(downloadCount.count, 1);
+});
+
+Deno.test("failure RPC outage is surfaced and not silently ignored", async () => {
+  const handler = createCamsKfintechIngestionHandler(deps({
+    messages: [
+      message(camsDbfFixture(), { senderAddress: "bad@example.test" }),
+    ],
+    recordFailure: () =>
+      Promise.reject(new IngestionError("persistence_failed")),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 422);
+  assertEquals(body.error.code, "persistence_failed");
 });
 
 Deno.test("SHA-256 is computed from attachment bytes inside worker", async () => {

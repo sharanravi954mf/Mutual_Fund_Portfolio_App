@@ -119,6 +119,23 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
+export async function deterministicUuid(input: string): Promise<string> {
+  const digest = await sha256(new TextEncoder().encode(input));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes).map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+}
+
 export function normalizeSenderAddress(value: string): string {
   const angleMatch = value.match(/<([^<>@\s]+@[^<>@\s]+)>/);
   const raw = angleMatch?.[1] ?? value;
@@ -212,6 +229,9 @@ export function errorStatus(code: FailureCode): number {
     case "malware_detected":
     case "sender_not_allowed":
     case "duplicate_attachment":
+    case "correlation_conflict":
+    case "previous_ingestion_failed":
+    case "processing_incomplete":
       return 409;
     default:
       return 422;
