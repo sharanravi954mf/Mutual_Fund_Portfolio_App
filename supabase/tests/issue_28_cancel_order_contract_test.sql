@@ -148,8 +148,29 @@ BEGIN
   END IF;
 
   BEGIN
-    INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-    VALUES ('96000000-0000-0000-0000-000000000000', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH-DRAFT', 'buy', 100.00, 'draft');
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      status
+    ) VALUES (
+      '96000000-0000-0000-0000-000000000000',
+      '93000000-0000-0000-0000-000000000001',
+      '92000000-0000-0000-0000-000000000003',
+      '92000000-0000-0000-0000-000000000003',
+      'investor',
+      'investor_portal',
+      'SCH-DRAFT',
+      'buy',
+      100.00,
+      'draft'
+    );
     RAISE EXCEPTION 'draft order persisted despite order_requests_status_not_draft';
   EXCEPTION WHEN check_violation THEN
     IF SQLERRM NOT LIKE '%order_requests_status_not_draft%' THEN
@@ -204,9 +225,34 @@ BEGIN
     RAISE EXCEPTION 'authenticated cannot execute cancel_order';
   END IF;
 
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  ) VALUES (
+    '96000000-0000-0000-0000-000000000001',
+    '93000000-0000-0000-0000-000000000001',
+    '92000000-0000-0000-0000-000000000003',
+    '92000000-0000-0000-0000-000000000003',
+    'investor',
+    'investor_portal',
+    'SCH101',
+    'buy',
+    1000.00,
+    'pending_qualification'
+  );
+
+  PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000000', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000000","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('96000000-0000-0000-0000-000000000001', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH101', 'buy', 1000.00, 'pending_qualification');
 
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000001', 'No profile');
@@ -217,6 +263,7 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   v_order := public.cancel_order('96000000-0000-0000-0000-000000000001', 'Owner requested cancellation');
 
@@ -273,9 +320,33 @@ BEGIN
     END IF;
   END;
 
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('96000000-0000-0000-0000-000000000002', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH102', 'sell', 1000.00, 'pending_review');
+	  PERFORM set_config('request.jwt.claim.sub', '', true);
+	  PERFORM set_config('request.jwt.claims', '{}', true);
+	  INSERT INTO public.order_requests (
+	    id,
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    scheme_code,
+	    type,
+	    amount,
+	    status
+	  ) VALUES (
+	    '96000000-0000-0000-0000-000000000002',
+	    '93000000-0000-0000-0000-000000000001',
+	    '92000000-0000-0000-0000-000000000003',
+	    '92000000-0000-0000-0000-000000000002',
+	    'advisor',
+	    'advisor_portal',
+	    'SCH102',
+	    'sell',
+	    1000.00,
+	    'pending_review'
+	  );
 
+	  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000002', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000002","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   v_order := public.cancel_order('96000000-0000-0000-0000-000000000002', 'Workspace owner cancelled pending review');
 
@@ -299,9 +370,33 @@ BEGIN
     RAISE EXCEPTION 'actual workspace owner cancellation audit is incorrect';
   END IF;
 
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('96000000-0000-0000-0000-000000000003', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH103', 'sell', 1000.00, 'pending_review');
+	  PERFORM set_config('request.jwt.claim.sub', '', true);
+	  PERFORM set_config('request.jwt.claims', '{}', true);
+	  INSERT INTO public.order_requests (
+	    id,
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    scheme_code,
+	    type,
+	    amount,
+	    status
+	  ) VALUES (
+	    '96000000-0000-0000-0000-000000000003',
+	    '93000000-0000-0000-0000-000000000001',
+	    '92000000-0000-0000-0000-000000000003',
+	    '92000000-0000-0000-0000-000000000006',
+	    'advisor',
+	    'advisor_portal',
+	    'SCH103',
+	    'sell',
+	    1000.00,
+	    'pending_review'
+	  );
 
+	  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000006', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000006","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   v_order := public.cancel_order('96000000-0000-0000-0000-000000000003', 'Advisor cancelled pending review');
 
@@ -325,9 +420,33 @@ BEGIN
     RAISE EXCEPTION 'advisor cancellation audit is incorrect';
   END IF;
 
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
-  VALUES ('96000000-0000-0000-0000-000000000007', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH107', 'buy', 1000.00, 'pending_review');
+	  PERFORM set_config('request.jwt.claim.sub', '', true);
+	  PERFORM set_config('request.jwt.claims', '{}', true);
+	  INSERT INTO public.order_requests (
+	    id,
+	    workspace_id,
+	    investor_profile_id,
+	    initiated_by_profile_id,
+	    initiated_by_role,
+	    initiation_channel,
+	    scheme_code,
+	    type,
+	    amount,
+	    status
+	  ) VALUES (
+	    '96000000-0000-0000-0000-000000000007',
+	    '93000000-0000-0000-0000-000000000001',
+	    '92000000-0000-0000-0000-000000000003',
+	    '92000000-0000-0000-0000-000000000002',
+	    'advisor',
+	    'advisor_portal',
+	    'SCH107',
+	    'buy',
+	    1000.00,
+	    'pending_review'
+	  );
 
+	  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000007', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000007","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Nonowner admin');
@@ -338,6 +457,7 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000008', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000008","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Inactive advisor');
@@ -348,6 +468,7 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000009', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000009","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Operations');
@@ -358,6 +479,7 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000005', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000005","role":"authenticated","app_metadata":{"user_role":"mfd"}}', true);
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Unrelated advisor');
@@ -368,6 +490,7 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000004', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000004","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Family guest');
@@ -378,6 +501,7 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000001', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000001","role":"authenticated","app_metadata":{"user_role":"platform_admin"}}', true);
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000007', 'Platform admin');
@@ -388,13 +512,31 @@ BEGIN
     END IF;
   END;
 
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000003', true);
   PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
 
-  INSERT INTO public.order_requests (id, workspace_id, investor_profile_id, scheme_code, type, amount, status)
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    status
+  )
   VALUES
-    ('96000000-0000-0000-0000-000000000004', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH104', 'buy', 1000.00, 'auto_approved'),
-    ('96000000-0000-0000-0000-000000000005', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH105', 'buy', 1000.00, 'approved'),
-    ('96000000-0000-0000-0000-000000000006', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', 'SCH106', 'buy', 1000.00, 'rejected');
+    ('96000000-0000-0000-0000-000000000004', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', '92000000-0000-0000-0000-000000000003', 'investor', 'investor_portal', 'SCH104', 'buy', 1000.00, 'auto_approved'),
+    ('96000000-0000-0000-0000-000000000005', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', '92000000-0000-0000-0000-000000000003', 'investor', 'investor_portal', 'SCH105', 'buy', 1000.00, 'approved'),
+    ('96000000-0000-0000-0000-000000000006', '93000000-0000-0000-0000-000000000001', '92000000-0000-0000-0000-000000000003', '92000000-0000-0000-0000-000000000003', 'investor', 'investor_portal', 'SCH106', 'buy', 1000.00, 'rejected');
+
+  PERFORM set_config('request.jwt.claim.sub', '91000000-0000-0000-0000-000000000003', true);
+  PERFORM set_config('request.jwt.claims', '{"sub":"91000000-0000-0000-0000-000000000003","role":"authenticated","app_metadata":{"user_role":"investor"}}', true);
 
   BEGIN
     PERFORM public.cancel_order('96000000-0000-0000-0000-000000000004', 'Auto approved');
