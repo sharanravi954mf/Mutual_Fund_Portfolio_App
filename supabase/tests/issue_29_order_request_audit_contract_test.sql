@@ -103,6 +103,7 @@ DECLARE
   v_distinct_count pg_catalog.int4;
   v_bad_status public.order_status;
   v_bad_status_index pg_catalog.int4 := 40;
+  v_reviewer_case pg_catalog.int4;
 	BEGIN
 	  IF EXISTS (
 	    SELECT 1
@@ -665,9 +666,62 @@ DECLARE
 	  IF v_order.initiated_by_profile_id <> '99100000-0000-0000-0000-000000000004'
 	     OR v_order.initiated_by_role <> 'advisor'
 	     OR v_order.initiation_channel <> 'advisor_portal'
-	     OR v_order.status <> 'pending_qualification' THEN
+	     OR v_order.status <> 'pending_qualification'
+	     OR v_order.reviewed_by IS NOT NULL
+	     OR v_order.reviewed_by_profile_id IS NOT NULL
+	     OR v_order.reviewed_at IS NOT NULL THEN
 	    RAISE EXCEPTION 'trusted service-role insert did not preserve explicit initiator metadata';
 	  END IF;
+
+  SELECT
+    pg_catalog.count(*)::pg_catalog.int4,
+    pg_catalog.count(*) FILTER (WHERE action = 'order.initiated')::pg_catalog.int4
+  INTO v_total_count, v_count
+  FROM public.workspace_audit_logs
+  WHERE entity_id = '99300000-0000-0000-0000-000000000016';
+
+  IF v_total_count <> 1 OR v_count <> 1 THEN
+    RAISE EXCEPTION 'trusted service-role insert wrote unexpected audit events: total %, initiated %', v_total_count, v_count;
+  END IF;
+
+  FOR v_reviewer_case IN 1..4 LOOP
+    BEGIN
+      INSERT INTO public.order_requests (
+        id,
+        workspace_id,
+        investor_profile_id,
+        initiated_by_profile_id,
+        initiated_by_role,
+        initiation_channel,
+        reviewed_by,
+        reviewed_by_profile_id,
+        reviewed_at,
+        scheme_code,
+        type,
+        amount,
+        status
+      ) VALUES (
+        ('99300000-0000-0000-0000-0000000000' || pg_catalog.lpad((60 + v_reviewer_case)::pg_catalog.text, 2, '0'))::pg_catalog.uuid,
+        '99200000-0000-0000-0000-000000000001',
+        '99100000-0000-0000-0000-000000000003',
+        '99100000-0000-0000-0000-000000000004',
+        'advisor',
+        'advisor_portal',
+        CASE WHEN v_reviewer_case IN (1, 4) THEN '99100000-0000-0000-0000-000000000004'::pg_catalog.uuid ELSE NULL END,
+        CASE WHEN v_reviewer_case IN (2, 4) THEN '99100000-0000-0000-0000-000000000004'::pg_catalog.uuid ELSE NULL END,
+        CASE WHEN v_reviewer_case IN (3, 4) THEN now() ELSE NULL END,
+        'SCH29-SERVICE-BAD-REVIEW',
+        'buy',
+        100.00,
+        'pending_qualification'
+      );
+      RAISE EXCEPTION 'service-role inserted reviewer metadata case %', v_reviewer_case;
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM <> 'review_metadata_requires_qualification' THEN
+        RAISE EXCEPTION 'Unexpected service-role reviewer metadata error for case %: %', v_reviewer_case, SQLERRM;
+      END IF;
+    END;
+  END LOOP;
 
   FOREACH v_bad_status IN ARRAY ARRAY[
     'draft'::public.order_status,
@@ -1141,7 +1195,7 @@ DECLARE
     );
     RAISE EXCEPTION 'mismatched reviewer fields were accepted on insert';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM <> 'reviewer_profile_mismatch' THEN
+    IF SQLERRM <> 'review_metadata_requires_qualification' THEN
       RAISE EXCEPTION 'Unexpected reviewer insert mismatch error: %', SQLERRM;
     END IF;
   END;

@@ -216,6 +216,7 @@ DECLARE
   v_caller_user_id pg_catalog.uuid;
   v_caller_profile_id pg_catalog.uuid;
   v_is_service_role pg_catalog.bool;
+  v_is_api_insert pg_catalog.bool;
   v_request_claims pg_catalog.text;
   v_request_role pg_catalog.text;
 BEGIN
@@ -228,6 +229,24 @@ BEGIN
 
   v_caller_user_id := auth.uid();
   v_is_service_role := COALESCE(auth.role(), v_request_role, '') = 'service_role';
+  v_is_api_insert := TG_OP = 'INSERT'
+    AND (
+      v_caller_user_id IS NOT NULL
+      OR v_request_role IN ('anon', 'authenticated', 'service_role')
+      OR v_is_service_role
+    );
+
+  IF v_is_api_insert THEN
+    IF NEW.status <> 'pending_qualification'::public.order_status THEN
+      RAISE EXCEPTION 'invalid_initial_order_status';
+    END IF;
+
+    IF NEW.reviewed_by IS NOT NULL
+       OR NEW.reviewed_by_profile_id IS NOT NULL
+       OR NEW.reviewed_at IS NOT NULL THEN
+      RAISE EXCEPTION 'review_metadata_requires_qualification';
+    END IF;
+  END IF;
 
   IF NEW.reviewed_by IS NOT NULL
      AND NEW.reviewed_by_profile_id IS NOT NULL
@@ -242,15 +261,6 @@ BEGIN
   END IF;
 
   IF TG_OP = 'INSERT' THEN
-    IF (
-      v_caller_user_id IS NOT NULL
-      OR v_request_role IN ('anon', 'authenticated', 'service_role')
-      OR v_is_service_role
-    )
-       AND NEW.status <> 'pending_qualification'::public.order_status THEN
-      RAISE EXCEPTION 'invalid_initial_order_status';
-    END IF;
-
     IF NEW.status = 'draft'::public.order_status THEN
       RETURN NEW;
     END IF;
@@ -310,18 +320,6 @@ BEGIN
          OR NEW.initiated_by_role IS NULL
          OR NEW.initiation_channel IS NULL THEN
         RAISE EXCEPTION 'order_request_canonical_metadata_missing';
-      END IF;
-
-      IF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_by IS NOT NULL THEN
-        NEW.reviewed_by_profile_id := NEW.reviewed_by;
-      ELSIF NEW.reviewed_by IS NULL AND NEW.reviewed_by_profile_id IS NOT NULL THEN
-        NEW.reviewed_by := NEW.reviewed_by_profile_id;
-      END IF;
-
-      IF NEW.reviewed_by_profile_id IS NOT NULL AND NEW.reviewed_at IS NULL THEN
-        RAISE EXCEPTION 'reviewed_at_required';
-      ELSIF NEW.reviewed_by_profile_id IS NULL AND NEW.reviewed_at IS NOT NULL THEN
-        RAISE EXCEPTION 'reviewer_profile_required';
       END IF;
     ELSIF COALESCE(pg_catalog.current_setting('role', true), '') NOT IN ('anon', 'authenticated', 'service_role') THEN
       IF NEW.initiated_by_profile_id IS NULL
