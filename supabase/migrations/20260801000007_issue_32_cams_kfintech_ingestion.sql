@@ -73,6 +73,23 @@ CREATE TABLE IF NOT EXISTS public.ingested_documents (
   UNIQUE (storage_bucket, storage_object_path)
 );
 
+CREATE TABLE IF NOT EXISTS public.cams_kfintech_ingestion_runs (
+  ingestion_run_id pg_catalog.uuid PRIMARY KEY,
+  workspace_id pg_catalog.uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+  mailbox_connection_id pg_catalog.uuid NOT NULL REFERENCES public.mailbox_connections(id) ON DELETE RESTRICT,
+  registrar pg_catalog.text NOT NULL CHECK (registrar IN ('CAMS', 'KFINTECH')),
+  status pg_catalog.text NOT NULL DEFAULT 'claimed'
+    CHECK (status IN ('claimed', 'completed', 'partially_failed', 'failed', 'stopped')),
+  started_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now(),
+  completed_at pg_catalog.timestamptz,
+  attempted_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (attempted_attachment_count >= 0),
+  successful_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (successful_attachment_count >= 0),
+  failed_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (failed_attachment_count >= 0),
+  stopped_reason pg_catalog.text,
+  created_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now(),
+  updated_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now()
+);
+
 ALTER TABLE public.ingestion_logs
   ADD COLUMN IF NOT EXISTS workspace_id pg_catalog.uuid REFERENCES public.workspaces(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS mailbox_connection_id pg_catalog.uuid REFERENCES public.mailbox_connections(id) ON DELETE SET NULL,
@@ -225,6 +242,15 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'issue_32_preflight_duplicate_statement_imported_event';
   END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.ingested_documents AS document
+    GROUP BY document.workspace_id, document.mailbox_connection_id, document.provider_message_id, document.provider_attachment_id
+    HAVING pg_catalog.count(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'issue_32_preflight_duplicate_provider_attachment_identity';
+  END IF;
 END;
 $$;
 
@@ -235,8 +261,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS registrar_configs_global_registrar_uidx
 CREATE UNIQUE INDEX IF NOT EXISTS ingested_documents_workspace_sha256_uidx
   ON public.ingested_documents(workspace_id, sha256_hex);
 
-CREATE UNIQUE INDEX IF NOT EXISTS ingested_documents_attachment_attempt_uidx
-  ON public.ingested_documents(workspace_id, mailbox_connection_id, provider_message_id, provider_attachment_id, sha256_hex);
+DROP INDEX IF EXISTS public.ingested_documents_attachment_attempt_uidx;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ingested_documents_provider_attachment_uidx
+  ON public.ingested_documents(workspace_id, mailbox_connection_id, provider_message_id, provider_attachment_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS ingestion_logs_failure_attempt_uidx
   ON public.ingestion_logs(workspace_id, mailbox_connection_id, attachment_attempt_key, failure_code)
@@ -298,6 +326,7 @@ ALTER TABLE public.mailbox_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mailbox_oauth_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ingested_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ingestion_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cams_kfintech_ingestion_runs ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION public.prevent_ingestion_log_modification()
 RETURNS pg_catalog.trigger AS $$
@@ -398,6 +427,174 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '';
 
+CREATE OR REPLACE FUNCTION public.claim_cams_kfintech_ingestion_run(
+  p_workspace_id pg_catalog.uuid,
+  p_mailbox_connection_id pg_catalog.uuid,
+  p_ingestion_run_id pg_catalog.uuid,
+  p_registrar pg_catalog.text
+)
+RETURNS pg_catalog.uuid AS $$
+DECLARE
+  v_existing public.cams_kfintech_ingestion_runs;
+BEGIN
+  IF p_workspace_id IS NULL OR p_mailbox_connection_id IS NULL OR p_ingestion_run_id IS NULL THEN
+    RAISE EXCEPTION 'correlation_id_required';
+  END IF;
+  IF p_registrar NOT IN ('CAMS', 'KFINTECH') THEN
+    RAISE EXCEPTION 'unsupported_registrar';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_ingestion_run_id::pg_catalog.text, 0)
+  );
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.mailbox_connections AS mailbox
+    WHERE mailbox.id = p_mailbox_connection_id
+      AND mailbox.workspace_id = p_workspace_id
+      AND mailbox.registrar = p_registrar
+      AND mailbox.status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'mailbox_connection_not_found';
+  END IF;
+
+  SELECT *
+  INTO v_existing
+  FROM public.cams_kfintech_ingestion_runs AS run
+  WHERE run.ingestion_run_id = p_ingestion_run_id
+  FOR UPDATE;
+
+  IF v_existing.ingestion_run_id IS NOT NULL THEN
+    IF v_existing.workspace_id IS DISTINCT FROM p_workspace_id
+       OR v_existing.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+       OR v_existing.registrar IS DISTINCT FROM p_registrar THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    RETURN v_existing.ingestion_run_id;
+  END IF;
+
+  BEGIN
+    INSERT INTO public.cams_kfintech_ingestion_runs (
+      ingestion_run_id,
+      workspace_id,
+      mailbox_connection_id,
+      registrar,
+      status
+    ) VALUES (
+      p_ingestion_run_id,
+      p_workspace_id,
+      p_mailbox_connection_id,
+      p_registrar,
+      'claimed'
+    );
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END;
+
+  RETURN p_ingestion_run_id;
+END;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '';
+
+CREATE OR REPLACE FUNCTION public.finalize_cams_kfintech_ingestion_run(
+  p_workspace_id pg_catalog.uuid,
+  p_mailbox_connection_id pg_catalog.uuid,
+  p_ingestion_run_id pg_catalog.uuid,
+  p_registrar pg_catalog.text,
+  p_stopped_reason pg_catalog.text DEFAULT NULL
+)
+RETURNS TABLE (
+  ingestion_run_id pg_catalog.uuid,
+  status pg_catalog.text,
+  attempted_attachment_count pg_catalog.int4,
+  successful_attachment_count pg_catalog.int4,
+  failed_attachment_count pg_catalog.int4,
+  stopped_reason pg_catalog.text
+) AS $$
+DECLARE
+  v_run public.cams_kfintech_ingestion_runs;
+  v_success pg_catalog.int4;
+  v_failed pg_catalog.int4;
+  v_status pg_catalog.text;
+BEGIN
+  IF p_workspace_id IS NULL OR p_mailbox_connection_id IS NULL OR p_ingestion_run_id IS NULL THEN
+    RAISE EXCEPTION 'correlation_id_required';
+  END IF;
+  IF p_registrar NOT IN ('CAMS', 'KFINTECH') THEN
+    RAISE EXCEPTION 'unsupported_registrar';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_ingestion_run_id::pg_catalog.text, 0)
+  );
+
+  SELECT *
+  INTO v_run
+  FROM public.cams_kfintech_ingestion_runs AS run
+  WHERE run.ingestion_run_id = p_ingestion_run_id
+  FOR UPDATE;
+
+  IF v_run.ingestion_run_id IS NULL THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+  IF v_run.workspace_id IS DISTINCT FROM p_workspace_id
+     OR v_run.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+     OR v_run.registrar IS DISTINCT FROM p_registrar THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4
+  INTO v_success
+  FROM public.ingested_documents AS document
+  WHERE document.ingestion_run_id = p_ingestion_run_id
+    AND document.workspace_id = p_workspace_id
+    AND document.mailbox_connection_id = p_mailbox_connection_id
+    AND document.processing_status = 'completed';
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4
+  INTO v_failed
+  FROM public.ingestion_logs AS log
+  WHERE log.ingestion_run_id = p_ingestion_run_id
+    AND log.workspace_id = p_workspace_id
+    AND log.mailbox_connection_id = p_mailbox_connection_id
+    AND log.status = 'FAILED';
+
+  IF p_stopped_reason IS NOT NULL THEN
+    v_status := 'stopped';
+  ELSIF v_failed > 0 AND v_success > 0 THEN
+    v_status := 'partially_failed';
+  ELSIF v_failed > 0 THEN
+    v_status := 'failed';
+  ELSE
+    v_status := 'completed';
+  END IF;
+
+  UPDATE public.cams_kfintech_ingestion_runs AS run
+  SET status = v_status,
+      completed_at = COALESCE(run.completed_at, pg_catalog.now()),
+      attempted_attachment_count = v_success + v_failed,
+      successful_attachment_count = v_success,
+      failed_attachment_count = v_failed,
+      stopped_reason = COALESCE(p_stopped_reason, run.stopped_reason),
+      updated_at = pg_catalog.now()
+  WHERE run.ingestion_run_id = p_ingestion_run_id
+  RETURNING run.ingestion_run_id,
+            run.status,
+            run.attempted_attachment_count,
+            run.successful_attachment_count,
+            run.failed_attachment_count,
+            run.stopped_reason
+  INTO finalize_cams_kfintech_ingestion_run.ingestion_run_id,
+       finalize_cams_kfintech_ingestion_run.status,
+       finalize_cams_kfintech_ingestion_run.attempted_attachment_count,
+       finalize_cams_kfintech_ingestion_run.successful_attachment_count,
+       finalize_cams_kfintech_ingestion_run.failed_attachment_count,
+       finalize_cams_kfintech_ingestion_run.stopped_reason;
+
+  RETURN NEXT;
+END;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '';
+
 CREATE OR REPLACE FUNCTION public.record_cams_kfintech_ingestion_failure(
   p_workspace_id pg_catalog.uuid,
   p_mailbox_connection_id pg_catalog.uuid,
@@ -418,6 +615,10 @@ CREATE OR REPLACE FUNCTION public.record_cams_kfintech_ingestion_failure(
 RETURNS pg_catalog.uuid AS $$
 DECLARE
   v_log_id pg_catalog.uuid;
+  v_correlation_document public.ingested_documents;
+  v_provider_document public.ingested_documents;
+  v_digest_document public.ingested_documents;
+  v_document_id pg_catalog.uuid;
 BEGIN
   IF p_workspace_id IS NULL OR p_mailbox_connection_id IS NULL OR p_ingestion_run_id IS NULL OR p_document_correlation_id IS NULL THEN
     RAISE EXCEPTION 'correlation_id_required';
@@ -442,6 +643,97 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || COALESCE(p_attachment_attempt_key, p_document_correlation_id::pg_catalog.text), 0)
   );
+  IF p_provider_message_id IS NOT NULL AND p_provider_attachment_id IS NOT NULL THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_provider_message_id || ':' || p_provider_attachment_id, 0)
+    );
+  END IF;
+  IF p_attachment_sha256 IS NOT NULL THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_attachment_sha256, 0)
+    );
+  END IF;
+
+  SELECT *
+  INTO v_correlation_document
+  FROM public.ingested_documents AS document
+  WHERE document.correlation_id = p_document_correlation_id
+  FOR UPDATE;
+
+  IF p_provider_message_id IS NOT NULL AND p_provider_attachment_id IS NOT NULL THEN
+    SELECT *
+    INTO v_provider_document
+    FROM public.ingested_documents AS document
+    WHERE document.workspace_id = p_workspace_id
+      AND document.mailbox_connection_id = p_mailbox_connection_id
+      AND document.provider_message_id = p_provider_message_id
+      AND document.provider_attachment_id = p_provider_attachment_id
+    FOR UPDATE;
+  END IF;
+
+  IF p_attachment_sha256 IS NOT NULL THEN
+    SELECT *
+    INTO v_digest_document
+    FROM public.ingested_documents AS document
+    WHERE document.workspace_id = p_workspace_id
+      AND document.sha256_hex = p_attachment_sha256
+    FOR UPDATE;
+  END IF;
+
+  IF v_correlation_document.id IS NOT NULL THEN
+    v_document_id := v_correlation_document.id;
+    IF v_correlation_document.workspace_id IS DISTINCT FROM p_workspace_id
+       OR v_correlation_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+       OR v_correlation_document.registrar IS DISTINCT FROM p_registrar THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_provider_message_id IS NOT NULL AND v_correlation_document.provider_message_id IS DISTINCT FROM p_provider_message_id THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_provider_attachment_id IS NOT NULL AND v_correlation_document.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_attachment_sha256 IS NOT NULL AND v_correlation_document.sha256_hex IS DISTINCT FROM p_attachment_sha256 THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    END IF;
+    IF p_storage_bucket IS NOT NULL AND v_correlation_document.storage_bucket IS DISTINCT FROM p_storage_bucket THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_storage_object_path IS NOT NULL AND v_correlation_document.storage_object_path IS DISTINCT FROM p_storage_object_path THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+  END IF;
+
+  IF v_provider_document.id IS NOT NULL THEN
+    v_document_id := COALESCE(v_document_id, v_provider_document.id);
+    IF v_provider_document.registrar IS DISTINCT FROM p_registrar
+       OR v_provider_document.correlation_id IS DISTINCT FROM p_document_correlation_id THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_attachment_sha256 IS NOT NULL AND v_provider_document.sha256_hex IS DISTINCT FROM p_attachment_sha256 THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    END IF;
+    IF p_storage_bucket IS NOT NULL AND v_provider_document.storage_bucket IS DISTINCT FROM p_storage_bucket THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_storage_object_path IS NOT NULL AND v_provider_document.storage_object_path IS DISTINCT FROM p_storage_object_path THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+  END IF;
+
+  IF v_digest_document.id IS NOT NULL THEN
+    IF p_provider_message_id IS NOT NULL
+       AND p_provider_attachment_id IS NOT NULL
+       AND (
+         v_digest_document.workspace_id IS DISTINCT FROM p_workspace_id
+         OR v_digest_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+         OR v_digest_document.provider_message_id IS DISTINCT FROM p_provider_message_id
+         OR v_digest_document.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id
+       ) THEN
+      RAISE EXCEPTION 'duplicate_attachment';
+    END IF;
+    v_document_id := COALESCE(v_document_id, v_digest_document.id);
+  END IF;
 
   SELECT log.id
   INTO v_log_id
@@ -450,10 +742,8 @@ BEGIN
     AND log.mailbox_connection_id = p_mailbox_connection_id
     AND log.status = 'FAILED'
     AND log.failure_code = p_failure_code
-    AND (
-      (p_attachment_attempt_key IS NOT NULL AND log.attachment_attempt_key = p_attachment_attempt_key)
-      OR log.correlation_id = p_document_correlation_id
-    )
+    AND log.correlation_id = p_document_correlation_id
+    AND (p_attachment_attempt_key IS NULL OR log.attachment_attempt_key = p_attachment_attempt_key)
   ORDER BY log.started_at ASC
   LIMIT 1;
 
@@ -481,6 +771,7 @@ BEGIN
     provider_attachment_id,
     attachment_attempt_key,
     correlation_id,
+    document_id,
     failure_code
   ) VALUES (
     pg_catalog.now(),
@@ -507,6 +798,7 @@ BEGIN
     p_provider_attachment_id,
     p_attachment_attempt_key,
     p_document_correlation_id,
+    v_document_id,
     p_failure_code
   )
   RETURNING id INTO v_log_id;
@@ -519,45 +811,49 @@ BEGIN
      AND p_size_bytes IS NOT NULL
      AND p_provider_message_id IS NOT NULL
      AND p_provider_attachment_id IS NOT NULL
-     AND p_attachment_attempt_key IS NOT NULL THEN
-    INSERT INTO public.ingested_documents (
-      workspace_id,
-      mailbox_connection_id,
-      ingestion_run_id,
-      provider_message_id,
-      provider_attachment_id,
-      attachment_attempt_key,
-      registrar,
-      storage_bucket,
-      storage_object_path,
-      sha256_hex,
-      detected_mime,
-      file_type,
-      size_bytes,
-      received_at,
-      processing_status,
-      correlation_id,
-      ingestion_log_id
-    ) VALUES (
-      p_workspace_id,
-      p_mailbox_connection_id,
-      p_ingestion_run_id,
-      p_provider_message_id,
-      p_provider_attachment_id,
-      p_attachment_attempt_key,
-      p_registrar,
-      p_storage_bucket,
-      p_storage_object_path,
-      p_attachment_sha256,
-      p_detected_mime,
-      p_file_type,
-      p_size_bytes,
-      pg_catalog.now(),
-      'failed',
-      p_document_correlation_id,
-      v_log_id
-    )
-    ON CONFLICT DO NOTHING;
+     AND p_attachment_attempt_key IS NOT NULL
+     AND v_document_id IS NULL THEN
+    BEGIN
+      INSERT INTO public.ingested_documents (
+        workspace_id,
+        mailbox_connection_id,
+        ingestion_run_id,
+        provider_message_id,
+        provider_attachment_id,
+        attachment_attempt_key,
+        registrar,
+        storage_bucket,
+        storage_object_path,
+        sha256_hex,
+        detected_mime,
+        file_type,
+        size_bytes,
+        received_at,
+        processing_status,
+        correlation_id,
+        ingestion_log_id
+      ) VALUES (
+        p_workspace_id,
+        p_mailbox_connection_id,
+        p_ingestion_run_id,
+        p_provider_message_id,
+        p_provider_attachment_id,
+        p_attachment_attempt_key,
+        p_registrar,
+        p_storage_bucket,
+        p_storage_object_path,
+        p_attachment_sha256,
+        p_detected_mime,
+        p_file_type,
+        p_size_bytes,
+        pg_catalog.now(),
+        'failed',
+        p_document_correlation_id,
+        v_log_id
+      );
+    EXCEPTION WHEN unique_violation THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END;
   END IF;
 
   RETURN v_log_id;
@@ -592,6 +888,10 @@ RETURNS TABLE (
 DECLARE
   v_mailbox public.mailbox_connections;
   v_existing_document public.ingested_documents;
+  v_correlation_document public.ingested_documents;
+  v_provider_document public.ingested_documents;
+  v_digest_document public.ingested_documents;
+  v_existing_folio public.folio_references;
   v_document_id pg_catalog.uuid;
   v_log_id pg_catalog.uuid;
   v_outbox_id pg_catalog.uuid;
@@ -603,6 +903,10 @@ DECLARE
   v_portfolio_id pg_catalog.uuid;
   v_portfolio_count pg_catalog.int4;
   v_folio_reference_id pg_catalog.uuid;
+  v_amc_identity pg_catalog.text;
+  v_incoming_fund_house pg_catalog.text;
+  v_existing_fund_house pg_catalog.text;
+  v_category pg_catalog.text;
   v_normalized_pan pg_catalog.text;
   v_normalized_folio pg_catalog.text;
   v_pan_hmac bytea;
@@ -616,6 +920,7 @@ DECLARE
   v_transaction_lineage jsonb := '[]'::jsonb;
   v_count pg_catalog.int4 := 0;
   v_expected_count pg_catalog.int4;
+  v_constraint_name pg_catalog.text;
 BEGIN
   IF p_workspace_id IS NULL OR p_mailbox_connection_id IS NULL OR p_ingestion_run_id IS NULL OR p_document_correlation_id IS NULL THEN
     RAISE EXCEPTION 'correlation_id_required';
@@ -645,6 +950,12 @@ BEGIN
     pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_attachment_attempt_key, 0)
   );
   PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_provider_message_id || ':' || p_provider_attachment_id, 0)
+  );
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_attachment_sha256, 0)
+  );
+  PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_document_correlation_id::pg_catalog.text, 0)
   );
 
@@ -662,18 +973,71 @@ BEGIN
   END IF;
 
   SELECT *
-  INTO v_existing_document
+  INTO v_correlation_document
   FROM public.ingested_documents AS document
   WHERE document.correlation_id = p_document_correlation_id
-     OR (
-       document.workspace_id = p_workspace_id
-       AND document.mailbox_connection_id = p_mailbox_connection_id
-       AND document.provider_message_id = p_provider_message_id
-       AND document.provider_attachment_id = p_provider_attachment_id
-       AND document.sha256_hex = p_attachment_sha256
-     )
-  ORDER BY document.created_at ASC
-  LIMIT 1;
+  FOR UPDATE;
+
+  SELECT *
+  INTO v_provider_document
+  FROM public.ingested_documents AS document
+  WHERE document.workspace_id = p_workspace_id
+    AND document.mailbox_connection_id = p_mailbox_connection_id
+    AND document.provider_message_id = p_provider_message_id
+    AND document.provider_attachment_id = p_provider_attachment_id
+  FOR UPDATE;
+
+  SELECT *
+  INTO v_digest_document
+  FROM public.ingested_documents AS document
+  WHERE document.workspace_id = p_workspace_id
+    AND document.sha256_hex = p_attachment_sha256
+  FOR UPDATE;
+
+  IF v_correlation_document.id IS NOT NULL THEN
+    IF v_correlation_document.workspace_id IS DISTINCT FROM p_workspace_id
+       OR v_correlation_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+       OR v_correlation_document.registrar IS DISTINCT FROM p_registrar
+       OR v_correlation_document.provider_message_id IS DISTINCT FROM p_provider_message_id
+       OR v_correlation_document.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id
+       OR v_correlation_document.storage_bucket IS DISTINCT FROM p_storage_bucket
+       OR v_correlation_document.storage_object_path IS DISTINCT FROM p_storage_object_path THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF v_correlation_document.sha256_hex IS DISTINCT FROM p_attachment_sha256 THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    END IF;
+    v_existing_document := v_correlation_document;
+  END IF;
+
+  IF v_provider_document.id IS NOT NULL THEN
+    IF v_existing_document.id IS NOT NULL AND v_existing_document.id IS DISTINCT FROM v_provider_document.id THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF v_provider_document.registrar IS DISTINCT FROM p_registrar
+       OR v_provider_document.correlation_id IS DISTINCT FROM p_document_correlation_id
+       OR v_provider_document.storage_bucket IS DISTINCT FROM p_storage_bucket
+       OR v_provider_document.storage_object_path IS DISTINCT FROM p_storage_object_path THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF v_provider_document.sha256_hex IS DISTINCT FROM p_attachment_sha256 THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    END IF;
+    v_existing_document := v_provider_document;
+  END IF;
+
+  IF v_digest_document.id IS NOT NULL THEN
+    IF v_existing_document.id IS NOT NULL AND v_existing_document.id IS DISTINCT FROM v_digest_document.id THEN
+      RAISE EXCEPTION 'duplicate_attachment';
+    END IF;
+    IF v_digest_document.workspace_id IS DISTINCT FROM p_workspace_id
+       OR v_digest_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+       OR v_digest_document.provider_message_id IS DISTINCT FROM p_provider_message_id
+       OR v_digest_document.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id THEN
+      RAISE EXCEPTION 'duplicate_attachment';
+    END IF;
+    v_existing_document := v_digest_document;
+  END IF;
 
   IF v_existing_document.id IS NOT NULL THEN
     IF v_existing_document.workspace_id IS DISTINCT FROM p_workspace_id
@@ -712,42 +1076,55 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO public.ingested_documents (
-    workspace_id,
-    mailbox_connection_id,
-    ingestion_run_id,
-    provider_message_id,
-    provider_attachment_id,
-    attachment_attempt_key,
-    registrar,
-    storage_bucket,
-    storage_object_path,
-    sha256_hex,
-    detected_mime,
-    file_type,
-    size_bytes,
-    received_at,
-    processing_status,
-    correlation_id
-  ) VALUES (
-    p_workspace_id,
-    p_mailbox_connection_id,
-    p_ingestion_run_id,
-    p_provider_message_id,
-    p_provider_attachment_id,
-    p_attachment_attempt_key,
-    p_registrar,
-    p_storage_bucket,
-    p_storage_object_path,
-    p_attachment_sha256,
-    p_detected_mime,
-    p_file_type,
-    p_size_bytes,
-    COALESCE(p_received_at, pg_catalog.now()),
-    'processing',
-    p_document_correlation_id
-  )
-  RETURNING id INTO v_document_id;
+  BEGIN
+    INSERT INTO public.ingested_documents (
+      workspace_id,
+      mailbox_connection_id,
+      ingestion_run_id,
+      provider_message_id,
+      provider_attachment_id,
+      attachment_attempt_key,
+      registrar,
+      storage_bucket,
+      storage_object_path,
+      sha256_hex,
+      detected_mime,
+      file_type,
+      size_bytes,
+      received_at,
+      processing_status,
+      correlation_id
+    ) VALUES (
+      p_workspace_id,
+      p_mailbox_connection_id,
+      p_ingestion_run_id,
+      p_provider_message_id,
+      p_provider_attachment_id,
+      p_attachment_attempt_key,
+      p_registrar,
+      p_storage_bucket,
+      p_storage_object_path,
+      p_attachment_sha256,
+      p_detected_mime,
+      p_file_type,
+      p_size_bytes,
+      COALESCE(p_received_at, pg_catalog.now()),
+      'processing',
+      p_document_correlation_id
+    )
+    RETURNING id INTO v_document_id;
+  EXCEPTION WHEN unique_violation THEN
+    GET STACKED DIAGNOSTICS v_constraint_name = CONSTRAINT_NAME;
+    IF v_constraint_name = 'ingested_documents_workspace_sha256_uidx' OR v_constraint_name = 'ingested_documents_workspace_id_sha256_hex_key' THEN
+      RAISE EXCEPTION 'duplicate_attachment';
+    ELSIF v_constraint_name = 'ingested_documents_provider_attachment_uidx' THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    ELSIF v_constraint_name = 'ingested_documents_correlation_id_key' THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    ELSE
+      RAISE EXCEPTION 'persistence_conflict';
+    END IF;
+  END;
 
   FOR v_tx IN SELECT * FROM pg_catalog.jsonb_array_elements(p_transactions) LOOP
     v_row_number := v_row_number + 1;
@@ -876,6 +1253,26 @@ BEGIN
       pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || v_profile_id::pg_catalog.text, 0)
     );
 
+    v_incoming_fund_house := NULLIF(pg_catalog.btrim(COALESCE(v_tx ->> 'fundHouse', '')), '');
+    v_category := NULLIF(pg_catalog.btrim(COALESCE(v_tx ->> 'category', '')), '');
+    IF v_incoming_fund_house IN ('Mutual Fund', 'CAMS', 'KFINTECH') THEN
+      v_incoming_fund_house := NULL;
+    END IF;
+
+    SELECT NULLIF(pg_catalog.btrim(COALESCE(fund.fund_house, '')), '')
+    INTO v_existing_fund_house
+    FROM public.mutual_funds AS fund
+    WHERE fund.scheme_code = v_tx ->> 'schemeCode'
+    FOR UPDATE;
+    IF v_existing_fund_house IN ('Mutual Fund', 'CAMS', 'KFINTECH') THEN
+      v_existing_fund_house := NULL;
+    END IF;
+
+    v_amc_identity := COALESCE(v_incoming_fund_house, v_existing_fund_house);
+    IF v_amc_identity IS NULL THEN
+      RAISE EXCEPTION 'amc_mapping_unresolved';
+    END IF;
+
     INSERT INTO public.mutual_funds (
       scheme_code,
       scheme_name,
@@ -884,8 +1281,8 @@ BEGIN
     ) VALUES (
       v_tx ->> 'schemeCode',
       COALESCE(v_tx ->> 'schemeName', v_tx ->> 'schemeCode'),
-      COALESCE(v_tx ->> 'fundHouse', 'Mutual Fund'),
-      COALESCE(v_tx ->> 'category', 'Mutual Fund')
+      v_amc_identity,
+      v_category
     )
     ON CONFLICT (scheme_code) DO UPDATE
     SET scheme_name = EXCLUDED.scheme_name,
@@ -897,28 +1294,31 @@ BEGIN
       pg_catalog.hashtextextended(p_registrar || ':' || v_normalized_folio, 0)
     );
 
-    INSERT INTO public.folio_references (
-      registrar,
-      normalized_folio_number,
-      amc_identity,
-      source_folio_masked
-    ) VALUES (
-      p_registrar,
-      v_normalized_folio,
-      COALESCE(v_tx ->> 'fundHouse', p_registrar),
-      '****' || pg_catalog.right(v_normalized_folio, 4)
-    )
-    ON CONFLICT (registrar, normalized_folio_number) DO NOTHING;
-
-    SELECT folio.id
-    INTO v_folio_reference_id
+    SELECT *
+    INTO v_existing_folio
     FROM public.folio_references AS folio
     WHERE folio.registrar = p_registrar
       AND folio.normalized_folio_number = v_normalized_folio
     FOR UPDATE;
 
-    IF v_folio_reference_id IS NULL THEN
-      RAISE EXCEPTION 'folio_relationship_conflict';
+    IF v_existing_folio.id IS NULL THEN
+      INSERT INTO public.folio_references (
+        registrar,
+        normalized_folio_number,
+        amc_identity,
+        source_folio_masked
+      ) VALUES (
+        p_registrar,
+        v_normalized_folio,
+        v_amc_identity,
+        '****' || pg_catalog.right(v_normalized_folio, 4)
+      )
+      RETURNING id INTO v_folio_reference_id;
+    ELSE
+      IF v_existing_folio.amc_identity IS DISTINCT FROM v_amc_identity THEN
+        RAISE EXCEPTION 'folio_relationship_conflict';
+      END IF;
+      v_folio_reference_id := v_existing_folio.id;
     END IF;
 
     SELECT pg_catalog.count(*)::pg_catalog.int4
@@ -1134,14 +1534,16 @@ REVOKE ALL ON TABLE public.mailbox_connections FROM PUBLIC, anon, authenticated,
 REVOKE ALL ON TABLE public.mailbox_oauth_credentials FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON TABLE public.ingested_documents FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON TABLE public.ingestion_logs FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON TABLE public.cams_kfintech_ingestion_runs FROM PUBLIC, anon, authenticated, service_role;
 
 GRANT SELECT ON TABLE public.registrar_configs TO service_role;
 GRANT SELECT ON TABLE public.mailbox_connections TO service_role;
-GRANT SELECT, INSERT, UPDATE ON TABLE public.ingested_documents TO service_role;
 
 REVOKE ALL ON FUNCTION public.prevent_ingestion_log_modification() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.load_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.replace_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.int4, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.claim_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.finalize_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.record_cams_kfintech_ingestion_failure(
   pg_catalog.uuid,
   pg_catalog.uuid,
@@ -1180,6 +1582,8 @@ REVOKE ALL ON FUNCTION public.persist_cams_kfintech_statement_ingestion(
 
 GRANT EXECUTE ON FUNCTION public.load_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.replace_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.int4, pg_catalog.timestamptz) TO service_role;
+GRANT EXECUTE ON FUNCTION public.claim_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.finalize_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.record_cams_kfintech_ingestion_failure(
   pg_catalog.uuid,
   pg_catalog.uuid,

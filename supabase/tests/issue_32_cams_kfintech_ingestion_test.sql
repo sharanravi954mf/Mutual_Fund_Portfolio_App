@@ -194,7 +194,11 @@ BEGIN
 
   IF pg_catalog.has_table_privilege('anon', 'public.ingested_documents', 'SELECT')
      OR pg_catalog.has_table_privilege('authenticated', 'public.ingested_documents', 'SELECT')
-     OR NOT pg_catalog.has_table_privilege('service_role', 'public.ingested_documents', 'INSERT') THEN
+     OR pg_catalog.has_table_privilege('service_role', 'public.ingested_documents', 'INSERT')
+     OR pg_catalog.has_table_privilege('service_role', 'public.ingested_documents', 'UPDATE')
+     OR pg_catalog.has_table_privilege('service_role', 'public.ingested_documents', 'DELETE')
+     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_runs', 'INSERT')
+     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_runs', 'UPDATE') THEN
     RAISE EXCEPTION 'Issue #32 document table grants are incorrect';
   END IF;
 
@@ -207,13 +211,15 @@ BEGIN
     AND proc.proname IN (
       'load_mailbox_oauth_credential_envelope',
       'replace_mailbox_oauth_credential_envelope',
+      'claim_cams_kfintech_ingestion_run',
+      'finalize_cams_kfintech_ingestion_run',
       'record_cams_kfintech_ingestion_failure',
       'persist_cams_kfintech_statement_ingestion'
     )
     AND proc.prosecdef
     AND proc.proconfig = ARRAY['search_path=""']::pg_catalog.text[];
 
-  IF v_count <> 4 THEN
+  IF v_count <> 6 THEN
     RAISE EXCEPTION 'Issue #32 RPCs are not SECURITY DEFINER with empty search_path';
   END IF;
 
@@ -231,7 +237,7 @@ BEGIN
      OR NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_indexes
        WHERE schemaname = 'public'
-         AND indexname = 'ingested_documents_attachment_attempt_uidx'
+         AND indexname = 'ingested_documents_provider_attachment_uidx'
      )
      OR NOT EXISTS (
 	       SELECT 1 FROM pg_catalog.pg_indexes
@@ -1486,6 +1492,7 @@ BEGIN
           'investorName', 'Duplicate Row',
           'folioNumber', 'FOLIO-DUP',
           'schemeCode', 'MF32NEG',
+          'fundHouse', 'Money Bowl AMC',
           'transactionType', 'BUY',
           'transactionDirection', 'INFLOW',
           'registrarTransactionCode', 'BUY',
@@ -1502,6 +1509,7 @@ BEGIN
           'investorName', 'Duplicate Row',
           'folioNumber', 'FOLIO-DUP',
           'schemeCode', 'MF32NEG',
+          'fundHouse', 'Money Bowl AMC',
           'transactionType', 'BUY',
           'transactionDirection', 'INFLOW',
           'registrarTransactionCode', 'BUY',
@@ -1576,6 +1584,7 @@ BEGIN
           'investorName', 'Duplicate Registrar Transaction',
           'folioNumber', 'FOLIO-DUP-TXN',
           'schemeCode', 'MF32NEG',
+          'fundHouse', 'Money Bowl AMC',
           'transactionType', 'BUY',
           'transactionDirection', 'INFLOW',
           'registrarTransactionCode', 'BUY',
@@ -1592,6 +1601,7 @@ BEGIN
           'investorName', 'Duplicate Registrar Transaction',
           'folioNumber', 'FOLIO-DUP-TXN',
           'schemeCode', 'MF32NEG',
+          'fundHouse', 'Money Bowl AMC',
           'transactionType', 'BUY',
           'transactionDirection', 'INFLOW',
           'registrarTransactionCode', 'BUY',
@@ -1625,6 +1635,525 @@ BEGIN
   END IF;
 END;
 $$;
+
+SET ROLE service_role;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000100',
+  'CAMS'
+);
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000100',
+  'CAMS'
+);
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000002',
+    '93700000-0000-0000-0000-000000000002',
+    '93900000-0000-0000-0000-000000000100',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'ingestion run rebound to another workspace was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000100',
+  'CAMS'
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_status pg_catalog.text;
+  v_attempted pg_catalog.int4;
+  v_success pg_catalog.int4;
+  v_failed pg_catalog.int4;
+BEGIN
+  SELECT status, attempted_attachment_count, successful_attachment_count, failed_attachment_count
+  INTO v_status, v_attempted, v_success, v_failed
+  FROM public.cams_kfintech_ingestion_runs
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000100';
+
+  IF v_status <> 'partially_failed' OR v_attempted <> 3 OR v_success <> 2 OR v_failed <> 1 THEN
+    RAISE EXCEPTION 'run finalisation did not derive lineage counts: %, %, %, %', v_status, v_attempted, v_success, v_failed;
+  END IF;
+END;
+$$;
+
+SET ROLE service_role;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000501',
+  'CAMS'
+);
+
+SELECT public.record_cams_kfintech_ingestion_failure(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000501',
+  '93900000-0000-0000-0000-000000000501',
+  NULL,
+  NULL,
+  NULL,
+  'CAMS',
+  'mailbox_poll_failed'
+);
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000501',
+  'CAMS',
+  'mailbox_poll_failed'
+);
+
+DO $$
+BEGIN
+  INSERT INTO public.ingested_documents (
+    workspace_id, mailbox_connection_id, ingestion_run_id, provider_message_id,
+    provider_attachment_id, attachment_attempt_key, registrar, storage_bucket,
+    storage_object_path, sha256_hex, detected_mime, file_type, size_bytes,
+    received_at, processing_status, correlation_id
+  ) VALUES (
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000777',
+    'forged-message',
+    'forged-attachment',
+    'forged-attempt',
+    'CAMS',
+    'ingested-documents',
+    'forged/path',
+    repeat('7', 64),
+    'application/x-dbase',
+    'DBF',
+    1024,
+    now(),
+    'completed',
+    '93900000-0000-0000-0000-000000000777'
+  );
+  RAISE EXCEPTION 'service_role inserted forged ingested document directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
+DO $$
+BEGIN
+  UPDATE public.ingested_documents
+  SET processing_status = 'failed', sha256_hex = repeat('8', 64)
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000101';
+  RAISE EXCEPTION 'service_role mutated ingested document directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
+DO $$
+BEGIN
+  INSERT INTO public.cams_kfintech_ingestion_runs (
+    ingestion_run_id, workspace_id, mailbox_connection_id, registrar
+  ) VALUES (
+    '93900000-0000-0000-0000-000000000778',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'service_role inserted forged ingestion run directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
+DO $$
+BEGIN
+  UPDATE public.cams_kfintech_ingestion_runs
+  SET status = 'completed'
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000100';
+  RAISE EXCEPTION 'service_role mutated ingestion run directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_docs_before pg_catalog.int4;
+  v_logs_before pg_catalog.int4;
+  v_events_before pg_catalog.int4;
+  v_docs_after pg_catalog.int4;
+  v_logs_after pg_catalog.int4;
+  v_events_after pg_catalog.int4;
+BEGIN
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_before FROM public.ingested_documents;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_before FROM public.ingestion_logs;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_before FROM public.event_outbox;
+
+  BEGIN
+    PERFORM *
+    FROM public.persist_cams_kfintech_statement_ingestion(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000502',
+      '93900000-0000-0000-0000-000000000101',
+      'provider-message-a',
+      'provider-attachment-a',
+      'provider-identity-changed-digest',
+      'CAMS',
+      repeat('b', 64),
+      'ingested-documents',
+      'changed/provider-digest',
+      'application/x-dbase',
+      'DBF',
+      1024,
+      '2026-07-29T00:00:00Z',
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'registrar', 'CAMS',
+        'clientPan', 'ABCDE1234F',
+        'investorName', 'Changed Digest',
+        'folioNumber', 'FOLIO-32-A',
+        'schemeCode', 'MF32A',
+        'fundHouse', 'Money Bowl AMC',
+        'transactionType', 'BUY',
+        'transactionDirection', 'INFLOW',
+        'registrarTransactionCode', 'BUY',
+        'units', 1,
+        'nav', 1,
+        'amount', 1,
+        'date', '2026-07-29',
+        'sourceRowNumber', 1
+      ))
+    );
+    RAISE EXCEPTION 'same provider attachment accepted changed bytes';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%attachment_hash_mismatch%' AND SQLERRM NOT LIKE '%correlation_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    PERFORM *
+    FROM public.persist_cams_kfintech_statement_ingestion(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000502',
+      '93900000-0000-0000-0000-000000000502',
+      'provider-message-digest-dup',
+      'provider-attachment-digest-dup',
+      'digest-duplicate-attempt',
+      'CAMS',
+      repeat('a', 64),
+      'ingested-documents',
+      'duplicate/digest',
+      'application/x-dbase',
+      'DBF',
+      1024,
+      '2026-07-29T00:00:00Z',
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'registrar', 'CAMS',
+        'clientPan', 'ABCDE1234F',
+        'investorName', 'Digest Duplicate',
+        'folioNumber', 'FOLIO-DIGEST-DUP',
+        'schemeCode', 'MF32A',
+        'fundHouse', 'Money Bowl AMC',
+        'transactionType', 'BUY',
+        'transactionDirection', 'INFLOW',
+        'registrarTransactionCode', 'BUY',
+        'units', 1,
+        'nav', 1,
+        'amount', 1,
+        'date', '2026-07-29',
+        'sourceRowNumber', 1
+      ))
+    );
+    RAISE EXCEPTION 'same digest under different provider identity was accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%duplicate_attachment%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_failure(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000502',
+      '93900000-0000-0000-0000-000000000101',
+      'provider-message-a',
+      'provider-attachment-a',
+      'failure-provider-digest-conflict',
+      'CAMS',
+      'attachment_hash_mismatch',
+      repeat('b', 64),
+      'ingested-documents',
+      'failure/changed-provider-digest',
+      'application/x-dbase',
+      'DBF',
+      1024
+    );
+    RAISE EXCEPTION 'failure lineage accepted provider digest contradiction';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%attachment_hash_mismatch%' AND SQLERRM NOT LIKE '%correlation_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_failure(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000502',
+      '93900000-0000-0000-0000-000000000502',
+      'provider-message-digest-dup',
+      'provider-attachment-digest-dup',
+      'failure-duplicate-digest-attempt',
+      'CAMS',
+      'duplicate_attachment',
+      repeat('a', 64),
+      'ingested-documents',
+      'failure/duplicate-digest',
+      'application/x-dbase',
+      'DBF',
+      1024
+    );
+    RAISE EXCEPTION 'failure lineage accepted duplicate digest as a new document';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%duplicate_attachment%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_after FROM public.ingested_documents;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_after FROM public.ingestion_logs;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_after FROM public.event_outbox;
+
+  IF v_docs_after <> v_docs_before OR v_logs_after <> v_logs_before OR v_events_after <> v_events_before THEN
+    RAISE EXCEPTION 'provider identity conflicts left document/log/event side effects';
+  END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM *
+  FROM public.persist_cams_kfintech_statement_ingestion(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000503',
+    '93900000-0000-0000-0000-000000000503',
+    'provider-message-amc-conflict',
+    'provider-attachment-amc-conflict',
+    'amc-conflict-attempt',
+    'CAMS',
+    repeat('d', 64),
+    'ingested-documents',
+    'amc/conflict',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    '2026-07-29T00:00:00Z',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'AMC Conflict',
+      'folioNumber', 'FOLIO-32-A',
+      'schemeCode', 'MF32AMCCONFLICT',
+      'fundHouse', 'Different AMC',
+      'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
+      'units', 1,
+      'nav', 1,
+      'amount', 1,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1
+    ))
+  );
+  RAISE EXCEPTION 'folio reused with conflicting AMC identity';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%folio_relationship_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM *
+  FROM public.persist_cams_kfintech_statement_ingestion(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000504',
+    '93900000-0000-0000-0000-000000000504',
+    'provider-message-missing-amc',
+    'provider-attachment-missing-amc',
+    'missing-amc-attempt',
+    'CAMS',
+    repeat('1', 64),
+    'ingested-documents',
+    'amc/missing',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    '2026-07-29T00:00:00Z',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Missing AMC',
+      'folioNumber', 'FOLIO-MISSING-AMC',
+      'schemeCode', 'MF32MISSINGAMC',
+      'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
+      'units', 1,
+      'nav', 1,
+      'amount', 1,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1
+    ))
+  );
+  RAISE EXCEPTION 'missing AMC mapping was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%amc_mapping_unresolved%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+INSERT INTO public.mutual_funds (scheme_code, scheme_name, fund_house, category)
+VALUES ('MF32TRUST', 'Issue 32 Trusted AMC Fund', 'Trusted AMC', 'Equity');
+
+SELECT *
+FROM public.persist_cams_kfintech_statement_ingestion(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000505',
+  '93900000-0000-0000-0000-000000000505',
+  'provider-message-trusted-amc',
+  'provider-attachment-trusted-amc',
+  'trusted-amc-attempt',
+  'CAMS',
+  repeat('f', 64),
+  'ingested-documents',
+  'amc/trusted',
+  'application/x-dbase',
+  'DBF',
+  1024,
+  '2026-07-29T00:00:00Z',
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'registrar', 'CAMS',
+    'clientPan', 'ABCDE1234F',
+    'investorName', 'Trusted AMC',
+    'folioNumber', 'FOLIO-TRUSTED-AMC',
+    'schemeCode', 'MF32TRUST',
+    'transactionType', 'BUY',
+    'transactionDirection', 'INFLOW',
+    'registrarTransactionCode', 'BUY',
+    'units', 1,
+    'nav', 1,
+    'amount', 1,
+    'date', '2026-07-29',
+    'sourceRowNumber', 1
+  ))
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.folio_references
+    WHERE registrar = 'CAMS'
+      AND normalized_folio_number = 'FOLIOTRUSTEDAMC'
+      AND amc_identity = 'Trusted AMC'
+  ) THEN
+    RAISE EXCEPTION 'trusted scheme AMC identity was not persisted on new folio';
+  END IF;
+END;
+$$;
+
+RESET ROLE;
+
+SET ROLE authenticated;
+DO $$
+BEGIN
+  INSERT INTO public.ingested_documents (
+    workspace_id, mailbox_connection_id, ingestion_run_id, provider_message_id,
+    provider_attachment_id, attachment_attempt_key, registrar, storage_bucket,
+    storage_object_path, sha256_hex, detected_mime, file_type, size_bytes,
+    received_at, processing_status, correlation_id
+  ) VALUES (
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000779',
+    'authenticated-forged-message',
+    'authenticated-forged-attachment',
+    'authenticated-forged-attempt',
+    'CAMS',
+    'ingested-documents',
+    'authenticated/forged',
+    repeat('9', 64),
+    'application/x-dbase',
+    'DBF',
+    1024,
+    now(),
+    'completed',
+    '93900000-0000-0000-0000-000000000779'
+  );
+  RAISE EXCEPTION 'authenticated inserted forged ingested document directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+DO $$
+BEGIN
+  INSERT INTO public.cams_kfintech_ingestion_runs (
+    ingestion_run_id, workspace_id, mailbox_connection_id, registrar
+  ) VALUES (
+    '93900000-0000-0000-0000-000000000780',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'authenticated inserted forged ingestion run directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+RESET ROLE;
 
 DROP INDEX IF EXISTS public.portfolio_folio_references_folio_uidx;
 DO $$

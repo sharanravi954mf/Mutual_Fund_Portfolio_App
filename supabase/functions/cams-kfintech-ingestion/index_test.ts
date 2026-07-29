@@ -100,12 +100,16 @@ function deps(options: {
   persist?: (input: PersistenceInput) => Promise<PersistenceResult>;
   failContext?: IngestionError;
   failureCodes?: string[];
+  claimedRuns?: string[];
+  finalizedRuns?: { runId: string; stoppedReason?: string }[];
   downloadCount?: { count: number };
   registrarConfig?: Partial<RegistrarConfig>;
   recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
 } = {}): HandlerDependencies {
   const stages = options.stages ?? [];
   const failureCodes = options.failureCodes ?? [];
+  const claimedRuns = options.claimedRuns ?? [];
+  const finalizedRuns = options.finalizedRuns ?? [];
   let storedBytes: Uint8Array | null = null;
 
   return {
@@ -183,6 +187,17 @@ function deps(options: {
       new KfintechParser(),
     ]),
     persistence: {
+      claimRun: (input) => {
+        claimedRuns.push(input.ingestionRunId);
+        return Promise.resolve();
+      },
+      finalizeRun: (input) => {
+        finalizedRuns.push({
+          runId: input.ingestionRunId,
+          stoppedReason: input.stoppedReason,
+        });
+        return Promise.resolve();
+      },
       persist: options.persist ??
         (() =>
           Promise.resolve({
@@ -257,6 +272,7 @@ Deno.test("pipeline stages execute in the required order", async () => {
   assertEquals(stages, [
     "internal_authorization",
     "load_credentials",
+    "claim_ingestion_run",
     "imap_oauth_connector",
     "poll_mailbox",
     "validate_sender",
@@ -270,6 +286,7 @@ Deno.test("pipeline stages execute in the required order", async () => {
     "parse",
     "persist",
     "complete_lineage",
+    "finalize_ingestion_run",
   ]);
 });
 
@@ -526,6 +543,38 @@ Deno.test("credentials are loaded by trusted identifier and missing credentials 
   assertEquals(stages, ["internal_authorization", "load_credentials"]);
 });
 
+Deno.test("run is claimed before polling and finalized after poll failure", async () => {
+  const stages: string[] = [];
+  const failureCodes: string[] = [];
+  const claimedRuns: string[] = [];
+  const finalizedRuns: { runId: string; stoppedReason?: string }[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    failureCodes,
+    claimedRuns,
+    finalizedRuns,
+    messages: [],
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 422);
+  assertEquals(body.error.code, "mailbox_poll_failed");
+  assertEquals(stages.slice(0, 4), [
+    "internal_authorization",
+    "load_credentials",
+    "claim_ingestion_run",
+    "imap_oauth_connector",
+  ]);
+  assertEquals(claimedRuns, [correlationId]);
+  assertEquals(failureCodes, ["mailbox_poll_failed"]);
+  assertEquals(finalizedRuns, [{
+    runId: correlationId,
+    stoppedReason: "mailbox_poll_failed",
+  }]);
+});
+
 Deno.test("OAuth values never appear in response logs or errors", async () => {
   const logs: unknown[][] = [];
   const originalWarn = console.warn;
@@ -730,6 +779,47 @@ Deno.test("oversized attachment stops further fetching", async () => {
   assertEquals(downloadCount.count, 1);
   assertEquals(body.data.stopped, true);
   assertEquals(body.data.stopped_reason, "attachment_too_large");
+});
+
+Deno.test("attachment download timeout stops later retrieval", async () => {
+  const downloadCount = { count: 0 };
+  const messageId = "timeout-message";
+  const controller = new AbortController();
+  const customDeps = deps({
+    downloadCount,
+    messages: [message(camsDbfFixture(), {
+      messageId,
+      attachments: [
+        attachmentFixture(camsDbfFixture(), messageId, "timeout-a"),
+        attachmentFixture(camsDbfFixture(), messageId, "timeout-b"),
+      ],
+    })],
+  });
+  customDeps.mailboxClient.downloadAttachment = (
+    _context,
+    _message,
+    attachment,
+  ) => {
+    downloadCount.count += 1;
+    const stream = new ReadableStream<Uint8Array>();
+    setTimeout(() => controller.abort(), 0);
+    return Promise.resolve({
+      ...attachment,
+      stream,
+      deadlineSignal: controller.signal,
+      cancelDeadline: () => {},
+    });
+  };
+
+  const response = await createCamsKfintechIngestionHandler(customDeps)(
+    request(validBody()),
+  );
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "mailbox_poll_failed");
+  assertEquals(body.data.stopped, true);
+  assertEquals(downloadCount.count, 1);
 });
 
 Deno.test("run byte limit stops later message downloads without false lineage", async () => {

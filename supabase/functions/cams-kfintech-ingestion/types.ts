@@ -18,6 +18,7 @@ export type FailureCode =
   | "investor_mapping_unresolved"
   | "investor_mapping_ambiguous"
   | "investor_workspace_relationship_required"
+  | "amc_mapping_unresolved"
   | "portfolio_mapping_ambiguous"
   | "folio_relationship_conflict"
   | "configuration_ambiguous"
@@ -108,6 +109,8 @@ export type MailMessage = {
 
 export type DownloadedAttachment = EmailAttachment & {
   stream: ReadableStream<Uint8Array>;
+  deadlineSignal?: AbortSignal;
+  cancelDeadline?: () => void;
 };
 
 export type DetectedFormat = {
@@ -164,6 +167,23 @@ export type PersistenceResult = {
   outbox_event_id: string | null;
   transaction_count: number;
   idempotent: boolean;
+};
+
+export type IngestionRunClaimInput = {
+  workspaceId: string;
+  mailboxConnectionId: string;
+  ingestionRunId: string;
+  registrar: Registrar;
+};
+
+export type IngestionRunFinalStatus =
+  | "completed"
+  | "partially_failed"
+  | "failed"
+  | "stopped";
+
+export type IngestionRunFinalizeInput = IngestionRunClaimInput & {
+  stoppedReason?: FailureCode;
 };
 
 export type FailureLineageInput = {

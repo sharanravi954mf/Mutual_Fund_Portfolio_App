@@ -10,6 +10,7 @@ import {
   HttpMalwareScanner,
   RemotePdfTextExtractor,
 } from "./adapters.ts";
+import { readBoundedStream } from "./security.ts";
 import { IngestionError, type IngestionRunContext } from "./types.ts";
 
 function base64(bytes: Uint8Array): string {
@@ -254,7 +255,7 @@ Deno.test("attachment retrieval uses connector service token and never mailbox O
       "https://connector.example/ingestion",
       "connector-service-token",
     );
-    await client.downloadAttachment(context(), {
+    const downloaded = await client.downloadAttachment(context(), {
       senderAddress: "reports@camsonline.com",
       messageId: "message-1",
       receivedAt: "2026-07-29T00:00:00Z",
@@ -265,6 +266,7 @@ Deno.test("attachment retrieval uses connector service token and never mailbox O
       declaredMime: "application/x-dbase",
       receivedAt: "2026-07-29T00:00:00Z",
     });
+    downloaded.cancelDeadline?.();
 
     assertEquals(seenAuthorizations, ["Bearer connector-service-token"]);
     assertEquals(
@@ -310,6 +312,181 @@ Deno.test("trusted connector credential refresher returns refreshed OAuth bundle
     assertEquals(refreshed.accessToken, "new-access");
     assertEquals(refreshed.refreshToken, "new-refresh");
     assertEquals(refreshed.expiresAt, "2026-07-29T01:00:00Z");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("connector refresh is timeout and response-size bounded", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (_input, init) =>
+      delayedFetch((init as { signal?: AbortSignal }).signal);
+    await assertRejects(
+      () =>
+        new ConnectorCredentialRefresher(
+          "https://connector.example/ingestion",
+          "connector-service-token",
+          false,
+          1,
+          1024,
+        ).refresh({
+          workspaceId: "workspace-id",
+          mailboxConnectionId: "mailbox-id",
+          connectorRef: "connector-ref",
+          registrar: "CAMS",
+        }, {
+          accessToken: "old-access",
+          refreshToken: "old-refresh",
+        }),
+      IngestionError,
+      "credential_refresh_failed",
+    );
+
+    globalThis.fetch = () =>
+      Promise.resolve(response({
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+      }));
+    await assertRejects(
+      () =>
+        new ConnectorCredentialRefresher(
+          "https://connector.example/ingestion",
+          "connector-service-token",
+          false,
+          10,
+          2,
+        ).refresh({
+          workspaceId: "workspace-id",
+          mailboxConnectionId: "mailbox-id",
+          connectorRef: "connector-ref",
+          registrar: "CAMS",
+        }, {
+          accessToken: "old-access",
+          refreshToken: "old-refresh",
+        }),
+      IngestionError,
+      "credential_refresh_failed",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("connector poll rejects timeout oversized JSON malformed metadata and empty IDs", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (_input, init) =>
+      delayedFetch((init as { signal?: AbortSignal }).signal);
+    await assertRejects(
+      () =>
+        new ConnectorMailboxClient(
+          "https://connector.example/ingestion",
+          "connector-service-token",
+          false,
+          1,
+          1024,
+        ).poll(context()),
+      IngestionError,
+      "mailbox_poll_failed",
+    );
+
+    globalThis.fetch = () =>
+      Promise.resolve(response({
+        messages: [{
+          sender_address: "reports@camsonline.com",
+          message_id: "message-1",
+          attachments: [{ attachment_id: "attachment-1" }],
+        }],
+      }));
+    await assertRejects(
+      () =>
+        new ConnectorMailboxClient(
+          "https://connector.example/ingestion",
+          "connector-service-token",
+          false,
+          10,
+          2,
+        ).poll(context()),
+      IngestionError,
+      "mailbox_poll_failed",
+    );
+
+    for (
+      const payload of [
+        { messages: [{}] },
+        {
+          messages: [{
+            message_id: "",
+            attachments: [{ attachment_id: "attachment-1" }],
+          }],
+        },
+        {
+          messages: [{
+            message_id: "message-1",
+            attachments: [{ attachment_id: "" }],
+          }],
+        },
+      ]
+    ) {
+      globalThis.fetch = () => Promise.resolve(response(payload));
+      await assertRejects(
+        () =>
+          new ConnectorMailboxClient(
+            "https://connector.example/ingestion",
+            "connector-service-token",
+          ).poll(context()),
+        IngestionError,
+        "mailbox_poll_failed",
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("attachment retrieval timeout covers the stream consumption deadline", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start() {
+              // Keep the response body pending until the connector deadline aborts.
+            },
+          }),
+        ),
+      );
+    const downloaded = await new ConnectorMailboxClient(
+      "https://connector.example/ingestion",
+      "connector-service-token",
+      false,
+      10,
+      1024,
+      1,
+    ).downloadAttachment(context(), {
+      senderAddress: "reports@camsonline.com",
+      messageId: "message-1",
+      receivedAt: "2026-07-29T00:00:00Z",
+      attachments: [],
+    }, {
+      attachmentId: "attachment-1",
+      filename: "cams.dbf",
+      declaredMime: "application/x-dbase",
+      receivedAt: "2026-07-29T00:00:00Z",
+    });
+
+    await assertRejects(
+      () =>
+        readBoundedStream(downloaded.stream, 1024, {
+          signal: downloaded.deadlineSignal,
+          abortCode: "mailbox_poll_failed",
+        }),
+      IngestionError,
+      "mailbox_poll_failed",
+    );
+    downloaded.cancelDeadline?.();
   } finally {
     globalThis.fetch = originalFetch;
   }

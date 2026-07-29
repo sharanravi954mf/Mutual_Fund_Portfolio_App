@@ -15,7 +15,9 @@ import {
   type FailureCode,
   type FailureLineageInput,
   IngestionError,
+  type IngestionRunClaimInput,
   type IngestionRunContext,
+  type IngestionRunFinalizeInput,
   type MailMessage,
   type PersistenceInput,
   type PersistenceResult,
@@ -33,6 +35,7 @@ const knownFailureCodes: Set<string> = new Set([
   "investor_mapping_unresolved",
   "investor_mapping_ambiguous",
   "investor_workspace_relationship_required",
+  "amc_mapping_unresolved",
   "portfolio_mapping_ambiguous",
   "folio_relationship_conflict",
   "storage_object_conflict",
@@ -88,6 +91,25 @@ function validPositive(
     return fallback;
   }
   return Math.floor(value);
+}
+
+function requirePositive(value: number, code: FailureCode): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new IngestionError(code);
+  }
+  return Math.floor(value);
+}
+
+function timeoutController(timeoutMs: number): {
+  signal: AbortSignal;
+  cancel: () => void;
+} {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cancel: () => clearTimeout(timeout),
+  };
 }
 
 async function importAesKey(rawBase64: string): Promise<CryptoKey> {
@@ -216,13 +238,18 @@ async function readJsonResponse(
   response: Response,
   maxBytes: number,
   code: FailureCode,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   if (response.body == null || maxBytes <= 0 || !Number.isFinite(maxBytes)) {
     throw new IngestionError(code);
   }
   let bytes: Uint8Array;
   try {
-    bytes = await readBoundedStream(response.body, Math.floor(maxBytes));
+    bytes = await readBoundedStream(response.body, Math.floor(maxBytes), {
+      signal,
+      abortCode: code,
+      emptyCode: code,
+    });
   } catch (_error) {
     throw new IngestionError(code);
   }
@@ -515,7 +542,17 @@ export class ConnectorCredentialRefresher implements CredentialRefreshClient {
     connectorUrl: string,
     private readonly connectorServiceToken: string,
     allowInsecureConnector = false,
+    private readonly timeoutMs = 5000,
+    private readonly maxResponseBytes = 65536,
   ) {
+    if (connectorServiceToken.trim() === "") {
+      throw new IngestionError("connector_untrusted_origin");
+    }
+    this.timeoutMs = requirePositive(timeoutMs, "connector_untrusted_origin");
+    this.maxResponseBytes = requirePositive(
+      maxResponseBytes,
+      "connector_untrusted_origin",
+    );
     this.baseUrl = parseTrustedConnectorUrl(
       connectorUrl,
       allowInsecureConnector,
@@ -531,45 +568,59 @@ export class ConnectorCredentialRefresher implements CredentialRefreshClient {
     },
     credentials: CredentialBundle,
   ): Promise<CredentialBundle> {
-    const response = await fetch(endpoint(this.baseUrl, "/oauth/refresh"), {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.connectorServiceToken}`,
-      },
-      body: JSON.stringify({
-        workspace_id: context.workspaceId,
-        mailbox_connection_id: context.mailboxConnectionId,
-        connector_ref: context.connectorRef,
-        registrar: context.registrar,
-        refresh_token: credentials.refreshToken,
-      }),
-    });
-    if (response.status >= 300 && response.status < 400) {
-      throw new IngestionError("connector_untrusted_origin");
-    }
-    if (!response.ok) {
+    const deadline = timeoutController(this.timeoutMs);
+    try {
+      const response = await fetch(endpoint(this.baseUrl, "/oauth/refresh"), {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.connectorServiceToken}`,
+        },
+        body: JSON.stringify({
+          workspace_id: context.workspaceId,
+          mailbox_connection_id: context.mailboxConnectionId,
+          connector_ref: context.connectorRef,
+          registrar: context.registrar,
+          refresh_token: credentials.refreshToken,
+        }),
+        signal: deadline.signal,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        throw new IngestionError("connector_untrusted_origin");
+      }
+      if (response.url !== "") {
+        assertSameOrigin(new URL(response.url), this.baseUrl.origin);
+      }
+      if (!response.ok) {
+        throw new IngestionError("credential_refresh_failed");
+      }
+      const payload = await readJsonResponse(
+        response,
+        this.maxResponseBytes,
+        "credential_refresh_failed",
+        deadline.signal,
+      );
+      if (
+        typeof payload.access_token !== "string" || payload.access_token === ""
+      ) {
+        throw new IngestionError("credential_refresh_failed");
+      }
+      return {
+        accessToken: payload.access_token,
+        refreshToken: typeof payload.refresh_token === "string"
+          ? payload.refresh_token
+          : credentials.refreshToken,
+        expiresAt: typeof payload.expires_at === "string"
+          ? payload.expires_at
+          : undefined,
+      };
+    } catch (error) {
+      if (error instanceof IngestionError) throw error;
       throw new IngestionError("credential_refresh_failed");
+    } finally {
+      deadline.cancel();
     }
-    const payload = recordFromUnknown(
-      await response.json(),
-      "credential_refresh_failed",
-    );
-    if (
-      typeof payload.access_token !== "string" || payload.access_token === ""
-    ) {
-      throw new IngestionError("credential_refresh_failed");
-    }
-    return {
-      accessToken: payload.access_token,
-      refreshToken: typeof payload.refresh_token === "string"
-        ? payload.refresh_token
-        : credentials.refreshToken,
-      expiresAt: typeof payload.expires_at === "string"
-        ? payload.expires_at
-        : undefined,
-    };
   }
 }
 
@@ -580,10 +631,22 @@ export class ConnectorMailboxClient {
     connectorUrl: string,
     private readonly connectorServiceToken: string,
     allowInsecureConnector = false,
+    private readonly timeoutMs = 5000,
+    private readonly maxResponseBytes = 1048576,
+    private readonly attachmentDownloadTimeoutMs = 10000,
   ) {
     if (connectorServiceToken.trim() === "") {
       throw new IngestionError("connector_untrusted_origin");
     }
+    this.timeoutMs = requirePositive(timeoutMs, "connector_untrusted_origin");
+    this.maxResponseBytes = requirePositive(
+      maxResponseBytes,
+      "connector_untrusted_origin",
+    );
+    this.attachmentDownloadTimeoutMs = requirePositive(
+      attachmentDownloadTimeoutMs,
+      "connector_untrusted_origin",
+    );
     this.baseUrl = parseTrustedConnectorUrl(
       connectorUrl,
       allowInsecureConnector,
@@ -591,69 +654,95 @@ export class ConnectorMailboxClient {
   }
 
   async poll(context: IngestionRunContext): Promise<MailMessage[]> {
-    const response = await fetch(endpoint(this.baseUrl, "/poll"), {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.connectorServiceToken}`,
-        "X-Mailbox-OAuth-Token": context.credentials.accessToken,
-      },
-      body: JSON.stringify({
-        connector_ref: context.mailbox.connectorRef,
-        mailbox_connection_id: context.mailboxConnectionId,
-        registrar: context.mailbox.registrar,
-      }),
-    });
-    if (response.status >= 300 && response.status < 400) {
-      throw new IngestionError("connector_untrusted_origin");
-    }
-    if (!response.ok) {
-      throw new IngestionError("mailbox_poll_failed");
-    }
-    const payload = recordFromUnknown(await response.json());
-    const messages = payload.messages;
-    if (!Array.isArray(messages)) {
-      throw new IngestionError("mailbox_poll_failed");
-    }
-
-    return messages.map((rawMessage): MailMessage => {
-      const message = recordFromUnknown(rawMessage);
-      const attachments = message.attachments;
-      if (!Array.isArray(attachments)) {
+    const deadline = timeoutController(this.timeoutMs);
+    try {
+      const response = await fetch(endpoint(this.baseUrl, "/poll"), {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.connectorServiceToken}`,
+          "X-Mailbox-OAuth-Token": context.credentials.accessToken,
+        },
+        body: JSON.stringify({
+          connector_ref: context.mailbox.connectorRef,
+          mailbox_connection_id: context.mailboxConnectionId,
+          registrar: context.mailbox.registrar,
+        }),
+        signal: deadline.signal,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        throw new IngestionError("connector_untrusted_origin");
+      }
+      if (response.url !== "") {
+        assertSameOrigin(new URL(response.url), this.baseUrl.origin);
+      }
+      if (!response.ok) {
         throw new IngestionError("mailbox_poll_failed");
       }
-      return {
-        senderAddress: String(message.sender_address ?? ""),
-        messageId: String(message.message_id ?? ""),
-        receivedAt: String(message.received_at ?? new Date().toISOString()),
-        attachments: attachments.map(
-          (rawAttachment): MailMessage["attachments"][number] => {
-            const attachment = recordFromUnknown(rawAttachment);
-            if (typeof attachment.attachment_id !== "string") {
-              throw new IngestionError("mailbox_poll_failed");
-            }
-            if (attachment.download_url != null) {
-              throw new IngestionError("connector_untrusted_origin");
-            }
-            return {
-              attachmentId: attachment.attachment_id,
-              filename: String(attachment.filename ?? "statement"),
-              declaredMime: String(
-                attachment.declared_mime ?? "application/octet-stream",
-              ),
-              receivedAt: String(
-                attachment.received_at ?? message.received_at ??
-                  new Date().toISOString(),
-              ),
-              expectedSha256Hex: attachment.expected_sha256_hex == null
-                ? undefined
-                : String(attachment.expected_sha256_hex),
-            };
-          },
-        ),
-      };
-    });
+      const payload = await readJsonResponse(
+        response,
+        this.maxResponseBytes,
+        "mailbox_poll_failed",
+        deadline.signal,
+      );
+      const messages = payload.messages;
+      if (!Array.isArray(messages)) {
+        throw new IngestionError("mailbox_poll_failed");
+      }
+
+      return messages.map((rawMessage): MailMessage => {
+        const message = recordFromUnknown(rawMessage);
+        const attachments = message.attachments;
+        if (!Array.isArray(attachments)) {
+          throw new IngestionError("mailbox_poll_failed");
+        }
+        if (
+          typeof message.message_id !== "string" ||
+          message.message_id.trim() === ""
+        ) {
+          throw new IngestionError("mailbox_poll_failed");
+        }
+        return {
+          senderAddress: String(message.sender_address ?? ""),
+          messageId: message.message_id.trim(),
+          receivedAt: String(message.received_at ?? new Date().toISOString()),
+          attachments: attachments.map(
+            (rawAttachment): MailMessage["attachments"][number] => {
+              const attachment = recordFromUnknown(rawAttachment);
+              if (
+                typeof attachment.attachment_id !== "string" ||
+                attachment.attachment_id.trim() === ""
+              ) {
+                throw new IngestionError("mailbox_poll_failed");
+              }
+              if (attachment.download_url != null) {
+                throw new IngestionError("connector_untrusted_origin");
+              }
+              return {
+                attachmentId: attachment.attachment_id.trim(),
+                filename: String(attachment.filename ?? "statement"),
+                declaredMime: String(
+                  attachment.declared_mime ?? "application/octet-stream",
+                ),
+                receivedAt: String(
+                  attachment.received_at ?? message.received_at ??
+                    new Date().toISOString(),
+                ),
+                expectedSha256Hex: attachment.expected_sha256_hex == null
+                  ? undefined
+                  : String(attachment.expected_sha256_hex),
+              };
+            },
+          ),
+        };
+      });
+    } catch (error) {
+      if (error instanceof IngestionError) throw error;
+      throw new IngestionError("mailbox_poll_failed");
+    } finally {
+      deadline.cancel();
+    }
   }
 
   async downloadAttachment(
@@ -661,35 +750,54 @@ export class ConnectorMailboxClient {
     message: MailMessage,
     attachment: MailMessage["attachments"][number],
   ): Promise<DownloadedAttachment> {
-    const response = await fetch(endpoint(this.baseUrl, "/attachments/fetch"), {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.connectorServiceToken}`,
-      },
-      body: JSON.stringify({
-        connector_ref: context.mailbox.connectorRef,
-        mailbox_connection_id: context.mailboxConnectionId,
-        registrar: context.mailbox.registrar,
-        message_id: message.messageId,
-        attachment_id: attachment.attachmentId,
-      }),
-    });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (location != null) {
-        assertSameOrigin(new URL(location, this.baseUrl), this.baseUrl.origin);
+    const deadline = timeoutController(this.attachmentDownloadTimeoutMs);
+    try {
+      const response = await fetch(
+        endpoint(this.baseUrl, "/attachments/fetch"),
+        {
+          method: "POST",
+          redirect: "manual",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.connectorServiceToken}`,
+          },
+          body: JSON.stringify({
+            connector_ref: context.mailbox.connectorRef,
+            mailbox_connection_id: context.mailboxConnectionId,
+            registrar: context.mailbox.registrar,
+            message_id: message.messageId,
+            attachment_id: attachment.attachmentId,
+          }),
+          signal: deadline.signal,
+        },
+      );
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (location != null) {
+          assertSameOrigin(
+            new URL(location, this.baseUrl),
+            this.baseUrl.origin,
+          );
+        }
+        throw new IngestionError("connector_untrusted_origin");
       }
-      throw new IngestionError("connector_untrusted_origin");
-    }
-    if (!response.ok || response.body == null) {
+      if (!response.ok || response.body == null) {
+        throw new IngestionError("mailbox_poll_failed");
+      }
+      if (response.url !== "") {
+        assertSameOrigin(new URL(response.url), this.baseUrl.origin);
+      }
+      return {
+        ...attachment,
+        stream: response.body,
+        deadlineSignal: deadline.signal,
+        cancelDeadline: deadline.cancel,
+      };
+    } catch (error) {
+      deadline.cancel();
+      if (error instanceof IngestionError) throw error;
       throw new IngestionError("mailbox_poll_failed");
     }
-    if (response.url !== "") {
-      assertSameOrigin(new URL(response.url), this.baseUrl.origin);
-    }
-    return { ...attachment, stream: response.body };
   }
 }
 
@@ -820,6 +928,49 @@ export class SupabaseEncryptedStorage {
 
 export class SupabasePersistence {
   constructor(private readonly client: SupabaseClient) {}
+
+  async claimRun(input: IngestionRunClaimInput): Promise<void> {
+    const { error } = await this.client.rpc(
+      "claim_cams_kfintech_ingestion_run",
+      {
+        p_workspace_id: input.workspaceId,
+        p_mailbox_connection_id: input.mailboxConnectionId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_registrar: input.registrar,
+      },
+    );
+    if (error != null) {
+      const code = error.message?.match(/([a-z][a-z0-9_]+)$/)?.[1] ??
+        "persistence_failed";
+      throw new IngestionError(
+        knownFailureCodes.has(code)
+          ? code as FailureCode
+          : "persistence_failed",
+      );
+    }
+  }
+
+  async finalizeRun(input: IngestionRunFinalizeInput): Promise<void> {
+    const { error } = await this.client.rpc(
+      "finalize_cams_kfintech_ingestion_run",
+      {
+        p_workspace_id: input.workspaceId,
+        p_mailbox_connection_id: input.mailboxConnectionId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_registrar: input.registrar,
+        p_stopped_reason: input.stoppedReason ?? null,
+      },
+    );
+    if (error != null) {
+      const code = error.message?.match(/([a-z][a-z0-9_]+)$/)?.[1] ??
+        "persistence_failed";
+      throw new IngestionError(
+        knownFailureCodes.has(code)
+          ? code as FailureCode
+          : "persistence_failed",
+      );
+    }
+  }
 
   async persist(input: PersistenceInput): Promise<PersistenceResult> {
     const { data, error } = await this.client.rpc(

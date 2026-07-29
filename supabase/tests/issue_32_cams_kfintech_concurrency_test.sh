@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SCENARIOS=6
+SCENARIOS=10
 DB_CONTAINER="${SUPABASE_DB_CONTAINER:-$(docker ps --filter "name=supabase_db_" --format "{{.Names}}" | head -n 1)}"
 
 if [ -z "${DB_CONTAINER}" ]; then
@@ -11,7 +11,14 @@ fi
 
 PSQL="docker exec -i ${DB_CONTAINER} psql -v ON_ERROR_STOP=1 -U postgres -d postgres"
 WORKDIR="$(mktemp -d)"
-trap 'rm -rf "${WORKDIR}"' EXIT
+cleanup() {
+  docker exec -i "${DB_CONTAINER}" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL' >/dev/null 2>&1 || true
+DROP TRIGGER IF EXISTS issue32_concurrency_sleep_before_document_insert ON public.ingested_documents;
+DROP FUNCTION IF EXISTS public.issue32_concurrency_sleep_trigger();
+SQL
+  rm -rf "${WORKDIR}"
+}
+trap cleanup EXIT
 
 run_psql() {
   ${PSQL}
@@ -136,8 +143,8 @@ one_success_one_conflict() {
     cat "${WORKDIR}/${name}.right.out" >&2
     exit 1
   fi
-  if ! grep -qE "correlation_conflict|persistence_conflict" "${WORKDIR}/${name}.left.out" "${WORKDIR}/${name}.right.out"; then
-    echo "${name}: expected correlation_conflict or persistence_conflict" >&2
+  if ! grep -qE "attachment_hash_mismatch|correlation_conflict|duplicate_attachment|persistence_conflict" "${WORKDIR}/${name}.left.out" "${WORKDIR}/${name}.right.out"; then
+    echo "${name}: expected stable conflict code" >&2
     exit 1
   fi
 }
@@ -158,7 +165,63 @@ $1
 SQL
 }
 
+write_claim_sql() {
+  file="$1"
+  workspace_id="$2"
+  mailbox_id="$3"
+  run_id="$4"
+  registrar="$5"
+  cat > "${file}" <<SQL
+\\pset tuples_only on
+\\pset format unaligned
+SET ROLE service_role;
+BEGIN;
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '${workspace_id}',
+  '${mailbox_id}',
+  '${run_id}',
+  '${registrar}'
+);
+COMMIT;
+SQL
+}
+
 run_psql <<'SQL'
+DROP TRIGGER IF EXISTS issue32_concurrency_sleep_before_document_insert ON public.ingested_documents;
+DROP FUNCTION IF EXISTS public.issue32_concurrency_sleep_trigger();
+
+ALTER TABLE public.ingestion_logs DISABLE TRIGGER enforce_ingestion_logs_immutability;
+DELETE FROM public.event_outbox AS event
+USING public.ingested_documents AS document
+WHERE event.entity_type = 'ingested_document'
+  AND event.entity_id = document.id
+  AND document.workspace_id = '94400000-0000-0000-0000-000000000001';
+DELETE FROM public.transactions
+WHERE registrar_transaction_id LIKE 'CON-TXN-%'
+   OR source_document_id IN (
+     SELECT id FROM public.ingested_documents
+     WHERE workspace_id = '94400000-0000-0000-0000-000000000001'
+   );
+DELETE FROM public.ingestion_logs
+WHERE workspace_id = '94400000-0000-0000-0000-000000000001';
+DELETE FROM public.ingested_documents
+WHERE workspace_id = '94400000-0000-0000-0000-000000000001';
+DELETE FROM public.cams_kfintech_ingestion_runs
+WHERE workspace_id = '94400000-0000-0000-0000-000000000001'
+   OR ingestion_run_id IN (
+     '94900000-0000-0000-0000-000000000901',
+     '94900000-0000-0000-0000-000000000902'
+   );
+DELETE FROM public.portfolio_folio_references AS mapping
+USING public.folio_references AS folio
+WHERE folio.id = mapping.folio_reference_id
+  AND folio.registrar = 'CAMS'
+  AND folio.normalized_folio_number LIKE 'CONFOLIO%';
+DELETE FROM public.folio_references
+WHERE registrar = 'CAMS'
+  AND normalized_folio_number LIKE 'CONFOLIO%';
+ALTER TABLE public.ingestion_logs ENABLE TRIGGER enforce_ingestion_logs_immutability;
+
 INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
   ('94200000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'issue32-concurrency-owner@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
@@ -180,6 +243,10 @@ WHERE user_id = '94200000-0000-0000-0000-000000000002';
 
 INSERT INTO public.workspaces (id, name, slug, owner_profile_id, workspace_status)
 VALUES ('94400000-0000-0000-0000-000000000001', 'Issue 32 Concurrency Workspace', 'issue-32-concurrency-workspace', '94300000-0000-0000-0000-000000000001', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.workspaces (id, name, slug, owner_profile_id, workspace_status)
+VALUES ('94400000-0000-0000-0000-000000000002', 'Issue 32 Concurrency Workspace B', 'issue-32-concurrency-workspace-b', '94300000-0000-0000-0000-000000000001', 'active')
 ON CONFLICT (id) DO NOTHING;
 
 DELETE FROM public.workspace_memberships
@@ -260,6 +327,26 @@ INSERT INTO public.mailbox_connections (
   'CAMS',
   'concurrency-owner@moneybowl.test',
   'issue-32-concurrency-connector',
+  'gmail',
+  ARRAY['concurrency@camsonline.com'],
+  'active'
+) ON CONFLICT (workspace_id, connector_ref) DO NOTHING;
+
+INSERT INTO public.mailbox_connections (
+  id,
+  workspace_id,
+  registrar,
+  mailbox_address,
+  connector_ref,
+  oauth_provider,
+  allowed_sender_addresses,
+  status
+) VALUES (
+  '94700000-0000-0000-0000-000000000002',
+  '94400000-0000-0000-0000-000000000002',
+  'CAMS',
+  'concurrency-owner-b@moneybowl.test',
+  'issue-32-concurrency-connector-b',
   'gmail',
   ARRAY['concurrency@camsonline.com'],
   'active'
@@ -371,6 +458,50 @@ assert_sql "DO \$\$ DECLARE v_count int; BEGIN
   IF v_count <> 1 THEN RAISE EXCEPTION 'scenario6 folio reference count %', v_count; END IF;
   SELECT count(*)::int INTO v_count FROM public.portfolio_folio_references m JOIN public.folio_references f ON f.id = m.folio_reference_id WHERE f.registrar = 'CAMS' AND f.normalized_folio_number = 'CONFOLIO6';
   IF v_count <> 1 THEN RAISE EXCEPTION 'scenario6 folio mapping count %', v_count; END IF;
+END \$\$;"
+
+write_persist_sql "${WORKDIR}/s7a.sql" "94900000-0000-0000-0000-000000000701" "s7-message" "s7-attachment" "s7-attempt-a" "a" "CON-FOLIO-7" "CON-TXN-7A" 1
+write_persist_sql "${WORKDIR}/s7b.sql" "94900000-0000-0000-0000-000000000701" "s7-message" "s7-attachment" "s7-attempt-b" "b" "CON-FOLIO-7" "CON-TXN-7B" 1
+run_pair "scenario7_provider_identity_changed_digest" "${WORKDIR}/s7a.sql" "${WORKDIR}/s7b.sql"
+one_success_one_conflict "scenario7_provider_identity_changed_digest"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.ingested_documents WHERE provider_message_id = 's7-message' AND provider_attachment_id = 's7-attachment';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario7 document count %', v_count; END IF;
+  SELECT count(*)::int INTO v_count FROM public.transactions WHERE registrar_transaction_id IN ('CON-TXN-7A','CON-TXN-7B');
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario7 transaction count %', v_count; END IF;
+  SELECT count(*)::int INTO v_count FROM public.ingestion_logs WHERE provider_message_id = 's7-message' AND status = 'SUCCESS';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario7 success log count %', v_count; END IF;
+END \$\$;"
+
+write_persist_sql "${WORKDIR}/s8a.sql" "94900000-0000-0000-0000-000000000801" "s8-message-a" "s8-attachment-a" "s8-attempt-a" "c" "CON-FOLIO-8A" "CON-TXN-8A" 1
+write_persist_sql "${WORKDIR}/s8b.sql" "94900000-0000-0000-0000-000000000802" "s8-message-b" "s8-attachment-b" "s8-attempt-b" "c" "CON-FOLIO-8B" "CON-TXN-8B" 1
+run_pair "scenario8_same_digest_different_provider_identity" "${WORKDIR}/s8a.sql" "${WORKDIR}/s8b.sql"
+one_success_one_conflict "scenario8_same_digest_different_provider_identity"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.ingested_documents WHERE provider_message_id IN ('s8-message-a','s8-message-b');
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario8 document count %', v_count; END IF;
+  SELECT count(*)::int INTO v_count FROM public.transactions WHERE registrar_transaction_id IN ('CON-TXN-8A','CON-TXN-8B');
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario8 transaction count %', v_count; END IF;
+  SELECT count(*)::int INTO v_count FROM public.event_outbox e JOIN public.ingested_documents d ON d.id = e.entity_id WHERE d.provider_message_id IN ('s8-message-a','s8-message-b') AND e.event_type = 'statement.imported';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario8 event count %', v_count; END IF;
+END \$\$;"
+
+write_claim_sql "${WORKDIR}/s9a.sql" "94400000-0000-0000-0000-000000000001" "94700000-0000-0000-0000-000000000001" "94900000-0000-0000-0000-000000000901" "CAMS"
+write_claim_sql "${WORKDIR}/s9b.sql" "94400000-0000-0000-0000-000000000001" "94700000-0000-0000-0000-000000000001" "94900000-0000-0000-0000-000000000901" "CAMS"
+run_pair "scenario9_identical_run_claim" "${WORKDIR}/s9a.sql" "${WORKDIR}/s9b.sql"
+both_success "scenario9_identical_run_claim"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_runs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000901';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario9 run count %', v_count; END IF;
+END \$\$;"
+
+write_claim_sql "${WORKDIR}/s10a.sql" "94400000-0000-0000-0000-000000000001" "94700000-0000-0000-0000-000000000001" "94900000-0000-0000-0000-000000000902" "CAMS"
+write_claim_sql "${WORKDIR}/s10b.sql" "94400000-0000-0000-0000-000000000002" "94700000-0000-0000-0000-000000000002" "94900000-0000-0000-0000-000000000902" "CAMS"
+run_pair "scenario10_conflicting_run_claim" "${WORKDIR}/s10a.sql" "${WORKDIR}/s10b.sql"
+one_success_one_conflict "scenario10_conflicting_run_claim"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_runs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000902';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario10 run count %', v_count; END IF;
 END \$\$;"
 
 run_psql <<'SQL'

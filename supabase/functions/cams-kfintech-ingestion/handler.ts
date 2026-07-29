@@ -18,7 +18,9 @@ import {
   type FailureCode,
   type FailureLineageInput,
   IngestionError,
+  type IngestionRunClaimInput,
   type IngestionRunContext,
+  type IngestionRunFinalizeInput,
   type MailMessage,
   type PersistenceInput,
   type PersistenceResult,
@@ -77,6 +79,8 @@ export type HandlerDependencies = {
   };
   parserRegistry: ParserRegistry;
   persistence: {
+    claimRun(input: IngestionRunClaimInput): Promise<void>;
+    finalizeRun(input: IngestionRunFinalizeInput): Promise<void>;
     persist(input: PersistenceInput): Promise<PersistenceResult>;
     recordFailure(input: FailureLineageInput): Promise<void>;
   };
@@ -133,14 +137,12 @@ function attachmentAttemptKey(input: {
   context: IngestionRunContext;
   message: MailMessage;
   attachment: EmailAttachment;
-  sha?: string;
 }): string {
   return [
     input.context.workspaceId,
     input.context.mailboxConnectionId,
     input.message.messageId,
     input.attachment.attachmentId,
-    input.sha ?? "pending-digest",
   ].join(":");
 }
 
@@ -161,7 +163,7 @@ async function recordFailure(
 }
 
 function isRunStopFailure(code: FailureCode): boolean {
-  return code === "attachment_too_large";
+  return code === "attachment_too_large" || code === "mailbox_poll_failed";
 }
 
 async function processAttachment(
@@ -176,12 +178,12 @@ async function processAttachment(
   let detectedMime: string | undefined;
   let fileType: "CAS_PDF" | "DBF" | undefined;
   let sizeBytes: number | undefined;
-  let correlationId = await documentCorrelationId({
+  const correlationId = await documentCorrelationId({
     context,
     message,
     attachment,
   });
-  let attemptKey = attachmentAttemptKey({ context, message, attachment });
+  const attemptKey = attachmentAttemptKey({ context, message, attachment });
 
   try {
     stage(deps, "validate_sender");
@@ -203,22 +205,24 @@ async function processAttachment(
     if (remainingBytes <= 0) {
       throw new IngestionError("attachment_too_large");
     }
-    const bytes = await readBoundedStream(
-      downloaded.stream,
-      Math.min(maxAttachmentBytes(context), remainingBytes),
-    );
+    let bytes: Uint8Array;
+    try {
+      bytes = await readBoundedStream(
+        downloaded.stream,
+        Math.min(maxAttachmentBytes(context), remainingBytes),
+        {
+          signal: downloaded.deadlineSignal,
+          abortCode: "mailbox_poll_failed",
+        },
+      );
+    } finally {
+      downloaded.cancelDeadline?.();
+    }
     sizeBytes = bytes.byteLength;
     counter.consumed += sizeBytes;
 
     stage(deps, "calculate_sha256");
     sha = await sha256Hex(bytes);
-    correlationId = await documentCorrelationId({
-      context,
-      message,
-      attachment,
-      sha,
-    });
-    attemptKey = attachmentAttemptKey({ context, message, attachment, sha });
     if (
       attachment.expectedSha256Hex != null &&
       attachment.expectedSha256Hex !== sha
@@ -378,6 +382,7 @@ export function createCamsKfintechIngestionHandler(
     }
 
     let context: IngestionRunContext | null = null;
+    let claimSucceeded = false;
     let pollFailureRecorded = false;
     try {
       stage(deps, "internal_authorization");
@@ -403,6 +408,15 @@ export function createCamsKfintechIngestionHandler(
         correlationId,
         registrar,
       });
+
+      stage(deps, "claim_ingestion_run");
+      await deps.persistence.claimRun({
+        workspaceId: context.workspaceId,
+        mailboxConnectionId: context.mailboxConnectionId,
+        ingestionRunId: context.correlationId,
+        registrar: context.mailbox.registrar,
+      });
+      claimSucceeded = true;
 
       stage(deps, "imap_oauth_connector");
       stage(deps, "poll_mailbox");
@@ -432,6 +446,15 @@ export function createCamsKfintechIngestionHandler(
         }
       }
 
+      stage(deps, "finalize_ingestion_run");
+      await deps.persistence.finalizeRun({
+        workspaceId: context.workspaceId,
+        mailboxConnectionId: context.mailboxConnectionId,
+        ingestionRunId: context.correlationId,
+        registrar: context.mailbox.registrar,
+        stoppedReason,
+      });
+
       return jsonResponse({
         data: {
           ingestion_run_id: correlationId,
@@ -447,6 +470,7 @@ export function createCamsKfintechIngestionHandler(
       const code = classifyUnknownError(error);
       if (
         context != null &&
+        claimSucceeded &&
         (code === "mailbox_poll_failed" ||
           code === "attachment_limit_exceeded") &&
         !pollFailureRecorded
@@ -460,6 +484,20 @@ export function createCamsKfintechIngestionHandler(
           failureCode: code,
         });
         pollFailureRecorded = true;
+      }
+      if (context != null && claimSucceeded) {
+        try {
+          stage(deps, "finalize_ingestion_run");
+          await deps.persistence.finalizeRun({
+            workspaceId: context.workspaceId,
+            mailboxConnectionId: context.mailboxConnectionId,
+            ingestionRunId: context.correlationId,
+            registrar: context.mailbox.registrar,
+            stoppedReason: code,
+          });
+        } catch (_finalizeError) {
+          // Preserve the original stable error response.
+        }
       }
       return jsonResponse({ error: { code } }, errorStatus(code));
     }

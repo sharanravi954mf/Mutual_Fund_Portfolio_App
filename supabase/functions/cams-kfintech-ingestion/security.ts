@@ -82,26 +82,49 @@ export function assertNoTrustedPlaintextPayload(
 export async function readBoundedStream(
   stream: ReadableStream<Uint8Array>,
   maxBytes: number,
+  options: {
+    signal?: AbortSignal;
+    abortCode?: FailureCode;
+    emptyCode?: FailureCode;
+  } = {},
 ): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  const abortCode = options.abortCode ?? "mailbox_poll_failed";
+  const emptyCode = options.emptyCode ?? "unsupported_statement_format";
+  let aborted = options.signal?.aborted ?? false;
+  const abort = () => {
+    aborted = true;
+    void reader.cancel();
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value == null) continue;
+  try {
+    while (true) {
+      if (aborted) {
+        throw new IngestionError(abortCode);
+      }
+      const { done, value } = await reader.read();
+      if (aborted) {
+        throw new IngestionError(abortCode);
+      }
+      if (done) break;
+      if (value == null) continue;
 
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      throw new IngestionError("attachment_too_large");
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new IngestionError("attachment_too_large");
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    options.signal?.removeEventListener("abort", abort);
   }
 
   if (total === 0) {
-    throw new IngestionError("unsupported_statement_format");
+    throw new IngestionError(emptyCode);
   }
 
   const result = new Uint8Array(total);

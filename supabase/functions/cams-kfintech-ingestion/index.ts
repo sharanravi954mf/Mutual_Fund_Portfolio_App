@@ -26,6 +26,15 @@ const mailboxConnectorToken = Deno.env.get("MAILBOX_CONNECTOR_SERVICE_TOKEN") ||
   "";
 const allowInsecureConnector = Deno.env.get("ALLOW_INSECURE_CONNECTOR_URL") ===
   "true";
+const mailboxConnectorTimeoutMs = Number(
+  Deno.env.get("MAILBOX_CONNECTOR_TIMEOUT_MS") || "5000",
+);
+const mailboxConnectorMaxResponseBytes = Number(
+  Deno.env.get("MAILBOX_CONNECTOR_MAX_RESPONSE_BYTES") || "1048576",
+);
+const mailboxAttachmentDownloadTimeoutMs = Number(
+  Deno.env.get("MAILBOX_ATTACHMENT_DOWNLOAD_TIMEOUT_MS") || "10000",
+);
 
 serve(createCamsKfintechIngestionHandler({
   internalToken: Deno.env.get("MONEYBOWL_INTERNAL_INGESTION_TOKEN") || "",
@@ -36,12 +45,17 @@ serve(createCamsKfintechIngestionHandler({
       mailboxConnectorUrl,
       mailboxConnectorToken,
       allowInsecureConnector,
+      mailboxConnectorTimeoutMs,
+      mailboxConnectorMaxResponseBytes,
     ),
   ),
   mailboxClient: new ConnectorMailboxClient(
     mailboxConnectorUrl,
     mailboxConnectorToken,
     allowInsecureConnector,
+    mailboxConnectorTimeoutMs,
+    mailboxConnectorMaxResponseBytes,
+    mailboxAttachmentDownloadTimeoutMs,
   ),
   malwareScanner: new HttpMalwareScanner(
     Deno.env.get("MALWARE_SCANNER_URL") || "",
