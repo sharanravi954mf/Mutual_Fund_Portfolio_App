@@ -41,6 +41,39 @@ description: Implement or validate Money Bowl Supabase and PostgreSQL migrations
   - unrelated advisor
   - cross-workspace user
 
+## RLS and privilege rules
+
+- Inspect the complete existing policy and privilege surface before
+  changing RLS.
+- Query `pg_catalog.pg_policies` rather than assuming only known policy
+  names exist.
+- PostgreSQL permissive policies combine with `OR`; an unexpected
+  surviving policy can broaden access.
+- When an issue owns the complete RLS contract for a table, ensure the
+  final policy set is exclusive:
+  - remove or fail on unexpected policies
+  - create only the intended policy names
+  - assert exact commands and roles
+  - assert the expected total policy count
+- Use safely quoted catalog-driven dynamic SQL when replacing an
+  exclusive policy set.
+- Verify RLS enablement through PostgreSQL catalog metadata.
+- Verify production grants using:
+  - `pg_catalog.has_table_privilege`
+  - `pg_catalog.has_function_privilege`
+  - `pg_catalog.pg_proc`
+  - ACL catalog inspection where PUBLIC/default privileges matter
+- Test the actual API roles with `SET ROLE`; do not grant broad
+  privileges inside focused tests merely to make test setup easier.
+- Separate API-role behavior from database-owner migration maintenance
+  and historical fixture setup.
+- Treat JWT workspace claims only as request or UI context, never as the
+  database authorization boundary.
+- Verify RLS policies, triggers, table grants and SECURITY DEFINER RPCs
+  do not create parallel unaudited mutation paths.
+- For lifecycle-controlled financial tables, prefer restricted audited
+  RPCs over direct client UPDATE or DELETE access.
+
 ## Transaction and audit rules
 
 - Use `SELECT ... FOR UPDATE` when concurrent financial state changes
