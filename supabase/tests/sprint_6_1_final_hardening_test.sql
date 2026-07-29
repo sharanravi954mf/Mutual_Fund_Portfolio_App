@@ -112,8 +112,8 @@ BEGIN
     RAISE EXCEPTION 'override attempt was logged before step-up verification';
   END IF;
 
-  -- Test 2.2: Attempt-first restore WITH step-up amr logs attempted + succeeded
-  PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd", "mfa"]}', true);
+  -- Test 2.2: Attempt-first restore WITH top-level aal2 logs attempted + succeeded
+  PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd", "mfa"], "aal": "aal2"}', true);
 
   PERFORM public.begin_platform_admin_override_attempt(
     '83000000-0000-0000-0000-000000000001',
@@ -244,7 +244,7 @@ BEGIN
   END;
 
   -- Platform Admin calls revoke WITH MFA (still denied; support intervention must use override RPC path)
-  PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd", "mfa"]}', true);
+  PERFORM set_config('request.jwt.claims', '{"sub": "81000000-0000-0000-0000-000000000001", "role": "authenticated", "app_metadata": {"user_role": "platform_admin"}, "amr": ["pwd", "mfa"], "aal": "aal2"}', true);
   BEGIN
     PERFORM public.delegate_consent_revoke('87000000-0000-0000-0000-000000000003');
     RAISE EXCEPTION 'Platform Admin direct delegate_consent_revoke with MFA succeeded';

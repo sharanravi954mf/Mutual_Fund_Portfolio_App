@@ -193,6 +193,10 @@ export function createPlatformAdminOverrideHandler(
     const actionResult = await callActionRpc(deps.serviceClient, normalizedPayload);
     if (actionResult.error != null) {
       const code = errorCode(actionResult.error);
+      if (code === "override_already_finalized") {
+        return jsonResponse({ error: { code } }, 409);
+      }
+
       const terminalType = knownDeniedCodes.has(code)
         ? "override.denied"
         : "override.failed";

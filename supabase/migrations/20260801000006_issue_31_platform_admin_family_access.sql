@@ -37,9 +37,7 @@ DECLARE
 BEGIN
   v_jwt := COALESCE(auth.jwt(), '{}'::jsonb);
 
-  RETURN COALESCE(v_jwt -> 'amr', '[]'::jsonb) ? 'mfa'
-    OR COALESCE(v_jwt ->> 'aal', '') IN ('aal2', 'aal3')
-    OR COALESCE(v_jwt #>> '{app_metadata,aal}', '') IN ('aal2', 'aal3');
+  RETURN COALESCE(v_jwt ->> 'aal', '') = 'aal2';
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '';
 
@@ -243,14 +241,9 @@ BEGIN
     RAISE EXCEPTION 'correlation_id_required';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.family_delegations AS delegation
-    WHERE delegation.id = p_entity_id
-      AND delegation.workspace_id = p_workspace_id
-  ) THEN
-    RAISE EXCEPTION 'target_workspace_mismatch';
-  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id::pg_catalog.text, 0)
+  );
 
   SELECT *
   INTO v_existing
@@ -331,6 +324,10 @@ BEGIN
   IF p_correlation_id IS NULL THEN
     RAISE EXCEPTION 'correlation_id_required';
   END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id::pg_catalog.text, 0)
+  );
 
   IF p_event_type NOT IN ('override.succeeded', 'override.denied', 'override.failed') THEN
     RAISE EXCEPTION 'invalid_terminal_event_type';
@@ -444,7 +441,16 @@ RETURNS TABLE (
 ) AS $$
 DECLARE
   v_attempt public.workspace_audit_logs;
+  v_terminal public.workspace_audit_logs;
 BEGIN
+  IF p_correlation_id IS NULL THEN
+    RAISE EXCEPTION 'correlation_id_required';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id::pg_catalog.text, 0)
+  );
+
   SELECT *
   INTO v_attempt
   FROM public.workspace_audit_logs AS audit
@@ -457,6 +463,17 @@ BEGIN
 
   IF v_attempt.id IS NULL THEN
     RAISE EXCEPTION 'override_attempt_not_found';
+  END IF;
+
+  SELECT *
+  INTO v_terminal
+  FROM public.workspace_audit_logs AS audit
+  WHERE audit.correlation_id = p_correlation_id
+    AND audit.event_type IN ('override.succeeded', 'override.denied', 'override.failed');
+
+  IF v_terminal.id IS NOT NULL
+     AND v_terminal.event_type <> 'override.succeeded' THEN
+    RAISE EXCEPTION 'override_already_finalized';
   END IF;
 
   RETURN QUERY
@@ -475,10 +492,18 @@ BEGIN
     AND delegation.delegate_profile_id = p_delegate_profile_id;
 
   IF NOT FOUND THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.family_delegations AS delegation
+      WHERE delegation.id = p_delegation_id
+    ) THEN
+      RAISE EXCEPTION 'delegation_not_found';
+    END IF;
+
     RAISE EXCEPTION 'target_binding_mismatch';
   END IF;
 END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '';
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '';
 
 CREATE OR REPLACE FUNCTION public.platform_admin_restore_family_delegation_access(
   p_correlation_id pg_catalog.uuid,
@@ -490,8 +515,17 @@ CREATE OR REPLACE FUNCTION public.platform_admin_restore_family_delegation_acces
 RETURNS public.family_delegations AS $$
 DECLARE
   v_attempt public.workspace_audit_logs;
+  v_terminal public.workspace_audit_logs;
   v_delegation public.family_delegations;
 BEGIN
+  IF p_correlation_id IS NULL THEN
+    RAISE EXCEPTION 'correlation_id_required';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id::pg_catalog.text, 0)
+  );
+
   SELECT *
   INTO v_attempt
   FROM public.workspace_audit_logs AS audit
@@ -504,6 +538,17 @@ BEGIN
 
   IF v_attempt.id IS NULL THEN
     RAISE EXCEPTION 'override_attempt_not_found';
+  END IF;
+
+  SELECT *
+  INTO v_terminal
+  FROM public.workspace_audit_logs AS audit
+  WHERE audit.correlation_id = p_correlation_id
+    AND audit.event_type IN ('override.succeeded', 'override.denied', 'override.failed');
+
+  IF v_terminal.id IS NOT NULL
+     AND v_terminal.event_type <> 'override.succeeded' THEN
+    RAISE EXCEPTION 'override_already_finalized';
   END IF;
 
   SELECT *
@@ -520,6 +565,10 @@ BEGIN
      OR v_delegation.owner_profile_id IS DISTINCT FROM p_owner_profile_id
      OR v_delegation.delegate_profile_id IS DISTINCT FROM p_delegate_profile_id THEN
     RAISE EXCEPTION 'target_binding_mismatch';
+  END IF;
+
+  IF v_terminal.id IS NOT NULL THEN
+    RETURN v_delegation;
   END IF;
 
   IF v_delegation.consent_status <> 'accepted' THEN
@@ -765,6 +814,10 @@ REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
            public.portfolios,
            public.transactions
   FROM anon, authenticated, service_role;
+
+REVOKE INSERT, UPDATE, DELETE
+  ON TABLE public.workspace_audit_logs
+  FROM PUBLIC, anon, authenticated, service_role;
 
 GRANT SELECT, INSERT ON TABLE public.family_delegations TO authenticated;
 GRANT SELECT ON TABLE public.portfolios TO authenticated;

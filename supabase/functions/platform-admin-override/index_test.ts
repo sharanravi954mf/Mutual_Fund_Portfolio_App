@@ -9,6 +9,7 @@ import {
 } from "./handler.ts";
 
 type RpcCall = {
+  client?: "user" | "service";
   fn: string;
   args: Record<string, unknown>;
 };
@@ -53,10 +54,11 @@ function fakeAuth(valid = true): AuthClient {
 function fakeClient(
   calls: RpcCall[],
   results: Record<string, { data?: unknown; error?: { message: string } }> = {},
+  client?: "user" | "service",
 ): RpcClient {
   return {
     rpc: (fn, args) => {
-      calls.push({ fn, args });
+      calls.push({ client, fn, args });
       const result = results[fn] ?? { data: { ok: true } };
       return Promise.resolve({
         data: result.data ?? null,
@@ -111,51 +113,125 @@ Deno.test("platform admin override requires explicit target, reason, and correla
 });
 
 Deno.test("platform admin override calls attempted audit before mutation and succeeded terminal", async () => {
-  const userCalls: RpcCall[] = [];
-  const serviceCalls: RpcCall[] = [];
+  const calls: RpcCall[] = [];
   const handler = createPlatformAdminOverrideHandler({
     authenticateClient: fakeAuth(),
-    userClientForToken: () => fakeClient(userCalls),
-    serviceClient: fakeClient(serviceCalls, {
+    userClientForToken: () => fakeClient(calls, {}, "user"),
+    serviceClient: fakeClient(calls, {
       platform_admin_restore_family_delegation_access: {
         data: { id: "97400000-0000-0000-0000-000000000001", is_active: true },
       },
       finish_platform_admin_override_attempt: { data: "audit-id" },
-    }),
+    }, "service"),
   });
 
   const response = await handler(request(validPayload()));
   const body = await response.json();
 
   assertEquals(response.status, 200);
-  assertEquals(userCalls[0].fn, "begin_platform_admin_override_attempt");
-  assertEquals(serviceCalls[0].fn, "platform_admin_restore_family_delegation_access");
-  assertEquals(serviceCalls[1].fn, "finish_platform_admin_override_attempt");
-  assertEquals(serviceCalls[1].args.p_event_type, "override.succeeded");
+  assertEquals(calls.map((call) => `${call.client}:${call.fn}`), [
+    "user:begin_platform_admin_override_attempt",
+    "service:platform_admin_restore_family_delegation_access",
+    "service:finish_platform_admin_override_attempt",
+  ]);
+  assertEquals(calls[2].args.p_event_type, "override.succeeded");
   assertExists(body.data);
 });
 
-Deno.test("platform admin override appends denied terminal after business denial", async () => {
-  const serviceCalls: RpcCall[] = [];
+Deno.test("platform admin override returns begin denial before service action", async () => {
+  const calls: RpcCall[] = [];
   const handler = createPlatformAdminOverrideHandler({
     authenticateClient: fakeAuth(),
-    userClientForToken: () => fakeClient([]),
-    serviceClient: fakeClient(serviceCalls, {
-      platform_admin_restore_family_delegation_access: {
-        error: { message: "owner_consent_not_recorded" },
-      },
-      finish_platform_admin_override_attempt: { data: "terminal-id" },
-    }),
+    userClientForToken: () =>
+      fakeClient(calls, {
+        begin_platform_admin_override_attempt: {
+          error: { message: "not_authorized" },
+        },
+      }, "user"),
+    serviceClient: fakeClient(calls, {}, "service"),
   });
 
   const response = await handler(request(validPayload()));
   const body = await response.json();
 
   assertEquals(response.status, 403);
-  assertEquals(body.error.code, "owner_consent_not_recorded");
-  assertEquals(serviceCalls[1].fn, "finish_platform_admin_override_attempt");
-  assertEquals(serviceCalls[1].args.p_event_type, "override.denied");
-  assertEquals(serviceCalls[1].args.p_error_code, "owner_consent_not_recorded");
+  assertEquals(body.error.code, "not_authorized");
+  assertEquals(calls.map((call) => `${call.client}:${call.fn}`), [
+    "user:begin_platform_admin_override_attempt",
+  ]);
+});
+
+Deno.test("platform admin override returns step-up denial before service action", async () => {
+  const calls: RpcCall[] = [];
+  const handler = createPlatformAdminOverrideHandler({
+    authenticateClient: fakeAuth(),
+    userClientForToken: () =>
+      fakeClient(calls, {
+        begin_platform_admin_override_attempt: {
+          error: { message: "platform_admin_step_up_required" },
+        },
+      }, "user"),
+    serviceClient: fakeClient(calls, {}, "service"),
+  });
+
+  const response = await handler(request(validPayload()));
+  const body = await response.json();
+
+  assertEquals(response.status, 403);
+  assertEquals(body.error.code, "platform_admin_step_up_required");
+  assertEquals(calls.map((call) => `${call.client}:${call.fn}`), [
+    "user:begin_platform_admin_override_attempt",
+  ]);
+});
+
+Deno.test("platform admin override appends denied terminal after target binding denial", async () => {
+  const calls: RpcCall[] = [];
+  const handler = createPlatformAdminOverrideHandler({
+    authenticateClient: fakeAuth(),
+    userClientForToken: () => fakeClient(calls, {}, "user"),
+    serviceClient: fakeClient(calls, {
+      platform_admin_restore_family_delegation_access: {
+        error: { message: "target_binding_mismatch" },
+      },
+      finish_platform_admin_override_attempt: { data: "terminal-id" },
+    }, "service"),
+  });
+
+  const response = await handler(request(validPayload()));
+  const body = await response.json();
+
+  assertEquals(response.status, 403);
+  assertEquals(body.error.code, "target_binding_mismatch");
+  assertEquals(calls.map((call) => `${call.client}:${call.fn}`), [
+    "user:begin_platform_admin_override_attempt",
+    "service:platform_admin_restore_family_delegation_access",
+    "service:finish_platform_admin_override_attempt",
+  ]);
+  assertEquals(calls[2].args.p_event_type, "override.denied");
+  assertEquals(calls[2].args.p_error_code, "target_binding_mismatch");
+});
+
+Deno.test("platform admin override does not append over a finalized correlation", async () => {
+  const calls: RpcCall[] = [];
+  const handler = createPlatformAdminOverrideHandler({
+    authenticateClient: fakeAuth(),
+    userClientForToken: () => fakeClient(calls, {}, "user"),
+    serviceClient: fakeClient(calls, {
+      platform_admin_restore_family_delegation_access: {
+        error: { message: "override_already_finalized" },
+      },
+    }, "service"),
+  });
+
+  const response = await handler(request(validPayload()));
+  const body = await response.json();
+
+  assertEquals(response.status, 409);
+  assertEquals(body.error.code, "override_already_finalized");
+  assertEquals(calls.map((call) => `${call.client}:${call.fn}`), [
+    "user:begin_platform_admin_override_attempt",
+    "service:platform_admin_restore_family_delegation_access",
+  ]);
 });
 
 Deno.test("platform admin override reports retryable outcome failure after successful mutation", async () => {
@@ -175,4 +251,42 @@ Deno.test("platform admin override reports retryable outcome failure after succe
 
   assertEquals(response.status, 202);
   assertEquals(body.error.code, "override_outcome_write_failed");
+});
+
+Deno.test("platform admin override does not log payload or service secrets", async () => {
+  const logs: unknown[][] = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.log = (...args: unknown[]) => {
+    logs.push(args);
+  };
+  console.warn = (...args: unknown[]) => {
+    logs.push(args);
+  };
+  console.error = (...args: unknown[]) => {
+    logs.push(args);
+  };
+
+  try {
+    const handler = createPlatformAdminOverrideHandler({
+      authenticateClient: fakeAuth(),
+      userClientForToken: () => fakeClient([]),
+      serviceClient: fakeClient([], {
+        platform_admin_restore_family_delegation_access: { data: { is_active: true } },
+        finish_platform_admin_override_attempt: { data: "audit-id" },
+      }),
+    });
+
+    const response = await handler(request(validPayload({
+      service_secret: "must-not-be-logged",
+    })));
+
+    assertEquals(response.status, 200);
+    assertEquals(logs, []);
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
 });
