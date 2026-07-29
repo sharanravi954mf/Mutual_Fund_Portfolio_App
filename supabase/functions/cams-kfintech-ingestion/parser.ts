@@ -48,6 +48,7 @@ type FieldAliases = {
 type TransactionCodeRule = {
   type: "BUY" | "SELL" | "SWITCH";
   sign: "positive" | "negative";
+  direction: "INFLOW" | "OUTFLOW";
 };
 
 const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
@@ -90,30 +91,38 @@ const transactionCodeRules: Record<
   Record<string, TransactionCodeRule>
 > = {
   CAMS: {
-    BUY: { type: "BUY", sign: "positive" },
-    PURCHASE: { type: "BUY", sign: "positive" },
-    PUR: { type: "BUY", sign: "positive" },
-    SIP: { type: "BUY", sign: "positive" },
-    SELL: { type: "SELL", sign: "negative" },
-    REDEMPTION: { type: "SELL", sign: "negative" },
-    RED: { type: "SELL", sign: "negative" },
-    SWITCHIN: { type: "SWITCH", sign: "positive" },
-    SWITCH_IN: { type: "SWITCH", sign: "positive" },
-    SWITCHOUT: { type: "SWITCH", sign: "negative" },
-    SWITCH_OUT: { type: "SWITCH", sign: "negative" },
+    BUY: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    PURCHASE: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    PUR: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    SIP: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    SELL: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    REDEMPTION: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    RED: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    SWITCHIN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SWITCH_IN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SWITCHOUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+    SWITCH_OUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
   },
   KFINTECH: {
-    P: { type: "BUY", sign: "positive" },
-    PURCHASE: { type: "BUY", sign: "positive" },
-    ADDITIONAL_PURCHASE: { type: "BUY", sign: "positive" },
-    SIP: { type: "BUY", sign: "positive" },
-    R: { type: "SELL", sign: "negative" },
-    REDEMPTION: { type: "SELL", sign: "negative" },
-    FULL_REDEMPTION: { type: "SELL", sign: "negative" },
-    SI: { type: "SWITCH", sign: "positive" },
-    SWITCH_IN: { type: "SWITCH", sign: "positive" },
-    SO: { type: "SWITCH", sign: "negative" },
-    SWITCH_OUT: { type: "SWITCH", sign: "negative" },
+    P: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    PURCHASE: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    ADDITIONAL_PURCHASE: {
+      type: "BUY",
+      sign: "positive",
+      direction: "INFLOW",
+    },
+    SIP: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    R: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    REDEMPTION: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    FULL_REDEMPTION: {
+      type: "SELL",
+      sign: "negative",
+      direction: "OUTFLOW",
+    },
+    SI: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SWITCH_IN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SO: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+    SWITCH_OUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
   },
 };
 
@@ -191,13 +200,13 @@ function normalizeCode(value: unknown): string {
 function lookupTransactionRule(
   registrar: Registrar,
   value: unknown,
-): TransactionCodeRule {
+): { code: string; rule: TransactionCodeRule } {
   const code = normalizeCode(value);
   const rule = transactionCodeRules[registrar][code];
   if (rule == null) {
     throw new IngestionError("parse_failed");
   }
-  return rule;
+  return { code, rule };
 }
 
 function validateSignedMagnitude(
@@ -227,7 +236,7 @@ function normalizeTransaction(
   sourceRowNumber: number,
 ): NormalizedTransaction {
   const aliases = fieldAliases[registrar];
-  const rule = lookupTransactionRule(
+  const { code, rule } = lookupTransactionRule(
     registrar,
     getValue(record, aliases.transactionCode),
   );
@@ -276,6 +285,8 @@ function normalizeTransaction(
       getValue(record, aliases.category) ?? "Mutual Fund",
     ).trim(),
     transactionType: rule.type,
+    transactionDirection: rule.direction,
+    registrarTransactionCode: code,
     units,
     nav,
     amount,

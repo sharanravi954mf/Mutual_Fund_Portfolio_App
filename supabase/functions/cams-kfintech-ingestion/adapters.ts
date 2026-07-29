@@ -33,6 +33,7 @@ const knownFailureCodes: Set<string> = new Set([
   "investor_mapping_unresolved",
   "investor_mapping_ambiguous",
   "investor_workspace_relationship_required",
+  "portfolio_mapping_ambiguous",
   "folio_relationship_conflict",
   "storage_object_conflict",
   "stored_object_hash_mismatch",

@@ -108,6 +108,7 @@ INSERT INTO public.registrar_configs (
   is_active
 ) VALUES
   ('93600000-0000-0000-0000-000000000001', '93400000-0000-0000-0000-000000000001', 'CAMS', ARRAY['workspace@camsonline.com'], 1024, 10, 2, 4, 4096, ARRAY['CAS_PDF', 'DBF'], true),
+  ('93600000-0000-0000-0000-000000000004', '93400000-0000-0000-0000-000000000001', 'KFINTECH', ARRAY['workspace@kfintech.com'], 1024, 10, 2, 4, 4096, ARRAY['CAS_PDF', 'DBF'], true),
   ('93600000-0000-0000-0000-000000000002', NULL, 'CAMS', ARRAY['global@camsonline.com'], 2048, 20, 3, 6, 8192, ARRAY['DBF'], true),
   ('93600000-0000-0000-0000-000000000003', NULL, 'KFINTECH', ARRAY['inactive@kfintech.com'], 2048, 20, 3, 6, 8192, ARRAY['DBF'], false);
 
@@ -122,6 +123,7 @@ INSERT INTO public.mailbox_connections (
   status
 ) VALUES
   ('93700000-0000-0000-0000-000000000001', '93400000-0000-0000-0000-000000000001', 'CAMS', 'owner@moneybowl.test', 'issue-32-connector-a', 'gmail', ARRAY['statements@camsonline.com'], 'active'),
+  ('93700000-0000-0000-0000-000000000003', '93400000-0000-0000-0000-000000000001', 'KFINTECH', 'owner-kfin@moneybowl.test', 'issue-32-connector-kfin', 'gmail', ARRAY['statements@kfintech.com'], 'active'),
   ('93700000-0000-0000-0000-000000000002', '93400000-0000-0000-0000-000000000002', 'CAMS', 'owner-b@moneybowl.test', 'issue-32-connector-b', 'gmail', ARRAY['statements@camsonline.com'], 'active');
 
 INSERT INTO public.mailbox_oauth_credentials (
@@ -134,6 +136,7 @@ INSERT INTO public.mailbox_oauth_credentials (
   expires_at
 ) VALUES
   ('93800000-0000-0000-0000-000000000001', '93700000-0000-0000-0000-000000000001', '93400000-0000-0000-0000-000000000001', encode('ciphertext-a'::bytea, 'base64'), encode(repeat('n', 12)::bytea, 'base64'), 1, now() + interval '1 hour'),
+  ('93800000-0000-0000-0000-000000000003', '93700000-0000-0000-0000-000000000003', '93400000-0000-0000-0000-000000000001', encode('ciphertext-k'::bytea, 'base64'), encode(repeat('k', 12)::bytea, 'base64'), 1, now() + interval '1 hour'),
   ('93800000-0000-0000-0000-000000000002', '93700000-0000-0000-0000-000000000002', '93400000-0000-0000-0000-000000000002', encode('ciphertext-b'::bytea, 'base64'), encode(repeat('m', 12)::bytea, 'base64'), 1, now() + interval '1 hour');
 
 DO $$
@@ -231,13 +234,33 @@ BEGIN
          AND indexname = 'ingested_documents_attachment_attempt_uidx'
      )
      OR NOT EXISTS (
+	       SELECT 1 FROM pg_catalog.pg_indexes
+	       WHERE schemaname = 'public'
+	         AND indexname = 'ingestion_logs_failure_attempt_uidx'
+	     )
+     OR NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_indexes
        WHERE schemaname = 'public'
-         AND indexname = 'ingestion_logs_failure_attempt_uidx'
+         AND indexname = 'transactions_registrar_folio_txn_uidx'
      )
      OR NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_indexes
        WHERE schemaname = 'public'
+         AND indexname = 'portfolio_folio_references_folio_uidx'
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_indexes
+       WHERE schemaname = 'public'
+         AND indexname = 'portfolio_folio_references_pair_uidx'
+     )
+     OR NOT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_indexes
+       WHERE schemaname = 'public'
+         AND indexname = 'portfolios_workspace_client_uidx'
+     )
+	     OR NOT EXISTS (
+	       SELECT 1 FROM pg_catalog.pg_indexes
+	       WHERE schemaname = 'public'
          AND indexname = 'event_outbox_statement_imported_uidx'
      ) THEN
     RAISE EXCEPTION 'Issue #32 idempotency/config indexes are missing';
@@ -369,6 +392,16 @@ INSERT INTO public.mutual_funds (
   '2026-01-01'
 );
 
+INSERT INTO public.portfolios (
+  id,
+  client_id,
+  workspace_id,
+  total_invested_value,
+  current_market_value
+) VALUES
+  ('93230000-0000-0000-0000-000000000001', '93300000-0000-0000-0000-000000000003', '93400000-0000-0000-0000-000000000001', 0.00, 0.00),
+  ('93230000-0000-0000-0000-000000000002', '93300000-0000-0000-0000-000000000002', '93400000-0000-0000-0000-000000000002', 0.00, 0.00);
+
 SET ROLE service_role;
 
 SELECT *
@@ -399,6 +432,8 @@ FROM public.persist_cams_kfintech_statement_ingestion(
       'fundHouse', 'Money Bowl AMC',
       'category', 'Equity',
       'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
       'units', 10,
       'nav', 20,
       'amount', 200,
@@ -437,6 +472,8 @@ FROM public.persist_cams_kfintech_statement_ingestion(
       'fundHouse', 'Money Bowl AMC',
       'category', 'Equity',
       'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
       'units', 10,
       'nav', 20,
       'amount', 200,
@@ -475,6 +512,8 @@ FROM public.persist_cams_kfintech_statement_ingestion(
       'fundHouse', 'Money Bowl AMC',
       'category', 'Hybrid',
       'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
       'units', 5,
       'nav', 10,
       'amount', 50,
@@ -551,6 +590,8 @@ BEGIN
         'fundHouse', 'Money Bowl AMC',
         'category', 'Debt',
         'transactionType', 'BUY',
+        'transactionDirection', 'INFLOW',
+        'registrarTransactionCode', 'BUY',
         'units', 1,
         'nav', 1,
         'amount', 1,
@@ -565,6 +606,144 @@ EXCEPTION
     IF SQLERRM NOT LIKE '%previous_ingestion_failed%' THEN
       RAISE;
     END IF;
+END;
+$$;
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_docs_before pg_catalog.int4;
+  v_events_before pg_catalog.int4;
+  v_logs_before pg_catalog.int4;
+  v_docs_after pg_catalog.int4;
+  v_events_after pg_catalog.int4;
+  v_logs_after pg_catalog.int4;
+BEGIN
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_before
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000405';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_before
+  FROM public.event_outbox
+  WHERE entity_type = 'ingested_document'
+    AND event_type = 'statement.imported';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_before
+  FROM public.ingestion_logs
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000405';
+
+  BEGIN
+    PERFORM *
+    FROM public.persist_cams_kfintech_statement_ingestion(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000400',
+      '93900000-0000-0000-0000-000000000405',
+      'provider-message-overlap',
+      'provider-attachment-overlap',
+      'overlap-attempt',
+      'CAMS',
+      repeat('8', 64),
+      'ingested-documents',
+      'negative/overlap',
+      'application/x-dbase',
+      'DBF',
+      1024,
+      '2026-07-29T00:00:00Z',
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'registrar', 'CAMS',
+        'clientPan', 'ABCDE1234F',
+        'investorName', 'Overlapping Statement',
+        'folioNumber', 'FOLIO-32-A',
+        'schemeCode', 'MF32A',
+        'transactionType', 'BUY',
+        'transactionDirection', 'INFLOW',
+        'registrarTransactionCode', 'BUY',
+        'units', 10,
+        'nav', 20,
+        'amount', 200,
+        'date', '2026-07-29',
+        'sourceRowNumber', 1,
+        'registrarTransactionId', 'CAMS-ROW-1'
+      ))
+    );
+    RAISE EXCEPTION 'duplicate registrar transaction across documents was accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%persistence_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_after
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000405';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_after
+  FROM public.event_outbox
+  WHERE entity_type = 'ingested_document'
+    AND event_type = 'statement.imported';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_after
+  FROM public.ingestion_logs
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000405';
+
+  IF v_docs_after <> v_docs_before OR v_events_after <> v_events_before OR v_logs_after <> v_logs_before THEN
+    RAISE EXCEPTION 'duplicate registrar transaction conflict left partial success side effects';
+  END IF;
+END;
+$$;
+
+SELECT *
+FROM public.persist_cams_kfintech_statement_ingestion(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000400',
+  '93900000-0000-0000-0000-000000000406',
+  'provider-message-permitted-same-id',
+  'provider-attachment-permitted-same-id',
+  'permitted-same-id-attempt',
+  'CAMS',
+  repeat('9', 64),
+  'ingested-documents',
+  'permitted/same-id-different-folio',
+  'application/x-dbase',
+  'DBF',
+  1024,
+  '2026-07-29T00:00:00Z',
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'registrar', 'CAMS',
+    'clientPan', 'ABCDE1234F',
+    'investorName', 'Permitted Same ID',
+    'folioNumber', 'FOLIO-32-PERMITTED',
+    'schemeCode', 'MF32PERM',
+    'schemeName', 'Issue 32 Permitted Same ID Fund',
+    'fundHouse', 'Money Bowl AMC',
+    'category', 'Equity',
+    'transactionType', 'BUY',
+    'transactionDirection', 'INFLOW',
+    'registrarTransactionCode', 'BUY',
+    'units', 1,
+    'nav', 1,
+    'amount', 1,
+    'date', '2026-07-29',
+    'sourceRowNumber', 1,
+    'registrarTransactionId', 'CAMS-ROW-1'
+  ))
+);
+
+DO $$
+DECLARE
+  v_count pg_catalog.int4;
+BEGIN
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.transactions AS transaction
+  JOIN public.folio_references AS folio
+    ON folio.id = transaction.source_folio_reference_id
+  WHERE transaction.registrar = 'CAMS'
+    AND transaction.registrar_transaction_id = 'CAMS-ROW-1'
+    AND folio.normalized_folio_number IN ('FOLIO32A', 'FOLIO32PERMITTED');
+
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'same registrar transaction id in different folios was not permitted as expected: %', v_count;
+  END IF;
 END;
 $$;
 
@@ -598,6 +777,8 @@ BEGIN
         'fundHouse', 'Money Bowl AMC',
         'category', 'Debt',
         'transactionType', 'BUY',
+        'transactionDirection', 'INFLOW',
+        'registrarTransactionCode', 'BUY',
         'units', 1,
         'nav', 1,
         'amount', 1,
@@ -660,6 +841,50 @@ BEGIN
   FROM public.persist_cams_kfintech_statement_ingestion(
     '93400000-0000-0000-0000-000000000001',
     '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000400',
+    '93900000-0000-0000-0000-000000000403',
+    'provider-message-invalid-direction',
+    'provider-attachment-invalid-direction',
+    'invalid-direction-attempt',
+    'CAMS',
+    repeat('7', 64),
+    'ingested-documents',
+    'negative/invalid-direction',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    '2026-07-29T00:00:00Z',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Invalid Direction',
+      'folioNumber', 'FOLIO-BAD-DIRECTION',
+      'schemeCode', 'MF32NEG',
+      'transactionType', 'BUY',
+      'transactionDirection', 'OUTFLOW',
+      'registrarTransactionCode', 'BUY',
+      'units', 1,
+      'nav', 1,
+      'amount', 1,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1
+    ))
+  );
+  RAISE EXCEPTION 'invalid registrar code and direction combination was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%parse_failed%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM *
+  FROM public.persist_cams_kfintech_statement_ingestion(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
     '93900000-0000-0000-0000-000000000100',
     '93900000-0000-0000-0000-000000000104',
     'provider-message-a',
@@ -684,6 +909,8 @@ BEGIN
         'fundHouse', 'Money Bowl AMC',
         'category', 'Debt',
         'transactionType', 'BUY',
+        'transactionDirection', 'INFLOW',
+        'registrarTransactionCode', 'BUY',
         'units', 1,
         'nav', 1,
         'amount', 1,
@@ -760,6 +987,77 @@ BEGIN
     RAISE EXCEPTION 'folio lineage is not visible from imported transactions: %', v_count;
   END IF;
 
+  SELECT pg_catalog.count(DISTINCT mapping.portfolio_id)::pg_catalog.int4 INTO v_count
+  FROM public.portfolio_folio_references AS mapping
+  JOIN public.folio_references AS folio
+    ON folio.id = mapping.folio_reference_id
+  JOIN public.portfolios AS portfolio
+    ON portfolio.id = mapping.portfolio_id
+  WHERE portfolio.workspace_id = '93400000-0000-0000-0000-000000000001'
+    AND portfolio.client_id = '93300000-0000-0000-0000-000000000002'
+    AND folio.normalized_folio_number IN ('FOLIO32A', 'FOLIO32B');
+
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'two folios did not reuse one canonical investor workspace portfolio: %', v_count;
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.portfolio_folio_references AS mapping
+  JOIN public.folio_references AS folio
+    ON folio.id = mapping.folio_reference_id
+  WHERE folio.normalized_folio_number IN ('FOLIO32A', 'FOLIO32B');
+
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'two folios did not produce two folio mappings: %', v_count;
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.portfolios
+  WHERE workspace_id = '93400000-0000-0000-0000-000000000001'
+    AND client_id = '93300000-0000-0000-0000-000000000002';
+
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'canonical investor workspace portfolio count is wrong: %', v_count;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.portfolio_folio_references AS mapping
+    JOIN public.folio_references AS folio
+      ON folio.id = mapping.folio_reference_id
+    WHERE folio.normalized_folio_number IN ('FOLIO32A', 'FOLIO32B')
+      AND mapping.portfolio_id IN (
+        '93230000-0000-0000-0000-000000000001',
+        '93230000-0000-0000-0000-000000000002'
+      )
+  ) THEN
+    RAISE EXCEPTION 'folio mapping reused another investor or workspace portfolio';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.mutual_funds
+    WHERE scheme_code = 'MF32B'
+      AND (current_nav IS NOT NULL OR nav_date IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'unknown scheme received fabricated market NAV/date';
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.transactions AS transaction
+  JOIN public.folio_references AS folio
+    ON folio.id = transaction.source_folio_reference_id
+  WHERE transaction.registrar = 'CAMS'
+    AND transaction.registrar_transaction_id IN ('CAMS-ROW-1', 'CAMS-ROW-2')
+    AND transaction.registrar_transaction_code = 'BUY'
+    AND transaction.transaction_direction = 'INFLOW'
+    AND transaction.nav_at_transaction > 0
+    AND folio.normalized_folio_number IN ('FOLIO32A', 'FOLIO32B');
+
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'registrar source code or direction did not persist for BUY rows: %', v_count;
+  END IF;
+
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
   FROM public.ingestion_logs
   WHERE attachment_attempt_key LIKE '%provider-attachment-failed%'
@@ -797,6 +1095,183 @@ END;
 $$;
 
 SET ROLE service_role;
+SELECT *
+FROM public.persist_cams_kfintech_statement_ingestion(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000400',
+  '93900000-0000-0000-0000-000000000401',
+  'provider-message-switch-cams',
+  'provider-attachment-switch-cams',
+  'switch-cams-attempt',
+  'CAMS',
+  repeat('5', 64),
+  'ingested-documents',
+  'switch/cams',
+  'application/x-dbase',
+  'DBF',
+  1024,
+  '2026-07-29T00:00:00Z',
+  pg_catalog.jsonb_build_array(
+    pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Switch Investor',
+      'folioNumber', 'FOLIO-SWITCH-CAMS',
+      'schemeCode', 'MF32SWC',
+      'schemeName', 'Issue 32 CAMS Switch Fund',
+      'fundHouse', 'Money Bowl AMC',
+      'category', 'Hybrid',
+      'transactionType', 'SWITCH',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'SWITCH_IN',
+      'units', 7,
+      'nav', 10,
+      'amount', 70,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1,
+      'registrarTransactionId', 'CAMS-SW-IN'
+    ),
+    pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Switch Investor',
+      'folioNumber', 'FOLIO-SWITCH-CAMS',
+      'schemeCode', 'MF32SWC',
+      'schemeName', 'Issue 32 CAMS Switch Fund',
+      'fundHouse', 'Money Bowl AMC',
+      'category', 'Hybrid',
+      'transactionType', 'SWITCH',
+      'transactionDirection', 'OUTFLOW',
+      'registrarTransactionCode', 'SWITCH_OUT',
+      'units', 7,
+      'nav', 10,
+      'amount', 70,
+      'date', '2026-07-29',
+      'sourceRowNumber', 2,
+      'registrarTransactionId', 'CAMS-SW-OUT'
+    )
+  )
+);
+
+SELECT *
+FROM public.persist_cams_kfintech_statement_ingestion(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000003',
+  '93900000-0000-0000-0000-000000000400',
+  '93900000-0000-0000-0000-000000000402',
+  'provider-message-switch-kfin',
+  'provider-attachment-switch-kfin',
+  'switch-kfin-attempt',
+  'KFINTECH',
+  repeat('6', 64),
+  'ingested-documents',
+  'switch/kfintech',
+  'application/x-dbase',
+  'DBF',
+  1024,
+  '2026-07-29T00:00:00Z',
+  pg_catalog.jsonb_build_array(
+    pg_catalog.jsonb_build_object(
+      'registrar', 'KFINTECH',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Switch Investor',
+      'folioNumber', 'KFOLIO-SWITCH',
+      'schemeCode', 'MF32SWK',
+      'schemeName', 'Issue 32 KFin Switch Fund',
+      'fundHouse', 'Money Bowl AMC',
+      'category', 'Hybrid',
+      'transactionType', 'SWITCH',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'SI',
+      'units', 3,
+      'nav', 12,
+      'amount', 36,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1,
+      'registrarTransactionId', 'KFIN-SW-IN'
+    ),
+    pg_catalog.jsonb_build_object(
+      'registrar', 'KFINTECH',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Switch Investor',
+      'folioNumber', 'KFOLIO-SWITCH',
+      'schemeCode', 'MF32SWK',
+      'schemeName', 'Issue 32 KFin Switch Fund',
+      'fundHouse', 'Money Bowl AMC',
+      'category', 'Hybrid',
+      'transactionType', 'SWITCH',
+      'transactionDirection', 'OUTFLOW',
+      'registrarTransactionCode', 'SO',
+      'units', 3,
+      'nav', 12,
+      'amount', 36,
+      'date', '2026-07-29',
+      'sourceRowNumber', 2,
+      'registrarTransactionId', 'KFIN-SW-OUT'
+    )
+  )
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_count pg_catalog.int4;
+BEGIN
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.transactions
+  WHERE registrar = 'CAMS'
+    AND transaction_type = 'SWITCH'
+    AND registrar_transaction_id IN ('CAMS-SW-IN', 'CAMS-SW-OUT')
+    AND (
+      (registrar_transaction_id = 'CAMS-SW-IN' AND registrar_transaction_code = 'SWITCH_IN' AND transaction_direction = 'INFLOW')
+      OR (registrar_transaction_id = 'CAMS-SW-OUT' AND registrar_transaction_code = 'SWITCH_OUT' AND transaction_direction = 'OUTFLOW')
+    );
+
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'CAMS switch-in and switch-out did not persist distinctly: %', v_count;
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.transactions
+  WHERE registrar = 'KFINTECH'
+    AND transaction_type = 'SWITCH'
+    AND registrar_transaction_id IN ('KFIN-SW-IN', 'KFIN-SW-OUT')
+    AND (
+      (registrar_transaction_id = 'KFIN-SW-IN' AND registrar_transaction_code = 'SI' AND transaction_direction = 'INFLOW')
+      OR (registrar_transaction_id = 'KFIN-SW-OUT' AND registrar_transaction_code = 'SO' AND transaction_direction = 'OUTFLOW')
+    );
+
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'KFintech switch-in and switch-out did not persist distinctly: %', v_count;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.event_outbox AS event
+    JOIN public.ingested_documents AS document
+      ON document.id = event.entity_id
+    WHERE document.correlation_id = '93900000-0000-0000-0000-000000000401'
+      AND event.payload -> 'transaction_lineage' @> '[{"registrar_transaction_code":"SWITCH_IN","transaction_direction":"INFLOW"},{"registrar_transaction_code":"SWITCH_OUT","transaction_direction":"OUTFLOW"}]'::jsonb
+  ) THEN
+    RAISE EXCEPTION 'statement.imported payload made CAMS switch legs indistinguishable';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.event_outbox AS event
+    JOIN public.ingested_documents AS document
+      ON document.id = event.entity_id
+    WHERE document.correlation_id = '93900000-0000-0000-0000-000000000402'
+      AND event.payload -> 'transaction_lineage' @> '[{"registrar_transaction_code":"SI","transaction_direction":"INFLOW"},{"registrar_transaction_code":"SO","transaction_direction":"OUTFLOW"}]'::jsonb
+  ) THEN
+    RAISE EXCEPTION 'statement.imported payload made KFintech switch legs indistinguishable';
+  END IF;
+END;
+$$;
+
+SET ROLE service_role;
 DO $$
 BEGIN
   PERFORM *
@@ -823,6 +1298,8 @@ BEGIN
       'folioNumber', 'FOLIO-NO-PAN',
       'schemeCode', 'MF32NEG',
       'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
       'units', 1,
       'nav', 1,
       'amount', 1,
@@ -865,6 +1342,8 @@ BEGIN
       'folioNumber', 'FOLIO-WRONG-WS',
       'schemeCode', 'MF32NEG',
       'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
       'units', 1,
       'nav', 1,
       'amount', 1,
@@ -937,6 +1416,8 @@ BEGIN
       'folioNumber', 'FOLIO-AMBIG',
       'schemeCode', 'MF32NEG',
       'transactionType', 'BUY',
+      'transactionDirection', 'INFLOW',
+      'registrarTransactionCode', 'BUY',
       'units', 1,
       'nav', 1,
       'amount', 1,
@@ -1006,6 +1487,8 @@ BEGIN
           'folioNumber', 'FOLIO-DUP',
           'schemeCode', 'MF32NEG',
           'transactionType', 'BUY',
+          'transactionDirection', 'INFLOW',
+          'registrarTransactionCode', 'BUY',
           'units', 1,
           'nav', 1,
           'amount', 1,
@@ -1020,6 +1503,8 @@ BEGIN
           'folioNumber', 'FOLIO-DUP',
           'schemeCode', 'MF32NEG',
           'transactionType', 'BUY',
+          'transactionDirection', 'INFLOW',
+          'registrarTransactionCode', 'BUY',
           'units', 1,
           'nav', 1,
           'amount', 1,
@@ -1048,6 +1533,268 @@ BEGIN
   IF v_docs_after <> v_docs_before OR v_events_after <> v_events_before THEN
     RAISE EXCEPTION 'duplicate row conflict created document or event side effects';
   END IF;
+END;
+$$;
+
+DO $$
+DECLARE
+  v_docs_before pg_catalog.int4;
+  v_events_before pg_catalog.int4;
+  v_docs_after pg_catalog.int4;
+  v_events_after pg_catalog.int4;
+BEGIN
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_before
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000305';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_before
+  FROM public.event_outbox
+  WHERE entity_type = 'ingested_document'
+    AND event_type = 'statement.imported';
+
+  BEGIN
+    PERFORM *
+    FROM public.persist_cams_kfintech_statement_ingestion(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000300',
+      '93900000-0000-0000-0000-000000000305',
+      'provider-message-negative',
+      'provider-attachment-duplicate-txn',
+      'duplicate-txn-attempt',
+      'CAMS',
+      repeat('0', 64),
+      'ingested-documents',
+      'negative/duplicate-txn',
+      'application/x-dbase',
+      'DBF',
+      1024,
+      '2026-07-29T00:00:00Z',
+      pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'registrar', 'CAMS',
+          'clientPan', 'ABCDE1234F',
+          'investorName', 'Duplicate Registrar Transaction',
+          'folioNumber', 'FOLIO-DUP-TXN',
+          'schemeCode', 'MF32NEG',
+          'transactionType', 'BUY',
+          'transactionDirection', 'INFLOW',
+          'registrarTransactionCode', 'BUY',
+          'units', 1,
+          'nav', 1,
+          'amount', 1,
+          'date', '2026-07-29',
+          'sourceRowNumber', 1,
+          'registrarTransactionId', 'DUP-TXN-SAME'
+        ),
+        pg_catalog.jsonb_build_object(
+          'registrar', 'CAMS',
+          'clientPan', 'ABCDE1234F',
+          'investorName', 'Duplicate Registrar Transaction',
+          'folioNumber', 'FOLIO-DUP-TXN',
+          'schemeCode', 'MF32NEG',
+          'transactionType', 'BUY',
+          'transactionDirection', 'INFLOW',
+          'registrarTransactionCode', 'BUY',
+          'units', 1,
+          'nav', 1,
+          'amount', 1,
+          'date', '2026-07-29',
+          'sourceRowNumber', 2,
+          'registrarTransactionId', 'DUP-TXN-SAME'
+        )
+      )
+    );
+    RAISE EXCEPTION 'duplicate registrar transaction id in one attachment was accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%persistence_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_after
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000305';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_after
+  FROM public.event_outbox
+  WHERE entity_type = 'ingested_document'
+    AND event_type = 'statement.imported';
+
+  IF v_docs_after <> v_docs_before OR v_events_after <> v_events_before THEN
+    RAISE EXCEPTION 'duplicate registrar transaction conflict created document or event side effects';
+  END IF;
+END;
+$$;
+
+DROP INDEX IF EXISTS public.portfolio_folio_references_folio_uidx;
+DO $$
+DECLARE
+  v_existing_folio_id pg_catalog.uuid;
+BEGIN
+  SELECT id INTO v_existing_folio_id
+  FROM public.folio_references
+  WHERE registrar = 'CAMS'
+    AND normalized_folio_number = 'FOLIO32A';
+
+  INSERT INTO public.portfolio_folio_references (portfolio_id, folio_reference_id)
+  VALUES ('93230000-0000-0000-0000-000000000001', v_existing_folio_id);
+
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM public.portfolio_folio_references AS mapping
+      GROUP BY mapping.folio_reference_id
+      HAVING pg_catalog.count(*) > 1
+    ) THEN
+      RAISE EXCEPTION 'issue_32_preflight_duplicate_folio_mapping';
+    END IF;
+    RAISE EXCEPTION 'duplicate folio mapping preflight did not fire';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%issue_32_preflight_duplicate_folio_mapping%' THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$$;
+
+DROP INDEX IF EXISTS public.portfolios_workspace_client_uidx;
+DO $$
+BEGIN
+  INSERT INTO public.portfolios (client_id, workspace_id, total_invested_value, current_market_value)
+  VALUES ('93300000-0000-0000-0000-000000000002', '93400000-0000-0000-0000-000000000001', 0.00, 0.00);
+
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM public.portfolios AS portfolio
+      WHERE portfolio.workspace_id IS NOT NULL
+      GROUP BY portfolio.workspace_id, portfolio.client_id
+      HAVING pg_catalog.count(*) > 1
+    ) THEN
+      RAISE EXCEPTION 'issue_32_preflight_duplicate_portfolio_identity';
+    END IF;
+    RAISE EXCEPTION 'duplicate portfolio identity preflight did not fire';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%issue_32_preflight_duplicate_portfolio_identity%' THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$$;
+
+DROP INDEX IF EXISTS public.transactions_registrar_folio_txn_uidx;
+DO $$
+DECLARE
+  v_document_id pg_catalog.uuid;
+  v_folio_id pg_catalog.uuid;
+  v_fund_id pg_catalog.uuid;
+  v_portfolio_id pg_catalog.uuid;
+BEGIN
+  SELECT id INTO v_document_id
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000406';
+  SELECT id INTO v_folio_id
+  FROM public.folio_references
+  WHERE registrar = 'CAMS'
+    AND normalized_folio_number = 'FOLIO32A';
+  SELECT id INTO v_fund_id
+  FROM public.mutual_funds
+  WHERE scheme_code = 'MF32A';
+  SELECT id INTO v_portfolio_id
+  FROM public.portfolios
+  WHERE workspace_id = '93400000-0000-0000-0000-000000000001'
+    AND client_id = '93300000-0000-0000-0000-000000000002'
+  LIMIT 1;
+
+  INSERT INTO public.transactions (
+    portfolio_id,
+    mutual_fund_id,
+    transaction_type,
+    units,
+    nav_at_transaction,
+    amount,
+    execution_date,
+    registrar,
+    source_document_id,
+    source_row_number,
+    source_attachment_sha256,
+    registrar_transaction_id,
+    registrar_transaction_code,
+    transaction_direction,
+    source_folio_reference_id
+  ) VALUES (
+    v_portfolio_id,
+    v_fund_id,
+    'BUY',
+    1,
+    1,
+    1,
+    '2026-07-29',
+    'CAMS',
+    v_document_id,
+    99,
+    repeat('9', 64),
+    'CAMS-ROW-1',
+    'BUY',
+    'INFLOW',
+    v_folio_id
+  );
+
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM public.transactions AS transaction
+      WHERE transaction.registrar IN ('CAMS', 'KFINTECH')
+        AND transaction.source_folio_reference_id IS NOT NULL
+        AND transaction.registrar_transaction_id IS NOT NULL
+      GROUP BY transaction.registrar, transaction.source_folio_reference_id, transaction.registrar_transaction_id
+      HAVING pg_catalog.count(*) > 1
+    ) THEN
+      RAISE EXCEPTION 'issue_32_preflight_duplicate_registrar_transaction_identity';
+    END IF;
+    RAISE EXCEPTION 'duplicate registrar transaction identity preflight did not fire';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%issue_32_preflight_duplicate_registrar_transaction_identity%' THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$$;
+
+DROP INDEX IF EXISTS public.event_outbox_statement_imported_uidx;
+DO $$
+DECLARE
+  v_document_id pg_catalog.uuid;
+BEGIN
+  SELECT id INTO v_document_id
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000401';
+
+  INSERT INTO public.event_outbox (event_type, entity_id, entity_type, payload, status)
+  VALUES ('statement.imported', v_document_id, 'ingested_document', pg_catalog.jsonb_build_object('duplicate', true), 'pending');
+
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM public.event_outbox AS event
+      WHERE event.event_type = 'statement.imported'
+        AND event.entity_type IS NOT NULL
+        AND event.entity_id IS NOT NULL
+      GROUP BY event.entity_type, event.entity_id, event.event_type
+      HAVING pg_catalog.count(*) > 1
+    ) THEN
+      RAISE EXCEPTION 'issue_32_preflight_duplicate_statement_imported_event';
+    END IF;
+    RAISE EXCEPTION 'duplicate statement.imported event preflight did not fire';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%issue_32_preflight_duplicate_statement_imported_event%' THEN
+        RAISE;
+      END IF;
+  END;
 END;
 $$;
 RESET ROLE;

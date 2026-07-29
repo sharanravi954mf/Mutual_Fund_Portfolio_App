@@ -18,6 +18,7 @@ export type FailureCode =
   | "investor_mapping_unresolved"
   | "investor_mapping_ambiguous"
   | "investor_workspace_relationship_required"
+  | "portfolio_mapping_ambiguous"
   | "folio_relationship_conflict"
   | "configuration_ambiguous"
   | "connector_untrusted_origin"
@@ -129,6 +130,8 @@ export type NormalizedTransaction = {
   fundHouse: string;
   category: string;
   transactionType: "BUY" | "SELL" | "SWITCH";
+  transactionDirection: "INFLOW" | "OUTFLOW";
+  registrarTransactionCode: string;
   units: number;
   nav: number;
   amount: number;

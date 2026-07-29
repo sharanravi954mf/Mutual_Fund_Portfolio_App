@@ -16,27 +16,27 @@ import {
 } from "./fixtures.ts";
 
 const camsAcceptedCodes = [
-  ["BUY", "BUY", "12.5000", "250.00"],
-  ["PURCHASE", "BUY", "12.5000", "250.00"],
-  ["PUR", "BUY", "12.5000", "250.00"],
-  ["SIP", "BUY", "12.5000", "250.00"],
-  ["SELL", "SELL", "-5.0000", "-50.00"],
-  ["REDEMPTION", "SELL", "-5.0000", "-50.00"],
-  ["RED", "SELL", "-5.0000", "-50.00"],
-  ["SWITCH_IN", "SWITCH", "7.0000", "70.00"],
-  ["SWITCH_OUT", "SWITCH", "-7.0000", "-70.00"],
+  ["BUY", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["PURCHASE", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["PUR", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["SIP", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["SELL", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
+  ["REDEMPTION", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
+  ["RED", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
+  ["SWITCH_IN", "SWITCH", "INFLOW", "7.0000", "70.00"],
+  ["SWITCH_OUT", "SWITCH", "OUTFLOW", "-7.0000", "-70.00"],
 ] as const;
 
 const kfintechAcceptedCodes = [
-  ["P", "BUY", "12.5000", "250.00"],
-  ["PURCHASE", "BUY", "12.5000", "250.00"],
-  ["ADDITIONAL_PURCHASE", "BUY", "12.5000", "250.00"],
-  ["SIP", "BUY", "12.5000", "250.00"],
-  ["R", "SELL", "-5.0000", "-50.00"],
-  ["REDEMPTION", "SELL", "-5.0000", "-50.00"],
-  ["FULL_REDEMPTION", "SELL", "-5.0000", "-50.00"],
-  ["SI", "SWITCH", "7.0000", "70.00"],
-  ["SO", "SWITCH", "-7.0000", "-70.00"],
+  ["P", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["PURCHASE", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["ADDITIONAL_PURCHASE", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["SIP", "BUY", "INFLOW", "12.5000", "250.00"],
+  ["R", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
+  ["REDEMPTION", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
+  ["FULL_REDEMPTION", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
+  ["SI", "SWITCH", "INFLOW", "7.0000", "70.00"],
+  ["SO", "SWITCH", "OUTFLOW", "-7.0000", "-70.00"],
 ] as const;
 
 Deno.test("CAMS DBF fixture produces deterministic normalized transaction", async () => {
@@ -54,6 +54,8 @@ Deno.test("CAMS DBF fixture produces deterministic normalized transaction", asyn
   assertEquals(rows[0].folioNumber, "FOLIO1001");
   assertEquals(rows[0].schemeCode, "CAMS001");
   assertEquals(rows[0].transactionType, "BUY");
+  assertEquals(rows[0].transactionDirection, "INFLOW");
+  assertEquals(rows[0].registrarTransactionCode, "BUY");
   assertEquals(rows[0].amount, 250);
   assertEquals(rows[0].date, "2026-07-29");
 });
@@ -73,6 +75,8 @@ Deno.test("KFintech DBF fixture produces deterministic normalized transaction", 
   assertEquals(rows[0].folioNumber, "KFOLIO1001");
   assertEquals(rows[0].schemeCode, "KFIN001");
   assertEquals(rows[0].transactionType, "SELL");
+  assertEquals(rows[0].transactionDirection, "OUTFLOW");
+  assertEquals(rows[0].registrarTransactionCode, "R");
   assertEquals(rows[0].units, 5);
   assertEquals(rows[0].amount, 50);
 });
@@ -107,7 +111,10 @@ Deno.test("CAS PDF fixture uses Edge-compatible text extractor", async () => {
   assertEquals(rows[0].schemeCode, "CAMS001");
 });
 
-for (const [code, expectedType, units, amount] of camsAcceptedCodes) {
+for (
+  const [code, expectedType, expectedDirection, units, amount]
+    of camsAcceptedCodes
+) {
   Deno.test(`CAMS transaction code ${code} maps explicitly`, async () => {
     const [row] = await new CamsParser().parse({
       registrar: "CAMS",
@@ -116,12 +123,17 @@ for (const [code, expectedType, units, amount] of camsAcceptedCodes) {
       bytes: camsDbfFixture({ TRX_TYPE: code, UNITS: units, AMOUNT: amount }),
     });
     assertEquals(row.transactionType, expectedType);
+    assertEquals(row.transactionDirection, expectedDirection);
+    assertEquals(row.registrarTransactionCode, code);
     assertEquals(row.units > 0, true);
     assertEquals(row.amount > 0, true);
   });
 }
 
-for (const [code, expectedType, units, amount] of kfintechAcceptedCodes) {
+for (
+  const [code, expectedType, expectedDirection, units, amount]
+    of kfintechAcceptedCodes
+) {
   Deno.test(`KFintech transaction code ${code} maps explicitly`, async () => {
     const [row] = await new KfintechParser().parse({
       registrar: "KFINTECH",
@@ -134,10 +146,67 @@ for (const [code, expectedType, units, amount] of kfintechAcceptedCodes) {
       }),
     });
     assertEquals(row.transactionType, expectedType);
+    assertEquals(row.transactionDirection, expectedDirection);
+    assertEquals(row.registrarTransactionCode, code);
     assertEquals(row.units > 0, true);
     assertEquals(row.amount > 0, true);
   });
 }
+
+Deno.test("switch legs preserve direction after magnitude normalization", async () => {
+  const [camsIn] = await new CamsParser().parse({
+    registrar: "CAMS",
+    fileType: "DBF",
+    filename: "cams-switch-in.dbf",
+    bytes: camsDbfFixture({
+      TRX_TYPE: "SWITCH_IN",
+      UNITS: "7.0000",
+      AMOUNT: "70.00",
+    }),
+  });
+  const [camsOut] = await new CamsParser().parse({
+    registrar: "CAMS",
+    fileType: "DBF",
+    filename: "cams-switch-out.dbf",
+    bytes: camsDbfFixture({
+      TRX_TYPE: "SWITCH_OUT",
+      UNITS: "-7.0000",
+      AMOUNT: "-70.00",
+    }),
+  });
+  const [kfinIn] = await new KfintechParser().parse({
+    registrar: "KFINTECH",
+    fileType: "DBF",
+    filename: "kfin-switch-in.dbf",
+    bytes: kfintechDbfFixture({
+      TD_TRTYPE: "SI",
+      TD_UNITS: "7.0000",
+      TD_AMT: "70.00",
+    }),
+  });
+  const [kfinOut] = await new KfintechParser().parse({
+    registrar: "KFINTECH",
+    fileType: "DBF",
+    filename: "kfin-switch-out.dbf",
+    bytes: kfintechDbfFixture({
+      TD_TRTYPE: "SO",
+      TD_UNITS: "-7.0000",
+      TD_AMT: "-70.00",
+    }),
+  });
+
+  assertEquals(camsIn.transactionType, camsOut.transactionType);
+  assertEquals(camsIn.units, camsOut.units);
+  assertEquals(camsIn.amount, camsOut.amount);
+  assertEquals(camsIn.transactionDirection, "INFLOW");
+  assertEquals(camsOut.transactionDirection, "OUTFLOW");
+  assertEquals(camsIn.registrarTransactionCode, "SWITCH_IN");
+  assertEquals(camsOut.registrarTransactionCode, "SWITCH_OUT");
+  assertEquals(kfinIn.transactionDirection, "INFLOW");
+  assertEquals(kfinOut.transactionDirection, "OUTFLOW");
+  assertEquals(kfinIn.registrarTransactionCode, "SI");
+  assertEquals(kfinOut.registrarTransactionCode, "SO");
+});
 
 Deno.test("unknown and ambiguous transaction codes fail closed", async () => {
   const parser = new CamsParser();

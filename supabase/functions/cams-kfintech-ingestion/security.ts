@@ -234,6 +234,7 @@ export function errorStatus(code: FailureCode): number {
     case "processing_incomplete":
     case "persistence_conflict":
     case "folio_relationship_conflict":
+    case "portfolio_mapping_ambiguous":
       return 409;
     default:
       return 422;
