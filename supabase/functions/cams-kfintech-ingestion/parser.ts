@@ -18,16 +18,106 @@ export type ParseInput = {
   bytes: Uint8Array;
 };
 
+export type PdfExtractionInput = ParseInput;
+
 export interface StatementParser {
   readonly registrar: Registrar;
   parse(input: ParseInput): Promise<NormalizedTransaction[]>;
 }
 
 export interface PdfTextExtractor {
-  extractText(bytes: Uint8Array, registrar: Registrar): Promise<string>;
+  extractRows(input: PdfExtractionInput): Promise<Record<string, unknown>[]>;
 }
 
-function parseAmount(value: unknown): number {
+type FieldAliases = {
+  transactionCode: string[];
+  units: string[];
+  amount: string[];
+  nav: string[];
+  date: string[];
+  pan: string[];
+  folioNumber: string[];
+  schemeCode: string[];
+  schemeName: string[];
+  fundHouse: string[];
+  category: string[];
+  investorName: string[];
+  registrarTransactionId: string[];
+};
+
+type TransactionCodeRule = {
+  type: "BUY" | "SELL" | "SWITCH";
+  sign: "positive" | "negative";
+};
+
+const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+const fieldAliases: Record<Registrar, FieldAliases> = {
+  CAMS: {
+    transactionCode: ["TRX_TYPE", "TRXN_TYPE", "TRDESC", "TRADESC"],
+    units: ["UNITS", "TRXN_UNITS", "UNIT_BAL"],
+    amount: ["AMOUNT", "TRXN_AMOUNT", "AMT"],
+    nav: ["NAV", "PURPRICE"],
+    date: ["TRX_DATE", "TRXN_DATE", "POSTDATE"],
+    pan: ["PAN", "INV_PAN", "APPL_PAN"],
+    folioNumber: ["FOLIO_NO", "FOLIOCHK", "FOLIO"],
+    schemeCode: ["SCHEME_CD", "PRODCODE", "PRODUCT"],
+    schemeName: ["SCHEME_NM", "SCHEME_NAME"],
+    fundHouse: ["FUND_HOUSE", "AMC_NAME"],
+    category: ["CATEGORY", "SCHEME_CAT"],
+    investorName: ["INV_NAME", "INVESTOR_NAME"],
+    registrarTransactionId: ["TRX_ID", "TRXNNO", "REGISTRAR_TXN_ID"],
+  },
+  KFINTECH: {
+    transactionCode: ["TD_TRTYPE", "TRTYPE", "TRDESC", "TRAN_TYPE"],
+    units: ["TD_UNITS", "UNITS", "TR_UNITS"],
+    amount: ["TD_AMT", "AMOUNT", "TR_AMT"],
+    nav: ["TD_NAV", "NAV", "PRICE"],
+    date: ["TD_TRDATE", "TR_DATE", "POST_DATE"],
+    pan: ["PAN1", "PAN", "IHNO"],
+    folioNumber: ["ACNO", "FOLIO_NO", "FOLIO"],
+    schemeCode: ["FUNDCODE", "SCHEME", "SCH_CODE"],
+    schemeName: ["FUND_DESC", "SCHEME_NAME", "SCH_NAME"],
+    fundHouse: ["AMC_CODE", "AMC_NAME", "FUND_HOUSE"],
+    category: ["ASSETTYPE", "CATEGORY", "SCHEME_CAT"],
+    investorName: ["INVNAME", "INVESTOR_NAME", "NAME"],
+    registrarTransactionId: ["TD_TRNO", "TRNO", "REGISTRAR_TXN_ID"],
+  },
+};
+
+const transactionCodeRules: Record<
+  Registrar,
+  Record<string, TransactionCodeRule>
+> = {
+  CAMS: {
+    BUY: { type: "BUY", sign: "positive" },
+    PURCHASE: { type: "BUY", sign: "positive" },
+    PUR: { type: "BUY", sign: "positive" },
+    SIP: { type: "BUY", sign: "positive" },
+    SELL: { type: "SELL", sign: "negative" },
+    REDEMPTION: { type: "SELL", sign: "negative" },
+    RED: { type: "SELL", sign: "negative" },
+    SWITCHIN: { type: "SWITCH", sign: "positive" },
+    SWITCH_IN: { type: "SWITCH", sign: "positive" },
+    SWITCHOUT: { type: "SWITCH", sign: "negative" },
+    SWITCH_OUT: { type: "SWITCH", sign: "negative" },
+  },
+  KFINTECH: {
+    P: { type: "BUY", sign: "positive" },
+    PURCHASE: { type: "BUY", sign: "positive" },
+    ADDITIONAL_PURCHASE: { type: "BUY", sign: "positive" },
+    SIP: { type: "BUY", sign: "positive" },
+    R: { type: "SELL", sign: "negative" },
+    REDEMPTION: { type: "SELL", sign: "negative" },
+    FULL_REDEMPTION: { type: "SELL", sign: "negative" },
+    SI: { type: "SWITCH", sign: "positive" },
+    SWITCH_IN: { type: "SWITCH", sign: "positive" },
+    SO: { type: "SWITCH", sign: "negative" },
+    SWITCH_OUT: { type: "SWITCH", sign: "negative" },
+  },
+};
+
+function parseDecimal(value: unknown, allowZero = false): number {
   const raw = String(value ?? "").replace(/,/g, "").trim();
   if (!/^-?\d+(\.\d+)?$/.test(raw)) {
     throw new IngestionError("parse_failed");
@@ -36,24 +126,47 @@ function parseAmount(value: unknown): number {
   if (!Number.isFinite(parsed)) {
     throw new IngestionError("parse_failed");
   }
-  return Math.round(Math.abs(parsed) * 1000000) / 1000000;
+  if (allowZero ? parsed < 0 : parsed <= 0) {
+    throw new IngestionError("parse_failed");
+  }
+  return Math.round(parsed * 1000000) / 1000000;
+}
+
+function parseSignedDecimal(value: unknown): number {
+  const raw = String(value ?? "").replace(/,/g, "").trim();
+  if (!/^-?\d+(\.\d+)?$/.test(raw)) {
+    throw new IngestionError("parse_failed");
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed === 0) {
+    throw new IngestionError("parse_failed");
+  }
+  return Math.round(parsed * 1000000) / 1000000;
 }
 
 function parseDate(value: unknown): string {
   const raw = String(value ?? "").trim();
-  let date: Date;
+  let year: number;
+  let month: number;
+  let day: number;
   if (/^\d{8}$/.test(raw)) {
-    date = new Date(Date.UTC(
-      Number(raw.substring(0, 4)),
-      Number(raw.substring(4, 6)) - 1,
-      Number(raw.substring(6, 8)),
-    ));
+    year = Number(raw.substring(0, 4));
+    month = Number(raw.substring(4, 6));
+    day = Number(raw.substring(6, 8));
   } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    date = new Date(`${raw}T00:00:00Z`);
+    year = Number(raw.substring(0, 4));
+    month = Number(raw.substring(5, 7));
+    day = Number(raw.substring(8, 10));
   } else {
     throw new IngestionError("parse_failed");
   }
-  if (Number.isNaN(date.getTime())) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() + 1 !== month ||
+    date.getUTCDate() !== day
+  ) {
     throw new IngestionError("parse_failed");
   }
   return date.toISOString().slice(0, 10);
@@ -69,49 +182,80 @@ function getValue(record: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
+function normalizeCode(value: unknown): string {
+  const code = String(value ?? "").trim().toUpperCase();
+  if (code === "") throw new IngestionError("parse_failed");
+  return code.replace(/[\s/-]+/g, "_").replace(/_+/g, "_");
+}
+
+function lookupTransactionRule(
+  registrar: Registrar,
+  value: unknown,
+): TransactionCodeRule {
+  const code = normalizeCode(value);
+  const rule = transactionCodeRules[registrar][code];
+  if (rule == null) {
+    throw new IngestionError("parse_failed");
+  }
+  return rule;
+}
+
+function validateSignedMagnitude(
+  value: number,
+  rule: TransactionCodeRule,
+): number {
+  if (rule.sign === "positive" && value <= 0) {
+    throw new IngestionError("parse_failed");
+  }
+  if (rule.sign === "negative" && value >= 0) {
+    throw new IngestionError("parse_failed");
+  }
+  return Math.round(Math.abs(value) * 1000000) / 1000000;
+}
+
+function normalizedPan(value: unknown): string {
+  const pan = String(value ?? "").toUpperCase().trim();
+  if (!panPattern.test(pan)) {
+    throw new IngestionError("parse_failed");
+  }
+  return pan;
+}
+
 function normalizeTransaction(
   record: Record<string, unknown>,
   registrar: Registrar,
   sourceRowNumber: number,
 ): NormalizedTransaction {
-  const rawType = String(
-    getValue(record, ["TRX_TYPE", "TX_TYPE", "TYPE", "TR_TYPE"]) ?? "",
-  )
-    .toUpperCase();
-  const transactionType = rawType.includes("SWITCH") || rawType.includes("SWI")
-    ? "SWITCH"
-    : rawType.includes("SELL") || rawType.includes("RED") ||
-        rawType.includes("OUT")
-    ? "SELL"
-    : "BUY";
+  const aliases = fieldAliases[registrar];
+  const rule = lookupTransactionRule(
+    registrar,
+    getValue(record, aliases.transactionCode),
+  );
 
-  const units = parseAmount(
-    getValue(record, ["UNITS", "CLOS_BAL", "QTY", "UNIT_QTY"]),
+  const units = validateSignedMagnitude(
+    parseSignedDecimal(getValue(record, aliases.units)),
+    rule,
   );
-  const amount = parseAmount(
-    getValue(record, ["AMOUNT", "RUPEE_BAL", "AMT", "TRX_AMT"]),
+  const amount = validateSignedMagnitude(
+    parseSignedDecimal(getValue(record, aliases.amount)),
+    rule,
   );
-  const nav = parseAmount(getValue(record, ["NAV", "PRICE", "RATE"]));
-  const date = parseDate(
-    getValue(record, ["TRX_DATE", "TX_DATE", "DATE", "REP_DATE"]),
-  );
-  const clientPan = String(
-    getValue(record, ["PAN", "PAN_NO", "APPL_PAN"]) ?? "",
-  ).toUpperCase().trim();
+  const nav = parseDecimal(getValue(record, aliases.nav));
+  const date = parseDate(getValue(record, aliases.date));
+  const clientPan = normalizedPan(getValue(record, aliases.pan));
   const folioNumber = String(
-    getValue(record, ["FOLIO_NO", "FOLIOCHK", "FOLIO"]) ?? "",
+    getValue(record, aliases.folioNumber) ?? "",
   ).trim();
   const schemeCode = String(
-    getValue(record, ["SCHEME_CD", "PRODUCT", "SCH_CODE", "FM_CODE"]) ?? "",
+    getValue(record, aliases.schemeCode) ?? "",
   ).trim();
   const investorName = String(
-    getValue(record, ["INV_NAME", "HOLDER_NAME", "NAME", "INV_NM"]) ?? "",
+    getValue(record, aliases.investorName) ?? "",
   ).trim();
 
   if (
-    clientPan === "" || folioNumber === "" || schemeCode === "" ||
-    investorName === "" ||
-    units <= 0 || amount <= 0
+    folioNumber === "" || schemeCode === "" || investorName === "" ||
+    sourceRowNumber <= 0 || !Number.isInteger(sourceRowNumber)
   ) {
     throw new IngestionError("parse_failed");
   }
@@ -123,22 +267,22 @@ function normalizeTransaction(
     folioNumber,
     schemeCode,
     schemeName: String(
-      getValue(record, ["SCHEME_NM", "SCH_NAME", "SCHEME_NAME"]) ?? schemeCode,
+      getValue(record, aliases.schemeName) ?? schemeCode,
     ).trim(),
     fundHouse: String(
-      getValue(record, ["FUND_HOUSE", "AMC", "AMC_NAME"]) ?? "Mutual Fund",
+      getValue(record, aliases.fundHouse) ?? "Mutual Fund",
     ).trim(),
     category: String(
-      getValue(record, ["CATEGORY", "SCHEME_CAT"]) ?? "Mutual Fund",
+      getValue(record, aliases.category) ?? "Mutual Fund",
     ).trim(),
-    transactionType,
+    transactionType: rule.type,
     units,
     nav,
     amount,
     date,
     sourceRowNumber,
     registrarTransactionId:
-      String(getValue(record, ["TRX_ID", "TRAN_ID", "REGISTRAR_TXN_ID"]) ?? "")
+      String(getValue(record, aliases.registrarTransactionId) ?? "")
         .trim() ||
       undefined,
   };
@@ -208,26 +352,6 @@ function parseDbf(bytes: Uint8Array): Record<string, unknown>[] {
   return records;
 }
 
-function parseDelimitedText(text: string): Record<string, unknown>[] {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length < 2) {
-    throw new IngestionError("parse_failed");
-  }
-  const delimiter = lines[0].includes("|") ? "|" : ",";
-  const headers = lines[0].split(delimiter).map((header) => header.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(delimiter).map((value) => value.trim());
-    if (values.length !== headers.length) {
-      throw new IngestionError("parse_failed");
-    }
-    const record: Record<string, unknown> = {};
-    headers.forEach((header, index) => {
-      record[header] = values[index];
-    });
-    return record;
-  });
-}
-
 abstract class BaseRegistrarParser implements StatementParser {
   abstract readonly registrar: Registrar;
 
@@ -240,7 +364,7 @@ abstract class BaseRegistrarParser implements StatementParser {
 
     const records = input.fileType === "DBF"
       ? parseDbf(input.bytes)
-      : parseDelimitedText(await this.extractPdfText(input.bytes));
+      : await this.extractPdfRows(input);
 
     const parsed = records.map((record, index) =>
       normalizeTransaction(record, this.registrar, index + 1)
@@ -251,11 +375,13 @@ abstract class BaseRegistrarParser implements StatementParser {
     return parsed;
   }
 
-  private async extractPdfText(bytes: Uint8Array): Promise<string> {
+  private async extractPdfRows(
+    input: ParseInput,
+  ): Promise<Record<string, unknown>[]> {
     if (this.pdfTextExtractor == null) {
       throw new IngestionError("unsupported_statement_format");
     }
-    return await this.pdfTextExtractor.extractText(bytes, this.registrar);
+    return await this.pdfTextExtractor.extractRows(input);
   }
 }
 
@@ -285,8 +411,9 @@ export class ParserRegistry {
 
 export function createSyntheticDbf(
   records: Record<string, string>[],
+  fields?: DbfField[],
 ): Uint8Array {
-  const fields = [
+  const dbfFields = fields ?? [
     { name: "PAN", type: "C", length: 10 },
     { name: "INV_NAME", type: "C", length: 24 },
     { name: "FOLIO_NO", type: "C", length: 16 },
@@ -300,8 +427,9 @@ export function createSyntheticDbf(
     { name: "AMOUNT", type: "N", length: 14 },
     { name: "TRX_DATE", type: "C", length: 8 },
   ];
-  const headerLength = 32 + fields.length * 32 + 1;
-  const recordLength = 1 + fields.reduce((sum, field) => sum + field.length, 0);
+  const headerLength = 32 + dbfFields.length * 32 + 1;
+  const recordLength = 1 +
+    dbfFields.reduce((sum, field) => sum + field.length, 0);
   const bytes = new Uint8Array(headerLength + recordLength * records.length);
   const view = new DataView(bytes.buffer);
   bytes[0] = 0x03;
@@ -311,7 +439,7 @@ export function createSyntheticDbf(
 
   const encoder = new TextEncoder();
   let offset = 32;
-  for (const field of fields) {
+  for (const field of dbfFields) {
     bytes.set(encoder.encode(field.name).subarray(0, 11), offset);
     bytes[offset + 11] = field.type.charCodeAt(0);
     bytes[offset + 16] = field.length;
@@ -323,7 +451,7 @@ export function createSyntheticDbf(
     let recordOffset = headerLength + recordIndex * recordLength;
     bytes[recordOffset] = 0x20;
     recordOffset += 1;
-    for (const field of fields) {
+    for (const field of dbfFields) {
       const value = (record[field.name] ?? "").padEnd(field.length, " ").slice(
         0,
         field.length,

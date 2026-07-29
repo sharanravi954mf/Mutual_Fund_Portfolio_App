@@ -49,24 +49,59 @@ export function camsDbfFixture(
   }]);
 }
 
+export function camsDbfFixtureWithRows(
+  records: Record<string, string>[],
+): Uint8Array {
+  return createSyntheticDbf(records.map((record) => ({
+    PAN: "ABCDE1234F",
+    INV_NAME: "Issue Investor",
+    FOLIO_NO: "FOLIO1001",
+    SCHEME_CD: "CAMS001",
+    SCHEME_NM: "CAMS Equity Fund",
+    FUND_HOUSE: "CAMS AMC",
+    CATEGORY: "Equity",
+    TRX_TYPE: "BUY",
+    UNITS: "12.5000",
+    NAV: "20.0000",
+    AMOUNT: "250.00",
+    TRX_DATE: "20260729",
+    ...record,
+  })));
+}
+
 export function kfintechDbfFixture(
   overrides: Record<string, string> = {},
 ): Uint8Array {
   return createSyntheticDbf([{
-    PAN: "FGHIJ5678K",
-    INV_NAME: "KFin Investor",
-    FOLIO_NO: "KFOLIO1001",
-    SCHEME_CD: "KFIN001",
-    SCHEME_NM: "KFin Debt Fund",
-    FUND_HOUSE: "KFin AMC",
-    CATEGORY: "Debt",
-    TRX_TYPE: "SELL",
-    UNITS: "5.0000",
-    NAV: "10.0000",
-    AMOUNT: "50.00",
-    TRX_DATE: "20260729",
+    PAN1: "FGHIJ5678K",
+    INVNAME: "KFin Investor",
+    ACNO: "KFOLIO1001",
+    FUNDCODE: "KFIN001",
+    FUND_DESC: "KFin Debt Fund",
+    AMC_CODE: "KFin AMC",
+    ASSETTYPE: "Debt",
+    TD_TRTYPE: "R",
+    TD_UNITS: "-5.0000",
+    TD_NAV: "10.0000",
+    TD_AMT: "-50.00",
+    TD_TRDATE: "20260729",
+    TD_TRNO: "KFIN-TXN-1",
     ...overrides,
-  }]);
+  }], [
+    { name: "PAN1", type: "C", length: 10 },
+    { name: "INVNAME", type: "C", length: 24 },
+    { name: "ACNO", type: "C", length: 16 },
+    { name: "FUNDCODE", type: "C", length: 12 },
+    { name: "FUND_DESC", type: "C", length: 32 },
+    { name: "AMC_CODE", type: "C", length: 28 },
+    { name: "ASSETTYPE", type: "C", length: 18 },
+    { name: "TD_TRTYPE", type: "C", length: 22 },
+    { name: "TD_UNITS", type: "N", length: 14 },
+    { name: "TD_NAV", type: "N", length: 12 },
+    { name: "TD_AMT", type: "N", length: 14 },
+    { name: "TD_TRDATE", type: "C", length: 8 },
+    { name: "TD_TRNO", type: "C", length: 16 },
+  ]);
 }
 
 export function syntheticCasPdfFixture(): Uint8Array {

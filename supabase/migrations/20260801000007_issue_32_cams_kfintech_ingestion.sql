@@ -96,7 +96,8 @@ ALTER TABLE public.transactions
   ADD COLUMN IF NOT EXISTS source_document_id pg_catalog.uuid REFERENCES public.ingested_documents(id) ON DELETE RESTRICT,
   ADD COLUMN IF NOT EXISTS source_row_number pg_catalog.int4,
   ADD COLUMN IF NOT EXISTS source_attachment_sha256 pg_catalog.text,
-  ADD COLUMN IF NOT EXISTS registrar_transaction_id pg_catalog.text;
+  ADD COLUMN IF NOT EXISTS registrar_transaction_id pg_catalog.text,
+  ADD COLUMN IF NOT EXISTS source_folio_reference_id pg_catalog.uuid REFERENCES public.folio_references(id) ON DELETE RESTRICT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS registrar_configs_global_registrar_uidx
   ON public.registrar_configs(registrar)
@@ -115,6 +116,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS ingestion_logs_failure_attempt_uidx
 CREATE UNIQUE INDEX IF NOT EXISTS transactions_source_document_row_uidx
   ON public.transactions(source_document_id, source_row_number)
   WHERE source_document_id IS NOT NULL AND source_row_number IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_source_document_registrar_txn_uidx
+  ON public.transactions(source_document_id, registrar_transaction_id)
+  WHERE source_document_id IS NOT NULL AND registrar_transaction_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS portfolio_folio_references_folio_uidx
+  ON public.portfolio_folio_references(folio_reference_id);
+
+CREATE INDEX IF NOT EXISTS transactions_source_folio_reference_idx
+  ON public.transactions(source_folio_reference_id)
+  WHERE source_folio_reference_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS event_outbox_statement_imported_uidx
   ON public.event_outbox(entity_type, entity_id, event_type)
@@ -446,12 +458,20 @@ DECLARE
   v_outbox_id pg_catalog.uuid;
   v_tx jsonb;
   v_profile_id pg_catalog.uuid;
+  v_profile_count pg_catalog.int4;
+  v_workspace_count pg_catalog.int4;
   v_fund_id pg_catalog.uuid;
   v_portfolio_id pg_catalog.uuid;
-  v_transaction_id pg_catalog.uuid;
+  v_portfolio_count pg_catalog.int4;
+  v_folio_reference_id pg_catalog.uuid;
   v_normalized_pan pg_catalog.text;
+  v_normalized_folio pg_catalog.text;
   v_pan_hmac bytea;
   v_row_number pg_catalog.int4 := 0;
+  v_source_row_number pg_catalog.int4;
+  v_registrar_transaction_id pg_catalog.text;
+  v_seen_source_rows pg_catalog.int4[] := ARRAY[]::pg_catalog.int4[];
+  v_seen_registrar_transactions pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
   v_count pg_catalog.int4 := 0;
   v_expected_count pg_catalog.int4;
 BEGIN
@@ -589,19 +609,40 @@ BEGIN
 
   FOR v_tx IN SELECT * FROM pg_catalog.jsonb_array_elements(p_transactions) LOOP
     v_row_number := v_row_number + 1;
+    v_profile_id := NULL;
+    v_portfolio_id := NULL;
+    v_folio_reference_id := NULL;
+    v_registrar_transaction_id := NULL;
 
     IF COALESCE(v_tx ->> 'folioNumber', '') = ''
        OR COALESCE(v_tx ->> 'schemeCode', '') = ''
        OR COALESCE(v_tx ->> 'transactionType', '') NOT IN ('BUY', 'SELL', 'SWITCH')
        OR COALESCE(v_tx ->> 'date', '') = ''
        OR COALESCE(v_tx ->> 'clientPan', '') = ''
+       OR COALESCE(v_tx ->> 'sourceRowNumber', '') !~ '^[0-9]+$'
        OR COALESCE(v_tx ->> 'amount', '') !~ '^[0-9]+(\.[0-9]+)?$'
        OR COALESCE(v_tx ->> 'units', '') !~ '^[0-9]+(\.[0-9]+)?$'
        OR COALESCE(v_tx ->> 'nav', '') !~ '^[0-9]+(\.[0-9]+)?$'
        OR (v_tx ->> 'amount')::pg_catalog.numeric <= 0
        OR (v_tx ->> 'units')::pg_catalog.numeric <= 0
-       OR (v_tx ->> 'nav')::pg_catalog.numeric < 0 THEN
+       OR (v_tx ->> 'nav')::pg_catalog.numeric <= 0 THEN
       RAISE EXCEPTION 'parse_failed';
+    END IF;
+    v_source_row_number := (v_tx ->> 'sourceRowNumber')::pg_catalog.int4;
+    IF v_source_row_number <= 0 THEN
+      RAISE EXCEPTION 'parse_failed';
+    END IF;
+    IF v_source_row_number = ANY(v_seen_source_rows) THEN
+      RAISE EXCEPTION 'persistence_conflict';
+    END IF;
+    v_seen_source_rows := pg_catalog.array_append(v_seen_source_rows, v_source_row_number);
+
+    v_registrar_transaction_id := NULLIF(pg_catalog.btrim(COALESCE(v_tx ->> 'registrarTransactionId', '')), '');
+    IF v_registrar_transaction_id IS NOT NULL THEN
+      IF v_registrar_transaction_id = ANY(v_seen_registrar_transactions) THEN
+        RAISE EXCEPTION 'persistence_conflict';
+      END IF;
+      v_seen_registrar_transactions := pg_catalog.array_append(v_seen_registrar_transactions, v_registrar_transaction_id);
     END IF;
 
     v_normalized_pan := public.normalize_pan(v_tx ->> 'clientPan');
@@ -612,38 +653,44 @@ BEGIN
     v_pan_hmac := extensions.hmac(v_normalized_pan, public.pan_lookup_hmac_key(), 'sha256');
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(pg_catalog.encode(v_pan_hmac, 'hex'), 0));
 
-    SELECT pan_record.profile_id
-    INTO v_profile_id
+    SELECT pg_catalog.count(DISTINCT profile.id)::pg_catalog.int4
+    INTO v_profile_count
     FROM public.profile_pan_records AS pan_record
+    JOIN public.profiles AS profile
+      ON profile.id = pan_record.profile_id
+     AND profile.canonical_pan_record_id = pan_record.id
     WHERE pan_record.pan_lookup_hmac = v_pan_hmac
-      AND pan_record.status IN ('OBSERVED', 'VERIFIED')
-    ORDER BY pan_record.created_at ASC
-    LIMIT 1;
+      AND pan_record.status = 'VERIFIED'
+      AND profile.role IN ('client', 'investor');
 
-    IF v_profile_id IS NULL THEN
-      INSERT INTO public.profiles (id, full_name, role)
-      VALUES (pg_catalog.gen_random_uuid(), COALESCE(v_tx ->> 'investorName', 'Imported Investor'), 'investor')
-      RETURNING id INTO v_profile_id;
+    IF v_profile_count = 0 THEN
+      RAISE EXCEPTION 'investor_mapping_unresolved';
+    ELSIF v_profile_count > 1 THEN
+      RAISE EXCEPTION 'investor_mapping_ambiguous';
     END IF;
 
-    INSERT INTO public.profile_pan_records (
-      profile_id,
-      pan_ciphertext,
-      pan_lookup_hmac,
-      masked_pan,
-      source,
-      source_system,
-      status
-    ) VALUES (
-      v_profile_id,
-      extensions.pgp_sym_encrypt(v_normalized_pan, public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
-      v_pan_hmac,
-      public.mask_pan(v_normalized_pan),
-      'IMPORT',
-      p_registrar,
-      'OBSERVED'
-    )
-    ON CONFLICT (profile_id, pan_lookup_hmac) WHERE pan_lookup_hmac IS NOT NULL DO NOTHING;
+    SELECT profile.id
+    INTO v_profile_id
+    FROM public.profile_pan_records AS pan_record
+    JOIN public.profiles AS profile
+      ON profile.id = pan_record.profile_id
+     AND profile.canonical_pan_record_id = pan_record.id
+    WHERE pan_record.pan_lookup_hmac = v_pan_hmac
+      AND pan_record.status = 'VERIFIED'
+      AND profile.role IN ('client', 'investor');
+
+    SELECT pg_catalog.count(*)::pg_catalog.int4
+    INTO v_workspace_count
+    FROM public.workspace_memberships AS membership
+    WHERE membership.workspace_id = p_workspace_id
+      AND membership.profile_id = v_profile_id
+      AND membership.status = 'active'
+      AND membership.ended_at IS NULL
+      AND membership.role IN ('investor', 'client');
+
+    IF v_workspace_count <> 1 THEN
+      RAISE EXCEPTION 'investor_workspace_relationship_required';
+    END IF;
 
     INSERT INTO public.mutual_funds (
       scheme_code,
@@ -657,23 +704,66 @@ BEGIN
       COALESCE(v_tx ->> 'schemeName', v_tx ->> 'schemeCode'),
       COALESCE(v_tx ->> 'fundHouse', 'Mutual Fund'),
       COALESCE(v_tx ->> 'category', 'Mutual Fund'),
-      (v_tx ->> 'nav')::pg_catalog.numeric,
-      (v_tx ->> 'date')::pg_catalog.date
+      0,
+      COALESCE(p_received_at, pg_catalog.now())::pg_catalog.date
     )
     ON CONFLICT (scheme_code) DO UPDATE
     SET scheme_name = EXCLUDED.scheme_name,
-        current_nav = EXCLUDED.current_nav,
-        nav_date = EXCLUDED.nav_date
+        fund_house = COALESCE(public.mutual_funds.fund_house, EXCLUDED.fund_house),
+        category = COALESCE(public.mutual_funds.category, EXCLUDED.category)
     RETURNING id INTO v_fund_id;
 
-    SELECT portfolio.id
-    INTO v_portfolio_id
-    FROM public.portfolios AS portfolio
-    WHERE portfolio.client_id = v_profile_id
-      AND portfolio.workspace_id = p_workspace_id
-    LIMIT 1;
+    v_normalized_folio := pg_catalog.upper(pg_catalog.regexp_replace(v_tx ->> 'folioNumber', '[^A-Za-z0-9]', '', 'g'));
+    IF v_normalized_folio = '' THEN
+      RAISE EXCEPTION 'parse_failed';
+    END IF;
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(p_registrar || ':' || v_normalized_folio, 0)
+    );
 
-    IF v_portfolio_id IS NULL THEN
+    INSERT INTO public.folio_references (
+      registrar,
+      normalized_folio_number,
+      amc_identity,
+      source_folio_masked
+    ) VALUES (
+      p_registrar,
+      v_normalized_folio,
+      COALESCE(v_tx ->> 'fundHouse', p_registrar),
+      '****' || pg_catalog.right(v_normalized_folio, 4)
+    )
+    ON CONFLICT (registrar, normalized_folio_number) DO NOTHING;
+
+    SELECT folio.id
+    INTO v_folio_reference_id
+    FROM public.folio_references AS folio
+    WHERE folio.registrar = p_registrar
+      AND folio.normalized_folio_number = v_normalized_folio
+    FOR UPDATE;
+
+    IF v_folio_reference_id IS NULL THEN
+      RAISE EXCEPTION 'folio_relationship_conflict';
+    END IF;
+
+    SELECT pg_catalog.count(*)::pg_catalog.int4
+    INTO v_portfolio_count
+    FROM public.portfolio_folio_references AS mapping
+    WHERE mapping.folio_reference_id = v_folio_reference_id;
+
+    IF v_portfolio_count > 0 THEN
+      SELECT portfolio.id
+      INTO v_portfolio_id
+      FROM public.portfolio_folio_references AS mapping
+      JOIN public.portfolios AS portfolio
+        ON portfolio.id = mapping.portfolio_id
+      WHERE mapping.folio_reference_id = v_folio_reference_id
+        AND portfolio.client_id = v_profile_id
+        AND portfolio.workspace_id = p_workspace_id;
+
+      IF v_portfolio_id IS NULL THEN
+        RAISE EXCEPTION 'folio_relationship_conflict';
+      END IF;
+    ELSE
       INSERT INTO public.portfolios (
         client_id,
         workspace_id,
@@ -686,44 +776,56 @@ BEGIN
         0.00
       )
       RETURNING id INTO v_portfolio_id;
+
+      INSERT INTO public.portfolio_folio_references (
+        portfolio_id,
+        folio_reference_id
+      ) VALUES (
+        v_portfolio_id,
+        v_folio_reference_id
+      );
     END IF;
 
-    INSERT INTO public.transactions (
-      portfolio_id,
-      mutual_fund_id,
-      transaction_type,
-      units,
-      nav_at_transaction,
-      amount,
-      execution_date,
-      registrar,
-      source_document_id,
-      source_row_number,
-      source_attachment_sha256,
-      registrar_transaction_id
-    ) VALUES (
-      v_portfolio_id,
-      v_fund_id,
-      v_tx ->> 'transactionType',
-      (v_tx ->> 'units')::pg_catalog.numeric,
-      (v_tx ->> 'nav')::pg_catalog.numeric,
-      (v_tx ->> 'amount')::pg_catalog.numeric,
-      (v_tx ->> 'date')::pg_catalog.date,
-      p_registrar,
-      v_document_id,
-      COALESCE((v_tx ->> 'sourceRowNumber')::pg_catalog.int4, v_row_number),
-      p_attachment_sha256,
-      NULLIF(v_tx ->> 'registrarTransactionId', '')
-    )
-    ON CONFLICT (source_document_id, source_row_number)
-      WHERE source_document_id IS NOT NULL AND source_row_number IS NOT NULL DO NOTHING
-    RETURNING id INTO v_transaction_id;
+    BEGIN
+      INSERT INTO public.transactions (
+        portfolio_id,
+        mutual_fund_id,
+        transaction_type,
+        units,
+        nav_at_transaction,
+        amount,
+        execution_date,
+        registrar,
+        source_document_id,
+        source_row_number,
+        source_attachment_sha256,
+        registrar_transaction_id,
+        source_folio_reference_id
+      ) VALUES (
+        v_portfolio_id,
+        v_fund_id,
+        v_tx ->> 'transactionType',
+        (v_tx ->> 'units')::pg_catalog.numeric,
+        (v_tx ->> 'nav')::pg_catalog.numeric,
+        (v_tx ->> 'amount')::pg_catalog.numeric,
+        (v_tx ->> 'date')::pg_catalog.date,
+        p_registrar,
+        v_document_id,
+        v_source_row_number,
+        p_attachment_sha256,
+        v_registrar_transaction_id,
+        v_folio_reference_id
+      );
+    EXCEPTION WHEN unique_violation THEN
+      RAISE EXCEPTION 'persistence_conflict';
+    END;
 
-    IF v_transaction_id IS NOT NULL THEN
-      v_count := v_count + 1;
-      PERFORM public.recalculate_portfolio_value(v_portfolio_id);
-    END IF;
+    v_count := v_count + 1;
   END LOOP;
+
+  IF v_count <> v_expected_count THEN
+    RAISE EXCEPTION 'persistence_conflict';
+  END IF;
 
   INSERT INTO public.ingestion_logs (
     completed_at,

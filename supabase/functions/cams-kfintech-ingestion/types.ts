@@ -15,6 +15,10 @@ export type FailureCode =
   | "correlation_conflict"
   | "previous_ingestion_failed"
   | "processing_incomplete"
+  | "investor_mapping_unresolved"
+  | "investor_mapping_ambiguous"
+  | "investor_workspace_relationship_required"
+  | "folio_relationship_conflict"
   | "configuration_ambiguous"
   | "connector_untrusted_origin"
   | "credential_refresh_failed"
@@ -24,10 +28,14 @@ export type FailureCode =
   | "malware_scan_unavailable"
   | "encrypted_storage_write_failed"
   | "encrypted_storage_read_failed"
+  | "storage_object_conflict"
+  | "stored_object_hash_mismatch"
+  | "stored_object_size_mismatch"
   | "unsupported_registrar"
   | "unsupported_statement_format"
   | "statement_decryption_failed"
   | "parse_failed"
+  | "persistence_conflict"
   | "persistence_failed";
 
 export class IngestionError extends Error {

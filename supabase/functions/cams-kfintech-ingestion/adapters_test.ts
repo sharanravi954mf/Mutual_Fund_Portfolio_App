@@ -1,11 +1,14 @@
 import {
   assertEquals,
   assertRejects,
+  assertThrows,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
 import {
   ConnectorCredentialRefresher,
   ConnectorMailboxClient,
   CredentialEnvelopeCrypto,
+  HttpMalwareScanner,
+  RemotePdfTextExtractor,
 } from "./adapters.ts";
 import { IngestionError, type IngestionRunContext } from "./types.ts";
 
@@ -51,6 +54,15 @@ function response(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     status: init.status ?? 200,
     headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+  });
+}
+
+function delayedFetch(signal?: AbortSignal): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    signal?.addEventListener(
+      "abort",
+      () => reject(new DOMException("aborted", "AbortError")),
+    );
   });
 }
 
@@ -298,6 +310,297 @@ Deno.test("trusted connector credential refresher returns refreshed OAuth bundle
     assertEquals(refreshed.accessToken, "new-access");
     assertEquals(refreshed.refreshToken, "new-refresh");
     assertEquals(refreshed.expiresAt, "2026-07-29T01:00:00Z");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("malware scanner validates URL token redirect timeout and schema", async () => {
+  assertThrows(
+    () => new HttpMalwareScanner("http://scanner.example", "t", 1),
+    IngestionError,
+  );
+  assertThrows(
+    () => new HttpMalwareScanner("https://scanner.example", "", 1),
+    IngestionError,
+    "malware_scan_unavailable",
+  );
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = () =>
+      Promise.resolve(new Response(null, { status: 302 }));
+    await assertRejects(
+      () =>
+        new HttpMalwareScanner("https://scanner.example", "scanner-token", 10)
+          .scan(new Uint8Array([1]), {
+            sha256Hex: "a".repeat(64),
+            filename: "a.dbf",
+          }),
+      IngestionError,
+      "malware_scan_unavailable",
+    );
+
+    globalThis.fetch = (_input, init) =>
+      delayedFetch((init as { signal?: AbortSignal }).signal);
+    await assertRejects(
+      () =>
+        new HttpMalwareScanner("https://scanner.example", "scanner-token", 1)
+          .scan(new Uint8Array([1]), {
+            sha256Hex: "a".repeat(64),
+            filename: "a.dbf",
+          }),
+      IngestionError,
+      "malware_scan_unavailable",
+    );
+
+    for (
+      const payload of [
+        { version: "unknown", verdict: "clean" },
+        { version: "moneybowl.malware-scan.v1", verdict: "mystery" },
+      ]
+    ) {
+      globalThis.fetch = () => Promise.resolve(response(payload));
+      await assertRejects(
+        () =>
+          new HttpMalwareScanner("https://scanner.example", "scanner-token", 10)
+            .scan(new Uint8Array([1]), {
+              sha256Hex: "a".repeat(64),
+              filename: "a.dbf",
+            }),
+        IngestionError,
+        "malware_scan_unavailable",
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("malware scanner handles non-2xx oversized malformed clean and infected responses", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = () => Promise.resolve(response({}, { status: 500 }));
+    await assertRejects(
+      () =>
+        new HttpMalwareScanner("https://scanner.example", "scanner-token", 10)
+          .scan(new Uint8Array([1]), {
+            sha256Hex: "a".repeat(64),
+            filename: "a.dbf",
+          }),
+      IngestionError,
+      "malware_scan_unavailable",
+    );
+
+    globalThis.fetch = () =>
+      Promise.resolve(
+        response({ version: "moneybowl.malware-scan.v1", verdict: "clean" }),
+      );
+    await assertRejects(
+      () =>
+        new HttpMalwareScanner(
+          "https://scanner.example",
+          "scanner-token",
+          10,
+          2,
+        )
+          .scan(new Uint8Array([1]), {
+            sha256Hex: "a".repeat(64),
+            filename: "a.dbf",
+          }),
+      IngestionError,
+      "malware_scan_unavailable",
+    );
+
+    globalThis.fetch = () => Promise.resolve(new Response("{"));
+    await assertRejects(
+      () =>
+        new HttpMalwareScanner("https://scanner.example", "scanner-token", 10)
+          .scan(new Uint8Array([1]), {
+            sha256Hex: "a".repeat(64),
+            filename: "a.dbf",
+          }),
+      IngestionError,
+      "malware_scan_unavailable",
+    );
+
+    globalThis.fetch = (_input, init) => {
+      const headers = (init as { headers?: Record<string, string> }).headers;
+      assertEquals(headers?.Authorization, "Bearer scanner-token");
+      return Promise.resolve(response({
+        version: "moneybowl.malware-scan.v1",
+        verdict: "clean",
+      }));
+    };
+    assertEquals(
+      await new HttpMalwareScanner(
+        "https://scanner.example",
+        "scanner-token",
+        10,
+      )
+        .scan(new Uint8Array([1]), {
+          sha256Hex: "a".repeat(64),
+          filename: "a.dbf",
+        }),
+      "clean",
+    );
+
+    globalThis.fetch = () =>
+      Promise.resolve(response({
+        version: "moneybowl.malware-scan.v1",
+        verdict: "infected",
+      }));
+    await assertRejects(
+      () =>
+        new HttpMalwareScanner("https://scanner.example", "scanner-token", 10)
+          .scan(new Uint8Array([1]), {
+            sha256Hex: "a".repeat(64),
+            filename: "a.dbf",
+          }),
+      IngestionError,
+      "malware_detected",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("PDF extractor validates URL token redirect timeout schema registrar and rows", async () => {
+  assertThrows(
+    () => new RemotePdfTextExtractor("http://extractor.example", "t", 1, 1024),
+    IngestionError,
+  );
+  assertThrows(
+    () => new RemotePdfTextExtractor("https://extractor.example", "", 1, 1024),
+    IngestionError,
+    "unsupported_statement_format",
+  );
+
+  const originalFetch = globalThis.fetch;
+  const pdf = new TextEncoder().encode("%PDF-1.7\nbody\n%%EOF");
+  try {
+    globalThis.fetch = () =>
+      Promise.resolve(new Response(null, { status: 302 }));
+    await assertRejects(
+      () =>
+        new RemotePdfTextExtractor(
+          "https://extractor.example",
+          "extractor-token",
+          10,
+          1024,
+        )
+          .extractRows({
+            registrar: "CAMS",
+            fileType: "CAS_PDF",
+            filename: "cas.pdf",
+            bytes: pdf,
+          }),
+      IngestionError,
+      "parse_failed",
+    );
+
+    globalThis.fetch = (_input, init) =>
+      delayedFetch((init as { signal?: AbortSignal }).signal);
+    await assertRejects(
+      () =>
+        new RemotePdfTextExtractor(
+          "https://extractor.example",
+          "extractor-token",
+          1,
+          1024,
+        )
+          .extractRows({
+            registrar: "CAMS",
+            fileType: "CAS_PDF",
+            filename: "cas.pdf",
+            bytes: pdf,
+          }),
+      IngestionError,
+      "parse_failed",
+    );
+
+    for (
+      const payload of [
+        {
+          version: "unknown",
+          registrar: "CAMS",
+          statement_format: "CAS_PDF",
+          rows: [],
+        },
+        {
+          version: "moneybowl.pdf-extraction.v1",
+          registrar: "KFINTECH",
+          statement_format: "CAS_PDF",
+          rows: [],
+        },
+        {
+          version: "moneybowl.pdf-extraction.v1",
+          registrar: "CAMS",
+          statement_format: "CAS_PDF",
+          rows: ["bad"],
+        },
+      ]
+    ) {
+      globalThis.fetch = () => Promise.resolve(response(payload));
+      await assertRejects(
+        () =>
+          new RemotePdfTextExtractor(
+            "https://extractor.example",
+            "extractor-token",
+            10,
+            1024,
+          )
+            .extractRows({
+              registrar: "CAMS",
+              fileType: "CAS_PDF",
+              filename: "cas.pdf",
+              bytes: pdf,
+            }),
+        IngestionError,
+        "parse_failed",
+      );
+    }
+
+    globalThis.fetch = (_input, init) => {
+      const headers = (init as { headers?: Record<string, string> }).headers;
+      assertEquals(headers?.Authorization, "Bearer extractor-token");
+      return Promise.resolve(response({
+        version: "moneybowl.pdf-extraction.v1",
+        registrar: "CAMS",
+        statement_format: "CAS_PDF",
+        rows: [{ PAN: "ABCDE1234F" }],
+      }));
+    };
+    const rows = await new RemotePdfTextExtractor(
+      "https://extractor.example",
+      "extractor-token",
+      10,
+      1024,
+    ).extractRows({
+      registrar: "CAMS",
+      fileType: "CAS_PDF",
+      filename: "cas.pdf",
+      bytes: pdf,
+    });
+    assertEquals(rows, [{ PAN: "ABCDE1234F" }]);
+
+    await assertRejects(
+      () =>
+        new RemotePdfTextExtractor(
+          "https://extractor.example",
+          "extractor-token",
+          10,
+          1024,
+        )
+          .extractRows({
+            registrar: "CAMS",
+            fileType: "CAS_PDF",
+            filename: "truncated.pdf",
+            bytes: new TextEncoder().encode("%PDF-1.7"),
+          }),
+      IngestionError,
+      "unsupported_statement_format",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

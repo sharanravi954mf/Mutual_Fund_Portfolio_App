@@ -57,6 +57,32 @@ VALUES
   ('93200000-0000-0000-0000-000000000002', '93300000-0000-0000-0000-000000000002', 'verified_email', now(), 'active'),
   ('93200000-0000-0000-0000-000000000003', '93300000-0000-0000-0000-000000000003', 'verified_email', now(), 'active');
 
+INSERT INTO public.profile_pan_records (
+  id,
+  profile_id,
+  pan_ciphertext,
+  pan_lookup_hmac,
+  masked_pan,
+  source,
+  source_system,
+  status,
+  verified_at
+) VALUES (
+  '93210000-0000-0000-0000-000000000001',
+  '93300000-0000-0000-0000-000000000002',
+  extensions.pgp_sym_encrypt('ABCDE1234F', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
+  extensions.hmac('ABCDE1234F', public.pan_lookup_hmac_key(), 'sha256'),
+  public.mask_pan('ABCDE1234F'),
+  'INVESTOR',
+  'MANUAL',
+  'VERIFIED',
+  now()
+);
+
+UPDATE public.profiles
+SET canonical_pan_record_id = '93210000-0000-0000-0000-000000000001'
+WHERE id = '93300000-0000-0000-0000-000000000002';
+
 INSERT INTO public.family_delegations (id, workspace_id, owner_profile_id, delegate_profile_id, consent_status, is_active, expires_at)
 VALUES (
   '93500000-0000-0000-0000-000000000001',
@@ -322,6 +348,28 @@ EXCEPTION
     NULL;
 END;
 $$;
+
+RESET ROLE;
+
+INSERT INTO public.mutual_funds (
+  id,
+  scheme_code,
+  scheme_name,
+  fund_house,
+  category,
+  current_nav,
+  nav_date
+) VALUES (
+  '93220000-0000-0000-0000-000000000001',
+  'MF32A',
+  'Issue 32 Existing Growth Fund',
+  'Money Bowl AMC',
+  'Equity',
+  999.0000,
+  '2026-01-01'
+);
+
+SET ROLE service_role;
 
 SELECT *
 FROM public.persist_cams_kfintech_statement_ingestion(
@@ -691,6 +739,27 @@ BEGIN
     RAISE EXCEPTION 'statement.imported event count is wrong: %', v_count;
   END IF;
 
+  IF EXISTS (
+    SELECT 1
+    FROM public.mutual_funds
+    WHERE scheme_code = 'MF32A'
+      AND (current_nav <> 999.0000 OR nav_date <> '2026-01-01'::pg_catalog.date)
+  ) THEN
+    RAISE EXCEPTION 'historical statement NAV overwrote current mutual_funds NAV/date';
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
+  FROM public.transactions AS transaction
+  JOIN public.folio_references AS folio
+    ON folio.id = transaction.source_folio_reference_id
+  WHERE transaction.source_document_id IS NOT NULL
+    AND folio.registrar = 'CAMS'
+    AND folio.normalized_folio_number IN ('FOLIO32A', 'FOLIO32B');
+
+  IF v_count <> 2 THEN
+    RAISE EXCEPTION 'folio lineage is not visible from imported transactions: %', v_count;
+  END IF;
+
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_count
   FROM public.ingestion_logs
   WHERE attachment_attempt_key LIKE '%provider-attachment-failed%'
@@ -726,5 +795,261 @@ BEGIN
   END;
 END;
 $$;
+
+SET ROLE service_role;
+DO $$
+BEGIN
+  PERFORM *
+  FROM public.persist_cams_kfintech_statement_ingestion(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000300',
+    '93900000-0000-0000-0000-000000000301',
+    'provider-message-negative',
+    'provider-attachment-no-pan',
+    'no-pan-attempt',
+    'CAMS',
+    repeat('1', 64),
+    'ingested-documents',
+    'negative/no-pan',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    '2026-07-29T00:00:00Z',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ZZZZZ9999Z',
+      'investorName', 'No Mapping',
+      'folioNumber', 'FOLIO-NO-PAN',
+      'schemeCode', 'MF32NEG',
+      'transactionType', 'BUY',
+      'units', 1,
+      'nav', 1,
+      'amount', 1,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1
+    ))
+  );
+  RAISE EXCEPTION 'missing PAN mapping was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%investor_mapping_unresolved%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM *
+  FROM public.persist_cams_kfintech_statement_ingestion(
+    '93400000-0000-0000-0000-000000000002',
+    '93700000-0000-0000-0000-000000000002',
+    '93900000-0000-0000-0000-000000000300',
+    '93900000-0000-0000-0000-000000000302',
+    'provider-message-negative',
+    'provider-attachment-wrong-workspace',
+    'wrong-workspace-attempt',
+    'CAMS',
+    repeat('2', 64),
+    'ingested-documents',
+    'negative/wrong-workspace',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    '2026-07-29T00:00:00Z',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Wrong Workspace',
+      'folioNumber', 'FOLIO-WRONG-WS',
+      'schemeCode', 'MF32NEG',
+      'transactionType', 'BUY',
+      'units', 1,
+      'nav', 1,
+      'amount', 1,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1
+    ))
+  );
+  RAISE EXCEPTION 'investor outside target workspace was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%investor_workspace_relationship_required%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+RESET ROLE;
+
+INSERT INTO public.profile_pan_records (
+  id,
+  profile_id,
+  pan_ciphertext,
+  pan_lookup_hmac,
+  masked_pan,
+  source,
+  source_system,
+  status,
+  verified_at
+) VALUES (
+  '93210000-0000-0000-0000-000000000002',
+  '93300000-0000-0000-0000-000000000003',
+  extensions.pgp_sym_encrypt('ABCDE1234F', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
+  extensions.hmac('ABCDE1234F', public.pan_lookup_hmac_key(), 'sha256'),
+  public.mask_pan('ABCDE1234F'),
+  'INVESTOR',
+  'MANUAL',
+  'VERIFIED',
+  now()
+);
+
+UPDATE public.profiles
+SET canonical_pan_record_id = '93210000-0000-0000-0000-000000000002'
+WHERE id = '93300000-0000-0000-0000-000000000003';
+
+SET ROLE service_role;
+
+DO $$
+BEGIN
+  PERFORM *
+  FROM public.persist_cams_kfintech_statement_ingestion(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000300',
+    '93900000-0000-0000-0000-000000000303',
+    'provider-message-negative',
+    'provider-attachment-ambiguous-pan',
+    'ambiguous-pan-attempt',
+    'CAMS',
+    repeat('3', 64),
+    'ingested-documents',
+    'negative/ambiguous-pan',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    '2026-07-29T00:00:00Z',
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'registrar', 'CAMS',
+      'clientPan', 'ABCDE1234F',
+      'investorName', 'Ambiguous PAN',
+      'folioNumber', 'FOLIO-AMBIG',
+      'schemeCode', 'MF32NEG',
+      'transactionType', 'BUY',
+      'units', 1,
+      'nav', 1,
+      'amount', 1,
+      'date', '2026-07-29',
+      'sourceRowNumber', 1
+    ))
+  );
+  RAISE EXCEPTION 'ambiguous PAN mapping was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%investor_mapping_ambiguous%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+RESET ROLE;
+
+UPDATE public.profiles
+SET canonical_pan_record_id = NULL
+WHERE id = '93300000-0000-0000-0000-000000000003';
+
+UPDATE public.profile_pan_records
+SET status = 'SUPERSEDED'
+WHERE id = '93210000-0000-0000-0000-000000000002';
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_docs_before pg_catalog.int4;
+  v_events_before pg_catalog.int4;
+  v_docs_after pg_catalog.int4;
+  v_events_after pg_catalog.int4;
+BEGIN
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_before
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000304';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_before
+  FROM public.event_outbox
+  WHERE entity_type = 'ingested_document'
+    AND event_type = 'statement.imported';
+
+  BEGIN
+    PERFORM *
+    FROM public.persist_cams_kfintech_statement_ingestion(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000300',
+      '93900000-0000-0000-0000-000000000304',
+      'provider-message-negative',
+      'provider-attachment-duplicate-row',
+      'duplicate-row-attempt',
+      'CAMS',
+      repeat('4', 64),
+      'ingested-documents',
+      'negative/duplicate-row',
+      'application/x-dbase',
+      'DBF',
+      1024,
+      '2026-07-29T00:00:00Z',
+      pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'registrar', 'CAMS',
+          'clientPan', 'ABCDE1234F',
+          'investorName', 'Duplicate Row',
+          'folioNumber', 'FOLIO-DUP',
+          'schemeCode', 'MF32NEG',
+          'transactionType', 'BUY',
+          'units', 1,
+          'nav', 1,
+          'amount', 1,
+          'date', '2026-07-29',
+          'sourceRowNumber', 1,
+          'registrarTransactionId', 'DUP-TXN-1'
+        ),
+        pg_catalog.jsonb_build_object(
+          'registrar', 'CAMS',
+          'clientPan', 'ABCDE1234F',
+          'investorName', 'Duplicate Row',
+          'folioNumber', 'FOLIO-DUP',
+          'schemeCode', 'MF32NEG',
+          'transactionType', 'BUY',
+          'units', 1,
+          'nav', 1,
+          'amount', 1,
+          'date', '2026-07-29',
+          'sourceRowNumber', 1,
+          'registrarTransactionId', 'DUP-TXN-2'
+        )
+      )
+    );
+    RAISE EXCEPTION 'duplicate source row was accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%persistence_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_after
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000304';
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_events_after
+  FROM public.event_outbox
+  WHERE entity_type = 'ingested_document'
+    AND event_type = 'statement.imported';
+
+  IF v_docs_after <> v_docs_before OR v_events_after <> v_events_before THEN
+    RAISE EXCEPTION 'duplicate row conflict created document or event side effects';
+  END IF;
+END;
+$$;
+RESET ROLE;
 
 ROLLBACK;

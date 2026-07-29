@@ -16,6 +16,10 @@ const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const client = supabaseClient(serviceRoleKey);
 const pdfExtractor = new RemotePdfTextExtractor(
   Deno.env.get("PDF_TEXT_EXTRACTOR_URL") || "",
+  Deno.env.get("PDF_TEXT_EXTRACTOR_SERVICE_TOKEN") || "",
+  Number(Deno.env.get("PDF_TEXT_EXTRACTOR_TIMEOUT_MS") || "5000"),
+  Number(Deno.env.get("PDF_TEXT_EXTRACTOR_MAX_RESPONSE_BYTES") || "1048576"),
+  Deno.env.get("ALLOW_INSECURE_PDF_TEXT_EXTRACTOR_URL") === "true",
 );
 const mailboxConnectorUrl = Deno.env.get("MAILBOX_CONNECTOR_URL") || "";
 const mailboxConnectorToken = Deno.env.get("MAILBOX_CONNECTOR_SERVICE_TOKEN") ||
@@ -41,7 +45,10 @@ serve(createCamsKfintechIngestionHandler({
   ),
   malwareScanner: new HttpMalwareScanner(
     Deno.env.get("MALWARE_SCANNER_URL") || "",
+    Deno.env.get("MALWARE_SCANNER_SERVICE_TOKEN") || "",
     Number(Deno.env.get("MALWARE_SCANNER_TIMEOUT_MS") || "5000"),
+    Number(Deno.env.get("MALWARE_SCANNER_MAX_RESPONSE_BYTES") || "4096"),
+    Deno.env.get("ALLOW_INSECURE_MALWARE_SCANNER_URL") === "true",
   ),
   storage: new SupabaseEncryptedStorage(client, "ingested-documents"),
   parserRegistry: new ParserRegistry([

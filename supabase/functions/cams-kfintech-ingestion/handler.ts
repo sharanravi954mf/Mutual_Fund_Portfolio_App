@@ -38,7 +38,7 @@ export type AttachmentProcessingResult =
     message_id: string;
     attachment_id: string;
     document_correlation_id: string;
-    error: { code: FailureCode };
+    error: { code: FailureCode; lineage_write_failed?: boolean };
   };
 
 export type HandlerDependencies = {
@@ -160,6 +160,10 @@ async function recordFailure(
   await deps.persistence.recordFailure(input);
 }
 
+function isRunStopFailure(code: FailureCode): boolean {
+  return code === "attachment_too_large";
+}
+
 async function processAttachment(
   deps: HandlerDependencies,
   context: IngestionRunContext,
@@ -247,6 +251,13 @@ async function processAttachment(
 
     stage(deps, "encrypted_storage_read");
     const storedBytes = await deps.storage.readOriginal(storageObject);
+    if (storedBytes.byteLength !== sizeBytes) {
+      throw new IngestionError("stored_object_size_mismatch");
+    }
+    const storedSha = await sha256Hex(storedBytes);
+    if (storedSha !== sha) {
+      throw new IngestionError("stored_object_hash_mismatch");
+    }
 
     stage(deps, "parse");
     const transactions = await deps.parserRegistry.parse({
@@ -287,28 +298,33 @@ async function processAttachment(
     const code = error instanceof IngestionError
       ? error.code
       : "persistence_failed";
-    await recordFailure(deps, {
-      workspaceId: context.workspaceId,
-      mailboxConnectionId: context.mailboxConnectionId,
-      ingestionRunId: context.correlationId,
-      documentCorrelationId: correlationId,
-      providerMessageId: message.messageId,
-      providerAttachmentId: attachment.attachmentId,
-      attachmentAttemptKey: attemptKey,
-      registrar: context.mailbox.registrar,
-      failureCode: code,
-      sha256Hex: sha,
-      storage: storageObject,
-      detectedMime,
-      fileType,
-      sizeBytes,
-    });
+    let lineageWriteFailed = false;
+    try {
+      await recordFailure(deps, {
+        workspaceId: context.workspaceId,
+        mailboxConnectionId: context.mailboxConnectionId,
+        ingestionRunId: context.correlationId,
+        documentCorrelationId: correlationId,
+        providerMessageId: message.messageId,
+        providerAttachmentId: attachment.attachmentId,
+        attachmentAttemptKey: attemptKey,
+        registrar: context.mailbox.registrar,
+        failureCode: code,
+        sha256Hex: sha,
+        storage: storageObject,
+        detectedMime,
+        fileType,
+        sizeBytes,
+      });
+    } catch (_lineageError) {
+      lineageWriteFailed = true;
+    }
     return {
       ok: false,
       message_id: message.messageId,
       attachment_id: attachment.attachmentId,
       document_correlation_id: correlationId,
-      error: { code },
+      error: { code, lineage_write_failed: lineageWriteFailed || undefined },
     };
   }
 }
@@ -395,8 +411,12 @@ export function createCamsKfintechIngestionHandler(
 
       const results: AttachmentProcessingResult[] = [];
       const counter: RunByteCounter = { consumed: 0 };
+      let stopped = false;
+      let stoppedReason: FailureCode | undefined;
       for (const message of messages) {
+        if (stopped) break;
         for (const attachment of message.attachments) {
+          if (stopped) break;
           const result = await processAttachment(
             deps,
             context,
@@ -405,8 +425,9 @@ export function createCamsKfintechIngestionHandler(
             counter,
           );
           results.push(result);
-          if (!result.ok && result.error.code === "attachment_too_large") {
-            break;
+          if (!result.ok && isRunStopFailure(result.error.code)) {
+            stopped = true;
+            stoppedReason = result.error.code;
           }
         }
       }
@@ -416,6 +437,8 @@ export function createCamsKfintechIngestionHandler(
           ingestion_run_id: correlationId,
           processed_attachments: results.filter((result) => result.ok).length,
           attempted_attachments: results.length,
+          stopped,
+          stopped_reason: stoppedReason,
           continuation_policy: "continue_after_attachment_failure",
           results,
         },

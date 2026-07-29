@@ -3,7 +3,11 @@ import {
   type SupabaseClient,
 } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import type { PdfTextExtractor } from "./parser.ts";
-import { DEFAULT_MAX_ATTACHMENT_BYTES } from "./security.ts";
+import {
+  DEFAULT_MAX_ATTACHMENT_BYTES,
+  readBoundedStream,
+  sha256Hex,
+} from "./security.ts";
 import {
   type CredentialBundle,
   type DownloadedAttachment,
@@ -26,9 +30,17 @@ const knownFailureCodes: Set<string> = new Set([
   "correlation_conflict",
   "previous_ingestion_failed",
   "processing_incomplete",
+  "investor_mapping_unresolved",
+  "investor_mapping_ambiguous",
+  "investor_workspace_relationship_required",
+  "folio_relationship_conflict",
+  "storage_object_conflict",
+  "stored_object_hash_mismatch",
+  "stored_object_size_mismatch",
   "unsupported_registrar",
   "unsupported_statement_format",
   "parse_failed",
+  "persistence_conflict",
   "persistence_failed",
 ]);
 
@@ -196,6 +208,28 @@ function endpoint(baseUrl: URL, suffix: string): URL {
 function assertSameOrigin(url: URL, expectedOrigin: string): void {
   if (url.origin !== expectedOrigin) {
     throw new IngestionError("connector_untrusted_origin");
+  }
+}
+
+async function readJsonResponse(
+  response: Response,
+  maxBytes: number,
+  code: FailureCode,
+): Promise<Record<string, unknown>> {
+  if (response.body == null || maxBytes <= 0 || !Number.isFinite(maxBytes)) {
+    throw new IngestionError(code);
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await readBoundedStream(response.body, Math.floor(maxBytes));
+  } catch (_error) {
+    throw new IngestionError(code);
+  }
+  try {
+    return recordFromUnknown(JSON.parse(new TextDecoder().decode(bytes)), code);
+  } catch (error) {
+    if (error instanceof IngestionError) throw error;
+    throw new IngestionError(code);
   }
 }
 
@@ -659,35 +693,60 @@ export class ConnectorMailboxClient {
 }
 
 export class HttpMalwareScanner {
+  private readonly baseUrl: URL;
+
   constructor(
-    private readonly scannerUrl: string,
+    scannerUrl: string,
+    private readonly scannerServiceToken: string,
     private readonly timeoutMs: number,
-  ) {}
+    private readonly maxResponseBytes = 4096,
+    allowInsecureScanner = false,
+  ) {
+    if (scannerServiceToken.trim() === "") {
+      throw new IngestionError("malware_scan_unavailable");
+    }
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      throw new IngestionError("malware_scan_unavailable");
+    }
+    this.baseUrl = parseTrustedConnectorUrl(scannerUrl, allowInsecureScanner);
+  }
 
   async scan(
     bytes: Uint8Array,
     context: { sha256Hex: string; filename: string },
   ): Promise<"clean"> {
-    if (this.scannerUrl.trim() === "") {
-      throw new IngestionError("malware_scan_unavailable");
-    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await fetch(this.scannerUrl, {
+      const response = await fetch(this.baseUrl, {
         method: "POST",
+        redirect: "manual",
         headers: {
           "Content-Type": "application/octet-stream",
+          Authorization: `Bearer ${this.scannerServiceToken}`,
           "X-Content-SHA256": context.sha256Hex,
           "X-File-Name": context.filename,
         },
         body: bytes,
         signal: controller.signal,
       });
+      if (response.status >= 300 && response.status < 400) {
+        throw new IngestionError("malware_scan_unavailable");
+      }
+      if (response.url !== "") {
+        assertSameOrigin(new URL(response.url), this.baseUrl.origin);
+      }
       if (!response.ok) {
         throw new IngestionError("malware_scan_unavailable");
       }
-      const result = await response.json();
+      const result = await readJsonResponse(
+        response,
+        this.maxResponseBytes,
+        "malware_scan_unavailable",
+      );
+      if (result.version !== "moneybowl.malware-scan.v1") {
+        throw new IngestionError("malware_scan_unavailable");
+      }
       if (result.verdict === "clean") {
         return "clean";
       }
@@ -727,10 +786,20 @@ export class SupabaseEncryptedStorage {
         upsert: false,
       },
     );
-    if (
-      error != null && !String(error.message).toLowerCase().includes("exists")
-    ) {
-      throw new IngestionError("encrypted_storage_write_failed");
+    if (error != null) {
+      let existing: Uint8Array;
+      try {
+        existing = await this.readOriginal({ bucket: this.bucket, path });
+      } catch (_readError) {
+        throw new IngestionError("encrypted_storage_write_failed");
+      }
+      if (existing.byteLength !== input.bytes.byteLength) {
+        throw new IngestionError("storage_object_conflict");
+      }
+      const existingSha = await sha256Hex(existing);
+      if (existingSha !== input.sha256Hex) {
+        throw new IngestionError("storage_object_conflict");
+      }
     }
     return { bucket: this.bucket, path };
   }
@@ -741,7 +810,10 @@ export class SupabaseEncryptedStorage {
     if (error != null || data == null) {
       throw new IngestionError("encrypted_storage_read_failed");
     }
-    return new Uint8Array(await data.arrayBuffer());
+    if (data.size > DEFAULT_MAX_ATTACHMENT_BYTES) {
+      throw new IngestionError("stored_object_size_mismatch");
+    }
+    return await readBoundedStream(data.stream(), DEFAULT_MAX_ATTACHMENT_BYTES);
   }
 }
 
@@ -810,27 +882,83 @@ export class SupabasePersistence {
 }
 
 export class RemotePdfTextExtractor implements PdfTextExtractor {
-  constructor(private readonly extractorUrl: string) {}
+  private readonly baseUrl: URL;
 
-  async extractText(bytes: Uint8Array, registrar: Registrar): Promise<string> {
-    if (this.extractorUrl.trim() === "") {
+  constructor(
+    extractorUrl: string,
+    private readonly extractorServiceToken: string,
+    private readonly timeoutMs: number,
+    private readonly maxResponseBytes: number,
+    allowInsecureExtractor = false,
+  ) {
+    if (extractorServiceToken.trim() === "") {
       throw new IngestionError("unsupported_statement_format");
     }
-    const response = await fetch(this.extractorUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/pdf",
-        "X-Registrar": registrar,
-      },
-      body: bytes,
-    });
-    if (!response.ok) {
-      throw new IngestionError("parse_failed");
+    if (
+      !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+      !Number.isFinite(maxResponseBytes) || maxResponseBytes <= 0
+    ) {
+      throw new IngestionError("unsupported_statement_format");
     }
-    const payload = await response.json();
-    if (typeof payload.text !== "string") {
-      throw new IngestionError("parse_failed");
+    this.baseUrl = parseTrustedConnectorUrl(
+      extractorUrl,
+      allowInsecureExtractor,
+    );
+  }
+
+  async extractRows(input: {
+    bytes: Uint8Array;
+    registrar: Registrar;
+    fileType: "CAS_PDF" | "DBF";
+    filename: string;
+  }): Promise<Record<string, unknown>[]> {
+    if (input.bytes.byteLength < 16) {
+      throw new IngestionError("unsupported_statement_format");
     }
-    return payload.text;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await fetch(this.baseUrl, {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/pdf",
+          Authorization: `Bearer ${this.extractorServiceToken}`,
+          "X-Registrar": input.registrar,
+          "X-Statement-Format": input.fileType,
+          "X-File-Name": input.filename,
+        },
+        body: input.bytes,
+        signal: controller.signal,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        throw new IngestionError("parse_failed");
+      }
+      if (response.url !== "") {
+        assertSameOrigin(new URL(response.url), this.baseUrl.origin);
+      }
+      if (!response.ok) {
+        throw new IngestionError("parse_failed");
+      }
+      const payload = await readJsonResponse(
+        response,
+        this.maxResponseBytes,
+        "parse_failed",
+      );
+      if (
+        payload.version !== "moneybowl.pdf-extraction.v1" ||
+        payload.registrar !== input.registrar ||
+        payload.statement_format !== input.fileType ||
+        !Array.isArray(payload.rows)
+      ) {
+        throw new IngestionError("parse_failed");
+      }
+      return payload.rows.map((row) => recordFromUnknown(row, "parse_failed"));
+    } catch (error) {
+      if (error instanceof IngestionError) throw error;
+      throw new IngestionError("parse_failed");
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

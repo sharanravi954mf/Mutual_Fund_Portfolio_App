@@ -392,9 +392,10 @@ Deno.test("malware scan result controls progression", async () => {
 Deno.test("storage precedes parsing and parsing failure prevents persistence", async () => {
   const stages: string[] = [];
   let persisted = false;
+  const badBytes = camsDbfFixture({ AMOUNT: "bad-value" });
   const handler = createCamsKfintechIngestionHandler(deps({
     stages,
-    storageReadBytes: camsDbfFixture({ AMOUNT: "bad-value" }),
+    messages: [message(badBytes)],
     persist: () => {
       persisted = true;
       return Promise.resolve({
@@ -416,6 +417,34 @@ Deno.test("storage precedes parsing and parsing failure prevents persistence", a
     true,
   );
   assertEquals(persisted, false);
+});
+
+Deno.test("stored object hash mismatch prevents parser invocation", async () => {
+  const stages: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    storageReadBytes: camsDbfFixture({ FOLIO_NO: "DIFFERENT" }),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(body.data.results[0].error.code, "stored_object_hash_mismatch");
+  assertEquals(stages.includes("parse"), false);
+});
+
+Deno.test("stored object size mismatch prevents parser invocation", async () => {
+  const stages: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    storageReadBytes: camsDbfFixture().slice(0, 64),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(body.data.results[0].error.code, "stored_object_size_mismatch");
+  assertEquals(stages.includes("parse"), false);
 });
 
 Deno.test("completion event occurs only after persistence", async () => {
@@ -592,7 +621,7 @@ Deno.test("validation malware and parsing failures record stable lineage", async
 
   await createCamsKfintechIngestionHandler(deps({
     failureCodes: parseFailures,
-    storageReadBytes: camsDbfFixture({ TRX_DATE: "bad-date" }),
+    messages: [message(camsDbfFixture({ TRX_DATE: "bad-date" }))],
   }))(request(validBody()));
 
   assertEquals(senderFailures, ["sender_not_allowed"]);
@@ -699,9 +728,47 @@ Deno.test("oversized attachment stops further fetching", async () => {
   assertEquals(response.status, 200);
   assertEquals(body.data.results[0].error.code, "attachment_too_large");
   assertEquals(downloadCount.count, 1);
+  assertEquals(body.data.stopped, true);
+  assertEquals(body.data.stopped_reason, "attachment_too_large");
 });
 
-Deno.test("failure RPC outage is surfaced and not silently ignored", async () => {
+Deno.test("run byte limit stops later message downloads without false lineage", async () => {
+  const downloadCount = { count: 0 };
+  const firstMessageId = "run-limit-first";
+  const secondMessageId = "run-limit-second";
+  const failureCodes: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    downloadCount,
+    failureCodes,
+    registrarConfig: { totalBytesPerRun: 8 },
+    messages: [
+      message(camsDbfFixture(), {
+        messageId: firstMessageId,
+        attachments: [
+          attachmentFixture(camsDbfFixture(), firstMessageId, "run-limit-a"),
+        ],
+      }),
+      message(camsDbfFixture(), {
+        messageId: secondMessageId,
+        attachments: [
+          attachmentFixture(camsDbfFixture(), secondMessageId, "run-limit-b"),
+        ],
+      }),
+    ],
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(downloadCount.count, 1);
+  assertEquals(body.data.attempted_attachments, 1);
+  assertEquals(body.data.results[0].message_id, firstMessageId);
+  assertEquals(body.data.stopped, true);
+  assertEquals(failureCodes, ["attachment_too_large"]);
+});
+
+Deno.test("failure RPC outage preserves original attachment error", async () => {
   const handler = createCamsKfintechIngestionHandler(deps({
     messages: [
       message(camsDbfFixture(), { senderAddress: "bad@example.test" }),
@@ -713,8 +780,9 @@ Deno.test("failure RPC outage is surfaced and not silently ignored", async () =>
   const response = await handler(request(validBody()));
   const body = await response.json();
 
-  assertEquals(response.status, 422);
-  assertEquals(body.error.code, "persistence_failed");
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "sender_not_allowed");
+  assertEquals(body.data.results[0].error.lineage_write_failed, true);
 });
 
 Deno.test("SHA-256 is computed from attachment bytes inside worker", async () => {

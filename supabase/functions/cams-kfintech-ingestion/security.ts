@@ -232,6 +232,8 @@ export function errorStatus(code: FailureCode): number {
     case "correlation_conflict":
     case "previous_ingestion_failed":
     case "processing_incomplete":
+    case "persistence_conflict":
+    case "folio_relationship_conflict":
       return 409;
     default:
       return 422;
