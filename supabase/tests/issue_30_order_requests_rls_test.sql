@@ -114,7 +114,27 @@ VALUES ('97500000-0000-0000-0000-000000000001', '97200000-0000-0000-0000-0000000
 DO $$
 DECLARE
   v_policy_count pg_catalog.int4;
+  v_select_policy_count pg_catalog.int4;
+  v_insert_policy_count pg_catalog.int4;
+  v_can_select_oid pg_catalog.oid;
+  v_can_insert_oid pg_catalog.oid;
+  v_policy pg_catalog.record;
 BEGIN
+  v_can_select_oid := 'public.can_select_order_request(pg_catalog.uuid, pg_catalog.uuid)'::pg_catalog.regprocedure::pg_catalog.oid;
+  v_can_insert_oid := 'public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, public.order_status, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.timestamptz)'::pg_catalog.regprocedure::pg_catalog.oid;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_class AS class
+    JOIN pg_catalog.pg_namespace AS namespace
+      ON namespace.oid = class.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND class.relname = 'order_requests'
+      AND class.relrowsecurity
+  ) THEN
+    RAISE EXCEPTION 'order_requests RLS is not enabled';
+  END IF;
+
   IF NOT pg_catalog.has_table_privilege('authenticated', 'public.order_requests', 'SELECT')
      OR NOT pg_catalog.has_table_privilege('authenticated', 'public.order_requests', 'INSERT') THEN
     RAISE EXCEPTION 'authenticated lacks expected order_requests read/insert grants';
@@ -135,11 +155,54 @@ BEGIN
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_policy_count
   FROM pg_catalog.pg_policies
   WHERE schemaname = 'public'
-    AND tablename = 'order_requests'
-    AND policyname IN ('order_requests_select_workspace_isolation', 'order_requests_insert_workspace_isolation');
+    AND tablename = 'order_requests';
 
   IF v_policy_count <> 2 THEN
-    RAISE EXCEPTION 'expected order_requests workspace-isolation policies were not installed';
+    RAISE EXCEPTION 'order_requests policy set is not exclusive: found % policies', v_policy_count;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'order_requests'
+      AND policyname = 'order_requests_select_workspace_isolation'
+      AND cmd = 'SELECT'
+      AND roles = ARRAY['authenticated']::pg_catalog.name[]
+  ) THEN
+    RAISE EXCEPTION 'canonical SELECT policy is missing or has incorrect command/role';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'order_requests'
+      AND policyname = 'order_requests_insert_workspace_isolation'
+      AND cmd = 'INSERT'
+      AND roles = ARRAY['authenticated']::pg_catalog.name[]
+  ) THEN
+    RAISE EXCEPTION 'canonical INSERT policy is missing or has incorrect command/role';
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_select_policy_count
+  FROM pg_catalog.pg_policies
+  WHERE schemaname = 'public'
+    AND tablename = 'order_requests'
+    AND cmd = 'SELECT';
+
+  IF v_select_policy_count <> 1 THEN
+    RAISE EXCEPTION 'order_requests has unexpected additional SELECT policies: %', v_select_policy_count;
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_insert_policy_count
+  FROM pg_catalog.pg_policies
+  WHERE schemaname = 'public'
+    AND tablename = 'order_requests'
+    AND cmd = 'INSERT';
+
+  IF v_insert_policy_count <> 1 THEN
+    RAISE EXCEPTION 'order_requests has unexpected additional INSERT policies: %', v_insert_policy_count;
   END IF;
 
   IF EXISTS (
@@ -152,10 +215,109 @@ BEGIN
     RAISE EXCEPTION 'order_requests exposes an UPDATE, DELETE, or ALL RLS policy';
   END IF;
 
-  IF pg_catalog.has_function_privilege('anon', 'public.can_select_order_request(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE')
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'order_requests'
+      AND roles && ARRAY['public', 'anon', 'service_role']::pg_catalog.name[]
+  ) THEN
+    RAISE EXCEPTION 'order_requests has a policy exposed to PUBLIC, anon, or service_role';
+  END IF;
+
+  IF EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_proc AS proc
+       CROSS JOIN pg_catalog.aclexplode(coalesce(proc.proacl, pg_catalog.acldefault('f', proc.proowner))) AS acl
+       WHERE proc.oid = v_can_select_oid
+         AND acl.grantee = 0
+         AND acl.privilege_type = 'EXECUTE'
+     )
+     OR pg_catalog.has_function_privilege('anon', 'public.can_select_order_request(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE')
      OR pg_catalog.has_function_privilege('service_role', 'public.can_select_order_request(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE')
      OR NOT pg_catalog.has_function_privilege('authenticated', 'public.can_select_order_request(pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'can_select_order_request helper privileges are incorrect';
+  END IF;
+
+  IF EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_proc AS proc
+       CROSS JOIN pg_catalog.aclexplode(coalesce(proc.proacl, pg_catalog.acldefault('f', proc.proowner))) AS acl
+       WHERE proc.oid = v_can_insert_oid
+         AND acl.grantee = 0
+         AND acl.privilege_type = 'EXECUTE'
+     )
+     OR pg_catalog.has_function_privilege('anon', 'public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, public.order_status, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.timestamptz)', 'EXECUTE')
+     OR pg_catalog.has_function_privilege('service_role', 'public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, public.order_status, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.timestamptz)', 'EXECUTE')
+     OR NOT pg_catalog.has_function_privilege('authenticated', 'public.can_insert_order_request(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, public.order_status, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.timestamptz)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'can_insert_order_request helper privileges are incorrect';
+  END IF;
+
+  CREATE POLICY issue_30_unexpected_permissive_select ON public.order_requests
+    FOR SELECT
+    TO authenticated
+    USING (true);
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_policy_count
+  FROM pg_catalog.pg_policies
+  WHERE schemaname = 'public'
+    AND tablename = 'order_requests';
+
+  IF v_policy_count <> 3 THEN
+    RAISE EXCEPTION 'Issue #30 unexpected-policy regression setup failed: found % policies', v_policy_count;
+  END IF;
+
+  FOR v_policy IN
+    SELECT policies.policyname
+    FROM pg_catalog.pg_policies AS policies
+    WHERE policies.schemaname = 'public'
+      AND policies.tablename = 'order_requests'
+  LOOP
+    EXECUTE pg_catalog.format(
+      'DROP POLICY IF EXISTS %I ON %I.%I',
+      v_policy.policyname,
+      'public',
+      'order_requests'
+    );
+  END LOOP;
+
+  CREATE POLICY order_requests_select_workspace_isolation ON public.order_requests
+    FOR SELECT
+    TO authenticated
+    USING (
+      public.can_select_order_request(workspace_id, investor_profile_id)
+    );
+
+  CREATE POLICY order_requests_insert_workspace_isolation ON public.order_requests
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (
+      public.can_insert_order_request(
+        workspace_id,
+        investor_profile_id,
+        initiated_by_profile_id,
+        initiated_by_role,
+        initiation_channel,
+        status,
+        reviewed_by,
+        reviewed_by_profile_id,
+        reviewed_at
+      )
+    );
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_policy_count
+  FROM pg_catalog.pg_policies
+  WHERE schemaname = 'public'
+    AND tablename = 'order_requests';
+
+  IF v_policy_count <> 2 OR EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'order_requests'
+      AND policyname = 'issue_30_unexpected_permissive_select'
+  ) THEN
+    RAISE EXCEPTION 'unexpected permissive order_requests policy survived catalog cleanup';
   END IF;
 END;
 $$;

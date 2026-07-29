@@ -169,10 +169,25 @@ GRANT EXECUTE ON FUNCTION public.can_insert_order_request(
 
 ALTER TABLE public.order_requests ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS order_requests_investor_select ON public.order_requests;
-DROP POLICY IF EXISTS order_requests_advisor_select ON public.order_requests;
-DROP POLICY IF EXISTS order_requests_admin_select ON public.order_requests;
-DROP POLICY IF EXISTS order_requests_admin_update ON public.order_requests;
+DO $$
+DECLARE
+  v_policy pg_catalog.record;
+BEGIN
+  FOR v_policy IN
+    SELECT policies.policyname
+    FROM pg_catalog.pg_policies AS policies
+    WHERE policies.schemaname = 'public'
+      AND policies.tablename = 'order_requests'
+  LOOP
+    EXECUTE pg_catalog.format(
+      'DROP POLICY IF EXISTS %I ON %I.%I',
+      v_policy.policyname,
+      'public',
+      'order_requests'
+    );
+  END LOOP;
+END;
+$$;
 
 CREATE POLICY order_requests_select_workspace_isolation ON public.order_requests
   FOR SELECT
