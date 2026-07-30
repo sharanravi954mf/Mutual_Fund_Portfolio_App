@@ -181,6 +181,9 @@ function terminalReplayResponse(summary: IngestionRunClaimResult): Response {
       failed_attachments: summary.failed_attachment_count,
       duplicate_attachments: summary.duplicate_attachment_count,
       stopped_attachments: summary.stopped_attachment_count,
+      observed_attachments: summary.observed_attachment_count,
+      durable_attempts: summary.durable_attempt_count,
+      lineage_gap_count: summary.lineage_gap_count,
       stopped: summary.status === "stopped",
       stopped_reason: summary.stopped_reason ?? undefined,
       run_failure_code: summary.run_failure_code ?? undefined,
@@ -188,6 +191,31 @@ function terminalReplayResponse(summary: IngestionRunClaimResult): Response {
       results: [],
     },
   });
+}
+
+function activeInProgressResponse(summary: IngestionRunClaimResult): Response {
+  return jsonResponse({
+    data: {
+      ingestion_run_id: summary.ingestion_run_id,
+      run_status: summary.status,
+      replay_state: summary.replay_state,
+      code: "ingestion_run_in_progress",
+      processed_attachments: summary.successful_attachment_count,
+      attempted_attachments: summary.attempted_attachment_count,
+      successful_attachments: summary.successful_attachment_count,
+      failed_attachments: summary.failed_attachment_count,
+      duplicate_attachments: summary.duplicate_attachment_count,
+      stopped_attachments: summary.stopped_attachment_count,
+      observed_attachments: summary.observed_attachment_count,
+      durable_attempts: summary.durable_attempt_count,
+      lineage_gap_count: summary.lineage_gap_count,
+      stopped: false,
+      stopped_reason: summary.stopped_reason ?? undefined,
+      run_failure_code: summary.run_failure_code ?? undefined,
+      continuation_policy: "active_run_in_progress_no_mailbox_poll",
+      results: [],
+    },
+  }, 202);
 }
 
 async function processAttachment(
@@ -409,6 +437,7 @@ export function createCamsKfintechIngestionHandler(
     let runIdentity: IngestionRunClaimInput | null = null;
     let claimSucceeded = false;
     let finalizationWriteFailed = false;
+    let observedAttachmentCount = 0;
     try {
       stage(deps, "internal_authorization");
       await verifyInternalInvocation(req, deps.internalToken);
@@ -438,6 +467,9 @@ export function createCamsKfintechIngestionHandler(
       claimSucceeded = true;
       if (claim.replay_state === "terminal_replay") {
         return terminalReplayResponse(claim);
+      }
+      if (claim.replay_state === "active_in_progress") {
+        return activeInProgressResponse(claim);
       }
 
       stage(deps, "load_credentials");
@@ -469,6 +501,7 @@ export function createCamsKfintechIngestionHandler(
             counter,
           );
           results.push(result);
+          observedAttachmentCount = results.length;
           if (!result.ok) {
             if (isRunStopFailure(result.error.code)) {
               halted = true;
@@ -480,6 +513,10 @@ export function createCamsKfintechIngestionHandler(
         }
       }
 
+      const hasLineageGap = results.some((result) =>
+        !result.ok && result.error.lineage_write_failed === true
+      );
+
       stage(deps, "finalize_ingestion_run");
       const finalSummary = await deps.persistence.finalizeRun({
         workspaceId: context.workspaceId,
@@ -487,6 +524,8 @@ export function createCamsKfintechIngestionHandler(
         ingestionRunId: context.correlationId,
         registrar: context.mailbox.registrar,
         stoppedReason,
+        failureCode: hasLineageGap ? "attempt_lineage_incomplete" : undefined,
+        observedAttachmentCount: results.length,
       });
 
       return jsonResponse({
@@ -499,6 +538,9 @@ export function createCamsKfintechIngestionHandler(
           failed_attachments: finalSummary.failed_attachment_count,
           duplicate_attachments: finalSummary.duplicate_attachment_count,
           stopped_attachments: finalSummary.stopped_attachment_count,
+          observed_attachments: finalSummary.observed_attachment_count,
+          durable_attempts: finalSummary.durable_attempt_count,
+          lineage_gap_count: finalSummary.lineage_gap_count,
           stopped: stoppedReason != null,
           stopped_reason: finalSummary.stopped_reason ?? stoppedReason,
           run_failure_code: finalSummary.run_failure_code ?? undefined,
@@ -515,6 +557,7 @@ export function createCamsKfintechIngestionHandler(
             ...runIdentity,
             stoppedReason: isRunStopFailure(code) ? code : undefined,
             failureCode: isRunStopFailure(code) ? undefined : code,
+            observedAttachmentCount,
           });
         } catch (_finalizeError) {
           finalizationWriteFailed = true;

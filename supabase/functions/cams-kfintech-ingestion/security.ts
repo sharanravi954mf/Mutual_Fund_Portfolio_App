@@ -253,7 +253,9 @@ export function errorStatus(code: FailureCode): number {
     case "sender_not_allowed":
     case "duplicate_attachment":
     case "correlation_conflict":
+    case "ingestion_run_in_progress":
     case "ingestion_run_finalized":
+    case "attempt_lineage_incomplete":
     case "previous_ingestion_failed":
     case "processing_incomplete":
     case "persistence_conflict":

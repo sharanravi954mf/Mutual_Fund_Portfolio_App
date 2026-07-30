@@ -32,8 +32,10 @@ const knownFailureCodes: Set<string> = new Set([
   "attachment_hash_mismatch",
   "duplicate_attachment",
   "correlation_conflict",
+  "ingestion_run_in_progress",
   "ingestion_run_not_claimed",
   "ingestion_run_finalized",
+  "attempt_lineage_incomplete",
   "previous_ingestion_failed",
   "processing_incomplete",
   "investor_mapping_unresolved",
@@ -972,6 +974,7 @@ export class SupabasePersistence {
         p_registrar: input.registrar,
         p_stopped_reason: input.stoppedReason ?? null,
         p_failure_code: input.failureCode ?? null,
+        p_observed_attachment_count: input.observedAttachmentCount ?? null,
       },
     );
     if (error != null) {

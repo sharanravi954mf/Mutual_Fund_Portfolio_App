@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS public.cams_kfintech_ingestion_runs (
   failed_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (failed_attachment_count >= 0),
   duplicate_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (duplicate_attachment_count >= 0),
   stopped_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (stopped_attachment_count >= 0),
+  observed_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (observed_attachment_count >= 0),
+  durable_attempt_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (durable_attempt_count >= 0),
+  lineage_gap_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (lineage_gap_count >= 0),
   stopped_reason pg_catalog.text,
   run_failure_code pg_catalog.text,
   created_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now(),
@@ -466,6 +469,7 @@ RETURNS pg_catalog.uuid AS $$
 DECLARE
   v_attempt_id pg_catalog.uuid;
   v_existing public.cams_kfintech_ingestion_attempts;
+  v_run public.cams_kfintech_ingestion_runs;
 BEGIN
   IF p_provider_message_id IS NULL OR p_provider_message_id = ''
      OR p_provider_attachment_id IS NULL OR p_provider_attachment_id = ''
@@ -473,6 +477,31 @@ BEGIN
      OR p_document_correlation_id IS NULL THEN
     RAISE EXCEPTION 'correlation_id_required';
   END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_ingestion_run_id::pg_catalog.text, 0)
+  );
+
+  SELECT *
+  INTO v_run
+  FROM public.cams_kfintech_ingestion_runs AS run
+  WHERE run.ingestion_run_id = p_ingestion_run_id
+  FOR UPDATE;
+
+  IF v_run.ingestion_run_id IS NULL THEN
+    RAISE EXCEPTION 'ingestion_run_not_claimed';
+  END IF;
+  IF v_run.workspace_id IS DISTINCT FROM p_workspace_id
+     OR v_run.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+  IF v_run.status <> 'claimed' THEN
+    RAISE EXCEPTION 'ingestion_run_finalized';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_attachment_attempt_key, 0)
+  );
 
   SELECT *
   INTO v_existing
@@ -490,7 +519,13 @@ BEGIN
        OR v_existing.outcome IS DISTINCT FROM p_outcome
        OR v_existing.failure_code IS DISTINCT FROM p_failure_code
        OR v_existing.document_id IS DISTINCT FROM p_document_id
-       OR (p_observed_sha256_hex IS NOT NULL AND v_existing.observed_sha256_hex IS DISTINCT FROM p_observed_sha256_hex) THEN
+       OR v_existing.ingestion_log_id IS DISTINCT FROM p_ingestion_log_id
+       OR v_existing.observed_sha256_hex IS DISTINCT FROM p_observed_sha256_hex
+       OR v_existing.storage_bucket IS DISTINCT FROM p_storage_bucket
+       OR v_existing.storage_object_path IS DISTINCT FROM p_storage_object_path
+       OR v_existing.detected_mime IS DISTINCT FROM p_detected_mime
+       OR v_existing.file_type IS DISTINCT FROM p_file_type
+       OR v_existing.size_bytes IS DISTINCT FROM p_size_bytes THEN
       RAISE EXCEPTION 'correlation_conflict';
     END IF;
     RETURN v_existing.id;
@@ -550,6 +585,18 @@ DROP TRIGGER IF EXISTS enforce_ingestion_logs_immutability ON public.ingestion_l
 CREATE TRIGGER enforce_ingestion_logs_immutability
   BEFORE UPDATE OR DELETE ON public.ingestion_logs
   FOR EACH ROW EXECUTE FUNCTION public.prevent_ingestion_log_modification();
+
+CREATE OR REPLACE FUNCTION public.prevent_cams_kfintech_ingestion_attempt_modification()
+RETURNS pg_catalog.trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'cams_kfintech_ingestion_attempts_immutable';
+END;
+$$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '';
+
+DROP TRIGGER IF EXISTS enforce_cams_kfintech_ingestion_attempts_immutability ON public.cams_kfintech_ingestion_attempts;
+CREATE TRIGGER enforce_cams_kfintech_ingestion_attempts_immutability
+  BEFORE UPDATE OR DELETE ON public.cams_kfintech_ingestion_attempts
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_cams_kfintech_ingestion_attempt_modification();
 
 CREATE OR REPLACE FUNCTION public.load_mailbox_oauth_credential_envelope(
   p_workspace_id pg_catalog.uuid,
@@ -653,6 +700,9 @@ RETURNS TABLE (
   failed_attachment_count pg_catalog.int4,
   duplicate_attachment_count pg_catalog.int4,
   stopped_attachment_count pg_catalog.int4,
+  observed_attachment_count pg_catalog.int4,
+  durable_attempt_count pg_catalog.int4,
+  lineage_gap_count pg_catalog.int4,
   stopped_reason pg_catalog.text,
   run_failure_code pg_catalog.text
 ) AS $$
@@ -671,17 +721,6 @@ BEGIN
     pg_catalog.hashtextextended(p_ingestion_run_id::pg_catalog.text, 0)
   );
 
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.mailbox_connections AS mailbox
-    WHERE mailbox.id = p_mailbox_connection_id
-      AND mailbox.workspace_id = p_workspace_id
-      AND mailbox.registrar = p_registrar
-      AND mailbox.status = 'active'
-  ) THEN
-    RAISE EXCEPTION 'mailbox_connection_not_found';
-  END IF;
-
   SELECT *
   INTO v_existing
   FROM public.cams_kfintech_ingestion_runs AS run
@@ -695,7 +734,7 @@ BEGIN
       RAISE EXCEPTION 'correlation_conflict';
     END IF;
     v_replay_state := CASE
-      WHEN v_existing.status = 'claimed' THEN 'active_claimed'
+      WHEN v_existing.status = 'claimed' THEN 'active_in_progress'
       ELSE 'terminal_replay'
     END;
     RETURN QUERY SELECT
@@ -707,9 +746,23 @@ BEGIN
       v_existing.failed_attachment_count,
       v_existing.duplicate_attachment_count,
       v_existing.stopped_attachment_count,
+      v_existing.observed_attachment_count,
+      v_existing.durable_attempt_count,
+      v_existing.lineage_gap_count,
       v_existing.stopped_reason,
       v_existing.run_failure_code;
     RETURN;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.mailbox_connections AS mailbox
+    WHERE mailbox.id = p_mailbox_connection_id
+      AND mailbox.workspace_id = p_workspace_id
+      AND mailbox.registrar = p_registrar
+      AND mailbox.status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'mailbox_connection_not_found';
   END IF;
 
   BEGIN
@@ -739,6 +792,9 @@ BEGIN
          run.failed_attachment_count,
          run.duplicate_attachment_count,
          run.stopped_attachment_count,
+         run.observed_attachment_count,
+         run.durable_attempt_count,
+         run.lineage_gap_count,
          run.stopped_reason,
          run.run_failure_code
   FROM public.cams_kfintech_ingestion_runs AS run
@@ -752,7 +808,8 @@ CREATE OR REPLACE FUNCTION public.finalize_cams_kfintech_ingestion_run(
   p_ingestion_run_id pg_catalog.uuid,
   p_registrar pg_catalog.text,
   p_stopped_reason pg_catalog.text DEFAULT NULL,
-  p_failure_code pg_catalog.text DEFAULT NULL
+  p_failure_code pg_catalog.text DEFAULT NULL,
+  p_observed_attachment_count pg_catalog.int4 DEFAULT NULL
 )
 RETURNS TABLE (
   ingestion_run_id pg_catalog.uuid,
@@ -762,6 +819,9 @@ RETURNS TABLE (
   failed_attachment_count pg_catalog.int4,
   duplicate_attachment_count pg_catalog.int4,
   stopped_attachment_count pg_catalog.int4,
+  observed_attachment_count pg_catalog.int4,
+  durable_attempt_count pg_catalog.int4,
+  lineage_gap_count pg_catalog.int4,
   stopped_reason pg_catalog.text,
   run_failure_code pg_catalog.text
 ) AS $$
@@ -772,13 +832,20 @@ DECLARE
   v_duplicate pg_catalog.int4;
   v_stopped pg_catalog.int4;
   v_attempted pg_catalog.int4;
+  v_observed pg_catalog.int4;
+  v_lineage_gap pg_catalog.int4;
   v_status pg_catalog.text;
+  v_run_failure_code pg_catalog.text;
+  v_stopped_reason pg_catalog.text;
 BEGIN
   IF p_workspace_id IS NULL OR p_mailbox_connection_id IS NULL OR p_ingestion_run_id IS NULL THEN
     RAISE EXCEPTION 'correlation_id_required';
   END IF;
   IF p_registrar NOT IN ('CAMS', 'KFINTECH') THEN
     RAISE EXCEPTION 'unsupported_registrar';
+  END IF;
+  IF p_observed_attachment_count IS NOT NULL AND p_observed_attachment_count < 0 THEN
+    RAISE EXCEPTION 'processing_incomplete';
   END IF;
 
   PERFORM pg_catalog.pg_advisory_xact_lock(
@@ -816,9 +883,34 @@ BEGIN
   v_failed := COALESCE(v_failed, 0);
   v_duplicate := COALESCE(v_duplicate, 0);
   v_stopped := COALESCE(v_stopped, 0);
+  v_observed := COALESCE(p_observed_attachment_count, v_attempted);
 
-  IF p_stopped_reason IS NOT NULL OR v_stopped > 0 THEN
+  IF v_observed < v_attempted THEN
+    RAISE EXCEPTION 'processing_incomplete';
+  END IF;
+
+  v_lineage_gap := v_observed - v_attempted;
+  v_run_failure_code := CASE
+    WHEN v_lineage_gap > 0 THEN 'attempt_lineage_incomplete'
+    ELSE p_failure_code
+  END;
+  v_stopped_reason := CASE
+    WHEN v_lineage_gap > 0 THEN NULL
+    ELSE p_stopped_reason
+  END;
+
+  IF v_lineage_gap > 0 THEN
+    IF v_success > 0 OR v_duplicate > 0 THEN
+      v_status := 'partially_failed';
+    ELSE
+      v_status := 'failed';
+    END IF;
+  ELSIF v_attempted = 0 AND p_stopped_reason IS NULL AND p_failure_code IS NULL THEN
+    RAISE EXCEPTION 'processing_incomplete';
+  ELSIF p_stopped_reason IS NOT NULL OR v_stopped > 0 THEN
     v_status := 'stopped';
+  ELSIF p_failure_code IS NOT NULL AND v_success + v_duplicate > 0 THEN
+    v_status := 'partially_failed';
   ELSIF p_failure_code IS NOT NULL AND v_attempted = 0 THEN
     v_status := 'failed';
   ELSIF v_failed > 0 AND (v_success > 0 OR v_duplicate > 0) THEN
@@ -836,8 +928,11 @@ BEGIN
        OR v_run.failed_attachment_count IS DISTINCT FROM v_failed
        OR v_run.duplicate_attachment_count IS DISTINCT FROM v_duplicate
        OR v_run.stopped_attachment_count IS DISTINCT FROM v_stopped
-       OR v_run.stopped_reason IS DISTINCT FROM p_stopped_reason
-       OR v_run.run_failure_code IS DISTINCT FROM p_failure_code THEN
+       OR v_run.observed_attachment_count IS DISTINCT FROM v_observed
+       OR v_run.durable_attempt_count IS DISTINCT FROM v_attempted
+       OR v_run.lineage_gap_count IS DISTINCT FROM v_lineage_gap
+       OR v_run.stopped_reason IS DISTINCT FROM v_stopped_reason
+       OR v_run.run_failure_code IS DISTINCT FROM v_run_failure_code THEN
       RAISE EXCEPTION 'ingestion_run_finalized';
     END IF;
 
@@ -849,6 +944,9 @@ BEGIN
       v_run.failed_attachment_count,
       v_run.duplicate_attachment_count,
       v_run.stopped_attachment_count,
+      v_run.observed_attachment_count,
+      v_run.durable_attempt_count,
+      v_run.lineage_gap_count,
       v_run.stopped_reason,
       v_run.run_failure_code;
     RETURN;
@@ -862,8 +960,11 @@ BEGIN
       failed_attachment_count = v_failed,
       duplicate_attachment_count = v_duplicate,
       stopped_attachment_count = v_stopped,
-      stopped_reason = p_stopped_reason,
-      run_failure_code = p_failure_code,
+      observed_attachment_count = v_observed,
+      durable_attempt_count = v_attempted,
+      lineage_gap_count = v_lineage_gap,
+      stopped_reason = v_stopped_reason,
+      run_failure_code = v_run_failure_code,
       updated_at = pg_catalog.now()
   WHERE run.ingestion_run_id = p_ingestion_run_id
   RETURNING run.ingestion_run_id,
@@ -873,6 +974,9 @@ BEGIN
             run.failed_attachment_count,
             run.duplicate_attachment_count,
             run.stopped_attachment_count,
+            run.observed_attachment_count,
+            run.durable_attempt_count,
+            run.lineage_gap_count,
             run.stopped_reason,
             run.run_failure_code
   INTO finalize_cams_kfintech_ingestion_run.ingestion_run_id,
@@ -882,6 +986,9 @@ BEGIN
        finalize_cams_kfintech_ingestion_run.failed_attachment_count,
        finalize_cams_kfintech_ingestion_run.duplicate_attachment_count,
        finalize_cams_kfintech_ingestion_run.stopped_attachment_count,
+       finalize_cams_kfintech_ingestion_run.observed_attachment_count,
+       finalize_cams_kfintech_ingestion_run.durable_attempt_count,
+       finalize_cams_kfintech_ingestion_run.lineage_gap_count,
        finalize_cams_kfintech_ingestion_run.stopped_reason,
        finalize_cams_kfintech_ingestion_run.run_failure_code;
 
@@ -899,6 +1006,10 @@ RETURNS public.cams_kfintech_ingestion_runs AS $$
 DECLARE
   v_run public.cams_kfintech_ingestion_runs;
 BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_ingestion_run_id::pg_catalog.text, 0)
+  );
+
   SELECT *
   INTO v_run
   FROM public.cams_kfintech_ingestion_runs AS run
@@ -957,16 +1068,8 @@ BEGIN
     RAISE EXCEPTION 'failure_code_required';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.mailbox_connections AS mailbox
-    WHERE mailbox.id = p_mailbox_connection_id
-      AND mailbox.workspace_id = p_workspace_id
-      AND mailbox.registrar = p_registrar
-  ) THEN
-    RAISE EXCEPTION 'mailbox_connection_not_found';
-  END IF;
-
+  -- Issue #32 mutation lock order: run advisory, run row, attempt identity,
+  -- provider identity, document correlation, content digest, investor graph.
   PERFORM public.assert_claimed_cams_kfintech_ingestion_run(
     p_workspace_id,
     p_mailbox_connection_id,
@@ -982,10 +1085,23 @@ BEGIN
       pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_provider_message_id || ':' || p_provider_attachment_id, 0)
     );
   END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_document_correlation_id::pg_catalog.text, 0)
+  );
   IF p_attachment_sha256 IS NOT NULL THEN
     PERFORM pg_catalog.pg_advisory_xact_lock(
       pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_attachment_sha256, 0)
     );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.mailbox_connections AS mailbox
+    WHERE mailbox.id = p_mailbox_connection_id
+      AND mailbox.workspace_id = p_workspace_id
+      AND mailbox.registrar = p_registrar
+  ) THEN
+    RAISE EXCEPTION 'mailbox_connection_not_found';
   END IF;
 
   SELECT *
@@ -1233,6 +1349,15 @@ BEGIN
   END IF;
   v_expected_count := pg_catalog.jsonb_array_length(p_transactions);
 
+  -- Issue #32 mutation lock order: run advisory, run row, attempt identity,
+  -- provider identity, document correlation, content digest, investor graph.
+  PERFORM public.assert_claimed_cams_kfintech_ingestion_run(
+    p_workspace_id,
+    p_mailbox_connection_id,
+    p_ingestion_run_id,
+    p_registrar
+  );
+
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_attachment_attempt_key, 0)
   );
@@ -1240,10 +1365,10 @@ BEGIN
     pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_mailbox_connection_id::pg_catalog.text || ':' || p_provider_message_id || ':' || p_provider_attachment_id, 0)
   );
   PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_attachment_sha256, 0)
+    pg_catalog.hashtextextended(p_document_correlation_id::pg_catalog.text, 0)
   );
   PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(p_document_correlation_id::pg_catalog.text, 0)
+    pg_catalog.hashtextextended(p_workspace_id::pg_catalog.text || ':' || p_attachment_sha256, 0)
   );
 
   SELECT *
@@ -1258,13 +1383,6 @@ BEGIN
   IF v_mailbox.id IS NULL THEN
     RAISE EXCEPTION 'mailbox_connection_not_found';
   END IF;
-
-  PERFORM public.assert_claimed_cams_kfintech_ingestion_run(
-    p_workspace_id,
-    p_mailbox_connection_id,
-    p_ingestion_run_id,
-    p_registrar
-  );
 
   SELECT *
   INTO v_correlation_document
@@ -1956,10 +2074,11 @@ GRANT SELECT ON TABLE public.registrar_configs TO service_role;
 GRANT SELECT ON TABLE public.mailbox_connections TO service_role;
 
 REVOKE ALL ON FUNCTION public.prevent_ingestion_log_modification() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.prevent_cams_kfintech_ingestion_attempt_modification() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.load_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.replace_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.int4, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.claim_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION public.finalize_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.finalize_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.int4) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.assert_claimed_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.normalize_cams_kfintech_amc_identity(pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.record_cams_kfintech_ingestion_attempt(
@@ -2020,7 +2139,7 @@ REVOKE ALL ON FUNCTION public.persist_cams_kfintech_statement_ingestion(
 GRANT EXECUTE ON FUNCTION public.load_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.replace_mailbox_oauth_credential_envelope(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.int4, pg_catalog.timestamptz) TO service_role;
 GRANT EXECUTE ON FUNCTION public.claim_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text) TO service_role;
-GRANT EXECUTE ON FUNCTION public.finalize_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.finalize_cams_kfintech_ingestion_run(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.int4) TO service_role;
 GRANT EXECUTE ON FUNCTION public.record_cams_kfintech_ingestion_failure(
   pg_catalog.uuid,
   pg_catalog.uuid,

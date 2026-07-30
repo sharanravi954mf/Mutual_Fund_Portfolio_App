@@ -13,8 +13,10 @@ export type FailureCode =
   | "attachment_hash_mismatch"
   | "duplicate_attachment"
   | "correlation_conflict"
+  | "ingestion_run_in_progress"
   | "ingestion_run_not_claimed"
   | "ingestion_run_finalized"
+  | "attempt_lineage_incomplete"
   | "previous_ingestion_failed"
   | "processing_incomplete"
   | "investor_mapping_unresolved"
@@ -189,7 +191,7 @@ export type IngestionRunFinalStatus =
 
 export type IngestionRunReplayState =
   | "newly_claimed"
-  | "active_claimed"
+  | "active_in_progress"
   | "terminal_replay";
 
 export type IngestionRunSummary = {
@@ -201,6 +203,9 @@ export type IngestionRunSummary = {
   failed_attachment_count: number;
   duplicate_attachment_count: number;
   stopped_attachment_count: number;
+  observed_attachment_count: number;
+  durable_attempt_count: number;
+  lineage_gap_count: number;
   stopped_reason: FailureCode | null;
   run_failure_code: FailureCode | null;
 };
@@ -212,6 +217,7 @@ export type IngestionRunClaimResult = IngestionRunSummary & {
 export type IngestionRunFinalizeInput = IngestionRunClaimInput & {
   stoppedReason?: FailureCode;
   failureCode?: FailureCode;
+  observedAttachmentCount?: number;
 };
 
 export type FailureLineageInput = {

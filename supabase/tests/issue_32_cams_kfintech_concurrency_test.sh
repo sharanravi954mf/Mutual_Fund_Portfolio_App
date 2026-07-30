@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SCENARIOS=14
+SCENARIOS=18
 DB_CONTAINER="${SUPABASE_DB_CONTAINER:-$(docker ps --filter "name=supabase_db_" --format "{{.Names}}" | head -n 1)}"
 
 if [ -z "${DB_CONTAINER}" ]; then
@@ -38,6 +38,8 @@ write_persist_sql() {
   cat > "${file}" <<SQL
 \\pset tuples_only on
 \\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
 SET ROLE service_role;
 BEGIN;
 SET LOCAL moneybowl.issue32_concurrency_sleep = 'on';
@@ -94,6 +96,8 @@ write_failure_sql() {
   cat > "${file}" <<SQL
 \\pset tuples_only on
 \\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
 SET ROLE service_role;
 BEGIN;
 SET LOCAL moneybowl.issue32_concurrency_sleep = 'on';
@@ -124,11 +128,57 @@ COMMIT;
 SQL
 }
 
+write_custom_failure_sql() {
+  file="$1"
+  run_id="$2"
+  correlation_id="$3"
+  message_id="$4"
+  attachment_id="$5"
+  attempt_key="$6"
+  sha_char="$7"
+  failure_code="$8"
+  cat > "${file}" <<SQL
+\\pset tuples_only on
+\\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
+SET ROLE service_role;
+BEGIN;
+SET LOCAL moneybowl.issue32_concurrency_sleep = 'on';
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '94400000-0000-0000-0000-000000000001',
+  '94700000-0000-0000-0000-000000000001',
+  '${run_id}',
+  'CAMS'
+);
+SELECT public.record_cams_kfintech_ingestion_failure(
+  '94400000-0000-0000-0000-000000000001',
+  '94700000-0000-0000-0000-000000000001',
+  '${run_id}',
+  '${correlation_id}',
+  '${message_id}',
+  '${attachment_id}',
+  '${attempt_key}',
+  'CAMS',
+  '${failure_code}',
+  repeat('${sha_char}', 64),
+  'ingested-documents',
+  'concurrency/${sha_char}',
+  'application/x-dbase',
+  'DBF',
+  1024
+);
+COMMIT;
+SQL
+}
+
 write_unclaimed_persist_sql() {
   file="$1"
   cat > "${file}" <<SQL
 \\pset tuples_only on
 \\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
 SET ROLE service_role;
 BEGIN;
 SELECT idempotent
@@ -175,9 +225,12 @@ write_finalize_sql() {
   run_id="$2"
   stopped_reason="$3"
   failure_code="$4"
+  observed_count="${5:-NULL}"
   cat > "${file}" <<SQL
 \\pset tuples_only on
 \\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
 SET ROLE service_role;
 BEGIN;
 SELECT status
@@ -187,7 +240,8 @@ FROM public.finalize_cams_kfintech_ingestion_run(
   '${run_id}',
   'CAMS',
   ${stopped_reason},
-  ${failure_code}
+  ${failure_code},
+  ${observed_count}
 );
 COMMIT;
 SQL
@@ -205,10 +259,14 @@ run_pair() {
   left_pid="$!"
   docker exec -i "${DB_CONTAINER}" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < "${right_sql}" > "${right_out}" 2>&1 &
   right_pid="$!"
+  (sleep 20; kill "${left_pid}" "${right_pid}" 2>/dev/null || true) &
+  watchdog_pid="$!"
   wait "${left_pid}"
   left_status="$?"
   wait "${right_pid}"
   right_status="$?"
+  kill "${watchdog_pid}" 2>/dev/null || true
+  wait "${watchdog_pid}" 2>/dev/null || true
   set -e
 
   echo "${left_status}" > "${WORKDIR}/${name}.left.status"
@@ -227,6 +285,25 @@ one_success_one_conflict() {
   fi
   if ! grep -qE "attachment_hash_mismatch|correlation_conflict|duplicate_attachment|persistence_conflict|ingestion_run_finalized" "${WORKDIR}/${name}.left.out" "${WORKDIR}/${name}.right.out"; then
     echo "${name}: expected stable conflict code" >&2
+    exit 1
+  fi
+}
+
+success_or_processing_incomplete() {
+  name="$1"
+  for side in left right; do
+    status="$(cat "${WORKDIR}/${name}.${side}.status")"
+    if [ "${status}" != "0" ] && ! grep -q "processing_incomplete" "${WORKDIR}/${name}.${side}.out"; then
+      echo "${name}: ${side} session failed without processing_incomplete" >&2
+      cat "${WORKDIR}/${name}.left.out" >&2
+      cat "${WORKDIR}/${name}.right.out" >&2
+      exit 1
+    fi
+  done
+  if [ "$(cat "${WORKDIR}/${name}.left.status")" != "0" ] && [ "$(cat "${WORKDIR}/${name}.right.status")" != "0" ]; then
+    echo "${name}: expected at least one session to succeed" >&2
+    cat "${WORKDIR}/${name}.left.out" >&2
+    cat "${WORKDIR}/${name}.right.out" >&2
     exit 1
   fi
 }
@@ -288,6 +365,7 @@ DROP TRIGGER IF EXISTS issue32_concurrency_sleep_before_document_insert ON publi
 DROP FUNCTION IF EXISTS public.issue32_concurrency_sleep_trigger();
 
 ALTER TABLE public.ingestion_logs DISABLE TRIGGER enforce_ingestion_logs_immutability;
+ALTER TABLE public.cams_kfintech_ingestion_attempts DISABLE TRIGGER enforce_cams_kfintech_ingestion_attempts_immutability;
 DELETE FROM public.cams_kfintech_ingestion_attempts
 WHERE workspace_id = '94400000-0000-0000-0000-000000000001';
 DELETE FROM public.event_outbox AS event
@@ -319,6 +397,7 @@ WHERE folio.id = mapping.folio_reference_id
 DELETE FROM public.folio_references
 WHERE registrar = 'CAMS'
   AND normalized_folio_number LIKE 'CONFOLIO%';
+ALTER TABLE public.cams_kfintech_ingestion_attempts ENABLE TRIGGER enforce_cams_kfintech_ingestion_attempts_immutability;
 ALTER TABLE public.ingestion_logs ENABLE TRIGGER enforce_ingestion_logs_immutability;
 
 INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
@@ -593,6 +672,12 @@ write_claim_sql "${WORKDIR}/s9a.sql" "94400000-0000-0000-0000-000000000001" "947
 write_claim_sql "${WORKDIR}/s9b.sql" "94400000-0000-0000-0000-000000000001" "94700000-0000-0000-0000-000000000001" "94900000-0000-0000-0000-000000000901" "CAMS"
 run_pair "scenario9_identical_run_claim" "${WORKDIR}/s9a.sql" "${WORKDIR}/s9b.sql"
 both_success "scenario9_identical_run_claim"
+if ! grep -q "active_in_progress" "${WORKDIR}/scenario9_identical_run_claim.left.out" "${WORKDIR}/scenario9_identical_run_claim.right.out"; then
+  echo "scenario9_identical_run_claim: expected one active_in_progress replay" >&2
+  cat "${WORKDIR}/scenario9_identical_run_claim.left.out" >&2
+  cat "${WORKDIR}/scenario9_identical_run_claim.right.out" >&2
+  exit 1
+fi
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
   SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_runs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000901';
   IF v_count <> 1 THEN RAISE EXCEPTION 'scenario9 run count %', v_count; END IF;
@@ -618,7 +703,7 @@ END \$\$;"
 
 assert_sql "SET ROLE service_role;
 SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000912','CAMS');
-SELECT * FROM public.finalize_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000912','CAMS');"
+SELECT * FROM public.finalize_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000912','CAMS', NULL, 'mailbox_poll_failed', 0);"
 write_persist_sql "${WORKDIR}/s12a.sql" "94900000-0000-0000-0000-000000000912" "s12-message" "s12-attachment-a" "s12-attempt-a" "d" "CON-FOLIO-12A" "CON-TXN-12A" 1 "94900000-0000-0000-0000-000000000912"
 write_persist_sql "${WORKDIR}/s12b.sql" "94900000-0000-0000-0000-000000000912" "s12-message" "s12-attachment-b" "s12-attempt-b" "e" "CON-FOLIO-12B" "CON-TXN-12B" 1 "94900000-0000-0000-0000-000000000912"
 run_pair "scenario12_persistence_after_terminal" "${WORKDIR}/s12a.sql" "${WORKDIR}/s12b.sql"
@@ -629,14 +714,31 @@ assert_sql "DO \$\$ DECLARE v_count int; BEGIN
 END \$\$;"
 
 assert_sql "SET ROLE service_role;
-SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000913','CAMS');"
+SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000913','CAMS');
+SELECT public.record_cams_kfintech_ingestion_failure(
+  '94400000-0000-0000-0000-000000000001',
+  '94700000-0000-0000-0000-000000000001',
+  '94900000-0000-0000-0000-000000000913',
+  '94900000-0000-0000-0000-000000000913',
+  's13-message',
+  's13-attachment',
+  's13-attempt',
+  'CAMS',
+  'malware_detected',
+  repeat('f', 64),
+  'ingested-documents',
+  'concurrency/s13-failure',
+  'application/x-dbase',
+  'DBF',
+  1024
+);"
 write_finalize_sql "${WORKDIR}/s13a.sql" "94900000-0000-0000-0000-000000000913" "NULL" "NULL"
 write_finalize_sql "${WORKDIR}/s13b.sql" "94900000-0000-0000-0000-000000000913" "NULL" "NULL"
 run_pair "scenario13_identical_terminal_finalization" "${WORKDIR}/s13a.sql" "${WORKDIR}/s13b.sql"
 both_success "scenario13_identical_terminal_finalization"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
-  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_runs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000913' AND status = 'completed';
-  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario13 completed run count %', v_count; END IF;
+  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_runs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000913' AND status = 'failed';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario13 failed run count %', v_count; END IF;
 END \$\$;"
 
 assert_sql "SET ROLE service_role;
@@ -649,6 +751,50 @@ assert_sql "DO \$\$ DECLARE v_count int; BEGIN
   SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_runs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000914' AND status IN ('failed','stopped');
   IF v_count <> 1 THEN RAISE EXCEPTION 'scenario14 terminal run count %', v_count; END IF;
 END \$\$;"
+
+write_persist_sql "${WORKDIR}/s15a.sql" "94900000-0000-0000-0000-000000000915" "s15-message" "s15-attachment" "s15-attempt" "1" "CON-FOLIO-15" "CON-TXN-15" 1 "94900000-0000-0000-0000-000000000915"
+write_custom_failure_sql "${WORKDIR}/s15b.sql" "94900000-0000-0000-0000-000000000915" "94900000-0000-0000-0000-000000000915" "s15-message" "s15-attachment" "s15-attempt" "1" "parse_failed"
+run_pair "scenario15_persist_failure_same_attachment" "${WORKDIR}/s15a.sql" "${WORKDIR}/s15b.sql"
+one_success_one_conflict "scenario15_persist_failure_same_attachment"
+assert_sql "DO \$\$ DECLARE v_count int; v_success int; v_failed int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000915' AND provider_message_id = 's15-message' AND provider_attachment_id = 's15-attachment';
+  SELECT count(*)::int INTO v_success FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000915' AND outcome = 'succeeded';
+  SELECT count(*)::int INTO v_failed FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000915' AND outcome = 'failed';
+  IF v_count <> 1 OR (v_success > 0 AND v_failed > 0) THEN RAISE EXCEPTION 'scenario15 contradictory attempts survived: %, %, %', v_count, v_success, v_failed; END IF;
+END \$\$;"
+
+assert_sql "SET ROLE service_role;
+SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000916','CAMS');"
+write_persist_sql "${WORKDIR}/s16a.sql" "94900000-0000-0000-0000-000000000916" "s16-message" "s16-attachment" "s16-attempt" "2" "CON-FOLIO-16" "CON-TXN-16" 1 "94900000-0000-0000-0000-000000000916"
+write_finalize_sql "${WORKDIR}/s16b.sql" "94900000-0000-0000-0000-000000000916" "NULL" "NULL"
+run_pair "scenario16_persist_races_finalization" "${WORKDIR}/s16a.sql" "${WORKDIR}/s16b.sql"
+success_or_processing_incomplete "scenario16_persist_races_finalization"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000916';
+  IF v_count > 1 THEN RAISE EXCEPTION 'scenario16 attempt count %', v_count; END IF;
+END \$\$;"
+
+assert_sql "SET ROLE service_role;
+SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000917','CAMS');"
+write_custom_failure_sql "${WORKDIR}/s17a.sql" "94900000-0000-0000-0000-000000000917" "94900000-0000-0000-0000-000000000917" "s17-message" "s17-attachment" "s17-attempt" "3" "malware_detected"
+write_finalize_sql "${WORKDIR}/s17b.sql" "94900000-0000-0000-0000-000000000917" "NULL" "NULL"
+run_pair "scenario17_failure_races_finalization" "${WORKDIR}/s17a.sql" "${WORKDIR}/s17b.sql"
+success_or_processing_incomplete "scenario17_failure_races_finalization"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000917';
+  IF v_count > 1 THEN RAISE EXCEPTION 'scenario17 attempt count %', v_count; END IF;
+END \$\$;"
+
+write_claim_sql "${WORKDIR}/s18a.sql" "94400000-0000-0000-0000-000000000001" "94700000-0000-0000-0000-000000000001" "94900000-0000-0000-0000-000000000918" "CAMS"
+write_claim_sql "${WORKDIR}/s18b.sql" "94400000-0000-0000-0000-000000000001" "94700000-0000-0000-0000-000000000001" "94900000-0000-0000-0000-000000000918" "CAMS"
+run_pair "scenario18_active_duplicate_claim_contract" "${WORKDIR}/s18a.sql" "${WORKDIR}/s18b.sql"
+both_success "scenario18_active_duplicate_claim_contract"
+if ! grep -q "active_in_progress" "${WORKDIR}/scenario18_active_duplicate_claim_contract.left.out" "${WORKDIR}/scenario18_active_duplicate_claim_contract.right.out"; then
+  echo "scenario18_active_duplicate_claim_contract: expected active_in_progress" >&2
+  cat "${WORKDIR}/scenario18_active_duplicate_claim_contract.left.out" >&2
+  cat "${WORKDIR}/scenario18_active_duplicate_claim_contract.right.out" >&2
+  exit 1
+fi
 
 run_psql <<'SQL'
 DROP TRIGGER IF EXISTS issue32_concurrency_sleep_before_document_insert ON public.ingested_documents;

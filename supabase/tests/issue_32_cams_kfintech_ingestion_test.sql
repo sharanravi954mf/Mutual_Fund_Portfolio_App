@@ -199,7 +199,10 @@ BEGIN
      OR pg_catalog.has_table_privilege('service_role', 'public.ingested_documents', 'UPDATE')
      OR pg_catalog.has_table_privilege('service_role', 'public.ingested_documents', 'DELETE')
      OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_runs', 'INSERT')
-     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_runs', 'UPDATE') THEN
+     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_runs', 'UPDATE')
+     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_attempts', 'INSERT')
+     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_attempts', 'UPDATE')
+     OR pg_catalog.has_table_privilege('service_role', 'public.cams_kfintech_ingestion_attempts', 'DELETE') THEN
     RAISE EXCEPTION 'Issue #32 document table grants are incorrect';
   END IF;
 
@@ -1127,6 +1130,194 @@ END;
 $$;
 
 SET ROLE service_role;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000505',
+  'CAMS'
+);
+
+DO $$
+BEGIN
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000505',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'claimed zero-attempt completion was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%processing_incomplete%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000506',
+  'CAMS'
+);
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000506',
+  'CAMS',
+  'attachment_limit_exceeded',
+  NULL,
+  0
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_status pg_catalog.text;
+  v_attempted pg_catalog.int4;
+BEGIN
+  SELECT status, attempted_attachment_count
+  INTO v_status, v_attempted
+  FROM public.cams_kfintech_ingestion_runs
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000506';
+
+  IF v_status <> 'stopped' OR v_attempted <> 0 THEN
+    RAISE EXCEPTION 'zero-attempt stop did not finalize as stopped: %, %', v_status, v_attempted;
+  END IF;
+END;
+$$;
+
+SET ROLE service_role;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000508',
+  'CAMS'
+);
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000508',
+  'CAMS',
+  NULL,
+  'sender_not_allowed',
+  1
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_status pg_catalog.text;
+  v_observed pg_catalog.int4;
+  v_durable pg_catalog.int4;
+  v_gap pg_catalog.int4;
+  v_failure_code pg_catalog.text;
+BEGIN
+  SELECT status, observed_attachment_count, durable_attempt_count, lineage_gap_count, run_failure_code
+  INTO v_status, v_observed, v_durable, v_gap, v_failure_code
+  FROM public.cams_kfintech_ingestion_runs
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000508';
+
+  IF v_status <> 'failed'
+     OR v_observed <> 1
+     OR v_durable <> 0
+     OR v_gap <> 1
+     OR v_failure_code <> 'attempt_lineage_incomplete' THEN
+    RAISE EXCEPTION 'lineage gap without durable success did not fail run: %, %, %, %, %', v_status, v_observed, v_durable, v_gap, v_failure_code;
+  END IF;
+END;
+$$;
+
+SET ROLE service_role;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000509',
+  'CAMS'
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_document_id pg_catalog.uuid;
+  v_log_id pg_catalog.uuid;
+BEGIN
+  SELECT id, ingestion_log_id
+  INTO v_document_id, v_log_id
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000101';
+
+  PERFORM public.record_cams_kfintech_ingestion_attempt(
+    '93900000-0000-0000-0000-000000000509',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'lineage-gap-success-message',
+    'lineage-gap-success-attachment',
+    'lineage-gap-success-attempt',
+    '93900000-0000-0000-0000-000000000509',
+    v_document_id,
+    v_log_id,
+    repeat('a', 64),
+    'ingested-documents',
+    'lineage-gap/success',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    'succeeded',
+    NULL
+  );
+END;
+$$;
+
+SET ROLE service_role;
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000509',
+  'CAMS',
+  NULL,
+  'sender_not_allowed',
+  2
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_status pg_catalog.text;
+  v_observed pg_catalog.int4;
+  v_durable pg_catalog.int4;
+  v_gap pg_catalog.int4;
+  v_failure_code pg_catalog.text;
+BEGIN
+  SELECT status, observed_attachment_count, durable_attempt_count, lineage_gap_count, run_failure_code
+  INTO v_status, v_observed, v_durable, v_gap, v_failure_code
+  FROM public.cams_kfintech_ingestion_runs
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000509';
+
+  IF v_status <> 'partially_failed'
+     OR v_observed <> 2
+     OR v_durable <> 1
+     OR v_gap <> 1
+     OR v_failure_code <> 'attempt_lineage_incomplete' THEN
+    RAISE EXCEPTION 'lineage gap with durable success did not partially fail run: %, %, %, %, %', v_status, v_observed, v_durable, v_gap, v_failure_code;
+  END IF;
+END;
+$$;
+
+SET ROLE service_role;
 SELECT *
 FROM public.persist_cams_kfintech_statement_ingestion(
   '93400000-0000-0000-0000-000000000001',
@@ -1664,12 +1855,24 @@ $$;
 
 SET ROLE service_role;
 
-SELECT public.claim_cams_kfintech_ingestion_run(
-  '93400000-0000-0000-0000-000000000001',
-  '93700000-0000-0000-0000-000000000001',
-  '93900000-0000-0000-0000-000000000100',
-  'CAMS'
-);
+DO $$
+DECLARE
+  v_replay_state pg_catalog.text;
+BEGIN
+  SELECT replay_state
+  INTO v_replay_state
+  FROM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000100',
+    'CAMS'
+  );
+
+  IF v_replay_state <> 'active_in_progress' THEN
+    RAISE EXCEPTION 'duplicate active run claim did not return active_in_progress: %', v_replay_state;
+  END IF;
+END;
+$$;
 
 SELECT public.claim_cams_kfintech_ingestion_run(
   '93400000-0000-0000-0000-000000000001',
@@ -1761,6 +1964,126 @@ BEGIN
 END;
 $$;
 
+UPDATE public.mailbox_connections
+SET status = 'disabled'
+WHERE id = '93700000-0000-0000-0000-000000000001';
+
+SET ROLE service_role;
+
+DO $$
+DECLARE
+  v_replay_state pg_catalog.text;
+BEGIN
+  SELECT replay_state
+  INTO v_replay_state
+  FROM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000501',
+    'CAMS'
+  );
+
+  IF v_replay_state <> 'terminal_replay' THEN
+    RAISE EXCEPTION 'disabled mailbox blocked terminal replay: %', v_replay_state;
+  END IF;
+END;
+$$;
+
+RESET ROLE;
+
+UPDATE public.mailbox_connections
+SET status = 'reauthorization_required'
+WHERE id = '93700000-0000-0000-0000-000000000001';
+
+SET ROLE service_role;
+
+DO $$
+DECLARE
+  v_replay_state pg_catalog.text;
+BEGIN
+  SELECT replay_state
+  INTO v_replay_state
+  FROM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000501',
+    'CAMS'
+  );
+
+  IF v_replay_state <> 'terminal_replay' THEN
+    RAISE EXCEPTION 'reauthorization mailbox blocked terminal replay: %', v_replay_state;
+  END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000002',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000501',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'terminal replay accepted conflicting workspace';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000002',
+    '93900000-0000-0000-0000-000000000501',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'terminal replay accepted conflicting mailbox';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000501',
+    'KFINTECH'
+  );
+  RAISE EXCEPTION 'terminal replay accepted conflicting registrar';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+RESET ROLE;
+
+DO $$
+BEGIN
+  DELETE FROM public.mailbox_connections
+  WHERE id = '93700000-0000-0000-0000-000000000001';
+  RAISE EXCEPTION 'referenced mailbox deletion was accepted';
+EXCEPTION
+  WHEN foreign_key_violation THEN
+    NULL;
+END;
+$$;
+
+UPDATE public.mailbox_connections
+SET status = 'active'
+WHERE id = '93700000-0000-0000-0000-000000000001';
+
 SET ROLE service_role;
 
 DO $$
@@ -1836,7 +2159,163 @@ EXCEPTION
 END;
 $$;
 
+DO $$
+BEGIN
+  INSERT INTO public.cams_kfintech_ingestion_attempts (
+    ingestion_run_id, workspace_id, mailbox_connection_id, provider_message_id,
+    provider_attachment_id, attachment_attempt_key, document_correlation_id,
+    outcome, failure_code
+  ) VALUES (
+    '93900000-0000-0000-0000-000000000100',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'forged-attempt-message',
+    'forged-attempt-attachment',
+    'forged-attempt-key',
+    '93900000-0000-0000-0000-000000000779',
+    'failed',
+    'malware_detected'
+  );
+  RAISE EXCEPTION 'service_role inserted forged attempt directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
+DO $$
+BEGIN
+  UPDATE public.cams_kfintech_ingestion_attempts
+  SET failure_code = 'parse_failed'
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000100';
+  RAISE EXCEPTION 'service_role updated attempt directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
+DO $$
+BEGIN
+  DELETE FROM public.cams_kfintech_ingestion_attempts
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000100';
+  RAISE EXCEPTION 'service_role deleted attempt directly';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END;
+$$;
+
 RESET ROLE;
+
+DO $$
+DECLARE
+  v_attempt_id pg_catalog.uuid;
+  v_replay_id pg_catalog.uuid;
+BEGIN
+  SELECT attempt.id
+  INTO v_attempt_id
+  FROM public.cams_kfintech_ingestion_attempts AS attempt
+  LIMIT 1;
+
+  IF v_attempt_id IS NULL THEN
+    RAISE EXCEPTION 'attempt immutability test did not find an attempt row';
+  END IF;
+
+  BEGIN
+    UPDATE public.cams_kfintech_ingestion_attempts
+    SET failure_code = COALESCE(failure_code, 'parse_failed')
+    WHERE id = v_attempt_id;
+    RAISE EXCEPTION 'owner updated attempt directly';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%cams_kfintech_ingestion_attempts_immutable%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    DELETE FROM public.cams_kfintech_ingestion_attempts
+    WHERE id = v_attempt_id;
+    RAISE EXCEPTION 'owner deleted attempt directly';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%cams_kfintech_ingestion_attempts_immutable%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  v_replay_id := public.record_cams_kfintech_ingestion_attempt(
+    '93900000-0000-0000-0000-000000000505',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'helper-replay-message',
+    'helper-replay-attachment',
+    'helper-replay-attempt',
+    '93900000-0000-0000-0000-000000000505',
+    NULL,
+    NULL,
+    repeat('9', 64),
+    'ingested-documents',
+    'helper/replay',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    'failed',
+    'parse_failed'
+  );
+
+  IF v_replay_id IS DISTINCT FROM public.record_cams_kfintech_ingestion_attempt(
+    '93900000-0000-0000-0000-000000000505',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'helper-replay-message',
+    'helper-replay-attachment',
+    'helper-replay-attempt',
+    '93900000-0000-0000-0000-000000000505',
+    NULL,
+    NULL,
+    repeat('9', 64),
+    'ingested-documents',
+    'helper/replay',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    'failed',
+    'parse_failed'
+  ) THEN
+    RAISE EXCEPTION 'identical attempt replay did not return the same attempt id';
+  END IF;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_attempt(
+      '93900000-0000-0000-0000-000000000505',
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      'helper-replay-message',
+      'helper-replay-attachment',
+      'helper-replay-attempt',
+      '93900000-0000-0000-0000-000000000505',
+      NULL,
+      NULL,
+      repeat('9', 64),
+      'ingested-documents',
+      'helper/replay-changed',
+      'application/x-dbase',
+      'DBF',
+      1024,
+      'failed',
+      'parse_failed'
+    );
+    RAISE EXCEPTION 'contradictory attempt replay was accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$$;
 
 DO $$
 DECLARE

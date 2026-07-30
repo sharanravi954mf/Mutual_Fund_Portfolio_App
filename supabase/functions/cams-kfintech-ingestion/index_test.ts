@@ -105,10 +105,12 @@ function deps(options: {
     runId: string;
     stoppedReason?: string;
     failureCode?: string;
+    observedAttachmentCount?: number;
   }[];
   downloadCount?: { count: number };
   registrarConfig?: Partial<RegistrarConfig>;
   claimRun?: HandlerDependencies["persistence"]["claimRun"];
+  finalizeRun?: HandlerDependencies["persistence"]["finalizeRun"];
   recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
 } = {}): HandlerDependencies {
   const stages = options.stages ?? [];
@@ -203,15 +205,19 @@ function deps(options: {
           failed_attachment_count: 0,
           duplicate_attachment_count: 0,
           stopped_attachment_count: 0,
+          observed_attachment_count: 0,
+          durable_attempt_count: 0,
+          lineage_gap_count: 0,
           stopped_reason: null,
           run_failure_code: null,
         });
       }),
-      finalizeRun: (input) => {
+      finalizeRun: options.finalizeRun ?? ((input) => {
         finalizedRuns.push({
           runId: input.ingestionRunId,
           stoppedReason: input.stoppedReason,
           failureCode: input.failureCode,
+          observedAttachmentCount: input.observedAttachmentCount,
         });
         return Promise.resolve({
           ingestion_run_id: input.ingestionRunId,
@@ -225,10 +231,15 @@ function deps(options: {
           failed_attachment_count: input.failureCode != null ? 1 : 0,
           duplicate_attachment_count: 0,
           stopped_attachment_count: input.stoppedReason != null ? 1 : 0,
+          observed_attachment_count: input.observedAttachmentCount ?? 0,
+          durable_attempt_count: input.failureCode != null ? 1 : 0,
+          lineage_gap_count: input.failureCode === "attempt_lineage_incomplete"
+            ? 1
+            : 0,
           stopped_reason: input.stoppedReason ?? null,
           run_failure_code: input.failureCode ?? null,
         });
-      },
+      }),
       persist: options.persist ??
         (() =>
           Promise.resolve({
@@ -338,6 +349,9 @@ Deno.test("terminal run replay returns immutable summary without mailbox polling
         failed_attachment_count: 0,
         duplicate_attachment_count: 1,
         stopped_attachment_count: 0,
+        observed_attachment_count: 2,
+        durable_attempt_count: 2,
+        lineage_gap_count: 0,
         stopped_reason: null,
         run_failure_code: null,
       }),
@@ -351,6 +365,59 @@ Deno.test("terminal run replay returns immutable summary without mailbox polling
   assertEquals(body.data.attempted_attachments, 2);
   assertEquals(body.data.duplicate_attachments, 1);
   assertEquals(downloadCount.count, 0);
+  assertEquals(stages, ["internal_authorization", "claim_ingestion_run"]);
+});
+
+Deno.test("active run replay returns in-progress without execution side effects", async () => {
+  const stages: string[] = [];
+  const downloadCount = { count: 0 };
+  let persistCount = 0;
+  const finalizedRuns: {
+    runId: string;
+    stoppedReason?: string;
+    failureCode?: string;
+    observedAttachmentCount?: number;
+  }[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    downloadCount,
+    finalizedRuns,
+    failContext: new IngestionError("oauth_credentials_unavailable"),
+    persist: () => {
+      persistCount += 1;
+      return Promise.reject(new IngestionError("persistence_failed"));
+    },
+    claimRun: (input) =>
+      Promise.resolve({
+        ingestion_run_id: input.ingestionRunId,
+        status: "claimed",
+        replay_state: "active_in_progress",
+        attempted_attachment_count: 1,
+        successful_attachment_count: 0,
+        failed_attachment_count: 0,
+        duplicate_attachment_count: 0,
+        stopped_attachment_count: 0,
+        observed_attachment_count: 1,
+        durable_attempt_count: 1,
+        lineage_gap_count: 0,
+        stopped_reason: null,
+        run_failure_code: null,
+      }),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 202);
+  assertEquals(body.data.replay_state, "active_in_progress");
+  assertEquals(body.data.code, "ingestion_run_in_progress");
+  assertEquals(
+    body.data.continuation_policy,
+    "active_run_in_progress_no_mailbox_poll",
+  );
+  assertEquals(downloadCount.count, 0);
+  assertEquals(persistCount, 0);
+  assertEquals(finalizedRuns, []);
   assertEquals(stages, ["internal_authorization", "claim_ingestion_run"]);
 });
 
@@ -620,6 +687,7 @@ Deno.test("run is claimed before polling and finalized after poll failure", asyn
     runId: string;
     stoppedReason?: string;
     failureCode?: string;
+    observedAttachmentCount?: number;
   }[] = [];
   const handler = createCamsKfintechIngestionHandler(deps({
     stages,
@@ -646,6 +714,7 @@ Deno.test("run is claimed before polling and finalized after poll failure", asyn
     runId: correlationId,
     stoppedReason: undefined,
     failureCode: "mailbox_poll_failed",
+    observedAttachmentCount: 0,
   }]);
 });
 
@@ -933,7 +1002,14 @@ Deno.test("run byte limit stops later message downloads without false lineage", 
 });
 
 Deno.test("failure RPC outage preserves original attachment error", async () => {
+  const finalizedRuns: {
+    runId: string;
+    stoppedReason?: string;
+    failureCode?: string;
+    observedAttachmentCount?: number;
+  }[] = [];
   const handler = createCamsKfintechIngestionHandler(deps({
+    finalizedRuns,
     messages: [
       message(camsDbfFixture(), { senderAddress: "bad@example.test" }),
     ],
@@ -947,6 +1023,123 @@ Deno.test("failure RPC outage preserves original attachment error", async () => 
   assertEquals(response.status, 200);
   assertEquals(body.data.results[0].error.code, "sender_not_allowed");
   assertEquals(body.data.results[0].error.lineage_write_failed, true);
+  assertEquals(body.data.run_failure_code, "attempt_lineage_incomplete");
+  assertEquals(finalizedRuns, [{
+    runId: correlationId,
+    stoppedReason: undefined,
+    failureCode: "attempt_lineage_incomplete",
+    observedAttachmentCount: 1,
+  }]);
+});
+
+Deno.test("one durable success plus a lineage gap finalizes partially failed", async () => {
+  let successCount = 0;
+  const handler = createCamsKfintechIngestionHandler(deps({
+    messages: [
+      message(camsDbfFixture(), { messageId: "lineage-success" }),
+      message(camsDbfFixture(), {
+        messageId: "lineage-failure",
+        senderAddress: "bad@example.test",
+      }),
+    ],
+    persist: () => {
+      successCount += 1;
+      return Promise.resolve({
+        document_id: "document-id",
+        ingestion_log_id: "log-id",
+        outbox_event_id: "event-id",
+        transaction_count: 1,
+        idempotent: false,
+      });
+    },
+    recordFailure: () =>
+      Promise.reject(new IngestionError("persistence_failed")),
+    finalizeRun: (input) =>
+      Promise.resolve({
+        ingestion_run_id: input.ingestionRunId,
+        status: "partially_failed",
+        attempted_attachment_count: successCount,
+        successful_attachment_count: successCount,
+        failed_attachment_count: 0,
+        duplicate_attachment_count: 0,
+        stopped_attachment_count: 0,
+        observed_attachment_count: input.observedAttachmentCount ?? 0,
+        durable_attempt_count: successCount,
+        lineage_gap_count: (input.observedAttachmentCount ?? 0) - successCount,
+        stopped_reason: null,
+        run_failure_code: input.failureCode ?? null,
+      }),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.run_status, "partially_failed");
+  assertEquals(body.data.run_failure_code, "attempt_lineage_incomplete");
+  assertEquals(body.data.observed_attachments, 2);
+  assertEquals(body.data.durable_attempts, 1);
+  assertEquals(body.data.lineage_gap_count, 1);
+  assertEquals(body.data.results[1].error.code, "sender_not_allowed");
+});
+
+Deno.test("multiple durable successes plus one lineage gap never completes", async () => {
+  const bytes = camsDbfFixture();
+  const first = attachmentFixture(bytes, "lineage-multi", "att-1");
+  const second = attachmentFixture(bytes, "lineage-multi", "att-2");
+  const third = attachmentFixture(bytes, "lineage-multi-bad", "att-3");
+  let successCount = 0;
+  const handler = createCamsKfintechIngestionHandler(deps({
+    messages: [
+      message(bytes, {
+        messageId: "lineage-multi",
+        attachments: [first, second],
+      }),
+      message(bytes, {
+        messageId: "lineage-multi-bad",
+        senderAddress: "bad@example.test",
+        attachments: [third],
+      }),
+    ],
+    persist: () => {
+      successCount += 1;
+      return Promise.resolve({
+        document_id: `document-${successCount}`,
+        ingestion_log_id: `log-${successCount}`,
+        outbox_event_id: `event-${successCount}`,
+        transaction_count: 1,
+        idempotent: false,
+      });
+    },
+    recordFailure: () =>
+      Promise.reject(new IngestionError("persistence_failed")),
+    finalizeRun: (input) =>
+      Promise.resolve({
+        ingestion_run_id: input.ingestionRunId,
+        status: "partially_failed",
+        attempted_attachment_count: successCount,
+        successful_attachment_count: successCount,
+        failed_attachment_count: 0,
+        duplicate_attachment_count: 0,
+        stopped_attachment_count: 0,
+        observed_attachment_count: input.observedAttachmentCount ?? 0,
+        durable_attempt_count: successCount,
+        lineage_gap_count: (input.observedAttachmentCount ?? 0) - successCount,
+        stopped_reason: null,
+        run_failure_code: input.failureCode ?? null,
+      }),
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.run_status, "partially_failed");
+  assertEquals(body.data.run_failure_code, "attempt_lineage_incomplete");
+  assertEquals(body.data.observed_attachments, 3);
+  assertEquals(body.data.durable_attempts, 2);
+  assertEquals(body.data.lineage_gap_count, 1);
+  assertEquals(body.data.results[2].error.code, "sender_not_allowed");
 });
 
 Deno.test("SHA-256 is computed from attachment bytes inside worker", async () => {
