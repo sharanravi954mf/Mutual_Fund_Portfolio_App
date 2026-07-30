@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SCENARIOS=18
+SCENARIOS=20
 DB_CONTAINER="${SUPABASE_DB_CONTAINER:-$(docker ps --filter "name=supabase_db_" --format "{{.Names}}" | head -n 1)}"
 
 if [ -z "${DB_CONTAINER}" ]; then
@@ -164,6 +164,51 @@ SELECT public.record_cams_kfintech_ingestion_failure(
   repeat('${sha_char}', 64),
   'ingested-documents',
   'concurrency/${sha_char}',
+  'application/x-dbase',
+  'DBF',
+  1024
+);
+COMMIT;
+SQL
+}
+
+write_exact_failure_sql() {
+  file="$1"
+  run_id="$2"
+  correlation_id="$3"
+  message_id="$4"
+  attachment_id="$5"
+  attempt_key="$6"
+  sha_hex="$7"
+  object_path="$8"
+  failure_code="$9"
+  cat > "${file}" <<SQL
+\\pset tuples_only on
+\\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
+SET ROLE service_role;
+BEGIN;
+SET LOCAL moneybowl.issue32_concurrency_sleep = 'on';
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '94400000-0000-0000-0000-000000000001',
+  '94700000-0000-0000-0000-000000000001',
+  '${run_id}',
+  'CAMS'
+);
+SELECT public.record_cams_kfintech_ingestion_failure(
+  '94400000-0000-0000-0000-000000000001',
+  '94700000-0000-0000-0000-000000000001',
+  '${run_id}',
+  '${correlation_id}',
+  '${message_id}',
+  '${attachment_id}',
+  '${attempt_key}',
+  'CAMS',
+  '${failure_code}',
+  '${sha_hex}',
+  'ingested-documents',
+  '${object_path}',
   'application/x-dbase',
   'DBF',
   1024
@@ -732,8 +777,8 @@ SELECT public.record_cams_kfintech_ingestion_failure(
   'DBF',
   1024
 );"
-write_finalize_sql "${WORKDIR}/s13a.sql" "94900000-0000-0000-0000-000000000913" "NULL" "NULL"
-write_finalize_sql "${WORKDIR}/s13b.sql" "94900000-0000-0000-0000-000000000913" "NULL" "NULL"
+write_finalize_sql "${WORKDIR}/s13a.sql" "94900000-0000-0000-0000-000000000913" "NULL" "NULL" "1"
+write_finalize_sql "${WORKDIR}/s13b.sql" "94900000-0000-0000-0000-000000000913" "NULL" "NULL" "1"
 run_pair "scenario13_identical_terminal_finalization" "${WORKDIR}/s13a.sql" "${WORKDIR}/s13b.sql"
 both_success "scenario13_identical_terminal_finalization"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
@@ -743,8 +788,8 @@ END \$\$;"
 
 assert_sql "SET ROLE service_role;
 SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000914','CAMS');"
-write_finalize_sql "${WORKDIR}/s14a.sql" "94900000-0000-0000-0000-000000000914" "'attachment_limit_exceeded'" "NULL"
-write_finalize_sql "${WORKDIR}/s14b.sql" "94900000-0000-0000-0000-000000000914" "NULL" "'mailbox_poll_failed'"
+write_finalize_sql "${WORKDIR}/s14a.sql" "94900000-0000-0000-0000-000000000914" "'attachment_limit_exceeded'" "NULL" "0"
+write_finalize_sql "${WORKDIR}/s14b.sql" "94900000-0000-0000-0000-000000000914" "NULL" "'mailbox_poll_failed'" "0"
 run_pair "scenario14_conflicting_terminal_finalization" "${WORKDIR}/s14a.sql" "${WORKDIR}/s14b.sql"
 one_success_one_conflict "scenario14_conflicting_terminal_finalization"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
@@ -766,7 +811,7 @@ END \$\$;"
 assert_sql "SET ROLE service_role;
 SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000916','CAMS');"
 write_persist_sql "${WORKDIR}/s16a.sql" "94900000-0000-0000-0000-000000000916" "s16-message" "s16-attachment" "s16-attempt" "2" "CON-FOLIO-16" "CON-TXN-16" 1 "94900000-0000-0000-0000-000000000916"
-write_finalize_sql "${WORKDIR}/s16b.sql" "94900000-0000-0000-0000-000000000916" "NULL" "NULL"
+write_finalize_sql "${WORKDIR}/s16b.sql" "94900000-0000-0000-0000-000000000916" "NULL" "NULL" "1"
 run_pair "scenario16_persist_races_finalization" "${WORKDIR}/s16a.sql" "${WORKDIR}/s16b.sql"
 success_or_processing_incomplete "scenario16_persist_races_finalization"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
@@ -776,8 +821,8 @@ END \$\$;"
 
 assert_sql "SET ROLE service_role;
 SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000917','CAMS');"
-write_custom_failure_sql "${WORKDIR}/s17a.sql" "94900000-0000-0000-0000-000000000917" "94900000-0000-0000-0000-000000000917" "s17-message" "s17-attachment" "s17-attempt" "3" "malware_detected"
-write_finalize_sql "${WORKDIR}/s17b.sql" "94900000-0000-0000-0000-000000000917" "NULL" "NULL"
+write_exact_failure_sql "${WORKDIR}/s17a.sql" "94900000-0000-0000-0000-000000000917" "94900000-0000-0000-0000-000000000917" "s17-message" "s17-attachment" "s17-attempt" "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567" "concurrency/s17-failure" "malware_detected"
+write_finalize_sql "${WORKDIR}/s17b.sql" "94900000-0000-0000-0000-000000000917" "NULL" "NULL" "1"
 run_pair "scenario17_failure_races_finalization" "${WORKDIR}/s17a.sql" "${WORKDIR}/s17b.sql"
 success_or_processing_incomplete "scenario17_failure_races_finalization"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
@@ -795,6 +840,30 @@ if ! grep -q "active_in_progress" "${WORKDIR}/scenario18_active_duplicate_claim_
   cat "${WORKDIR}/scenario18_active_duplicate_claim_contract.right.out" >&2
   exit 1
 fi
+
+assert_sql "SET ROLE service_role;
+SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000919','CAMS');"
+write_exact_failure_sql "${WORKDIR}/s19a.sql" "94900000-0000-0000-0000-000000000919" "94900000-0000-0000-0000-000000000919" "s19-message" "s19-attachment" "s19-attempt" "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" "concurrency/s19-failure" "parse_failed"
+write_exact_failure_sql "${WORKDIR}/s19b.sql" "94900000-0000-0000-0000-000000000919" "94900000-0000-0000-0000-000000000919" "s19-message" "s19-attachment" "s19-attempt" "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" "concurrency/s19-failure" "parse_failed"
+run_pair "scenario19_identical_failure_replay" "${WORKDIR}/s19a.sql" "${WORKDIR}/s19b.sql"
+both_success "scenario19_identical_failure_replay"
+assert_sql "DO \$\$ DECLARE v_logs int; v_attempts int; BEGIN
+  SELECT count(*)::int INTO v_logs FROM public.ingestion_logs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000919' AND failure_code = 'parse_failed';
+  SELECT count(*)::int INTO v_attempts FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000919' AND failure_code = 'parse_failed';
+  IF v_logs <> 1 OR v_attempts <> 1 THEN RAISE EXCEPTION 'scenario19 failure replay lineage counts %, %', v_logs, v_attempts; END IF;
+END \$\$;"
+
+assert_sql "SET ROLE service_role;
+SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-000000000001','94700000-0000-0000-0000-000000000001','94900000-0000-0000-0000-000000000920','CAMS');"
+write_exact_failure_sql "${WORKDIR}/s20a.sql" "94900000-0000-0000-0000-000000000920" "94900000-0000-0000-0000-000000000920" "s20-message" "s20-attachment" "s20-attempt" "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" "concurrency/s20-failure-a" "parse_failed"
+write_exact_failure_sql "${WORKDIR}/s20b.sql" "94900000-0000-0000-0000-000000000920" "94900000-0000-0000-0000-000000000920" "s20-message" "s20-attachment" "s20-attempt" "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" "concurrency/s20-failure-b" "parse_failed"
+run_pair "scenario20_contradictory_failure_replay" "${WORKDIR}/s20a.sql" "${WORKDIR}/s20b.sql"
+one_success_one_conflict "scenario20_contradictory_failure_replay"
+assert_sql "DO \$\$ DECLARE v_logs int; v_attempts int; BEGIN
+  SELECT count(*)::int INTO v_logs FROM public.ingestion_logs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000920' AND failure_code = 'parse_failed';
+  SELECT count(*)::int INTO v_attempts FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000920' AND failure_code = 'parse_failed';
+  IF v_logs <> 1 OR v_attempts <> 1 THEN RAISE EXCEPTION 'scenario20 failure replay lineage counts %, %', v_logs, v_attempts; END IF;
+END \$\$;"
 
 run_psql <<'SQL'
 DROP TRIGGER IF EXISTS issue32_concurrency_sleep_before_document_insert ON public.ingested_documents;

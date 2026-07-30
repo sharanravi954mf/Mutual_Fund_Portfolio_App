@@ -90,10 +90,35 @@ CREATE TABLE IF NOT EXISTS public.cams_kfintech_ingestion_runs (
   observed_attachment_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (observed_attachment_count >= 0),
   durable_attempt_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (durable_attempt_count >= 0),
   lineage_gap_count pg_catalog.int4 NOT NULL DEFAULT 0 CHECK (lineage_gap_count >= 0),
-  stopped_reason pg_catalog.text,
-  run_failure_code pg_catalog.text,
+  stopped_reason pg_catalog.text CHECK (
+    stopped_reason IS NULL
+    OR stopped_reason IN ('attachment_too_large', 'attachment_limit_exceeded')
+  ),
+  run_failure_code pg_catalog.text CHECK (
+    run_failure_code IS NULL
+    OR run_failure_code IN (
+      'mailbox_connection_not_found',
+      'oauth_credentials_unavailable',
+      'mailbox_poll_failed',
+      'configuration_ambiguous',
+      'connector_untrusted_origin',
+      'credential_refresh_failed',
+      'malware_scan_unavailable',
+      'persistence_failed',
+      'attempt_lineage_incomplete'
+    )
+  ),
   created_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now(),
-  updated_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now()
+  updated_at pg_catalog.timestamptz NOT NULL DEFAULT pg_catalog.now(),
+  CHECK (
+    (status = 'stopped' AND stopped_reason IS NOT NULL AND run_failure_code IS NULL)
+    OR (status = 'completed' AND stopped_reason IS NULL AND run_failure_code IS NULL)
+    OR (status IN ('claimed', 'failed', 'partially_failed') AND stopped_reason IS NULL)
+  ),
+  CHECK (
+    run_failure_code IS NULL
+    OR status IN ('failed', 'partially_failed')
+  )
 );
 
 CREATE TABLE IF NOT EXISTS public.cams_kfintech_ingestion_attempts (
@@ -837,6 +862,8 @@ DECLARE
   v_status pg_catalog.text;
   v_run_failure_code pg_catalog.text;
   v_stopped_reason pg_catalog.text;
+  v_attempt_stopped_reason pg_catalog.text;
+  v_attempt_stopped_reason_count pg_catalog.int4;
 BEGIN
   IF p_workspace_id IS NULL OR p_mailbox_connection_id IS NULL OR p_ingestion_run_id IS NULL THEN
     RAISE EXCEPTION 'correlation_id_required';
@@ -846,6 +873,27 @@ BEGIN
   END IF;
   IF p_observed_attachment_count IS NOT NULL AND p_observed_attachment_count < 0 THEN
     RAISE EXCEPTION 'processing_incomplete';
+  END IF;
+  IF p_stopped_reason IS NOT NULL AND p_failure_code IS NOT NULL THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+  IF p_stopped_reason IS NOT NULL
+     AND p_stopped_reason NOT IN ('attachment_too_large', 'attachment_limit_exceeded') THEN
+    RAISE EXCEPTION 'unsupported_stopped_reason';
+  END IF;
+  IF p_failure_code IS NOT NULL
+     AND p_failure_code NOT IN (
+       'mailbox_connection_not_found',
+       'oauth_credentials_unavailable',
+       'mailbox_poll_failed',
+       'configuration_ambiguous',
+       'connector_untrusted_origin',
+       'credential_refresh_failed',
+       'malware_scan_unavailable',
+       'persistence_failed',
+       'attempt_lineage_incomplete'
+     ) THEN
+    RAISE EXCEPTION 'unsupported_run_failure_code';
   END IF;
 
   PERFORM pg_catalog.pg_advisory_xact_lock(
@@ -883,20 +931,59 @@ BEGIN
   v_failed := COALESCE(v_failed, 0);
   v_duplicate := COALESCE(v_duplicate, 0);
   v_stopped := COALESCE(v_stopped, 0);
-  v_observed := COALESCE(p_observed_attachment_count, v_attempted);
+
+  IF v_run.status = 'claimed' AND p_observed_attachment_count IS NULL THEN
+    RAISE EXCEPTION 'processing_incomplete';
+  END IF;
+
+  v_observed := COALESCE(p_observed_attachment_count, v_run.observed_attachment_count);
 
   IF v_observed < v_attempted THEN
     RAISE EXCEPTION 'processing_incomplete';
   END IF;
 
   v_lineage_gap := v_observed - v_attempted;
+
+  SELECT pg_catalog.min(attempt.failure_code),
+         pg_catalog.count(DISTINCT attempt.failure_code)::pg_catalog.int4
+  INTO v_attempt_stopped_reason, v_attempt_stopped_reason_count
+  FROM public.cams_kfintech_ingestion_attempts AS attempt
+  WHERE attempt.ingestion_run_id = p_ingestion_run_id
+    AND attempt.workspace_id = p_workspace_id
+    AND attempt.mailbox_connection_id = p_mailbox_connection_id
+    AND attempt.outcome = 'stopped';
+
+  v_attempt_stopped_reason_count := COALESCE(v_attempt_stopped_reason_count, 0);
+  IF v_attempt_stopped_reason IS NOT NULL
+     AND v_attempt_stopped_reason NOT IN ('attachment_too_large', 'attachment_limit_exceeded') THEN
+    RAISE EXCEPTION 'unsupported_stopped_reason';
+  END IF;
+
+  IF p_failure_code = 'attempt_lineage_incomplete' AND v_lineage_gap = 0 THEN
+    RAISE EXCEPTION 'processing_incomplete';
+  END IF;
+  IF v_lineage_gap = 0
+     AND p_stopped_reason IS NOT NULL
+     AND v_stopped = 0
+     AND v_attempted > 0 THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+  IF v_lineage_gap = 0
+     AND p_failure_code IS NOT NULL
+     AND v_failed = 0
+     AND v_attempted > 0 THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+
   v_run_failure_code := CASE
     WHEN v_lineage_gap > 0 THEN 'attempt_lineage_incomplete'
     ELSE p_failure_code
   END;
   v_stopped_reason := CASE
     WHEN v_lineage_gap > 0 THEN NULL
-    ELSE p_stopped_reason
+    WHEN p_stopped_reason IS NOT NULL THEN p_stopped_reason
+    WHEN v_stopped > 0 AND v_attempt_stopped_reason_count = 1 THEN v_attempt_stopped_reason
+    ELSE NULL
   END;
 
   IF v_lineage_gap > 0 THEN
@@ -919,6 +1006,21 @@ BEGIN
     v_status := 'failed';
   ELSE
     v_status := 'completed';
+  END IF;
+
+  IF v_status = 'completed' AND (p_stopped_reason IS NOT NULL OR p_failure_code IS NOT NULL) THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+  IF v_status = 'stopped' AND v_stopped_reason IS NULL THEN
+    RAISE EXCEPTION 'unsupported_stopped_reason';
+  END IF;
+  IF v_status <> 'stopped' AND v_stopped_reason IS NOT NULL THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+  IF v_status = 'failed'
+     AND v_run_failure_code IS NULL
+     AND v_failed = 0 THEN
+    RAISE EXCEPTION 'processing_incomplete';
   END IF;
 
   IF v_run.status <> 'claimed' THEN
@@ -1052,6 +1154,8 @@ CREATE OR REPLACE FUNCTION public.record_cams_kfintech_ingestion_failure(
 RETURNS pg_catalog.uuid AS $$
 DECLARE
   v_log_id pg_catalog.uuid;
+  v_existing_log public.ingestion_logs;
+  v_existing_attempt public.cams_kfintech_ingestion_attempts;
   v_correlation_document public.ingested_documents;
   v_provider_document public.ingested_documents;
   v_digest_document public.ingested_documents;
@@ -1131,46 +1235,140 @@ BEGIN
   END IF;
 
   IF v_correlation_document.id IS NOT NULL THEN
-    v_document_id := v_correlation_document.id;
     IF v_correlation_document.workspace_id IS DISTINCT FROM p_workspace_id
        OR v_correlation_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
        OR v_correlation_document.registrar IS DISTINCT FROM p_registrar THEN
       RAISE EXCEPTION 'correlation_conflict';
     END IF;
-    IF p_provider_message_id IS NOT NULL AND v_correlation_document.provider_message_id IS DISTINCT FROM p_provider_message_id THEN
-      RAISE EXCEPTION 'correlation_conflict';
-    END IF;
-    IF p_provider_attachment_id IS NOT NULL AND v_correlation_document.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id THEN
-      RAISE EXCEPTION 'correlation_conflict';
-    END IF;
+    v_document_id := v_correlation_document.id;
   END IF;
 
   IF v_provider_document.id IS NOT NULL THEN
-    v_document_id := COALESCE(v_document_id, v_provider_document.id);
-    IF v_provider_document.registrar IS DISTINCT FROM p_registrar THEN
+    IF v_provider_document.workspace_id IS DISTINCT FROM p_workspace_id
+       OR v_provider_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+       OR v_provider_document.registrar IS DISTINCT FROM p_registrar THEN
       RAISE EXCEPTION 'correlation_conflict';
     END IF;
   END IF;
 
   IF v_digest_document.id IS NOT NULL THEN
-    v_document_id := COALESCE(v_document_id, v_digest_document.id);
+    IF v_digest_document.workspace_id IS DISTINCT FROM p_workspace_id
+       OR v_digest_document.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+       OR v_digest_document.registrar IS DISTINCT FROM p_registrar THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
   END IF;
 
-  SELECT log.id
-  INTO v_log_id
+  IF v_correlation_document.id IS NOT NULL
+     AND v_provider_document.id IS NOT NULL
+     AND v_correlation_document.id IS DISTINCT FROM v_provider_document.id THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+
+  IF v_correlation_document.id IS NOT NULL
+     AND v_digest_document.id IS NOT NULL
+     AND v_correlation_document.id IS DISTINCT FROM v_digest_document.id THEN
+    RAISE EXCEPTION 'correlation_conflict';
+  END IF;
+
+  IF v_provider_document.id IS NOT NULL THEN
+    v_document_id := v_provider_document.id;
+    IF p_attachment_sha256 IS NOT NULL
+       AND v_provider_document.sha256_hex IS DISTINCT FROM p_attachment_sha256
+       AND p_failure_code <> 'attachment_hash_mismatch' THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    END IF;
+  ELSIF v_correlation_document.id IS NOT NULL THEN
+    v_document_id := v_correlation_document.id;
+    IF p_provider_message_id IS NOT NULL
+       AND v_correlation_document.provider_message_id IS DISTINCT FROM p_provider_message_id THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_provider_attachment_id IS NOT NULL
+       AND v_correlation_document.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+    IF p_attachment_sha256 IS NOT NULL
+       AND v_correlation_document.sha256_hex IS DISTINCT FROM p_attachment_sha256
+       AND p_failure_code <> 'attachment_hash_mismatch' THEN
+      RAISE EXCEPTION 'attachment_hash_mismatch';
+    END IF;
+  ELSIF v_digest_document.id IS NOT NULL THEN
+    IF p_failure_code <> 'duplicate_attachment' THEN
+      RAISE EXCEPTION 'duplicate_attachment';
+    END IF;
+    v_document_id := v_digest_document.id;
+  END IF;
+
+  v_outcome := CASE
+    WHEN p_failure_code = 'duplicate_attachment' THEN 'duplicate'
+    WHEN p_failure_code IN ('attachment_too_large', 'attachment_limit_exceeded') THEN 'stopped'
+    ELSE 'failed'
+  END;
+
+  SELECT log.*
+  INTO v_existing_log
   FROM public.ingestion_logs AS log
   WHERE log.workspace_id = p_workspace_id
     AND log.mailbox_connection_id = p_mailbox_connection_id
     AND log.ingestion_run_id = p_ingestion_run_id
     AND log.status = 'FAILED'
-    AND log.failure_code = p_failure_code
-    AND log.correlation_id = p_document_correlation_id
-    AND (p_attachment_attempt_key IS NULL OR log.attachment_attempt_key = p_attachment_attempt_key)
+    AND (
+      (p_attachment_attempt_key IS NOT NULL AND log.attachment_attempt_key = p_attachment_attempt_key)
+      OR (log.failure_code = p_failure_code AND log.correlation_id = p_document_correlation_id)
+    )
   ORDER BY log.started_at ASC
   LIMIT 1;
 
-  IF v_log_id IS NOT NULL THEN
-    RETURN v_log_id;
+  IF v_existing_log.id IS NOT NULL THEN
+    IF v_existing_log.registrar IS DISTINCT FROM p_registrar
+       OR v_existing_log.provider_message_id IS DISTINCT FROM p_provider_message_id
+       OR v_existing_log.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id
+       OR v_existing_log.attachment_attempt_key IS DISTINCT FROM p_attachment_attempt_key
+       OR v_existing_log.correlation_id IS DISTINCT FROM p_document_correlation_id
+       OR v_existing_log.document_id IS DISTINCT FROM v_document_id
+       OR v_existing_log.failure_code IS DISTINCT FROM p_failure_code
+       OR v_existing_log.attachment_sha256 IS DISTINCT FROM p_attachment_sha256
+       OR v_existing_log.storage_bucket IS DISTINCT FROM p_storage_bucket
+       OR v_existing_log.storage_object_path IS DISTINCT FROM p_storage_object_path
+       OR v_existing_log.detected_mime IS DISTINCT FROM p_detected_mime
+       OR v_existing_log.file_type IS DISTINCT FROM p_file_type
+       OR v_existing_log.size_bytes IS DISTINCT FROM p_size_bytes THEN
+      RAISE EXCEPTION 'correlation_conflict';
+    END IF;
+
+    IF p_provider_message_id IS NOT NULL
+       AND p_provider_attachment_id IS NOT NULL
+       AND p_attachment_attempt_key IS NOT NULL THEN
+      SELECT *
+      INTO v_existing_attempt
+      FROM public.cams_kfintech_ingestion_attempts AS attempt
+      WHERE attempt.ingestion_log_id = v_existing_log.id
+      FOR UPDATE;
+
+      IF v_existing_attempt.id IS NULL
+         OR v_existing_attempt.ingestion_run_id IS DISTINCT FROM p_ingestion_run_id
+         OR v_existing_attempt.workspace_id IS DISTINCT FROM p_workspace_id
+         OR v_existing_attempt.mailbox_connection_id IS DISTINCT FROM p_mailbox_connection_id
+         OR v_existing_attempt.provider_message_id IS DISTINCT FROM p_provider_message_id
+         OR v_existing_attempt.provider_attachment_id IS DISTINCT FROM p_provider_attachment_id
+         OR v_existing_attempt.attachment_attempt_key IS DISTINCT FROM p_attachment_attempt_key
+         OR v_existing_attempt.document_correlation_id IS DISTINCT FROM p_document_correlation_id
+         OR v_existing_attempt.document_id IS DISTINCT FROM v_document_id
+         OR v_existing_attempt.ingestion_log_id IS DISTINCT FROM v_existing_log.id
+         OR v_existing_attempt.observed_sha256_hex IS DISTINCT FROM p_attachment_sha256
+         OR v_existing_attempt.storage_bucket IS DISTINCT FROM p_storage_bucket
+         OR v_existing_attempt.storage_object_path IS DISTINCT FROM p_storage_object_path
+         OR v_existing_attempt.detected_mime IS DISTINCT FROM p_detected_mime
+         OR v_existing_attempt.file_type IS DISTINCT FROM p_file_type
+         OR v_existing_attempt.size_bytes IS DISTINCT FROM p_size_bytes
+         OR v_existing_attempt.outcome IS DISTINCT FROM v_outcome
+         OR v_existing_attempt.failure_code IS DISTINCT FROM p_failure_code THEN
+        RAISE EXCEPTION 'correlation_conflict';
+      END IF;
+    END IF;
+
+    RETURN v_existing_log.id;
   END IF;
 
   INSERT INTO public.ingestion_logs (
@@ -1228,12 +1426,6 @@ BEGIN
   IF p_provider_message_id IS NOT NULL
      AND p_provider_attachment_id IS NOT NULL
      AND p_attachment_attempt_key IS NOT NULL THEN
-    v_outcome := CASE
-      WHEN p_failure_code = 'duplicate_attachment' THEN 'duplicate'
-      WHEN p_failure_code IN ('attachment_too_large', 'attachment_limit_exceeded') THEN 'stopped'
-      ELSE 'failed'
-    END;
-
     PERFORM public.record_cams_kfintech_ingestion_attempt(
       p_ingestion_run_id,
       p_workspace_id,

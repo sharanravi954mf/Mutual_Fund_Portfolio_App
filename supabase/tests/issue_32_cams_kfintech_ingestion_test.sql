@@ -782,6 +782,432 @@ BEGIN
 END;
 $$;
 
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000510',
+  'CAMS'
+);
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000511',
+  'CAMS'
+);
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000512',
+  'CAMS'
+);
+
+DO $$
+DECLARE
+  v_doc_a pg_catalog.uuid;
+  v_doc_b pg_catalog.uuid;
+  v_log_id pg_catalog.uuid;
+  v_docs_before pg_catalog.int4;
+  v_logs_before pg_catalog.int4;
+  v_attempts_before pg_catalog.int4;
+  v_docs_after pg_catalog.int4;
+  v_logs_after pg_catalog.int4;
+  v_attempts_after pg_catalog.int4;
+  v_document_id pg_catalog.uuid;
+  v_observed_sha pg_catalog.text;
+  v_outcome pg_catalog.text;
+BEGIN
+  SELECT id INTO v_doc_a
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000101';
+
+  SELECT id INTO v_doc_b
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000102';
+
+  IF v_doc_a IS NULL OR v_doc_b IS NULL OR v_doc_a = v_doc_b THEN
+    RAISE EXCEPTION 'canonical failure lineage fixtures missing';
+  END IF;
+
+  v_log_id := public.record_cams_kfintech_ingestion_failure(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000511',
+    '93900000-0000-0000-0000-000000000101',
+    'provider-message-a',
+    'provider-attachment-a',
+    'same-correlation-provider-attempt',
+    'CAMS',
+    'parse_failed',
+    repeat('a', 64),
+    'ingested-documents',
+    'failure/same-correlation-provider',
+    'application/x-dbase',
+    'DBF',
+    1024
+  );
+
+  SELECT log.document_id
+  INTO v_document_id
+  FROM public.ingestion_logs AS log
+  WHERE log.id = v_log_id;
+
+  IF v_document_id IS DISTINCT FROM v_doc_a THEN
+    RAISE EXCEPTION 'same correlation/provider did not keep document A: %', v_document_id;
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_before FROM public.ingestion_logs;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_before FROM public.cams_kfintech_ingestion_attempts;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_failure(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000510',
+      '93900000-0000-0000-0000-000000000101',
+      'provider-message-a',
+      'provider-attachment-b',
+      'different-correlation-provider-attempt',
+      'CAMS',
+      'parse_failed',
+      repeat('b', 64),
+      'ingested-documents',
+      'failure/different-correlation-provider',
+      'application/x-dbase',
+      'DBF',
+      1024
+    );
+    RAISE EXCEPTION 'different correlation/provider documents were accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_after FROM public.ingestion_logs;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_after FROM public.cams_kfintech_ingestion_attempts;
+
+  IF v_logs_after <> v_logs_before OR v_attempts_after <> v_attempts_before THEN
+    RAISE EXCEPTION 'correlation/provider conflict left failure lineage side effects';
+  END IF;
+
+  v_log_id := public.record_cams_kfintech_ingestion_failure(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000510',
+    '93900000-0000-0000-0000-000000000512',
+    'provider-message-a',
+    'provider-attachment-a',
+    'provider-changed-digest-attempt',
+    'CAMS',
+    'attachment_hash_mismatch',
+    repeat('b', 64),
+    'ingested-documents',
+    'failure/provider-changed-digest',
+    'application/x-dbase',
+    'DBF',
+    1024
+  );
+
+  SELECT attempt.document_id, attempt.observed_sha256_hex
+  INTO v_document_id, v_observed_sha
+  FROM public.cams_kfintech_ingestion_attempts AS attempt
+  WHERE attempt.ingestion_log_id = v_log_id;
+
+  IF v_document_id IS DISTINCT FROM v_doc_a OR v_observed_sha <> repeat('b', 64) THEN
+    RAISE EXCEPTION 'provider changed digest rebound lineage: %, %', v_document_id, v_observed_sha;
+  END IF;
+
+  v_log_id := public.record_cams_kfintech_ingestion_failure(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000510',
+    '93900000-0000-0000-0000-000000000513',
+    'duplicate-provider-message',
+    'duplicate-provider-attachment',
+    'duplicate-provider-attempt',
+    'CAMS',
+    'duplicate_attachment',
+    repeat('a', 64),
+    'ingested-documents',
+    'failure/duplicate-provider',
+    'application/x-dbase',
+    'DBF',
+    1024
+  );
+
+  SELECT attempt.document_id, attempt.outcome
+  INTO v_document_id, v_outcome
+  FROM public.cams_kfintech_ingestion_attempts AS attempt
+  WHERE attempt.ingestion_log_id = v_log_id;
+
+  IF v_document_id IS DISTINCT FROM v_doc_a OR v_outcome <> 'duplicate' THEN
+    RAISE EXCEPTION 'duplicate digest did not reference canonical document A: %, %', v_document_id, v_outcome;
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_before FROM public.ingested_documents;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_before FROM public.ingestion_logs;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_before FROM public.cams_kfintech_ingestion_attempts;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_failure(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000510',
+      '93900000-0000-0000-0000-000000000101',
+      'new-conflicting-digest-message',
+      'new-conflicting-digest-attachment',
+      'correlation-digest-conflict-attempt',
+      'CAMS',
+      'duplicate_attachment',
+      repeat('b', 64),
+      'ingested-documents',
+      'failure/correlation-digest-conflict',
+      'application/x-dbase',
+      'DBF',
+      1024
+    );
+    RAISE EXCEPTION 'correlation A and digest B failure lineage was accepted';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_failure(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000512',
+      '93900000-0000-0000-0000-000000000514',
+      'provider-message-a',
+      'provider-attachment-a',
+      'provider-changed-digest-wrong-code',
+      'CAMS',
+      'parse_failed',
+      repeat('c', 64),
+      'ingested-documents',
+      'failure/provider-changed-wrong-code',
+      'application/x-dbase',
+      'DBF',
+      1024
+    );
+    RAISE EXCEPTION 'provider changed digest accepted a non-hash-mismatch code';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%attachment_hash_mismatch%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    PERFORM public.record_cams_kfintech_ingestion_failure(
+      '93400000-0000-0000-0000-000000000001',
+      '93700000-0000-0000-0000-000000000001',
+      '93900000-0000-0000-0000-000000000512',
+      '93900000-0000-0000-0000-000000000515',
+      'duplicate-wrong-code-message',
+      'duplicate-wrong-code-attachment',
+      'duplicate-wrong-code-attempt',
+      'CAMS',
+      'parse_failed',
+      repeat('a', 64),
+      'ingested-documents',
+      'failure/duplicate-wrong-code',
+      'application/x-dbase',
+      'DBF',
+      1024
+    );
+    RAISE EXCEPTION 'duplicate digest accepted a non-duplicate code';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%duplicate_attachment%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_docs_after FROM public.ingested_documents;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_after FROM public.ingestion_logs;
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_after FROM public.cams_kfintech_ingestion_attempts;
+
+  IF v_docs_after <> v_docs_before
+     OR v_logs_after <> v_logs_before
+     OR v_attempts_after <> v_attempts_before THEN
+    RAISE EXCEPTION 'contradictory canonical failure lineage was not fully rolled back';
+  END IF;
+END;
+$$;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000520',
+  'CAMS'
+);
+
+DO $$
+DECLARE
+  v_log_id pg_catalog.uuid;
+  v_replay_id pg_catalog.uuid;
+  v_logs_before pg_catalog.int4;
+  v_attempts_before pg_catalog.int4;
+  v_logs_after pg_catalog.int4;
+  v_attempts_after pg_catalog.int4;
+  v_variant pg_catalog.text;
+  v_sha pg_catalog.text;
+  v_bucket pg_catalog.text;
+  v_path pg_catalog.text;
+  v_mime pg_catalog.text;
+  v_file_type pg_catalog.text;
+  v_size pg_catalog.int4;
+  v_message pg_catalog.text;
+  v_attachment pg_catalog.text;
+  v_correlation pg_catalog.uuid;
+  v_attempt_key pg_catalog.text;
+BEGIN
+  v_log_id := public.record_cams_kfintech_ingestion_failure(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000520',
+    '93900000-0000-0000-0000-000000000520',
+    'failure-replay-message',
+    'failure-replay-attachment',
+    'failure-replay-attempt',
+    'CAMS',
+    'parse_failed',
+    repeat('4', 64),
+    'ingested-documents',
+    'failure/replay',
+    'application/x-dbase',
+    'DBF',
+    1024
+  );
+
+  v_replay_id := public.record_cams_kfintech_ingestion_failure(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000520',
+    '93900000-0000-0000-0000-000000000520',
+    'failure-replay-message',
+    'failure-replay-attachment',
+    'failure-replay-attempt',
+    'CAMS',
+    'parse_failed',
+    repeat('4', 64),
+    'ingested-documents',
+    'failure/replay',
+    'application/x-dbase',
+    'DBF',
+    1024
+  );
+
+  IF v_replay_id IS DISTINCT FROM v_log_id THEN
+    RAISE EXCEPTION 'identical failure replay returned a different log id';
+  END IF;
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_before
+  FROM public.ingestion_logs
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000520';
+
+  SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_before
+  FROM public.cams_kfintech_ingestion_attempts
+  WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000520';
+
+  FOR v_variant IN
+    SELECT * FROM pg_catalog.unnest(ARRAY[
+      'digest',
+      'storage_path',
+      'bucket',
+      'mime',
+      'file_type',
+      'size',
+      'provider_message',
+      'provider_attachment',
+      'document_correlation',
+      'attachment_attempt_key'
+    ]::pg_catalog.text[])
+  LOOP
+    v_sha := repeat('4', 64);
+    v_bucket := 'ingested-documents';
+    v_path := 'failure/replay';
+    v_mime := 'application/x-dbase';
+    v_file_type := 'DBF';
+    v_size := 1024;
+    v_message := 'failure-replay-message';
+    v_attachment := 'failure-replay-attachment';
+    v_correlation := '93900000-0000-0000-0000-000000000520';
+    v_attempt_key := 'failure-replay-attempt';
+
+    IF v_variant = 'digest' THEN
+      v_sha := repeat('5', 64);
+    ELSIF v_variant = 'storage_path' THEN
+      v_path := 'failure/replay-changed';
+    ELSIF v_variant = 'bucket' THEN
+      v_bucket := 'other-ingested-documents';
+    ELSIF v_variant = 'mime' THEN
+      v_mime := 'application/pdf';
+    ELSIF v_variant = 'file_type' THEN
+      v_file_type := 'CAS_PDF';
+    ELSIF v_variant = 'size' THEN
+      v_size := 2048;
+    ELSIF v_variant = 'provider_message' THEN
+      v_message := 'failure-replay-message-changed';
+    ELSIF v_variant = 'provider_attachment' THEN
+      v_attachment := 'failure-replay-attachment-changed';
+    ELSIF v_variant = 'document_correlation' THEN
+      v_correlation := '93900000-0000-0000-0000-000000000521';
+    ELSIF v_variant = 'attachment_attempt_key' THEN
+      v_attempt_key := 'failure-replay-attempt-changed';
+    END IF;
+
+    BEGIN
+      PERFORM public.record_cams_kfintech_ingestion_failure(
+        '93400000-0000-0000-0000-000000000001',
+        '93700000-0000-0000-0000-000000000001',
+        '93900000-0000-0000-0000-000000000520',
+        v_correlation,
+        v_message,
+        v_attachment,
+        v_attempt_key,
+        'CAMS',
+        'parse_failed',
+        v_sha,
+        v_bucket,
+        v_path,
+        v_mime,
+        v_file_type,
+        v_size
+      );
+      RAISE EXCEPTION 'contradictory failure replay accepted variant %', v_variant;
+    EXCEPTION
+      WHEN others THEN
+        IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+          RAISE;
+        END IF;
+    END;
+
+    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_logs_after
+    FROM public.ingestion_logs
+    WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000520';
+
+    SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_after
+    FROM public.cams_kfintech_ingestion_attempts
+    WHERE ingestion_run_id = '93900000-0000-0000-0000-000000000520';
+
+    IF v_logs_after <> v_logs_before OR v_attempts_after <> v_attempts_before THEN
+      RAISE EXCEPTION 'contradictory failure replay variant % left extra lineage rows', v_variant;
+    END IF;
+  END LOOP;
+
+  IF v_logs_before <> 1 OR v_attempts_before <> 1 THEN
+    RAISE EXCEPTION 'failure replay did not preserve exactly one log and attempt: %, %', v_logs_before, v_attempts_before;
+  END IF;
+END;
+$$;
+
 DO $$
 BEGIN
   PERFORM *
@@ -1196,6 +1622,240 @@ SET ROLE service_role;
 SELECT public.claim_cams_kfintech_ingestion_run(
   '93400000-0000-0000-0000-000000000001',
   '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000530',
+  'CAMS'
+);
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000530',
+  'CAMS',
+  'attachment_too_large',
+  NULL,
+  0
+);
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000531',
+    'CAMS'
+  );
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000531',
+    'CAMS',
+    'unsupported_stop_reason',
+    NULL,
+    0
+  );
+  RAISE EXCEPTION 'unknown stopped reason was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%unsupported_stopped_reason%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000532',
+    'CAMS'
+  );
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000532',
+    'CAMS',
+    NULL,
+    'sender_not_allowed',
+    0
+  );
+  RAISE EXCEPTION 'unknown run failure code was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%unsupported_run_failure_code%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000533',
+    'CAMS'
+  );
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000533',
+    'CAMS',
+    'attachment_too_large',
+    'mailbox_poll_failed',
+    0
+  );
+  RAISE EXCEPTION 'stop and run failure supplied together were accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000534',
+  'CAMS'
+);
+
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_document_id pg_catalog.uuid;
+  v_log_id pg_catalog.uuid;
+BEGIN
+  SELECT id, ingestion_log_id
+  INTO v_document_id, v_log_id
+  FROM public.ingested_documents
+  WHERE correlation_id = '93900000-0000-0000-0000-000000000101';
+
+  PERFORM public.record_cams_kfintech_ingestion_attempt(
+    '93900000-0000-0000-0000-000000000534',
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    'completed-reason-message',
+    'completed-reason-attachment',
+    'completed-reason-attempt',
+    '93900000-0000-0000-0000-000000000534',
+    v_document_id,
+    v_log_id,
+    repeat('a', 64),
+    'ingested-documents',
+    'finalizer/completed-reason',
+    'application/x-dbase',
+    'DBF',
+    1024,
+    'succeeded',
+    NULL
+  );
+END;
+$$;
+
+SET ROLE service_role;
+
+DO $$
+BEGIN
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000534',
+    'CAMS',
+    'attachment_limit_exceeded',
+    NULL,
+    1
+  );
+  RAISE EXCEPTION 'completed run with stopped reason was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%correlation_conflict%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM public.claim_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000535',
+    'CAMS'
+  );
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000535',
+    'CAMS',
+    NULL,
+    NULL,
+    0
+  );
+  RAISE EXCEPTION 'failed run without legitimate basis was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%processing_incomplete%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000536',
+  'CAMS'
+);
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000536',
+  'CAMS',
+  NULL,
+  'mailbox_poll_failed',
+  0
+);
+
+SELECT *
+FROM public.finalize_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000536',
+  'CAMS',
+  NULL,
+  'mailbox_poll_failed',
+  0
+);
+
+DO $$
+BEGIN
+  PERFORM public.finalize_cams_kfintech_ingestion_run(
+    '93400000-0000-0000-0000-000000000001',
+    '93700000-0000-0000-0000-000000000001',
+    '93900000-0000-0000-0000-000000000536',
+    'CAMS',
+    'attachment_limit_exceeded',
+    NULL,
+    0
+  );
+  RAISE EXCEPTION 'contradictory terminal finalizer replay was accepted';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%ingestion_run_finalized%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
   '93900000-0000-0000-0000-000000000508',
   'CAMS'
 );
@@ -1207,7 +1867,7 @@ FROM public.finalize_cams_kfintech_ingestion_run(
   '93900000-0000-0000-0000-000000000508',
   'CAMS',
   NULL,
-  'sender_not_allowed',
+  'attempt_lineage_incomplete',
   1
 );
 
@@ -1288,7 +1948,7 @@ FROM public.finalize_cams_kfintech_ingestion_run(
   '93900000-0000-0000-0000-000000000509',
   'CAMS',
   NULL,
-  'sender_not_allowed',
+  'attempt_lineage_incomplete',
   2
 );
 
@@ -1903,7 +2563,10 @@ FROM public.finalize_cams_kfintech_ingestion_run(
   '93400000-0000-0000-0000-000000000001',
   '93700000-0000-0000-0000-000000000001',
   '93900000-0000-0000-0000-000000000100',
-  'CAMS'
+  'CAMS',
+  NULL,
+  NULL,
+  3
 );
 
 RESET ROLE;
@@ -1942,7 +2605,8 @@ FROM public.finalize_cams_kfintech_ingestion_run(
   '93900000-0000-0000-0000-000000000501',
   'CAMS',
   NULL,
-  'mailbox_poll_failed'
+  'mailbox_poll_failed',
+  0
 );
 
 RESET ROLE;
@@ -2482,8 +3146,8 @@ BEGIN
   SELECT pg_catalog.count(*)::pg_catalog.int4 INTO v_attempts_after FROM public.cams_kfintech_ingestion_attempts;
 
   IF v_docs_after <> v_docs_before
-     OR v_logs_after <> v_logs_before + 2
-     OR v_attempts_after <> v_attempts_before + 2
+     OR v_logs_after <> v_logs_before + 1
+     OR v_attempts_after <> v_attempts_before + 1
      OR v_events_after <> v_events_before THEN
     RAISE EXCEPTION 'provider identity conflicts did not preserve durable attempt lineage without document/event side effects';
   END IF;
