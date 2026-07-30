@@ -4,16 +4,13 @@ import '../domain/order_models.dart';
 import 'order_state.dart';
 
 class OrderBloc extends ChangeNotifier {
-  final OrderRepository repository;
+  final OrderRepository _repository;
   OrderState _state;
 
-  OrderBloc(
-    this.repository, {
-    required String workspaceId,
-    required String investorProfileId,
-  }) : _state = OrderState.initial(
-          workspaceId: workspaceId,
-          investorProfileId: investorProfileId,
+  OrderBloc(this._repository)
+      : _state = const OrderState(
+          phase: OrderPhase.initial,
+          draft: OrderDraft(schemeCode: '', type: OrderType.buy),
         );
 
   OrderState get state => _state;
@@ -23,66 +20,187 @@ class OrderBloc extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Load reference data: mutual funds, folios, and optionally assigned investors
-  Future<void> loadReferenceData(
-    String currentProfileId, {
-    required bool isAdvisor,
+  /// Initialize context for Investor Flow
+  Future<void> initiateForInvestor({
+    required String investorProfileId,
+    required String initiatorProfileId,
+    required String initiationRole,
+    required String initiationChannel,
   }) async {
-    _updateState(_state.copyWith(phase: 'loadingReferenceData'));
-
-    try {
-      final funds = await repository.fetchMutualFunds();
-      final folios =
-          await repository.fetchFolios(_state.draft.investorProfileId);
-      List<OrderInvestor> assigned = const [];
-
-      if (isAdvisor) {
-        assigned = await repository.fetchAssignedInvestors(currentProfileId);
-      }
-
-      _updateState(_state.copyWith(
-        phase: 'ready',
-        funds: funds,
-        folios: folios,
-        assignedInvestors: assigned,
-      ));
-    } catch (e) {
-      _updateState(_state.copyWith(
-        phase: 'failure',
-        errorMessage: 'Failed to load reference data. Please try again.',
-      ));
-    }
-  }
-
-  /// Update order type and safely clear incompatible draft fields
-  void updateOrderType(OrderType type) {
-    final draft = _state.draft;
-    // Clear amount, units, folio, destSchemeCode when type changes to prevent stale states
-    final clearedDraft = draft.copyWith(
-      type: type,
-      clearAmount: true,
-      clearUnits: true,
-      clearFolio: true,
-      clearDestScheme: true,
-    );
-
     _updateState(_state.copyWith(
-      draft: clearedDraft,
-      errorMessage: null,
+      phase: OrderPhase.loadingReferenceData,
+      clearErrorMessage: true,
+      clearSubmittedOrderId: true,
     ));
 
-    // Reload folios since sell/switch require them
-    if (type == OrderType.sell || type == OrderType.switchOrder) {
-      _loadFoliosOnly();
+    try {
+      final context = await _repository.resolveInvestorContext(
+        investorProfileId: investorProfileId,
+        initiatorProfileId: initiatorProfileId,
+        initiationRole: initiationRole,
+        initiationChannel: initiationChannel,
+      );
+
+      final funds = await _repository.fetchMutualFunds();
+      final folios =
+          await _repository.fetchFolios(investorProfileId, context.workspaceId);
+
+      _updateState(_state.copyWith(
+        phase: OrderPhase.ready,
+        draft: _state.stateDraftWithContext(context),
+        funds: funds,
+        folios: folios,
+      ));
+    } on OrderFailure catch (e) {
+      _updatePhaseForFailure(e);
+    } catch (e) {
+      _updateState(_state.copyWith(
+        phase: OrderPhase.failure,
+        errorMessage: "Initialization failed: $e",
+      ));
     }
   }
 
-  /// Update the beneficiary investor (Advisor-only flow)
+  /// Initialize context for Advisor Flow
+  Future<void> initiateForAdvisor({
+    required String advisorProfileId,
+    String? preSelectedInvestorId,
+    required String initiatorProfileId,
+    required String initiationRole,
+    required String initiationChannel,
+  }) async {
+    _updateState(_state.copyWith(
+      phase: OrderPhase.loadingReferenceData,
+      clearErrorMessage: true,
+      clearSubmittedOrderId: true,
+    ));
+
+    try {
+      if (preSelectedInvestorId != null) {
+        final context = await _repository.resolveInvestorContext(
+          investorProfileId: preSelectedInvestorId,
+          initiatorProfileId: initiatorProfileId,
+          initiationRole: initiationRole,
+          initiationChannel: initiationChannel,
+        );
+
+        final funds = await _repository.fetchMutualFunds();
+        final folios = await _repository.fetchFolios(
+            preSelectedInvestorId, context.workspaceId);
+
+        _updateState(_state.copyWith(
+          phase: OrderPhase.ready,
+          draft: _state.stateDraftWithContext(context),
+          funds: funds,
+          folios: folios,
+        ));
+      } else {
+        final assigned =
+            await _repository.fetchAssignedInvestors(advisorProfileId);
+        if (assigned.isEmpty) {
+          _updateState(_state.copyWith(
+            phase: OrderPhase.emptyInvestors,
+            assignedInvestors: const [],
+          ));
+          return;
+        }
+
+        final funds = await _repository.fetchMutualFunds();
+
+        _updateState(_state.copyWith(
+          phase: OrderPhase.ready,
+          assignedInvestors: assigned,
+          funds: funds,
+        ));
+      }
+    } on OrderFailure catch (e) {
+      _updatePhaseForFailure(e);
+    } catch (e) {
+      _updateState(_state.copyWith(
+        phase: OrderPhase.failure,
+        errorMessage: "Initialization failed: $e",
+      ));
+    }
+  }
+
+  /// Handle typed failures and update state phase accordingly
+  void _updatePhaseForFailure(OrderFailure failure) {
+    OrderPhase nextPhase = OrderPhase.failure;
+    if (failure is AccessDeniedFailure) {
+      nextPhase = OrderPhase.accessDenied;
+    } else if (failure is NetworkFailure) {
+      nextPhase = OrderPhase.offline;
+    } else if (failure is EmptyFailure) {
+      nextPhase = OrderPhase.emptyInvestors;
+    }
+    _updateState(_state.copyWith(
+      phase: nextPhase,
+      errorMessage: failure.message,
+    ));
+  }
+
+  /// Update active beneficiary client & workspace
   Future<void> updateBeneficiary(
       String investorProfileId, String workspaceId) async {
-    final clearedDraft = _state.draft.copyWith(
-      investorProfileId: investorProfileId,
-      workspaceId: workspaceId,
+    // Prevent setting workspaceId = investorProfileId
+    if (workspaceId == investorProfileId) {
+      _updateState(_state.copyWith(
+        phase: OrderPhase.failure,
+        errorMessage:
+            "Invalid context mapping: Workspace ID cannot be identical to Investor Profile ID.",
+      ));
+      return;
+    }
+
+    _updateState(_state.copyWith(
+      phase: OrderPhase.loadingReferenceData,
+      clearErrorMessage: true,
+      // Clear all stale financial fields on beneficiary swap
+      draft: _state.draft.copyWith(
+        clearContext: true,
+        schemeCode: '',
+        clearAmount: true,
+        clearUnits: true,
+        clearFolio: true,
+        clearDestScheme: true,
+      ),
+    ));
+
+    try {
+      final context = await _repository.resolveInvestorContext(
+        investorProfileId: investorProfileId,
+        initiatorProfileId: _state.draft.context?.initiatorProfileId ?? '',
+        initiationRole: _state.draft.context?.initiationRole ?? '',
+        initiationChannel: _state.draft.context?.initiationChannel ?? '',
+      );
+
+      final folios =
+          await _repository.fetchFolios(investorProfileId, context.workspaceId);
+      final holdings = await _repository.fetchHoldings(
+          investorProfileId, context.workspaceId);
+
+      _updateState(_state.copyWith(
+        phase: OrderPhase.ready,
+        draft: _state.stateDraftWithContext(context),
+        folios: folios,
+        holdings: holdings,
+      ));
+    } on OrderFailure catch (e) {
+      _updatePhaseForFailure(e);
+    } catch (e) {
+      _updateState(_state.copyWith(
+        phase: OrderPhase.failure,
+        errorMessage: "Failed to load beneficiary context: $e",
+      ));
+    }
+  }
+
+  /// Update order type (Buy/Sell/Switch) and reset stale inputs
+  Future<void> updateOrderType(OrderType type) async {
+    final ctx = _state.draft.context;
+    // Clear all stale financial fields on order type switch
+    var newDraft = _state.draft.copyWith(
+      type: type,
       schemeCode: '',
       clearAmount: true,
       clearUnits: true,
@@ -91,138 +209,142 @@ class OrderBloc extends ChangeNotifier {
     );
 
     _updateState(_state.copyWith(
-      draft: clearedDraft,
-      phase: 'loadingReferenceData',
-      errorMessage: null,
+      draft: newDraft,
+      clearErrorMessage: true,
     ));
 
-    try {
-      final folios = await repository.fetchFolios(investorProfileId);
-      _updateState(_state.copyWith(
-        phase: 'ready',
-        folios: folios,
-      ));
-    } catch (e) {
-      _updateState(_state.copyWith(
-        phase: 'failure',
-        errorMessage: 'Failed to load folios for beneficiary.',
-      ));
+    if (ctx != null &&
+        (type == OrderType.sell || type == OrderType.switchOrder)) {
+      _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
+      try {
+        final holdings = await _repository.fetchHoldings(
+            ctx.investorProfileId, ctx.workspaceId);
+        _updateState(_state.copyWith(
+          phase: OrderPhase.ready,
+          holdings: holdings,
+        ));
+      } on OrderFailure catch (e) {
+        _updatePhaseForFailure(e);
+      } catch (e) {
+        _updateState(_state.copyWith(
+          phase: OrderPhase.failure,
+          errorMessage: "Failed to load holdings: $e",
+        ));
+      }
     }
   }
 
-  Future<void> _loadFoliosOnly() async {
-    try {
-      final folios =
-          await repository.fetchFolios(_state.draft.investorProfileId);
-      _updateState(_state.copyWith(folios: folios));
-    } catch (_) {}
-  }
-
+  /// Update selected scheme
   void updateScheme(String schemeCode) {
     _updateState(_state.copyWith(
       draft: _state.draft.copyWith(schemeCode: schemeCode),
-      errorMessage: null,
     ));
   }
 
-  void updateFolio(String folioNumber) {
-    _updateState(_state.copyWith(
-      draft: _state.draft.copyWith(folioNumber: folioNumber),
-      errorMessage: null,
-    ));
-  }
-
+  /// Update Switch destination scheme
   void updateDestScheme(String destSchemeCode) {
     _updateState(_state.copyWith(
       draft: _state.draft.copyWith(destSchemeCode: destSchemeCode),
-      errorMessage: null,
     ));
   }
 
+  /// Update selected folio & clear incompatible schemes
+  Future<void> updateFolio(String folioNumber) async {
+    var newDraft = _state.draft.copyWith(folioNumber: folioNumber);
+    final ctx = _state.draft.context;
+
+    if (ctx != null &&
+        (_state.draft.type == OrderType.sell ||
+            _state.draft.type == OrderType.switchOrder)) {
+      // List only source schemes actually held in the selected folio
+      _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
+      try {
+        final holdings = await _repository.fetchHoldings(
+            ctx.investorProfileId, ctx.workspaceId);
+
+        // Check if current schemeCode is held in this folio (or portfolio).
+        // If not, clear the incompatible scheme.
+        final isHeld =
+            holdings.any((h) => h['scheme_code'] == _state.draft.schemeCode);
+        if (!isHeld) {
+          newDraft = newDraft.copyWith(schemeCode: '');
+        }
+
+        _updateState(_state.copyWith(
+          phase: OrderPhase.ready,
+          draft: newDraft,
+          holdings: holdings,
+        ));
+      } on OrderFailure catch (e) {
+        _updatePhaseForFailure(e);
+      } catch (e) {
+        _updateState(_state.copyWith(
+          phase: OrderPhase.failure,
+          errorMessage: "Failed to update folio: $e",
+        ));
+      }
+    } else {
+      _updateState(_state.copyWith(draft: newDraft));
+    }
+  }
+
+  /// Update transaction amount
   void updateAmount(double? amount) {
     _updateState(_state.copyWith(
-      draft: _state.draft
-          .copyWith(amount: amount, clearUnits: true), // Mutual exclusivity
-      errorMessage: null,
-    ));
-  }
-
-  void updateUnits(double? units) {
-    _updateState(_state.copyWith(
-      draft: _state.draft
-          .copyWith(units: units, clearAmount: true), // Mutual exclusivity
-      errorMessage: null,
-    ));
-  }
-
-  /// Submit the order to Supabase
-  Future<void> submitOrder({
-    required String initiatedByProfileId,
-    required String initiatedByRole,
-    required String initiationChannel,
-  }) async {
-    // Duplicate submission guard
-    if (_state.phase == 'submitting' || _state.phase == 'submitted') {
-      return;
-    }
-
-    _updateState(_state.copyWith(phase: 'validating'));
-
-    final validationErrors = _state.draft.validate();
-    if (validationErrors != null && validationErrors.isNotEmpty) {
-      _updateState(_state.copyWith(
-        phase: 'failure',
-        errorMessage: validationErrors.join('\n'),
-      ));
-      return;
-    }
-
-    _updateState(_state.copyWith(phase: 'submitting'));
-
-    try {
-      final orderId = await repository.submitOrder(
-        _state.draft,
-        initiatedByProfileId: initiatedByProfileId,
-        initiatedByRole: initiatedByRole,
-        initiationChannel: initiationChannel,
-      );
-
-      _updateState(_state.copyWith(
-        phase: 'submitted',
-        submittedOrderId: orderId,
-      ));
-    } catch (e) {
-      // Map error safely without exposing raw DB exception
-      String friendlyError =
-          'Submission failed. Please check connection and try again.';
-      final errStr = e.toString().toLowerCase();
-      if (errStr.contains('permission') || errStr.contains('not_authorized')) {
-        friendlyError =
-            'Access Denied: You are not authorized to initiate this order.';
-      } else if (errStr.contains('relationship')) {
-        friendlyError = 'Invalid beneficiary relationship in this workspace.';
-      }
-
-      _updateState(_state.copyWith(
-        phase: 'failure',
-        errorMessage: friendlyError,
-      ));
-    }
-  }
-
-  /// Reset form state back to ready for placing another order
-  void reset() {
-    _updateState(_state.copyWith(
-      phase: 'ready',
-      submittedOrderId: null,
-      errorMessage: null,
       draft: _state.draft.copyWith(
-        schemeCode: '',
-        amount: null,
-        units: null,
-        folioNumber: null,
-        destSchemeCode: null,
+        amount: amount,
+        clearUnits: true,
       ),
     ));
+  }
+
+  /// Update transaction units
+  void updateUnits(double? units) {
+    _updateState(_state.copyWith(
+      draft: _state.draft.copyWith(
+        units: units,
+        clearAmount: true,
+      ),
+    ));
+  }
+
+  /// Submit order intent
+  Future<void> submitOrder() async {
+    // 1. Validation
+    final errors = _state.draft.validate();
+    if (errors != null && errors.isNotEmpty) {
+      _updateState(_state.copyWith(
+        phase: OrderPhase.failure,
+        errorMessage: errors.join('\n'),
+      ));
+      return;
+    }
+
+    // 2. Prevent duplicate submissions
+    if (_state.phase == OrderPhase.submitting) return;
+
+    _updateState(_state.copyWith(phase: OrderPhase.submitting));
+
+    try {
+      final orderId = await _repository.submitOrder(_state.draft);
+      _updateState(_state.copyWith(
+        phase: OrderPhase.submitted,
+        submittedOrderId: orderId,
+        clearErrorMessage: true,
+      ));
+    } on OrderFailure catch (e) {
+      _updatePhaseForFailure(e);
+    } catch (e) {
+      _updateState(_state.copyWith(
+        phase: OrderPhase.failure,
+        errorMessage: "Submission failed: $e",
+      ));
+    }
+  }
+}
+
+extension on OrderState {
+  OrderDraft stateDraftWithContext(OrderContext context) {
+    return draft.copyWith(context: context);
   }
 }

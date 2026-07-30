@@ -73,19 +73,78 @@ enum OrderStatus {
   }
 }
 
-class OrderDraft {
+enum OrderPhase {
+  initial,
+  loadingReferenceData,
+  ready,
+  emptyInvestors,
+  emptyFolios,
+  emptyHoldings,
+  accessDenied,
+  offline,
+  failure,
+  validating,
+  submitting,
+  submitted,
+}
+
+class OrderContext {
   final String workspaceId;
   final String investorProfileId;
+  final String investorFullName;
+  final String? investorEmail;
+  final String? investorPhone;
+  final String initiatorProfileId;
+  final String initiationRole;
+  final String initiationChannel;
+
+  const OrderContext({
+    required this.workspaceId,
+    required this.investorProfileId,
+    required this.investorFullName,
+    this.investorEmail,
+    this.investorPhone,
+    required this.initiatorProfileId,
+    required this.initiationRole,
+    required this.initiationChannel,
+  });
+
+  OrderContext copyWith({
+    String? workspaceId,
+    String? investorProfileId,
+    String? investorFullName,
+    String? investorEmail,
+    String? investorPhone,
+    String? initiatorProfileId,
+    String? initiationRole,
+    String? initiationChannel,
+  }) {
+    return OrderContext(
+      workspaceId: workspaceId ?? this.workspaceId,
+      investorProfileId: investorProfileId ?? this.investorProfileId,
+      investorFullName: investorFullName ?? this.investorFullName,
+      investorEmail: investorEmail ?? this.investorEmail,
+      investorPhone: investorPhone ?? this.investorPhone,
+      initiatorProfileId: initiatorProfileId ?? this.initiatorProfileId,
+      initiationRole: initiationRole ?? this.initiationRole,
+      initiationChannel: initiationChannel ?? this.initiationChannel,
+    );
+  }
+}
+
+class OrderDraft {
+  final OrderContext? context;
   final String schemeCode;
   final OrderType type;
   final double? amount;
   final double? units;
-  final String? folioNumber; // Local-only
-  final String? destSchemeCode; // Local-only (destination scheme for Switch)
+  final String?
+      folioNumber; // Local-only for Buy, mapped to folio database objects for Sell/Switch
+  final String?
+      destSchemeCode; // Local-only for Buy/Sell, mapped to destination scheme for Switch
 
   const OrderDraft({
-    required this.workspaceId,
-    required this.investorProfileId,
+    this.context,
     required this.schemeCode,
     required this.type,
     this.amount,
@@ -95,8 +154,7 @@ class OrderDraft {
   });
 
   OrderDraft copyWith({
-    String? workspaceId,
-    String? investorProfileId,
+    OrderContext? context,
     String? schemeCode,
     OrderType? type,
     double? amount,
@@ -107,10 +165,10 @@ class OrderDraft {
     bool clearUnits = false,
     bool clearFolio = false,
     bool clearDestScheme = false,
+    bool clearContext = false,
   }) {
     return OrderDraft(
-      workspaceId: workspaceId ?? this.workspaceId,
-      investorProfileId: investorProfileId ?? this.investorProfileId,
+      context: clearContext ? null : (context ?? this.context),
       schemeCode: schemeCode ?? this.schemeCode,
       type: type ?? this.type,
       amount: clearAmount ? null : (amount ?? this.amount),
@@ -125,10 +183,17 @@ class OrderDraft {
   List<String>? validate() {
     final errors = <String>[];
 
-    if (workspaceId.trim().isEmpty) {
+    final ctx = context;
+    if (ctx == null) {
+      errors.add(
+          'Order context is required. Beneficiary or workspace could not be verified.');
+      return errors;
+    }
+
+    if (ctx.workspaceId.trim().isEmpty) {
       errors.add('Workspace context is required.');
     }
-    if (investorProfileId.trim().isEmpty) {
+    if (ctx.investorProfileId.trim().isEmpty) {
       errors.add('Beneficiary investor is required.');
     }
     if (schemeCode.trim().isEmpty) {

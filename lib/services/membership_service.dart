@@ -39,12 +39,16 @@ class MembershipService {
     WorkspaceRole role,
   ) async {
     try {
-      final response = await _client.from('workspace_memberships').insert({
-        'workspace_id': workspaceId,
-        'profile_id': profileId,
-        'role': role.databaseValue,
-        'status': 'active',
-      }).select().single();
+      final response = await _client
+          .from('workspace_memberships')
+          .insert({
+            'workspace_id': workspaceId,
+            'profile_id': profileId,
+            'role': role.databaseValue,
+            'status': 'active',
+          })
+          .select()
+          .single();
       return WorkspaceMembership.fromJson(response);
     } catch (e) {
       return null;

@@ -52,8 +52,11 @@ class AdvisorInvestorAssignment {
       assignedBy: json['assigned_by'] as String?,
       assignedAt: DateTime.parse(json['assigned_at'] as String),
       endedBy: json['ended_by'] as String?,
-      endedAt: json['ended_at'] != null ? DateTime.parse(json['ended_at'] as String) : null,
-      status: AssignmentStatus.fromDatabase(json['status'] as String? ?? 'active'),
+      endedAt: json['ended_at'] != null
+          ? DateTime.parse(json['ended_at'] as String)
+          : null,
+      status:
+          AssignmentStatus.fromDatabase(json['status'] as String? ?? 'active'),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(
         json['updated_at'] as String? ?? json['created_at'] as String,

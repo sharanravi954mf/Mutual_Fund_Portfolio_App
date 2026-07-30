@@ -92,21 +92,7 @@ class _OrderModalState extends State<OrderModal> {
   @override
   void initState() {
     super.initState();
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final workspaceId = auth.userProfile?.role == UserRole.advisor
-        ? auth.userProfile?.id ??
-            '' // Default to advisor ID as workspace context if not pre-selected
-        : auth.userAccount?.userId ?? '';
-
-    // If pre-selected (advisor viewing client details), use client's profile ID
-    final beneficiaryId =
-        widget.preSelectedClientId ?? auth.userProfile?.id ?? '';
-
-    _bloc = OrderBloc(
-      widget.repository,
-      workspaceId: workspaceId,
-      investorProfileId: beneficiaryId,
-    );
+    _bloc = OrderBloc(widget.repository);
   }
 
   @override
@@ -114,10 +100,30 @@ class _OrderModalState extends State<OrderModal> {
     super.didChangeDependencies();
     if (!_hasInitialRefLoadCalled) {
       _hasInitialRefLoadCalled = true;
-      final auth = Provider.of<AuthProvider>(context);
-      final isAdvisor = auth.userProfile?.role == UserRole.advisor;
+      final auth = Provider.of<AuthProvider>(context, listen: false);
       final profileId = auth.userProfile?.id ?? '';
-      _bloc.loadReferenceData(profileId, isAdvisor: isAdvisor);
+      final role =
+          auth.userProfile?.role == UserRole.advisor ? 'advisor' : 'investor';
+      final channel = auth.userProfile?.role == UserRole.advisor
+          ? 'advisor_portal'
+          : 'investor_portal';
+
+      if (auth.userProfile?.role == UserRole.advisor) {
+        _bloc.initiateForAdvisor(
+          advisorProfileId: profileId,
+          preSelectedInvestorId: widget.preSelectedClientId,
+          initiatorProfileId: profileId,
+          initiationRole: role,
+          initiationChannel: channel,
+        );
+      } else {
+        _bloc.initiateForInvestor(
+          investorProfileId: profileId,
+          initiatorProfileId: profileId,
+          initiationRole: role,
+          initiationChannel: channel,
+        );
+      }
     }
   }
 
@@ -142,12 +148,42 @@ class _OrderModalState extends State<OrderModal> {
         builder: (context, bloc, child) {
           final state = bloc.state;
 
-          if (state.phase == 'loadingReferenceData') {
-            return const Center(child: CircularProgressIndicator());
+          if (state.phase == OrderPhase.loadingReferenceData) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
           }
 
-          if (state.phase == 'submitted') {
+          if (state.phase == OrderPhase.submitted) {
             return _buildSuccessState(context, state, colors);
+          }
+
+          if (state.phase == OrderPhase.accessDenied) {
+            return _buildErrorState(
+              context,
+              'Access Denied',
+              state.errorMessage ??
+                  'You do not have permission to access this relationship.',
+              colors,
+            );
+          }
+
+          if (state.phase == OrderPhase.offline) {
+            return _buildErrorState(
+              context,
+              'Network Offline',
+              'Please check your internet connection and try again.',
+              colors,
+            );
+          }
+
+          if (state.phase == OrderPhase.emptyInvestors) {
+            return _buildErrorState(
+              context,
+              'No Mapped Investors',
+              'There are no actively mapped investors in your workspaces.',
+              colors,
+            );
           }
 
           return Scaffold(
@@ -194,24 +230,16 @@ class _OrderModalState extends State<OrderModal> {
                       ),
                       const SizedBox(height: 16),
                     ],
-
-                    // Step 1: Beneficiary Information (Pre-selected or Dropdown)
                     _buildBeneficiaryCard(
                         context, state, colors, isAdvisor, auth),
                     const SizedBox(height: 20),
-
-                    // Step 2: Order Details Form
-                    if (state.phase == 'ready' ||
-                        state.phase == 'failure' ||
-                        state.phase == 'validating') ...[
+                    if (state.phase == OrderPhase.ready ||
+                        state.phase == OrderPhase.failure ||
+                        state.phase == OrderPhase.validating) ...[
                       _buildOrderTypeSelector(state, colors),
                       const SizedBox(height: 20),
-                      _buildSchemeSelector(state, colors),
+                      _buildSchemeInputs(state, colors),
                       const SizedBox(height: 20),
-                      if (state.draft.type == OrderType.switchOrder) ...[
-                        _buildDestSchemeSelector(state, colors),
-                        const SizedBox(height: 20),
-                      ],
                       if (state.draft.type == OrderType.sell ||
                           state.draft.type == OrderType.switchOrder) ...[
                         _buildFolioSelector(state, colors),
@@ -223,16 +251,19 @@ class _OrderModalState extends State<OrderModal> {
                       const SizedBox(height: 24),
                       _buildActionButtons(state, colors, isAdvisor, auth),
                     ],
-
-                    if (state.phase == 'submitting') ...[
-                      const Center(
+                    if (state.phase == OrderPhase.submitting) ...[
+                      Center(
                         child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 40),
+                          padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Column(
                             children: [
-                              CircularProgressIndicator(),
-                              SizedBox(height: 16),
-                              Text('Submitting order securely to queue...'),
+                              const CircularProgressIndicator(),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Submitting order securely to queue...',
+                                style: GoogleFonts.inter(
+                                    color: colors.textSecondary),
+                              ),
                             ],
                           ),
                         ),
@@ -244,6 +275,44 @@ class _OrderModalState extends State<OrderModal> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildErrorState(
+      BuildContext context, String title, String msg, AppThemeColors colors) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, size: 64, color: colors.error),
+              const SizedBox(height: 24),
+              Text(
+                title,
+                style: GoogleFonts.outfit(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: colors.textPrimary),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                msg,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                    color: colors.textSecondary, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -264,25 +333,27 @@ class _OrderModalState extends State<OrderModal> {
             children: [
               Icon(Icons.assignment_ind_outlined, color: colors.primary),
               const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Beneficiary Client (Locked)',
-                    style: GoogleFonts.inter(
-                        color: colors.textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.preSelectedClientName ?? 'Unnamed Client',
-                    style: GoogleFonts.outfit(
-                        color: colors.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Beneficiary Client (Locked)',
+                      style: GoogleFonts.inter(
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.preSelectedClientName ?? 'Unnamed Client',
+                      style: GoogleFonts.outfit(
+                          color: colors.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -291,7 +362,6 @@ class _OrderModalState extends State<OrderModal> {
     }
 
     if (!isAdvisor) {
-      // Self Investor Mode
       final name = auth.userProfile?.fullName ?? 'Unnamed Investor';
       final email = auth.userProfile?.email ?? '';
       final phone = auth.userProfile?.phoneNumber ?? '';
@@ -308,7 +378,7 @@ class _OrderModalState extends State<OrderModal> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Beneficiary Investor',
+                      'Investor Beneficiary',
                       style: GoogleFonts.inter(
                           color: colors.textSecondary,
                           fontSize: 11,
@@ -323,9 +393,9 @@ class _OrderModalState extends State<OrderModal> {
                           fontWeight: FontWeight.bold),
                     ),
                     if (email.isNotEmpty || phone.isNotEmpty) ...[
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 4),
                       Text(
-                        '${email.isNotEmpty ? MaskingUtil.maskEmail(email) : ''} | ${phone.isNotEmpty ? MaskingUtil.maskPhone(phone) : ''}',
+                        '${MaskingUtil.maskEmail(email)} | ${MaskingUtil.maskPhone(phone)}',
                         style: GoogleFonts.inter(
                             color: colors.textSecondary, fontSize: 12),
                       ),
@@ -339,38 +409,35 @@ class _OrderModalState extends State<OrderModal> {
       );
     }
 
-    // Advisor Mode - select assigned investor
-    if (state.assignedInvestors.isEmpty) {
-      return Card(
-        color: colors.surface,
-        child: const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('No actively mapped investors found in your workspace.'),
-        ),
-      );
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Select Mapped Investor',
-          style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.bold),
+        Semantics(
+          label: 'Select Mapped Investor',
+          child: Text(
+            'Select Mapped Investor',
+            style: GoogleFonts.outfit(
+                color: colors.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.bold),
+          ),
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
+        DropdownButtonFormField<OrderInvestor>(
           // ignore: deprecated_member_use
-          value: state.draft.investorProfileId.isEmpty
+          value: state.draft.context == null
               ? null
-              : state.draft.investorProfileId,
+              : state.assignedInvestors.firstWhere(
+                  (i) => i.id == state.draft.context!.investorProfileId,
+                  orElse: () => state.assignedInvestors.first,
+                ),
           items: state.assignedInvestors.map((investor) {
-            return DropdownMenuItem<String>(
-              value: investor.id,
+            return DropdownMenuItem<OrderInvestor>(
+              value: investor,
               child: Text(
-                  '${investor.fullName} (${MaskingUtil.maskEmail(investor.email ?? '')})'),
+                '${investor.fullName} (${MaskingUtil.maskEmail(investor.email ?? '')})',
+                style: GoogleFonts.inter(fontSize: 14),
+              ),
             );
           }).toList(),
           decoration: const InputDecoration(
@@ -378,7 +445,7 @@ class _OrderModalState extends State<OrderModal> {
           ),
           onChanged: (val) {
             if (val != null) {
-              _bloc.updateBeneficiary(val, val);
+              _bloc.updateBeneficiary(val.id, val.workspaceId);
             }
           },
         ),
@@ -390,12 +457,15 @@ class _OrderModalState extends State<OrderModal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Order Type',
-          style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.bold),
+        Semantics(
+          label: 'Transaction Type',
+          child: Text(
+            'Transaction Type',
+            style: GoogleFonts.outfit(
+                color: colors.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.bold),
+          ),
         ),
         const SizedBox(height: 8),
         SegmentedButton<OrderType>(
@@ -405,49 +475,9 @@ class _OrderModalState extends State<OrderModal> {
             ButtonSegment(value: OrderType.switchOrder, label: Text('Switch')),
           ],
           selected: {state.draft.type},
-          onSelectionChanged: (Set<OrderType> newSelection) {
-            _bloc.updateOrderType(newSelection.first);
-            _amountController.clear();
-            _unitsController.clear();
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSchemeSelector(OrderState state, AppThemeColors colors) {
-    if (state.funds.isEmpty) {
-      return const Text('Loading mutual funds...');
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          state.draft.type == OrderType.switchOrder
-              ? 'Source Scheme'
-              : 'Scheme',
-          style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          // ignore: deprecated_member_use
-          value: state.draft.schemeCode.isEmpty ? null : state.draft.schemeCode,
-          items: state.funds.map((fund) {
-            return DropdownMenuItem<String>(
-              value: fund['scheme_code'] as String,
-              child: Text('${fund['scheme_name']} (${fund['scheme_code']})'),
-            );
-          }).toList(),
-          decoration: const InputDecoration(
-            hintText: 'Select mutual fund',
-          ),
-          onChanged: (val) {
-            if (val != null) {
-              _bloc.updateScheme(val);
+          onSelectionChanged: (set) {
+            if (set.isNotEmpty) {
+              _bloc.updateOrderType(set.first);
             }
           },
         ),
@@ -455,12 +485,83 @@ class _OrderModalState extends State<OrderModal> {
     );
   }
 
-  Widget _buildDestSchemeSelector(OrderState state, AppThemeColors colors) {
+  Widget _buildSchemeInputs(OrderState state, AppThemeColors colors) {
+    if (state.draft.type == OrderType.buy) {
+      return SearchableSchemePicker(
+        initialItems: state.funds,
+        selectedSchemeCode: state.draft.schemeCode,
+        onSelected: (code) => _bloc.updateScheme(code),
+        onSearch: (q) => widget.repository.searchMutualFunds(q),
+        label: 'Scheme',
+      );
+    }
+
+    if (state.draft.type == OrderType.sell) {
+      return _buildHoldingsSelector(
+        state: state,
+        label: 'Holding Scheme to Sell',
+        selectedCode: state.draft.schemeCode,
+        onSelected: (code) => _bloc.updateScheme(code),
+        colors: colors,
+      );
+    }
+
+    // Switch Order: Source (holdings) and Destination (searchable scheme universe)
+    return Column(
+      children: [
+        _buildHoldingsSelector(
+          state: state,
+          label: 'Source Scheme (from holdings)',
+          selectedCode: state.draft.schemeCode,
+          onSelected: (code) => _bloc.updateScheme(code),
+          colors: colors,
+        ),
+        const SizedBox(height: 20),
+        SearchableSchemePicker(
+          initialItems: state.funds,
+          selectedSchemeCode: state.draft.destSchemeCode,
+          onSelected: (code) => _bloc.updateDestScheme(code),
+          onSearch: (q) => widget.repository.searchMutualFunds(q),
+          label: 'Destination Scheme',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHoldingsSelector({
+    required OrderState state,
+    required String label,
+    required String? selectedCode,
+    required ValueChanged<String> onSelected,
+    required AppThemeColors colors,
+  }) {
+    if (state.holdings.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colors.warning.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: colors.warning),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'No holdings found in this portfolio context. You cannot execute a Sell/Switch.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Destination Scheme',
+          label,
           style: GoogleFonts.outfit(
               color: colors.textPrimary,
               fontSize: 14,
@@ -469,22 +570,19 @@ class _OrderModalState extends State<OrderModal> {
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           // ignore: deprecated_member_use
-          value: state.draft.destSchemeCode == null ||
-                  state.draft.destSchemeCode!.isEmpty
+          value: selectedCode == null || selectedCode.isEmpty
               ? null
-              : state.draft.destSchemeCode,
-          items: state.funds.map((fund) {
+              : selectedCode,
+          items: state.holdings.map((h) {
             return DropdownMenuItem<String>(
-              value: fund['scheme_code'] as String,
-              child: Text('${fund['scheme_name']} (${fund['scheme_code']})'),
+              value: h['scheme_code'] as String,
+              child: Text('${h['scheme_name']} (${h['scheme_code']})'),
             );
           }).toList(),
-          decoration: const InputDecoration(
-            hintText: 'Select destination fund',
-          ),
+          decoration: const InputDecoration(hintText: 'Select held scheme'),
           onChanged: (val) {
             if (val != null) {
-              _bloc.updateDestScheme(val);
+              onSelected(val);
             }
           },
         ),
@@ -539,9 +637,7 @@ class _OrderModalState extends State<OrderModal> {
                   '${MaskingUtil.maskFolio(folio.normalizedFolioNumber)} (${folio.registrar})'),
             );
           }).toList(),
-          decoration: const InputDecoration(
-            hintText: 'Choose verified folio',
-          ),
+          decoration: const InputDecoration(hintText: 'Choose verified folio'),
           onChanged: (val) {
             if (val != null) {
               _bloc.updateFolio(val);
@@ -556,40 +652,51 @@ class _OrderModalState extends State<OrderModal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'Order Value',
-              style: GoogleFonts.outfit(
-                  color: colors.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold),
-            ),
-            const Spacer(),
-            ChoiceChip(
-              label: const Text('Amount (₹)'),
-              selected: _isAmountMode,
-              onSelected: (val) {
-                setState(() {
-                  _isAmountMode = true;
-                  _unitsController.clear();
-                  _bloc.updateUnits(null);
-                });
-              },
-            ),
-            const SizedBox(width: 8),
-            ChoiceChip(
-              label: const Text('Units'),
-              selected: !_isAmountMode,
-              onSelected: (val) {
-                setState(() {
-                  _isAmountMode = false;
-                  _amountController.clear();
-                  _bloc.updateAmount(null);
-                });
-              },
-            ),
-          ],
+        Semantics(
+          label: 'Order Value inputs',
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Order Value',
+                style: GoogleFonts.outfit(
+                    color: colors.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold),
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Amount (₹)'),
+                    selected: _isAmountMode,
+                    onSelected: (val) {
+                      setState(() {
+                        _isAmountMode = true;
+                        _unitsController.clear();
+                        _bloc.updateUnits(null);
+                      });
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('Units'),
+                    selected: !_isAmountMode,
+                    onSelected: (val) {
+                      setState(() {
+                        _isAmountMode = false;
+                        _amountController.clear();
+                        _bloc.updateAmount(null);
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         if (_isAmountMode)
@@ -600,12 +707,12 @@ class _OrderModalState extends State<OrderModal> {
               FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))
             ],
             decoration: const InputDecoration(
-              hintText: 'Enter amount in ₹ (e.g. 5000)',
-              prefixIcon: Icon(Icons.currency_rupee),
+              hintText: 'Enter amount in ₹',
+              prefixText: '₹ ',
             ),
             onChanged: (val) {
-              final d = double.tryParse(val);
-              _bloc.updateAmount(d);
+              final parsed = double.tryParse(val);
+              _bloc.updateAmount(parsed);
             },
           )
         else
@@ -616,96 +723,84 @@ class _OrderModalState extends State<OrderModal> {
               FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,4}'))
             ],
             decoration: const InputDecoration(
-              hintText: 'Enter units (e.g. 10.456)',
-              prefixIcon: Icon(Icons.dashboard_customize_outlined),
+              hintText: 'Enter quantity of units',
             ),
             onChanged: (val) {
-              final d = double.tryParse(val);
-              _bloc.updateUnits(d);
+              final parsed = double.tryParse(val);
+              _bloc.updateUnits(parsed);
             },
           ),
       ],
     );
   }
 
-  Widget _buildReviewPanel(
-    OrderState state,
-    AppThemeColors colors,
-    bool isAdvisor,
-    AuthProvider auth,
-  ) {
-    final validationErrors = state.draft.validate();
-    final isValid = validationErrors == null || validationErrors.isEmpty;
+  Widget _buildReviewPanel(OrderState state, AppThemeColors colors,
+      bool isAdvisor, AuthProvider auth) {
+    final errors = state.draft.validate();
+    if (errors != null) return const SizedBox.shrink();
 
-    if (!isValid) return const SizedBox.shrink();
-
-    final name = isAdvisor
-        ? (widget.preSelectedClientId != null
-            ? (widget.preSelectedClientName ?? 'Client')
-            : state.assignedInvestors
-                .firstWhere((i) => i.id == state.draft.investorProfileId,
-                    orElse: () =>
-                        const OrderInvestor(id: '', fullName: 'Client'))
-                .fullName)
-        : (auth.userProfile?.fullName ?? 'Investor');
+    final draft = state.draft;
+    final ctx = draft.context!;
 
     return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: colors.primary.withValues(alpha: 0.3)),
-      ),
+      color: colors.activeBackground,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Order Summary & Review',
+              'Order Preview',
               style: GoogleFonts.outfit(
-                  color: colors.primary,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold),
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: colors.textPrimary),
             ),
             const SizedBox(height: 12),
-            _buildReviewRow('Order Type',
-                state.draft.type.databaseValue.toUpperCase(), colors),
-            _buildReviewRow('Beneficiary', name, colors),
-            _buildReviewRow('Scheme', state.draft.schemeCode, colors),
-            if (state.draft.type == OrderType.switchOrder)
-              _buildReviewRow(
-                  'Dest Scheme', state.draft.destSchemeCode ?? '', colors),
-            if (state.draft.type == OrderType.sell ||
-                state.draft.type == OrderType.switchOrder)
-              _buildReviewRow('Folio',
-                  MaskingUtil.maskFolio(state.draft.folioNumber ?? ''), colors),
+            _buildReviewRow('Beneficiary', ctx.investorFullName, colors),
+            _buildReviewRow('Workspace ID', ctx.workspaceId, colors),
             _buildReviewRow(
-              'Value',
-              _isAmountMode
-                  ? _currencyFormat.format(state.draft.amount ?? 0)
-                  : '${state.draft.units?.toStringAsFixed(4) ?? '0'} Units',
-              colors,
-              isMonospace: true,
-            ),
-            _buildReviewRow(
-                'Initiation',
-                isAdvisor ? 'Advisor-assisted Portal' : 'Investor Portal',
+                'Order Type',
+                draft.type == OrderType.switchOrder
+                    ? 'Switch'
+                    : draft.type.name.toUpperCase(),
                 colors),
-            const SizedBox(height: 16),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                'I confirm this order request is qualified and mapped correctly. I understand this will enter the review pipeline.',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: colors.textSecondary),
-              ),
-              value: _hasConfirmedReview,
-              onChanged: (val) {
-                setState(() {
-                  _hasConfirmedReview = val ?? false;
-                });
-              },
-              controlAffinity: ListTileControlAffinity.leading,
+            _buildReviewRow('Source Scheme', draft.schemeCode, colors),
+            if (draft.type == OrderType.switchOrder)
+              _buildReviewRow(
+                  'Destination Scheme', draft.destSchemeCode ?? '', colors),
+            if (draft.type == OrderType.sell ||
+                draft.type == OrderType.switchOrder)
+              _buildReviewRow('Verified Folio',
+                  MaskingUtil.maskFolio(draft.folioNumber ?? ''), colors),
+            if (draft.amount != null)
+              _buildReviewRow(
+                  'Amount', _currencyFormat.format(draft.amount), colors),
+            if (draft.units != null)
+              _buildReviewRow('Units', draft.units!.toStringAsFixed(4), colors),
+            const Divider(height: 24),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Checkbox(
+                  value: _hasConfirmedReview,
+                  onChanged: (val) {
+                    setState(() {
+                      _hasConfirmedReview = val ?? false;
+                    });
+                  },
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'I confirm that these details are correct. By confirming, I agree to submit this order request for qualification. The order status will start strictly as pending_qualification and will be reviewed.',
+                      style: GoogleFonts.inter(
+                          fontSize: 12, color: colors.textSecondary),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -713,67 +808,60 @@ class _OrderModalState extends State<OrderModal> {
     );
   }
 
-  Widget _buildReviewRow(String label, String value, AppThemeColors colors,
-      {bool isMonospace = false}) {
+  Widget _buildReviewRow(String label, String value, AppThemeColors colors) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
               style:
-                  GoogleFonts.inter(color: colors.textSecondary, fontSize: 13)),
-          Text(
-            value,
-            style: isMonospace
-                ? GoogleFonts.inter(
-                    color: colors.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  )
-                : GoogleFonts.inter(
-                    color: colors.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold),
+                  GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: GoogleFonts.inter(
+                  color: colors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildActionButtons(
-    OrderState state,
-    AppThemeColors colors,
-    bool isAdvisor,
-    AuthProvider auth,
-  ) {
-    final validationErrors = state.draft.validate();
-    final isValid = (validationErrors == null || validationErrors.isEmpty) &&
-        _hasConfirmedReview;
+  Widget _buildActionButtons(OrderState state, AppThemeColors colors,
+      bool isAdvisor, AuthProvider auth) {
+    final isValid = state.draft.validate() == null;
 
     return Row(
       children: [
         Expanded(
-          child: OutlinedButton(
+          child: TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 16),
         Expanded(
-          child: ElevatedButton(
-            onPressed: isValid
-                ? () {
-                    _bloc.submitOrder(
-                      initiatedByProfileId: auth.userProfile?.id ?? '',
-                      initiatedByRole: isAdvisor ? 'advisor' : 'investor',
-                      initiationChannel:
-                          isAdvisor ? 'advisor_portal' : 'investor_portal',
-                    );
-                  }
-                : null,
-            child: const Text('Confirm & Submit'),
+          child: Semantics(
+            label: 'Submit Order Request',
+            child: ElevatedButton(
+              onPressed: isValid &&
+                      _hasConfirmedReview &&
+                      state.phase != OrderPhase.submitting
+                  ? () => _bloc.submitOrder()
+                  : null,
+              child: const Text('Submit Request'),
+            ),
           ),
         ),
       ],
@@ -785,61 +873,188 @@ class _OrderModalState extends State<OrderModal> {
     return Scaffold(
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.check_circle_outline, size: 72, color: colors.success),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_outline,
+                    size: 72, color: Colors.green),
+              ),
               const SizedBox(height: 24),
               Text(
-                'Order Submitted Successfully',
+                'Request Submitted',
                 style: GoogleFonts.outfit(
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: colors.textPrimary),
               ),
               const SizedBox(height: 12),
               Text(
-                'The order request has been queued in status pending_qualification. You will be notified once qualified.',
+                'Your order request was submitted successfully with status pending_qualification and is now in review.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
-                    fontSize: 14, color: colors.textSecondary),
+                    color: colors.textSecondary, fontSize: 14),
               ),
-              const SizedBox(height: 24),
-              Card(
-                color: colors.activeBackground,
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('Order ID: ',
-                          style:
-                              GoogleFonts.inter(color: colors.textSecondary)),
-                      SelectableText(
-                        state.submittedOrderId ?? 'N/A',
-                        style: GoogleFonts.inter(
-                            fontWeight: FontWeight.bold,
-                            color: colors.textPrimary),
-                      ),
-                    ],
-                  ),
+              const SizedBox(height: 8),
+              if (state.submittedOrderId != null)
+                Text(
+                  'ID: ${state.submittedOrderId}',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: colors.primary),
                 ),
-              ),
               const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('Close'),
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Done'),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class SearchableSchemePicker extends StatefulWidget {
+  final List<Map<String, dynamic>> initialItems;
+  final String? selectedSchemeCode;
+  final ValueChanged<String> onSelected;
+  final Future<List<Map<String, dynamic>>> Function(String query) onSearch;
+  final String label;
+
+  const SearchableSchemePicker({
+    required this.initialItems,
+    required this.selectedSchemeCode,
+    required this.onSelected,
+    required this.onSearch,
+    required this.label,
+    super.key,
+  });
+
+  @override
+  State<SearchableSchemePicker> createState() => _SearchableSchemePickerState();
+}
+
+class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
+  final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _filteredItems = [];
+  bool _isSearching = false;
+  bool _isOpen = false;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredItems = widget.initialItems.take(10).toList();
+    _focusNode.addListener(() {
+      setState(() {
+        _isOpen = _focusNode.hasFocus;
+      });
+    });
+  }
+
+  void _onSearchChanged(String val) async {
+    if (val.isEmpty) {
+      setState(() {
+        _filteredItems = widget.initialItems.take(10).toList();
+      });
+      return;
+    }
+    setState(() {
+      _isSearching = true;
+    });
+    try {
+      final results = await widget.onSearch(val);
+      setState(() {
+        _filteredItems = results;
+        _isSearching = false;
+      });
+    } catch (_) {
+      setState(() {
+        _isSearching = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedItem = widget.initialItems.firstWhere(
+      (item) => item['scheme_code'] == widget.selectedSchemeCode,
+      orElse: () => <String, dynamic>{},
+    );
+    final selectedName = selectedItem['scheme_name'] as String? ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.label,
+          style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          focusNode: _focusNode,
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText:
+                selectedName.isNotEmpty ? selectedName : 'Search schemes...',
+            suffixIcon: const Icon(Icons.search),
+          ),
+          onChanged: _onSearchChanged,
+        ),
+        if (_isOpen) ...[
+          const SizedBox(height: 4),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 200),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: _isSearching
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: CircularProgressIndicator()))
+                : _filteredItems.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: Text('No matching schemes found.'),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _filteredItems.length,
+                        itemBuilder: (context, idx) {
+                          final item = _filteredItems[idx];
+                          final code = item['scheme_code'] as String;
+                          final name = item['scheme_name'] as String;
+                          return ListTile(
+                            title: Text(name),
+                            subtitle: Text(code),
+                            onTap: () {
+                              widget.onSelected(code);
+                              _searchController.clear();
+                              _focusNode.unfocus();
+                              setState(() {
+                                _isOpen = false;
+                              });
+                            },
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ],
     );
   }
 }

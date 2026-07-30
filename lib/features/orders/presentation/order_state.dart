@@ -2,12 +2,12 @@ import '../data/order_repository.dart';
 import '../domain/order_models.dart';
 
 class OrderState {
-  final String
-      phase; // 'initial', 'loadingReferenceData', 'ready', 'validating', 'submitting', 'submitted', 'failure'
+  final OrderPhase phase;
   final OrderDraft draft;
   final List<Map<String, dynamic>> funds;
   final List<OrderFolio> folios;
   final List<OrderInvestor> assignedInvestors;
+  final List<Map<String, dynamic>> holdings;
   final String? errorMessage;
   final String? submittedOrderId;
 
@@ -17,33 +17,22 @@ class OrderState {
     this.funds = const [],
     this.folios = const [],
     this.assignedInvestors = const [],
+    this.holdings = const [],
     this.errorMessage,
     this.submittedOrderId,
   });
 
-  factory OrderState.initial({
-    required String workspaceId,
-    required String investorProfileId,
-  }) {
-    return OrderState(
-      phase: 'initial',
-      draft: OrderDraft(
-        workspaceId: workspaceId,
-        investorProfileId: investorProfileId,
-        schemeCode: '',
-        type: OrderType.buy,
-      ),
-    );
-  }
-
   OrderState copyWith({
-    String? phase,
+    OrderPhase? phase,
     OrderDraft? draft,
     List<Map<String, dynamic>>? funds,
     List<OrderFolio>? folios,
     List<OrderInvestor>? assignedInvestors,
+    List<Map<String, dynamic>>? holdings,
     String? errorMessage,
     String? submittedOrderId,
+    bool clearErrorMessage = false,
+    bool clearSubmittedOrderId = false,
   }) {
     return OrderState(
       phase: phase ?? this.phase,
@@ -51,8 +40,12 @@ class OrderState {
       funds: funds ?? this.funds,
       folios: folios ?? this.folios,
       assignedInvestors: assignedInvestors ?? this.assignedInvestors,
-      errorMessage: errorMessage ?? this.errorMessage,
-      submittedOrderId: submittedOrderId ?? this.submittedOrderId,
+      holdings: holdings ?? this.holdings,
+      errorMessage:
+          clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
+      submittedOrderId: clearSubmittedOrderId
+          ? null
+          : (submittedOrderId ?? this.submittedOrderId),
     );
   }
 }

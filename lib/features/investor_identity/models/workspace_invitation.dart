@@ -51,7 +51,8 @@ class WorkspaceInvitation {
 
   bool get isPending => status == InvitationStatus.pending;
   bool get isAccepted => status == InvitationStatus.accepted;
-  bool get isExpired => status == InvitationStatus.expired || DateTime.now().isAfter(expiresAt);
+  bool get isExpired =>
+      status == InvitationStatus.expired || DateTime.now().isAfter(expiresAt);
   bool get isRevoked => status == InvitationStatus.revoked;
 
   factory WorkspaceInvitation.fromJson(Map<String, dynamic> json) {
@@ -62,7 +63,8 @@ class WorkspaceInvitation {
       role: WorkspaceRole.fromDatabase(json['role'] as String),
       invitedBy: json['invited_by'] as String,
       tokenHash: json['token_hash'] as String,
-      status: InvitationStatus.fromDatabase(json['status'] as String? ?? 'pending'),
+      status:
+          InvitationStatus.fromDatabase(json['status'] as String? ?? 'pending'),
       expiresAt: DateTime.parse(json['expires_at'] as String),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(

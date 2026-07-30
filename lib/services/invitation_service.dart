@@ -33,15 +33,19 @@ class InvitationService {
       final bytes = utf8.encode(plaintextToken);
       final hash = sha256.convert(bytes).toString();
 
-      final response = await _client.from('workspace_invitations').insert({
-        'workspace_id': workspaceId,
-        'email': email,
-        'role': role.databaseValue,
-        'invited_by': invitedBy,
-        'token_hash': hash,
-        'status': 'pending',
-        'expires_at': expiresAt.toIso8601String(),
-      }).select().single();
+      final response = await _client
+          .from('workspace_invitations')
+          .insert({
+            'workspace_id': workspaceId,
+            'email': email,
+            'role': role.databaseValue,
+            'invited_by': invitedBy,
+            'token_hash': hash,
+            'status': 'pending',
+            'expires_at': expiresAt.toIso8601String(),
+          })
+          .select()
+          .single();
       return WorkspaceInvitation.fromJson(response);
     } catch (e) {
       return null;

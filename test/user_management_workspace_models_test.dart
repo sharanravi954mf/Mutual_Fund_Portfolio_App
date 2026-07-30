@@ -83,7 +83,10 @@ void main() {
     });
 
     test('WorkspaceInvitation parsing', () {
-      final futureDate = DateTime.now().add(const Duration(days: 30)).toUtc().toIso8601String();
+      final futureDate = DateTime.now()
+          .add(const Duration(days: 30))
+          .toUtc()
+          .toIso8601String();
       final json = {
         'id': 'invite-uuid',
         'workspace_id': 'workspace-uuid',

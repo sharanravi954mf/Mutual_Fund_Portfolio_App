@@ -14,7 +14,6 @@ import '../../features/orders/order_unit_test.dart';
 
 void main() {
   setUpAll(() async {
-    // Suppress Network/Supabase initialization errors if any
     try {
       await Supabase.initialize(
         url: 'https://example.supabase.co',
@@ -43,75 +42,148 @@ void main() {
     );
   }
 
-  testWidgets('renders OrderModal form with Buy details', (tester) async {
-    final repository = FakeOrderRepository();
-    final modal = OrderModal(
-      repository: repository,
-    );
+  group('OrderModal Widget Tests', () {
+    late FakeAuthProvider investorAuth;
+    late FakeAuthProvider advisorAuth;
 
-    final auth = FakeAuthProvider(
-      isAuthenticated: true,
-      userProfile: UserProfile(
-        id: 'investor-1',
-        fullName: 'John Doe',
-        email: 'john@example.com',
-        phoneNumber: '9876543210',
-        role: UserRole.investor,
-        accountStatus: AccountStatus.active,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      ),
-      userAccount: UserAccount(
-        userId: 'user-1',
-        accountState: AccountState.linkedInvestor,
-        onboardingCompleted: true,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      ),
-    );
+    setUp(() {
+      investorAuth = FakeAuthProvider(
+        isAuthenticated: true,
+        userProfile: UserProfile(
+          id: 'investor-1',
+          fullName: 'John Doe',
+          email: 'john@example.com',
+          phoneNumber: '9876543210',
+          role: UserRole.investor,
+          accountStatus: AccountStatus.active,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+        userAccount: UserAccount(
+          userId: 'user-1',
+          accountState: AccountState.linkedInvestor,
+          onboardingCompleted: true,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      );
 
-    await tester.pumpWidget(buildTestableWidget(modal, auth: auth));
-    await tester.pumpAndSettle();
+      advisorAuth = FakeAuthProvider(
+        isAuthenticated: true,
+        userProfile: UserProfile(
+          id: 'advisor-1',
+          fullName: 'Advisor Advisor',
+          email: 'advisor@example.com',
+          phoneNumber: '9876543211',
+          role: UserRole.advisor,
+          accountStatus: AccountStatus.active,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      );
+    });
 
-    // Verify header title
-    expect(find.text('Place Mutual Fund Order'), findsOneWidget);
-    // Verify default order type selection is Buy
-    expect(find.text('Buy'), findsWidgets);
-    // Verify beneficiary name shows up
-    expect(find.text('John Doe'), findsOneWidget);
+    testWidgets('renders OrderModal for investor Buy flow', (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+      expect(find.text('John Doe'), findsOneWidget);
+      expect(find.text('Buy'), findsWidgets);
+    });
+
+    testWidgets('renders preselected locked client in MFD flow',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(
+        repository: repository,
+        preSelectedClientId: 'investor-1',
+        preSelectedClientName: 'John Doe Client',
+      );
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: advisorAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Advisor-Assisted Order'), findsOneWidget);
+      expect(find.text('John Doe Client'), findsOneWidget);
+      expect(find.text('Beneficiary Client (Locked)'), findsOneWidget);
+    });
+
+    testWidgets('shows Access Denied state', (tester) async {
+      final repository = FakeOrderRepository()..shouldThrowAccessDenied = true;
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Access Denied'), findsOneWidget);
+      expect(find.text('Access is restricted'), findsOneWidget);
+    });
+
+    testWidgets('shows Offline / Network Error state', (tester) async {
+      final repository = FakeOrderRepository()..shouldThrowNetworkError = true;
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Network Offline'), findsOneWidget);
+      expect(find.text('Network Offline'), findsWidgets);
+    });
+
+    testWidgets('supports narrow 320px layout responsive design',
+        (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+    });
   });
+}
 
-  testWidgets('renders preselected locked client in MFD flow', (tester) async {
-    final repository = FakeOrderRepository();
-    final auth = FakeAuthProvider(
-      isAuthenticated: true,
-      userProfile: UserProfile(
-        id: 'advisor-1',
-        fullName: 'Advisor Advisor',
-        email: 'advisor@example.com',
-        phoneNumber: '9876543211',
-        role: UserRole.advisor,
-        accountStatus: AccountStatus.active,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      ),
-    );
+class _EmptyLocalStorage extends LocalStorage {
+  const _EmptyLocalStorage();
 
-    final modal = OrderModal(
-      repository: repository,
-      preSelectedClientId: 'investor-1',
-      preSelectedClientName: 'John Doe Client',
-    );
+  @override
+  Future<String?> accessToken() async => null;
 
-    await tester.pumpWidget(buildTestableWidget(modal, auth: auth));
-    await tester.pumpAndSettle();
+  @override
+  Future<bool> hasAccessToken() async => false;
 
-    // Verify advisor title
-    expect(find.text('Advisor-Assisted Order'), findsOneWidget);
-    // Verify client name is locked
-    expect(find.text('John Doe Client'), findsOneWidget);
-    expect(find.text('Beneficiary Client (Locked)'), findsOneWidget);
-  });
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<void> persistSession(String persistSessionString) async {}
+
+  @override
+  Future<void> removePersistedSession() async {}
+}
+
+class _EmptyAsyncStorage extends GotrueAsyncStorage {
+  const _EmptyAsyncStorage();
+
+  @override
+  Future<String?> getItem({required String key}) async => null;
+
+  @override
+  Future<void> removeItem({required String key}) async {}
+
+  @override
+  Future<void> setItem({required String key, required String value}) async {}
 }
 
 class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
@@ -176,36 +248,4 @@ class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
 
   @override
   Future<void> signOut() async {}
-}
-
-class _EmptyLocalStorage extends LocalStorage {
-  const _EmptyLocalStorage();
-
-  @override
-  Future<String?> accessToken() async => null;
-
-  @override
-  Future<bool> hasAccessToken() async => false;
-
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  Future<void> persistSession(String persistSessionString) async {}
-
-  @override
-  Future<void> removePersistedSession() async {}
-}
-
-class _EmptyAsyncStorage extends GotrueAsyncStorage {
-  const _EmptyAsyncStorage();
-
-  @override
-  Future<String?> getItem({required String key}) async => null;
-
-  @override
-  Future<void> removeItem({required String key}) async {}
-
-  @override
-  Future<void> setItem({required String key, required String value}) async {}
 }
