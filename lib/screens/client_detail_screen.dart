@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/theme_provider.dart';
 import '../utils/finance.dart';
 import 'factsheet_dialog.dart';
+import '../features/orders/data/supabase_order_repository.dart';
+import '../features/orders/presentation/widgets/order_modal.dart';
 
 class ClientDetailScreen extends StatefulWidget {
   final String clientId;
@@ -88,11 +90,30 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           ),
         ),
         actions: [
+          ElevatedButton.icon(
+            key: const Key('initiate-order-button'),
+            onPressed: () {
+              OrderModal.show(
+                context,
+                repository: SupabaseOrderRepository(Supabase.instance.client),
+                preSelectedClientId: widget.clientId,
+                preSelectedClientName: widget.clientName,
+              );
+            },
+            icon: const Icon(Icons.add_shopping_cart, size: 16),
+            label: const Text('Initiate Order'),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             icon: Icon(Icons.refresh, color: colors.textSecondary),
             tooltip: "Refresh Data",
             onPressed: _refreshData,
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: SafeArea(

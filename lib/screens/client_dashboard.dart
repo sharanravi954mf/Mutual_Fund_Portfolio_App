@@ -16,6 +16,8 @@ import '../features/portfolio/services/fund_search_service.dart';
 import '../features/investor_verification/presentation/folio_verification_route_factory.dart';
 import 'factsheet_dialog.dart';
 import 'rupee_rain_background.dart';
+import '../features/orders/data/supabase_order_repository.dart';
+import '../features/orders/presentation/widgets/order_modal.dart';
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({
@@ -1119,21 +1121,45 @@ class _ClientDashboardState extends State<ClientDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Your portfolio',
-              style: GoogleFonts.outfit(
-                color: colors.textPrimary,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              summary.lastUpdated == null
-                  ? 'Portfolio update date is not available.'
-                  : 'Last updated ${dateFormat.format(summary.lastUpdated!)}',
-              style:
-                  GoogleFonts.inter(color: colors.textSecondary, fontSize: 13),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your portfolio',
+                        style: GoogleFonts.outfit(
+                          color: colors.textPrimary,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        summary.lastUpdated == null
+                            ? 'Portfolio update date is not available.'
+                            : 'Last updated ${dateFormat.format(summary.lastUpdated!)}',
+                        style: GoogleFonts.inter(
+                            color: colors.textSecondary, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton.icon(
+                  key: const Key('transact-button'),
+                  onPressed: () {
+                    OrderModal.show(
+                      context,
+                      repository:
+                          SupabaseOrderRepository(Supabase.instance.client),
+                    );
+                  },
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Transact'),
+                ),
+              ],
             ),
             if (dashboard.warnings.isNotEmpty) ...[
               const SizedBox(height: 16),
