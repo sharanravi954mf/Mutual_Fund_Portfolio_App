@@ -7,6 +7,12 @@ class OrderBloc extends ChangeNotifier {
   final OrderRepository _repository;
   OrderState _state;
 
+  // Immutable initiator context — stored independently from any beneficiary
+  // selection so it is never overwritten when the advisor changes client.
+  String? _initiatorProfileId;
+  String? _initiationRole;
+  String? _initiationChannel;
+
   OrderBloc(this._repository)
       : _state = const OrderState(
           phase: OrderPhase.initial,
@@ -27,6 +33,10 @@ class OrderBloc extends ChangeNotifier {
     required String initiationRole,
     required String initiationChannel,
   }) async {
+    _initiatorProfileId = initiatorProfileId;
+    _initiationRole = initiationRole;
+    _initiationChannel = initiationChannel;
+
     _updateState(_state.copyWith(
       phase: OrderPhase.loadingReferenceData,
       clearErrorMessage: true,
@@ -53,15 +63,19 @@ class OrderBloc extends ChangeNotifier {
       ));
     } on OrderFailure catch (e) {
       _updatePhaseForFailure(e);
-    } catch (e) {
+    } catch (_) {
       _updateState(_state.copyWith(
         phase: OrderPhase.failure,
-        errorMessage: "Initialization failed: $e",
+        errorMessage:
+            'Unable to initialize the order session. Please try again.',
       ));
     }
   }
 
-  /// Initialize context for Advisor Flow
+  /// Initialize context for Advisor Flow.
+  ///
+  /// When [preSelectedInvestorId] is null, the advisor must select a
+  /// beneficiary from their assigned investor list.
   Future<void> initiateForAdvisor({
     required String advisorProfileId,
     String? preSelectedInvestorId,
@@ -69,6 +83,10 @@ class OrderBloc extends ChangeNotifier {
     required String initiationRole,
     required String initiationChannel,
   }) async {
+    _initiatorProfileId = initiatorProfileId;
+    _initiationRole = initiationRole;
+    _initiationChannel = initiationChannel;
+
     _updateState(_state.copyWith(
       phase: OrderPhase.loadingReferenceData,
       clearErrorMessage: true,
@@ -115,10 +133,11 @@ class OrderBloc extends ChangeNotifier {
       }
     } on OrderFailure catch (e) {
       _updatePhaseForFailure(e);
-    } catch (e) {
+    } catch (_) {
       _updateState(_state.copyWith(
         phase: OrderPhase.failure,
-        errorMessage: "Initialization failed: $e",
+        errorMessage:
+            'Unable to initialize the advisor session. Please try again.',
       ));
     }
   }
@@ -139,7 +158,11 @@ class OrderBloc extends ChangeNotifier {
     ));
   }
 
-  /// Update active beneficiary client & workspace
+  /// Update active beneficiary client & workspace.
+  ///
+  /// This clears all stale financial fields but preserves immutable
+  /// initiator context: [_initiatorProfileId], [_initiationRole], and
+  /// [_initiationChannel] are never read from the draft that was just cleared.
   Future<void> updateBeneficiary(
       String investorProfileId, String workspaceId) async {
     // Prevent setting workspaceId = investorProfileId
@@ -147,7 +170,7 @@ class OrderBloc extends ChangeNotifier {
       _updateState(_state.copyWith(
         phase: OrderPhase.failure,
         errorMessage:
-            "Invalid context mapping: Workspace ID cannot be identical to Investor Profile ID.",
+            'Invalid context mapping: Workspace ID cannot be identical to Investor Profile ID.',
       ));
       return;
     }
@@ -167,30 +190,30 @@ class OrderBloc extends ChangeNotifier {
     ));
 
     try {
+      // Read initiator values from the bloc-level fields, NOT from a draft
+      // context that has just been cleared.
       final context = await _repository.resolveInvestorContext(
         investorProfileId: investorProfileId,
-        initiatorProfileId: _state.draft.context?.initiatorProfileId ?? '',
-        initiationRole: _state.draft.context?.initiationRole ?? '',
-        initiationChannel: _state.draft.context?.initiationChannel ?? '',
+        initiatorProfileId: _initiatorProfileId ?? '',
+        initiationRole: _initiationRole ?? '',
+        initiationChannel: _initiationChannel ?? '',
       );
 
       final folios =
           await _repository.fetchFolios(investorProfileId, context.workspaceId);
-      final holdings = await _repository.fetchHoldings(
-          investorProfileId, context.workspaceId);
 
       _updateState(_state.copyWith(
         phase: OrderPhase.ready,
         draft: _state.stateDraftWithContext(context),
         folios: folios,
-        holdings: holdings,
+        holdings: const [],
       ));
     } on OrderFailure catch (e) {
       _updatePhaseForFailure(e);
-    } catch (e) {
+    } catch (_) {
       _updateState(_state.copyWith(
         phase: OrderPhase.failure,
-        errorMessage: "Failed to load beneficiary context: $e",
+        errorMessage: 'Unable to load the selected client. Please try again.',
       ));
     }
   }
@@ -215,20 +238,27 @@ class OrderBloc extends ChangeNotifier {
 
     if (ctx != null &&
         (type == OrderType.sell || type == OrderType.switchOrder)) {
-      _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
-      try {
-        final holdings = await _repository.fetchHoldings(
-            ctx.investorProfileId, ctx.workspaceId);
+      final folio = _state.draft.folioNumber;
+      if (folio != null && folio.isNotEmpty) {
+        _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
+        try {
+          final holdings = await _repository.fetchHoldings(
+              ctx.investorProfileId, ctx.workspaceId, folio);
+          _updateState(_state.copyWith(
+            phase: OrderPhase.ready,
+            holdings: holdings,
+          ));
+        } on OrderFailure catch (e) {
+          _updatePhaseForFailure(e);
+        } catch (_) {
+          _updateState(_state.copyWith(
+            phase: OrderPhase.failure,
+            errorMessage: 'Unable to load holdings. Please try again.',
+          ));
+        }
+      } else {
         _updateState(_state.copyWith(
-          phase: OrderPhase.ready,
-          holdings: holdings,
-        ));
-      } on OrderFailure catch (e) {
-        _updatePhaseForFailure(e);
-      } catch (e) {
-        _updateState(_state.copyWith(
-          phase: OrderPhase.failure,
-          errorMessage: "Failed to load holdings: $e",
+          holdings: const [],
         ));
       }
     }
@@ -260,9 +290,9 @@ class OrderBloc extends ChangeNotifier {
       _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
       try {
         final holdings = await _repository.fetchHoldings(
-            ctx.investorProfileId, ctx.workspaceId);
+            ctx.investorProfileId, ctx.workspaceId, folioNumber);
 
-        // Check if current schemeCode is held in this folio (or portfolio).
+        // Check if current schemeCode is held in this folio.
         // If not, clear the incompatible scheme.
         final isHeld =
             holdings.any((h) => h['scheme_code'] == _state.draft.schemeCode);
@@ -277,10 +307,10 @@ class OrderBloc extends ChangeNotifier {
         ));
       } on OrderFailure catch (e) {
         _updatePhaseForFailure(e);
-      } catch (e) {
+      } catch (_) {
         _updateState(_state.copyWith(
           phase: OrderPhase.failure,
-          errorMessage: "Failed to update folio: $e",
+          errorMessage: 'Unable to load folio holdings. Please try again.',
         ));
       }
     } else {
@@ -334,10 +364,10 @@ class OrderBloc extends ChangeNotifier {
       ));
     } on OrderFailure catch (e) {
       _updatePhaseForFailure(e);
-    } catch (e) {
+    } catch (_) {
       _updateState(_state.copyWith(
         phase: OrderPhase.failure,
-        errorMessage: "Submission failed: $e",
+        errorMessage: 'An unexpected error occurred. Please try again.',
       ));
     }
   }

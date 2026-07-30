@@ -35,7 +35,7 @@ class SupabaseOrderRepository implements OrderRepository {
     // Section 4 validation: When the existing order_requests schema cannot persist Sell/Switch intent
     if (draft.type == OrderType.sell || draft.type == OrderType.switchOrder) {
       throw const ConfigurationFailure(
-          "Database schema error: Sell and Switch orders cannot be persisted because 'folio_reference_id' and 'destination_scheme_code' columns are missing in public.order_requests table.");
+          "Sell and Switch orders are temporarily unavailable while the secure folio-order contract is being completed.");
     }
 
     try {
@@ -89,12 +89,15 @@ class SupabaseOrderRepository implements OrderRepository {
       for (var row in (response as List)) {
         final ref = row['folio_references'] as Map<String, dynamic>?;
         if (ref != null) {
+          final folioNumber = ref['normalized_folio_number'] as String? ?? '';
           list.add(OrderFolio(
-            normalizedFolioNumber:
-                ref['normalized_folio_number'] as String? ?? '',
-            sourceFolioMasked: ref['source_folio_masked'] as String? ?? '',
-            registrar: ref['registrar'] as String? ?? '',
+            folioReferenceId: ref['id'] as String,
             portfolioId: row['portfolio_id'] as String? ?? '',
+            maskedFolioDisplay: ref['source_folio_masked'] as String? ??
+                (folioNumber.length > 4
+                    ? '••••${folioNumber.substring(folioNumber.length - 4)}'
+                    : '••••••••••'),
+            registrar: ref['registrar'] as String? ?? 'CAMS',
           ));
         }
       }
@@ -109,12 +112,12 @@ class SupabaseOrderRepository implements OrderRepository {
   Future<List<OrderInvestor>> fetchAssignedInvestors(
       String advisorProfileId) async {
     try {
-      // 1. Fetch workspaces where the advisor has an active membership
+      // 1. Fetch workspaces where the advisor/admin has an active membership
       final workspacesRes = await _client
           .from('workspace_memberships')
           .select('workspace_id')
           .eq('profile_id', advisorProfileId)
-          .eq('role', 'advisor')
+          .inFilter('role', ['advisor', 'admin'])
           .eq('status', 'active')
           .isFilter('ended_at', null);
 
@@ -133,30 +136,39 @@ class SupabaseOrderRepository implements OrderRepository {
           .eq('status', 'active')
           .isFilter('ended_at', null);
 
-      final investorProfilesMap =
-          <String, String>{}; // profileId -> workspaceId
+      final relationshipTuples = <Map<String, String>>[];
+      final investorProfileIds = <String>{};
       for (var row in (investorMembershipsRes as List)) {
-        investorProfilesMap[row['profile_id'] as String] =
-            row['workspace_id'] as String;
+        final profileId = row['profile_id'] as String;
+        final wsId = row['workspace_id'] as String;
+        relationshipTuples.add({'profile_id': profileId, 'workspace_id': wsId});
+        investorProfileIds.add(profileId);
       }
 
-      if (investorProfilesMap.isEmpty) return [];
+      if (relationshipTuples.isEmpty) return [];
 
       // 3. Fetch profiles for those active investor IDs
       final profilesRes = await _client
           .from('profiles')
           .select()
-          .inFilter('id', investorProfilesMap.keys.toList());
+          .inFilter('id', investorProfileIds.toList());
+
+      final profilesMap = {
+        for (var p in (profilesRes as List)) p['id'] as String: p
+      };
 
       final list = <OrderInvestor>[];
-      for (var row in (profilesRes as List)) {
-        final id = row['id'] as String;
+      for (var tuple in relationshipTuples) {
+        final pid = tuple['profile_id']!;
+        final wsId = tuple['workspace_id']!;
+        final profile = profilesMap[pid];
+        if (profile == null) continue;
         list.add(OrderInvestor(
-          id: id,
-          fullName: row['full_name'] as String? ?? 'Unnamed Investor',
-          email: row['email'] as String?,
-          phoneNumber: row['phone_number'] as String?,
-          workspaceId: investorProfilesMap[id] ?? '',
+          investorProfileId: pid,
+          workspaceId: wsId,
+          investorFullName: profile['full_name'] as String? ?? 'Unnamed Investor',
+          email: profile['email'] as String?,
+          phoneNumber: profile['phone_number'] as String?,
         ));
       }
       return list;
@@ -198,7 +210,7 @@ class SupabaseOrderRepository implements OrderRepository {
 
   @override
   Future<List<Map<String, dynamic>>> fetchHoldings(
-      String investorProfileId, String workspaceId) async {
+      String investorProfileId, String workspaceId, String folioReferenceId) async {
     try {
       // 1. Fetch portfolios for the investor & workspace context
       final portfoliosRes = await _client
@@ -212,11 +224,22 @@ class SupabaseOrderRepository implements OrderRepository {
 
       if (portfolioIds.isEmpty) return [];
 
-      // 2. Fetch all transactions in these portfolios with mutual fund details
+      // 2. Filter portfolio matching folioReferenceId
+      final referencesRes = await _client
+          .from('portfolio_folio_references')
+          .select('portfolio_id')
+          .inFilter('portfolio_id', portfolioIds)
+          .eq('folio_reference_id', folioReferenceId);
+
+      if ((referencesRes as List).isEmpty) return [];
+
+      final portfolioId = referencesRes.first['portfolio_id'] as String;
+
+      // 3. Fetch all transactions in this single portfolio with mutual fund details
       final txsRes = await _client
           .from('transactions')
           .select('*, mutual_funds(*)')
-          .inFilter('portfolio_id', portfolioIds);
+          .eq('portfolio_id', portfolioId);
 
       final holdingsMap = <String, Map<String, dynamic>>{};
       for (var tx in (txsRes as List)) {

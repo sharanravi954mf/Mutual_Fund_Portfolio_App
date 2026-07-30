@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -238,18 +239,17 @@ class _OrderModalState extends State<OrderModal> {
                         state.phase == OrderPhase.validating) ...[
                       _buildOrderTypeSelector(state, colors),
                       const SizedBox(height: 20),
-                      _buildSchemeInputs(state, colors),
-                      const SizedBox(height: 20),
-                      if (state.draft.type == OrderType.sell ||
-                          state.draft.type == OrderType.switchOrder) ...[
-                        _buildFolioSelector(state, colors),
+                      if (state.draft.type == OrderType.buy) ...[
+                        _buildSchemeInputs(state, colors),
                         const SizedBox(height: 20),
+                        _buildValueInput(state, colors),
+                        const SizedBox(height: 24),
+                        _buildReviewPanel(state, colors, isAdvisor, auth),
+                        const SizedBox(height: 24),
+                        _buildActionButtons(state, colors, isAdvisor, auth),
+                      ] else ...[
+                        _buildUnavailableNotice(state.draft.type, colors),
                       ],
-                      _buildValueInput(state, colors),
-                      const SizedBox(height: 24),
-                      _buildReviewPanel(state, colors, isAdvisor, auth),
-                      const SizedBox(height: 24),
-                      _buildActionButtons(state, colors, isAdvisor, auth),
                     ],
                     if (state.phase == OrderPhase.submitting) ...[
                       Center(
@@ -425,18 +425,24 @@ class _OrderModalState extends State<OrderModal> {
         const SizedBox(height: 8),
         DropdownButtonFormField<OrderInvestor>(
           // ignore: deprecated_member_use
+          isExpanded: true,
           value: state.draft.context == null
               ? null
               : state.assignedInvestors.firstWhere(
-                  (i) => i.id == state.draft.context!.investorProfileId,
+                  (i) => i.investorProfileId == state.draft.context!.investorProfileId &&
+                         i.workspaceId == state.draft.context!.workspaceId,
                   orElse: () => state.assignedInvestors.first,
                 ),
           items: state.assignedInvestors.map((investor) {
+            final wsAbbr = investor.workspaceId.length > 5
+                ? investor.workspaceId.substring(0, 5)
+                : investor.workspaceId;
             return DropdownMenuItem<OrderInvestor>(
               value: investor,
               child: Text(
-                '${investor.fullName} (${MaskingUtil.maskEmail(investor.email ?? '')})',
+                '${investor.investorFullName} (${MaskingUtil.maskEmail(investor.email ?? '')}) [WS: $wsAbbr]',
                 style: GoogleFonts.inter(fontSize: 14),
+                overflow: TextOverflow.ellipsis,
               ),
             );
           }).toList(),
@@ -445,7 +451,7 @@ class _OrderModalState extends State<OrderModal> {
           ),
           onChanged: (val) {
             if (val != null) {
-              _bloc.updateBeneficiary(val.id, val.workspaceId);
+              _bloc.updateBeneficiary(val.investorProfileId, val.workspaceId);
             }
           },
         ),
@@ -482,6 +488,49 @@ class _OrderModalState extends State<OrderModal> {
           },
         ),
       ],
+    );
+  }
+
+  Widget _buildUnavailableNotice(OrderType type, AppThemeColors colors) {
+    final message = type == OrderType.sell
+        ? 'Sell requests are temporarily unavailable while the secure folio-order contract is being completed.'
+        : 'Switch requests are temporarily unavailable while source-folio and destination-scheme persistence is being completed.';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.info_outline, color: colors.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Temporarily Unavailable',
+                style: GoogleFonts.outfit(
+                  color: colors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: GoogleFonts.inter(
+              color: colors.textSecondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -590,6 +639,7 @@ class _OrderModalState extends State<OrderModal> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildFolioSelector(OrderState state, AppThemeColors colors) {
     if (state.folios.isEmpty) {
       return Container(
@@ -632,9 +682,9 @@ class _OrderModalState extends State<OrderModal> {
               : state.draft.folioNumber,
           items: state.folios.map((folio) {
             return DropdownMenuItem<String>(
-              value: folio.normalizedFolioNumber,
+              value: folio.folioReferenceId,
               child: Text(
-                  '${MaskingUtil.maskFolio(folio.normalizedFolioNumber)} (${folio.registrar})'),
+                  '${folio.maskedFolioDisplay} (${folio.registrar})'),
             );
           }).toList(),
           decoration: const InputDecoration(hintText: 'Choose verified folio'),
@@ -953,38 +1003,70 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
   bool _isOpen = false;
   final FocusNode _focusNode = FocusNode();
 
+  Timer? _debounceTimer;
+  int _currentSearchId = 0;
+  String? _searchError;
+
   @override
   void initState() {
     super.initState();
     _filteredItems = widget.initialItems.take(10).toList();
     _focusNode.addListener(() {
-      setState(() {
-        _isOpen = _focusNode.hasFocus;
-      });
+      if (mounted) {
+        setState(() {
+          _isOpen = _focusNode.hasFocus;
+        });
+      }
     });
   }
 
-  void _onSearchChanged(String val) async {
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    _searchController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String val) {
+    _debounceTimer?.cancel();
     if (val.isEmpty) {
-      setState(() {
-        _filteredItems = widget.initialItems.take(10).toList();
-      });
+      if (mounted) {
+        setState(() {
+          _filteredItems = widget.initialItems.take(10).toList();
+          _isSearching = false;
+          _searchError = null;
+        });
+      }
       return;
     }
-    setState(() {
-      _isSearching = true;
+
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      final searchId = ++_currentSearchId;
+      if (mounted) {
+        setState(() {
+          _isSearching = true;
+          _searchError = null;
+        });
+      }
+
+      try {
+        final results = await widget.onSearch(val);
+        if (!mounted || searchId != _currentSearchId) {
+          return;
+        }
+        setState(() {
+          _filteredItems = results;
+          _isSearching = false;
+        });
+      } catch (e) {
+        if (!mounted || searchId != _currentSearchId) return;
+        setState(() {
+          _isSearching = false;
+          _searchError = 'Search failed. Please try again.';
+        });
+      }
     });
-    try {
-      final results = await widget.onSearch(val);
-      setState(() {
-        _filteredItems = results;
-        _isSearching = false;
-      });
-    } catch (_) {
-      setState(() {
-        _isSearching = false;
-      });
-    }
   }
 
   @override
@@ -1026,32 +1108,49 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
                     child: Padding(
                         padding: EdgeInsets.all(8.0),
                         child: CircularProgressIndicator()))
-                : _filteredItems.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Text('No matching schemes found.'),
+                : _searchError != null
+                    ? Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline,
+                                color: Colors.red, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _searchError!,
+                                style: const TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
                       )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _filteredItems.length,
-                        itemBuilder: (context, idx) {
-                          final item = _filteredItems[idx];
-                          final code = item['scheme_code'] as String;
-                          final name = item['scheme_name'] as String;
-                          return ListTile(
-                            title: Text(name),
-                            subtitle: Text(code),
-                            onTap: () {
-                              widget.onSelected(code);
-                              _searchController.clear();
-                              _focusNode.unfocus();
-                              setState(() {
-                                _isOpen = false;
-                              });
+                    : _filteredItems.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Text('No matching schemes found.'),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _filteredItems.length,
+                            itemBuilder: (context, idx) {
+                              final item = _filteredItems[idx];
+                              final code = item['scheme_code'] as String;
+                              final name = item['scheme_name'] as String;
+                              return ListTile(
+                                title: Text(name),
+                                subtitle: Text(code),
+                                onTap: () {
+                                  widget.onSelected(code);
+                                  _searchController.clear();
+                                  _focusNode.unfocus();
+                                  setState(() {
+                                    _isOpen = false;
+                                  });
+                                },
+                              );
                             },
-                          );
-                        },
-                      ),
+                          ),
           ),
         ],
       ],

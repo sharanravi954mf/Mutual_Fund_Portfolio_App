@@ -24,32 +24,32 @@ class ConfigurationFailure extends OrderFailure {
 }
 
 class OrderFolio {
-  final String normalizedFolioNumber;
-  final String sourceFolioMasked;
-  final String registrar;
+  final String folioReferenceId;
   final String portfolioId;
+  final String maskedFolioDisplay;
+  final String registrar;
 
   const OrderFolio({
-    required this.normalizedFolioNumber,
-    required this.sourceFolioMasked,
-    required this.registrar,
+    required this.folioReferenceId,
     required this.portfolioId,
+    required this.maskedFolioDisplay,
+    required this.registrar,
   });
 }
 
 class OrderInvestor {
-  final String id;
-  final String fullName;
+  final String investorProfileId;
+  final String workspaceId;
+  final String investorFullName;
   final String? email;
   final String? phoneNumber;
-  final String workspaceId;
 
   const OrderInvestor({
-    required this.id,
-    required this.fullName,
+    required this.investorProfileId,
+    required this.workspaceId,
+    required this.investorFullName,
     this.email,
     this.phoneNumber,
-    required this.workspaceId,
   });
 }
 
@@ -70,9 +70,9 @@ abstract class OrderRepository {
   /// Search mutual funds by name or code.
   Future<List<Map<String, dynamic>>> searchMutualFunds(String query);
 
-  /// Fetch currently held schemes for the investor's portfolio in a specific workspace.
+  /// Fetch currently held schemes for the investor's portfolio, scoped to selected folio
   Future<List<Map<String, dynamic>>> fetchHoldings(
-      String investorProfileId, String workspaceId);
+      String investorProfileId, String workspaceId, String folioReferenceId);
 
   /// Resolves the active workspace membership/portfolio details for the investor
   Future<OrderContext> resolveInvestorContext({

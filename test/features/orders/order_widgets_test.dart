@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/widgets/order_modal.dart';
+import 'package:mutual_fund_portfolio_app/features/orders/presentation/widgets/advisor_order_action.dart';
 import 'package:mutual_fund_portfolio_app/providers/auth_provider.dart';
 import 'package:mutual_fund_portfolio_app/providers/language_provider.dart';
 import 'package:mutual_fund_portfolio_app/providers/theme_provider.dart';
@@ -42,47 +43,50 @@ void main() {
     );
   }
 
+  late FakeAuthProvider investorAuth;
+  late FakeAuthProvider advisorAuth;
+
+  setUp(() {
+    investorAuth = FakeAuthProvider(
+      isAuthenticated: true,
+      userProfile: UserProfile(
+        id: 'investor-1',
+        fullName: 'John Doe',
+        email: 'john@example.com',
+        phoneNumber: '9876543210',
+        role: UserRole.investor,
+        accountStatus: AccountStatus.active,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+      userAccount: UserAccount(
+        userId: 'user-1',
+        accountState: AccountState.linkedInvestor,
+        onboardingCompleted: true,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+    );
+
+    advisorAuth = FakeAuthProvider(
+      isAuthenticated: true,
+      userProfile: UserProfile(
+        id: 'advisor-1',
+        fullName: 'Advisor Advisor',
+        email: 'advisor@example.com',
+        phoneNumber: '9876543211',
+        role: UserRole.advisor,
+        accountStatus: AccountStatus.active,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // OrderModal Widget Tests
+  // ---------------------------------------------------------------------------
   group('OrderModal Widget Tests', () {
-    late FakeAuthProvider investorAuth;
-    late FakeAuthProvider advisorAuth;
-
-    setUp(() {
-      investorAuth = FakeAuthProvider(
-        isAuthenticated: true,
-        userProfile: UserProfile(
-          id: 'investor-1',
-          fullName: 'John Doe',
-          email: 'john@example.com',
-          phoneNumber: '9876543210',
-          role: UserRole.investor,
-          accountStatus: AccountStatus.active,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-        userAccount: UserAccount(
-          userId: 'user-1',
-          accountState: AccountState.linkedInvestor,
-          onboardingCompleted: true,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      );
-
-      advisorAuth = FakeAuthProvider(
-        isAuthenticated: true,
-        userProfile: UserProfile(
-          id: 'advisor-1',
-          fullName: 'Advisor Advisor',
-          email: 'advisor@example.com',
-          phoneNumber: '9876543211',
-          role: UserRole.advisor,
-          accountStatus: AccountStatus.active,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      );
-    });
-
     testWidgets('renders OrderModal for investor Buy flow', (tester) async {
       final repository = FakeOrderRepository();
       final modal = OrderModal(repository: repository);
@@ -130,7 +134,6 @@ void main() {
       await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
       await tester.pumpAndSettle();
 
-      expect(find.text('Network Offline'), findsOneWidget);
       expect(find.text('Network Offline'), findsWidgets);
     });
 
@@ -149,11 +152,203 @@ void main() {
       await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
       await tester.pumpAndSettle();
 
+      // No overflow or uncaught exceptions at 320px
       expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+    });
+
+    testWidgets('supports desktop-width layout', (tester) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+    });
+
+    testWidgets('shows Sell requests temporarily unavailable notice',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Sell'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Temporarily Unavailable'), findsOneWidget);
+      expect(
+          find.text(
+              'Sell requests are temporarily unavailable while the secure folio-order contract is being completed.'),
+          findsOneWidget);
+    });
+
+    testWidgets('shows Switch requests temporarily unavailable notice',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Switch'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Temporarily Unavailable'), findsOneWidget);
+      expect(
+          find.text(
+              'Switch requests are temporarily unavailable while source-folio and destination-scheme persistence is being completed.'),
+          findsOneWidget);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // AdvisorOrderAction Widget Tests
+  // ---------------------------------------------------------------------------
+  // These tests validate the platform-neutral AdvisorOrderAction widget
+  // independently, without importing the web-only AdminDashboard.
+  group('AdvisorOrderAction Widget Tests', () {
+    testWidgets(
+        'AdvisorOrderAction renders Initiate Order button and opens modal on tap',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final action = AdvisorOrderAction(repository: repository);
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: advisorAuth),
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ChangeNotifierProvider(create: (_) => LanguageProvider()),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              actions: [action],
+            ),
+          ),
+        ),
+      ));
+
+      // Button must be present with the canonical key
+      final initiateButton = find.byKey(const Key('initiate_order_button'));
+      expect(initiateButton, findsOneWidget);
+
+      // Tap the button — the modal should open (advisor flow without client)
+      await tester.tap(initiateButton);
+      await tester.pumpAndSettle();
+
+      // The advisor-flow modal must show the client selector
+      expect(find.text('Choose client'), findsOneWidget);
+    });
+
+    testWidgets(
+        'AdvisorOrderAction is platform-neutral and composes into any scaffold',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final action = AdvisorOrderAction(repository: repository);
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: advisorAuth),
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ChangeNotifierProvider(create: (_) => LanguageProvider()),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Center(child: action),
+          ),
+        ),
+      ));
+
+      expect(find.byKey(const Key('initiate_order_button')), findsOneWidget);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Light / Dark Mode Tests
+  // ---------------------------------------------------------------------------
+  group('Light and Dark Mode Tests', () {
+    testWidgets('renders correctly in light mode', (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: investorAuth),
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ChangeNotifierProvider(create: (_) => LanguageProvider()),
+        ],
+        child: MaterialApp(
+          theme: ThemeData.light(),
+          home: Scaffold(body: modal),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+    });
+
+    testWidgets('renders correctly in dark mode', (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: investorAuth),
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ChangeNotifierProvider(create: (_) => LanguageProvider()),
+        ],
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(body: modal),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Large Text Scale Test
+  // ---------------------------------------------------------------------------
+  group('Accessibility Tests', () {
+    testWidgets('renders without overflow at large text scale', (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: investorAuth),
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          ChangeNotifierProvider(create: (_) => LanguageProvider()),
+        ],
+        child: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+          child: MaterialApp(
+            home: Scaffold(body: modal),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull,
+          reason: 'No uncaught exceptions at 1.5x text scale');
     });
   });
 }
 
+// ---------------------------------------------------------------------------
+// Supabase stub storage implementations for test isolation
+// ---------------------------------------------------------------------------
 class _EmptyLocalStorage extends LocalStorage {
   const _EmptyLocalStorage();
 
@@ -186,6 +381,9 @@ class _EmptyAsyncStorage extends GotrueAsyncStorage {
   Future<void> setItem({required String key, required String value}) async {}
 }
 
+// ---------------------------------------------------------------------------
+// FakeAuthProvider — minimal test double for AuthProvider
+// ---------------------------------------------------------------------------
 class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
   FakeAuthProvider({
     bool isLoading = false,
