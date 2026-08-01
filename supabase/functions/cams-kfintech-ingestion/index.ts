@@ -10,6 +10,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+async function requestWorkspaceId(req: Request): Promise<string | null> {
+  const headerWorkspaceId = req.headers.get("x-workspace-id")?.trim();
+  if (headerWorkspaceId != null && headerWorkspaceId.length > 0) {
+    return headerWorkspaceId;
+  }
+
+  const contentType = req.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return null;
+  }
+
+  const payload = await req.json().catch(() => null);
+  const workspaceId = payload?.workspace_id;
+  return typeof workspaceId === "string" && workspaceId.trim().length > 0
+    ? workspaceId.trim()
+    : null;
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -31,6 +49,52 @@ serve(async (req) => {
     Deno.env.get("SUPABASE_URL") || "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
   );
+
+  const workspaceId = await requestWorkspaceId(req);
+  if (workspaceId == null) {
+    return new Response(
+      JSON.stringify({ error: "workspace_id is required." }),
+      {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("user_id", authorization.userId)
+    .maybeSingle();
+
+  if (profileError != null || profile == null) {
+    return new Response(
+      JSON.stringify({ error: "Advisor access is required." }),
+      {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("workspace_memberships")
+    .select("workspace_id")
+    .eq("workspace_id", workspaceId)
+    .eq("profile_id", profile.id)
+    .eq("status", "active")
+    .in("role", ["advisor", "admin"])
+    .maybeSingle();
+
+  if (membershipError != null || membership == null) {
+    return new Response(
+      JSON.stringify({ error: "Workspace advisor access is required." }),
+      {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
 
   // 1. Log beginning of the ingestion job
   const { data: logEntry } = await supabase
@@ -60,7 +124,7 @@ serve(async (req) => {
       }
       if (batch.length > 0) {
         console.log(`Ingesting batch of ${batch.length} parsed records...`);
-        await db.processParsedRecordsBatch(batch);
+        await db.processParsedRecordsBatch(batch, workspaceId);
         recordsProcessed += batch.length;
       }
     }

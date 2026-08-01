@@ -10,7 +10,7 @@ export class DatabaseSyncService {
   /**
    * Invokes process_cams_records batch stored procedure on Supabase to prevent N+1 CPU timeouts.
    */
-  async processParsedRecordsBatch(records: ParsedTransaction[]): Promise<void> {
+  async processParsedRecordsBatch(records: ParsedTransaction[], workspaceId: string): Promise<void> {
     if (records.length === 0) return;
     
     console.log(`Streaming batch of ${records.length} records to process_cams_records database function...`);
@@ -54,7 +54,8 @@ export class DatabaseSyncService {
     }));
 
     const { error } = await this.client.rpc("process_cams_records", {
-      records: formattedRecords
+      records: formattedRecords,
+      p_workspace_id: workspaceId,
     });
 
     if (error) {
