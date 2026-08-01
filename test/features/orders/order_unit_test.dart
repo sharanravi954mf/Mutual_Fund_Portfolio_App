@@ -18,7 +18,9 @@ void main() {
         expect(MaskingUtil.maskPan('ABCDE1234F'), 'ABC••••34F');
       });
 
-      test('returns fully masked for PAN with wrong structure (only 3 leading alpha)', () {
+      test(
+          'returns fully masked for PAN with wrong structure (only 3 leading alpha)',
+          () {
         // 'ABC123456F' has 3 leading letters, not 5 → malformed
         expect(MaskingUtil.maskPan('ABC123456F'), '••••••••••');
       });
@@ -86,7 +88,8 @@ void main() {
         expect(MaskingUtil.maskEmail('invalid-email'), '•••••@•••••.com');
       });
 
-      test('returns fully masked placeholder for malformed email (double @)', () {
+      test('returns fully masked placeholder for malformed email (double @)',
+          () {
         expect(MaskingUtil.maskEmail('a@@example.com'), '•••••@•••••.com');
       });
 
@@ -261,8 +264,7 @@ void main() {
       expect(bloc.state.draft.context, isNull); // waiting for selection
     });
 
-    test(
-        'advisor initiator context is preserved after investor selection',
+    test('advisor initiator context is preserved after investor selection',
         () async {
       // Step 1: Advisor initiates without a preselected investor
       await bloc.initiateForAdvisor(
@@ -281,14 +283,16 @@ void main() {
       expect(ctx, isNotNull);
       // Initiator identity must be preserved from bloc-level fields, not cleared context
       expect(ctx!.initiatorProfileId, 'advisor-1',
-          reason: 'initiatorProfileId must remain the advisor after client selection');
+          reason:
+              'initiatorProfileId must remain the advisor after client selection');
       expect(ctx.initiationRole, 'advisor',
           reason: 'initiationRole must remain advisor');
       expect(ctx.initiationChannel, 'advisor_portal',
           reason: 'initiationChannel must remain advisor_portal');
       // Beneficiary must be the selected investor
       expect(ctx.workspaceId, 'workspace-2',
-          reason: 'workspace must be the one carried by the selected relationship');
+          reason:
+              'workspace must be the one carried by the selected relationship');
       expect(ctx.investorProfileId, 'investor-2',
           reason: 'investor must be the selected investor');
     });
@@ -369,10 +373,8 @@ void main() {
       await bloc.submitOrder();
 
       expect(bloc.state.phase, OrderPhase.failure);
-      expect(
-          bloc.state.errorMessage,
-          contains(
-              'Sell and Switch orders are temporarily unavailable'));
+      expect(bloc.state.errorMessage,
+          contains('Sell and Switch orders are temporarily unavailable'));
     });
 
     test('submitOrder blocks duplicate calls while submitting', () async {
@@ -428,7 +430,8 @@ void main() {
       // 1. Active advisor membership verified (ws-1)
       final ws1Relationships = results.where((r) => r.workspaceId == 'ws-1');
       expect(ws1Relationships, isNotEmpty,
-          reason: 'Active advisor membership in ws-1 must produce relationships');
+          reason:
+              'Active advisor membership in ws-1 must produce relationships');
 
       // 2. Authorised workspace-owner/admin membership verified (ws-2)
       final ws2Relationships = results.where((r) => r.workspaceId == 'ws-2');
@@ -494,7 +497,8 @@ void main() {
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-A'), false,
           reason: 'SCH-A must not appear when Folio B is selected');
       expect(bloc.state.draft.schemeCode, isEmpty,
-          reason: 'Source scheme from Folio A must be cleared after moving to Folio B');
+          reason:
+              'Source scheme from Folio A must be cleared after moving to Folio B');
     });
 
     test('Sell order does not attempt submission to repository', () async {
@@ -541,7 +545,8 @@ void main() {
 
       expect(bloc.state.phase, OrderPhase.failure);
       expect(bloc.state.errorMessage, isNotNull);
-      expect(bloc.state.errorMessage, isNot(contains('destination_scheme_code')));
+      expect(
+          bloc.state.errorMessage, isNot(contains('destination_scheme_code')));
     });
   });
   _registerSanitisationTests();
@@ -625,16 +630,24 @@ class FakeOrderRepository implements OrderRepository {
   /// This deterministically proves that Folio A never shows Scheme B and
   /// vice-versa.
   @override
-  Future<List<Map<String, dynamic>>> fetchHoldings(
-      String investorProfileId, String workspaceId, String folioReferenceId) async {
+  Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
+      String workspaceId, String folioReferenceId) async {
     _checkErrors();
     if (folioReferenceId == 'folio-a') {
       return [
-        {'scheme_code': 'SCH-A', 'scheme_name': 'Scheme Alpha Fund', 'units': 100.0},
+        {
+          'scheme_code': 'SCH-A',
+          'scheme_name': 'Scheme Alpha Fund',
+          'units': 100.0
+        },
       ];
     } else if (folioReferenceId == 'folio-b') {
       return [
-        {'scheme_code': 'SCH-B', 'scheme_name': 'Scheme Beta Fund', 'units': 50.0},
+        {
+          'scheme_code': 'SCH-B',
+          'scheme_name': 'Scheme Beta Fund',
+          'units': 50.0
+        },
       ];
     }
     return [
@@ -784,7 +797,8 @@ class FakeOrderRepository implements OrderRepository {
 // New Focused Tests for workspace resolution, authorization and sanitisation
 // -----------------------------------------------------------------------------
 void _registerSanitisationTests() {
-  group('SupabaseOrderRepository and Context Resolution / Sanitisation Tests', () {
+  group('SupabaseOrderRepository and Context Resolution / Sanitisation Tests',
+      () {
     test('workspace mismatch and multi-workspace investors', () async {
       // Investor has active memberships in workspace-1 and workspace-2
       // and has portfolios in both workspaces.
@@ -1049,7 +1063,9 @@ void _registerSanitisationTests() {
       );
     });
 
-    test('proves the exact selected workspace reaches resolveInvestorContext via OrderBloc', () async {
+    test(
+        'proves the exact selected workspace reaches resolveInvestorContext via OrderBloc',
+        () async {
       final client = FakeSupabaseClient(queryResponses: {
         'profiles': [
           {'id': 'inv-1', 'full_name': 'John Doe'}
@@ -1071,7 +1087,11 @@ void _registerSanitisationTests() {
           }
         ],
         'portfolios': [
-          {'id': 'portfolio-1', 'workspace_id': 'workspace-selected', 'client_id': 'inv-1'}
+          {
+            'id': 'portfolio-1',
+            'workspace_id': 'workspace-selected',
+            'client_id': 'inv-1'
+          }
         ],
         'mutual_funds': [
           {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'}
@@ -1095,7 +1115,8 @@ void _registerSanitisationTests() {
       expect(bloc.state.draft.context?.workspaceId, 'workspace-selected');
     });
 
-    test('database exception sanitisation hides raw DB/SQL schema details', () async {
+    test('database exception sanitisation hides raw DB/SQL schema details',
+        () async {
       final client = FakeSupabaseClient(
         errorToThrow: const PostgrestException(
           message: 'column "non_existent_column" does not exist',
@@ -1146,10 +1167,13 @@ void _registerSanitisationTests() {
       expect(bloc.state.errorMessage, isNotNull);
       expect(bloc.state.errorMessage, isNot(contains('column')));
       expect(bloc.state.errorMessage, isNot(contains('portfolios')));
-      expect(bloc.state.errorMessage, contains('Failed to resolve investor context'));
+      expect(bloc.state.errorMessage,
+          contains('Failed to resolve investor context'));
     });
 
-    test('owner-admin submit persists initiated_by_role=advisor and initiation_channel=advisor_portal', () async {
+    test(
+        'owner-admin submit persists initiated_by_role=advisor and initiation_channel=advisor_portal',
+        () async {
       final client = FakeSupabaseClient(queryResponses: {
         'order_requests': [
           {'id': 'order-1'}
@@ -1175,10 +1199,12 @@ void _registerSanitisationTests() {
       expect(orderId, 'order-1');
       expect(client.lastInsertedPayload, isNotNull);
       expect(client.lastInsertedPayload!['initiated_by_role'], 'advisor');
-      expect(client.lastInsertedPayload!['initiation_channel'], 'advisor_portal');
+      expect(
+          client.lastInsertedPayload!['initiation_channel'], 'advisor_portal');
     });
 
-    test('fetchAssignedInvestors excludes a non-owner admin workspace', () async {
+    test('fetchAssignedInvestors excludes a non-owner admin workspace',
+        () async {
       final client = FakeSupabaseClient(queryResponses: {
         'workspace_memberships': [
           {
@@ -1209,7 +1235,9 @@ void _registerSanitisationTests() {
       expect(list, isEmpty);
     });
 
-    test('preselected order initiation cannot launch without an exact workspace ID', () async {
+    test(
+        'preselected order initiation cannot launch without an exact workspace ID',
+        () async {
       final client = FakeSupabaseClient(queryResponses: {
         'profiles': [
           {'id': 'inv-1', 'full_name': 'John Doe'}
@@ -1224,7 +1252,11 @@ void _registerSanitisationTests() {
           }
         ],
         'portfolios': [
-          {'id': 'portfolio-1', 'workspace_id': 'workspace-1', 'client_id': 'inv-1'}
+          {
+            'id': 'portfolio-1',
+            'workspace_id': 'workspace-1',
+            'client_id': 'inv-1'
+          }
         ]
       });
 
@@ -1281,12 +1313,14 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
   FakeSupabaseQueryBuilder(this.table, this.queryResponses, {this.onInsert});
 
   @override
-  PostgrestFilterBuilder<List<Map<String, dynamic>>> select([String columns = '*']) {
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
+      [String columns = '*']) {
     return FakePostgrestFilterBuilder(table, queryResponses);
   }
 
   @override
-  PostgrestFilterBuilder<List<Map<String, dynamic>>> insert(Object values, {Object? defaultToNull}) {
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> insert(Object values,
+      {Object? defaultToNull}) {
     if (onInsert != null && values is Map<String, dynamic>) {
       onInsert!(values);
     }
@@ -1297,7 +1331,8 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class FakePostgrestFilterBuilder implements PostgrestFilterBuilder<List<Map<String, dynamic>>> {
+class FakePostgrestFilterBuilder
+    implements PostgrestFilterBuilder<List<Map<String, dynamic>>> {
   final String table;
   final Map<String, List<Map<String, dynamic>>> queryResponses;
   final Map<String, dynamic> filters = {};
@@ -1305,24 +1340,28 @@ class FakePostgrestFilterBuilder implements PostgrestFilterBuilder<List<Map<Stri
   FakePostgrestFilterBuilder(this.table, this.queryResponses);
 
   @override
-  PostgrestFilterBuilder<List<Map<String, dynamic>>> select([String columns = '*']) {
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
+      [String columns = '*']) {
     return this;
   }
 
   @override
-  PostgrestFilterBuilder<List<Map<String, dynamic>>> eq(String column, Object value) {
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> eq(
+      String column, Object value) {
     filters[column] = value;
     return this;
   }
 
   @override
-  PostgrestFilterBuilder<List<Map<String, dynamic>>> inFilter(String column, List values) {
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> inFilter(
+      String column, List values) {
     filters[column] = values;
     return this;
   }
 
   @override
-  PostgrestFilterBuilder<List<Map<String, dynamic>>> isFilter(String column, Object? value) {
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> isFilter(
+      String column, Object? value) {
     filters[column] = value;
     return this;
   }
@@ -1362,7 +1401,9 @@ class FakePostgrestFilterBuilder implements PostgrestFilterBuilder<List<Map<Stri
   }
 
   @override
-  Future<T> then<T>(FutureOr<T> Function(List<Map<String, dynamic>> value) onValue, {Function? onError}) {
+  Future<T> then<T>(
+      FutureOr<T> Function(List<Map<String, dynamic>> value) onValue,
+      {Function? onError}) {
     final list = _applyFilters();
     return Future.value(list).then(onValue, onError: onError);
   }
@@ -1377,7 +1418,8 @@ class FakePostgrestTransformBuilder<T> implements PostgrestTransformBuilder<T> {
   FakePostgrestTransformBuilder(this._future);
 
   @override
-  Future<T2> then<T2>(FutureOr<T2> Function(T value) onValue, {Function? onError}) {
+  Future<T2> then<T2>(FutureOr<T2> Function(T value) onValue,
+      {Function? onError}) {
     return _future.then(onValue, onError: onError);
   }
 

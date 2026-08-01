@@ -59,8 +59,7 @@ class MaskingUtil {
 
     // Domain must contain at least one dot with non-empty segments
     final domainParts = domain.split('.');
-    if (domainParts.length < 2 ||
-        domainParts.any((p) => p.isEmpty)) {
+    if (domainParts.length < 2 || domainParts.any((p) => p.isEmpty)) {
       return '•••••@•••••.com';
     }
 

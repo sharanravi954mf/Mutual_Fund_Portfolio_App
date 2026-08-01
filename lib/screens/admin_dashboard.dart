@@ -920,8 +920,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           if (authProvider.userProfile?.role == UserRole.advisor ||
               authProvider.userProfile?.role == UserRole.admin)
             AdvisorOrderAction(
-              repository:
-                  SupabaseOrderRepository(Supabase.instance.client),
+              repository: SupabaseOrderRepository(Supabase.instance.client),
             ),
           IconButton(
             icon: Icon(Icons.refresh, color: colors.textSecondary),

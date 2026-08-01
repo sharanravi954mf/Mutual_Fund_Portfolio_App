@@ -81,7 +81,8 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     final colors = AppThemeColors(isDark);
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final userRole = auth.userProfile?.role;
-    final isAdvisorOrAdmin = userRole == UserRole.advisor || userRole == UserRole.admin;
+    final isAdvisorOrAdmin =
+        userRole == UserRole.advisor || userRole == UserRole.admin;
 
     return Scaffold(
       backgroundColor: colors.background,

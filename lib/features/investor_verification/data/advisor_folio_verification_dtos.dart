@@ -12,8 +12,7 @@ class AdvisorFolioVerificationQueueItemDto {
         investorDisplayLabel: json['investor_display_label'] as String,
         registrarDisplay: json['registrar_display'] as String,
         maskedFolio: json['masked_folio'] as String,
-        holderRelationship:
-            _relationship(json['holder_relationship'] as String),
+        holderRelationship: _relationship(json['holder_relationship'] as String),
         status: FolioVerificationStatus.fromDatabase(json['status'] as String),
         submittedAt: _date(json['submitted_at']),
         updatedAt: _date(json['updated_at']),
@@ -31,8 +30,7 @@ class AdvisorFolioVerificationDetailDto {
         investorDisplayLabel: json['investor_display_label'] as String,
         registrarDisplay: json['registrar_display'] as String,
         maskedFolio: json['masked_folio'] as String,
-        holderRelationship:
-            _relationship(json['holder_relationship'] as String),
+        holderRelationship: _relationship(json['holder_relationship'] as String),
         status: FolioVerificationStatus.fromDatabase(json['status'] as String),
         submittedAt: _date(json['submitted_at']),
         updatedAt: _date(json['updated_at']),
@@ -61,8 +59,7 @@ class AdvisorFolioVerificationHistoryEventDto {
                 json['previous_status'] as String),
         newStatus: json['new_status'] == null
             ? null
-            : FolioVerificationStatus.fromDatabase(
-                json['new_status'] as String),
+            : FolioVerificationStatus.fromDatabase(json['new_status'] as String),
         reasonCode: json['reason_code'] as String?,
       );
 }

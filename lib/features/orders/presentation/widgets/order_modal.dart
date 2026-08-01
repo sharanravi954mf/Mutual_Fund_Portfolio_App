@@ -128,7 +128,8 @@ class _OrderModalState extends State<OrderModal> {
           initiationChannel: 'investor_portal',
         );
       } else {
-        _bloc.setAccessDenied("Access Denied: Unsupported role for order initiation.");
+        _bloc.setAccessDenied(
+            "Access Denied: Unsupported role for order initiation.");
       }
     }
   }
@@ -146,7 +147,8 @@ class _OrderModalState extends State<OrderModal> {
     final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
     final colors = AppThemeColors(isDark);
     final auth = Provider.of<AuthProvider>(context);
-    final isAdvisor = auth.userProfile?.role == UserRole.advisor || auth.userProfile?.role == UserRole.admin;
+    final isAdvisor = auth.userProfile?.role == UserRole.advisor ||
+        auth.userProfile?.role == UserRole.admin;
 
     return ChangeNotifierProvider<OrderBloc>.value(
       value: _bloc,
@@ -434,8 +436,10 @@ class _OrderModalState extends State<OrderModal> {
           value: state.draft.context == null
               ? null
               : state.assignedInvestors.firstWhere(
-                  (i) => i.investorProfileId == state.draft.context!.investorProfileId &&
-                         i.workspaceId == state.draft.context!.workspaceId,
+                  (i) =>
+                      i.investorProfileId ==
+                          state.draft.context!.investorProfileId &&
+                      i.workspaceId == state.draft.context!.workspaceId,
                   orElse: () => state.assignedInvestors.first,
                 ),
           items: state.assignedInvestors.map((investor) {
@@ -688,8 +692,7 @@ class _OrderModalState extends State<OrderModal> {
           items: state.folios.map((folio) {
             return DropdownMenuItem<String>(
               value: folio.folioReferenceId,
-              child: Text(
-                  '${folio.maskedFolioDisplay} (${folio.registrar})'),
+              child: Text('${folio.maskedFolioDisplay} (${folio.registrar})'),
             );
           }).toList(),
           decoration: const InputDecoration(hintText: 'Choose verified folio'),

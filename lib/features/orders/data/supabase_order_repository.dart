@@ -51,7 +51,8 @@ class SupabaseOrderRepository implements OrderRepository {
             'units': draft.units,
             'status': 'pending_qualification',
             'initiated_by_profile_id': ctx.initiatorProfileId,
-            'initiated_by_role': ctx.initiationRole == 'admin' ? 'advisor' : ctx.initiationRole,
+            'initiated_by_role':
+                ctx.initiationRole == 'admin' ? 'advisor' : ctx.initiationRole,
             'initiation_channel': ctx.initiationChannel,
           })
           .select('id')
@@ -197,7 +198,8 @@ class SupabaseOrderRepository implements OrderRepository {
         list.add(OrderInvestor(
           investorProfileId: pid,
           workspaceId: wsId,
-          investorFullName: profile['full_name'] as String? ?? 'Unnamed Investor',
+          investorFullName:
+              profile['full_name'] as String? ?? 'Unnamed Investor',
           email: profile['email'] as String?,
           phoneNumber: profile['phone_number'] as String?,
         ));
@@ -240,8 +242,8 @@ class SupabaseOrderRepository implements OrderRepository {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> fetchHoldings(
-      String investorProfileId, String workspaceId, String folioReferenceId) async {
+  Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
+      String workspaceId, String folioReferenceId) async {
     try {
       // 1. Fetch portfolios for the investor & workspace context
       final portfoliosRes = await _client
@@ -428,7 +430,8 @@ class SupabaseOrderRepository implements OrderRepository {
             .eq('id', resolvedWorkspaceId)
             .maybeSingle();
 
-        if (workspaceRes == null || workspaceRes['owner_profile_id'] != initiatorProfileId) {
+        if (workspaceRes == null ||
+            workspaceRes['owner_profile_id'] != initiatorProfileId) {
           throw const AccessDeniedFailure(
               "Access Denied: Admin does not own the selected workspace.");
         }

@@ -99,7 +99,9 @@ void main() {
       expect(find.text('Buy'), findsWidgets);
     });
 
-    testWidgets('renders OrderModal for UserRole.client and does not show Access Denied', (tester) async {
+    testWidgets(
+        'renders OrderModal for UserRole.client and does not show Access Denied',
+        (tester) async {
       final clientAuth = FakeAuthProvider(
         isAuthenticated: true,
         userProfile: UserProfile(

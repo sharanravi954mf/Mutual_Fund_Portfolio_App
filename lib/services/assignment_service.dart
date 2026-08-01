@@ -26,16 +26,12 @@ class AssignmentService {
     required String assignedBy,
   }) async {
     try {
-      final response = await _client
-          .from('advisor_investor_assignments')
-          .insert({
-            'advisor_id': advisorId,
-            'investor_id': investorId,
-            'assigned_by': assignedBy,
-            'status': 'active',
-          })
-          .select()
-          .single();
+      final response = await _client.from('advisor_investor_assignments').insert({
+        'advisor_id': advisorId,
+        'investor_id': investorId,
+        'assigned_by': assignedBy,
+        'status': 'active',
+      }).select().single();
       return AdvisorInvestorAssignment.fromJson(response);
     } catch (e) {
       return null;

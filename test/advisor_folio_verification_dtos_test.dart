@@ -50,7 +50,6 @@ void main() {
     expect(detail.history.single.reasonCode, 'INSUFFICIENT_DOCUMENTS');
     expect(detail.history.single.newStatus,
         FolioVerificationStatus.moreInformationRequired);
-    expect(() => detail.history.add(detail.history.single),
-        throwsUnsupportedError);
+    expect(() => detail.history.add(detail.history.single), throwsUnsupportedError);
   });
 }
