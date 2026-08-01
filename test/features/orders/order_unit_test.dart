@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/data/order_repository.dart';
+import 'package:mutual_fund_portfolio_app/features/orders/data/supabase_order_repository.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/domain/masking.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/domain/order_models.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/order_bloc.dart';
@@ -541,6 +544,7 @@ void main() {
       expect(bloc.state.errorMessage, isNot(contains('destination_scheme_code')));
     });
   });
+  _registerSanitisationTests();
 }
 
 /// ---------------------------------------------------------------------------
@@ -644,11 +648,12 @@ class FakeOrderRepository implements OrderRepository {
     required String initiatorProfileId,
     required String initiationRole,
     required String initiationChannel,
+    String? selectedWorkspaceId,
   }) async {
     _checkErrors();
     return OrderContext(
-      workspaceId:
-          investorProfileId == 'investor-2' ? 'workspace-2' : 'workspace-1',
+      workspaceId: selectedWorkspaceId ??
+          (investorProfileId == 'investor-2' ? 'workspace-2' : 'workspace-1'),
       investorProfileId: investorProfileId,
       investorFullName: 'John Doe',
       initiatorProfileId: initiatorProfileId,
@@ -773,4 +778,609 @@ class FakeOrderRepository implements OrderRepository {
       );
     }).toList();
   }
+}
+
+// -----------------------------------------------------------------------------
+// New Focused Tests for workspace resolution, authorization and sanitisation
+// -----------------------------------------------------------------------------
+void _registerSanitisationTests() {
+  group('SupabaseOrderRepository and Context Resolution / Sanitisation Tests', () {
+    test('workspace mismatch and multi-workspace investors', () async {
+      // Investor has active memberships in workspace-1 and workspace-2
+      // and has portfolios in both workspaces.
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe', 'email': 'john@example.com'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          },
+          {
+            'workspace_id': 'workspace-2',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'portfolios': [
+          {'workspace_id': 'workspace-1', 'client_id': 'inv-1'},
+          {'workspace_id': 'workspace-2', 'client_id': 'inv-1'}
+        ],
+      });
+
+      final repo = SupabaseOrderRepository(client);
+
+      // 1. Success on workspace-1
+      final ctx1 = await repo.resolveInvestorContext(
+        investorProfileId: 'inv-1',
+        initiatorProfileId: 'inv-1',
+        initiationRole: 'investor',
+        initiationChannel: 'investor_portal',
+        selectedWorkspaceId: 'workspace-1',
+      );
+      expect(ctx1.workspaceId, 'workspace-1');
+
+      // 2. Success on workspace-2
+      final ctx2 = await repo.resolveInvestorContext(
+        investorProfileId: 'inv-1',
+        initiatorProfileId: 'inv-1',
+        initiationRole: 'investor',
+        initiationChannel: 'investor_portal',
+        selectedWorkspaceId: 'workspace-2',
+      );
+      expect(ctx2.workspaceId, 'workspace-2');
+
+      // 3. Fails on workspace-3 (no membership/portfolio)
+      expect(
+        () => repo.resolveInvestorContext(
+          investorProfileId: 'inv-1',
+          initiatorProfileId: 'inv-1',
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
+          selectedWorkspaceId: 'workspace-3',
+        ),
+        throwsA(isA<AccessDeniedFailure>()),
+      );
+
+      // 4. Mismatch workspace case: portfolio in workspace-2 but resolution is requested for workspace-1 where no portfolio matches
+      final mismatchedClient = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'portfolios': [
+          {'workspace_id': 'workspace-2', 'client_id': 'inv-1'}
+        ],
+      });
+      final mismatchedRepo = SupabaseOrderRepository(mismatchedClient);
+      expect(
+        () => mismatchedRepo.resolveInvestorContext(
+          investorProfileId: 'inv-1',
+          initiatorProfileId: 'inv-1',
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
+          selectedWorkspaceId: 'workspace-1',
+        ),
+        throwsA(isA<AccessDeniedFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('no portfolio in the selected workspace'),
+        )),
+      );
+    });
+
+    test('active advisor success', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          },
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'adv-1',
+            'role': 'advisor',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'portfolios': [
+          {'workspace_id': 'workspace-1', 'client_id': 'inv-1'}
+        ],
+      });
+
+      final repo = SupabaseOrderRepository(client);
+      final ctx = await repo.resolveInvestorContext(
+        investorProfileId: 'inv-1',
+        initiatorProfileId: 'adv-1',
+        initiationRole: 'advisor',
+        initiationChannel: 'advisor_portal',
+        selectedWorkspaceId: 'workspace-1',
+      );
+
+      expect(ctx.workspaceId, 'workspace-1');
+      expect(ctx.initiatorProfileId, 'adv-1');
+    });
+
+    test('owner-admin success', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          },
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'admin-1',
+            'role': 'admin',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'workspaces': [
+          {'id': 'workspace-1', 'owner_profile_id': 'admin-1'}
+        ],
+        'portfolios': [
+          {'workspace_id': 'workspace-1', 'client_id': 'inv-1'}
+        ],
+      });
+
+      final repo = SupabaseOrderRepository(client);
+      final ctx = await repo.resolveInvestorContext(
+        investorProfileId: 'inv-1',
+        initiatorProfileId: 'admin-1',
+        initiationRole: 'admin',
+        initiationChannel: 'advisor_portal',
+        selectedWorkspaceId: 'workspace-1',
+      );
+
+      expect(ctx.workspaceId, 'workspace-1');
+      expect(ctx.initiatorProfileId, 'admin-1');
+      expect(ctx.initiationRole, 'admin');
+    });
+
+    test('non-owner-admin rejection', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          },
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'admin-1',
+            'role': 'admin',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'workspaces': [
+          {'id': 'workspace-1', 'owner_profile_id': 'admin-different'}
+        ],
+        'portfolios': [
+          {'workspace_id': 'workspace-1', 'client_id': 'inv-1'}
+        ],
+      });
+
+      final repo = SupabaseOrderRepository(client);
+
+      expect(
+        () => repo.resolveInvestorContext(
+          investorProfileId: 'inv-1',
+          initiatorProfileId: 'admin-1',
+          initiationRole: 'admin',
+          initiationChannel: 'advisor_portal',
+          selectedWorkspaceId: 'workspace-1',
+        ),
+        throwsA(isA<AccessDeniedFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('Admin does not own the selected workspace'),
+        )),
+      );
+    });
+
+    test('inactive membership rejection', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'inactive', // Inactive!
+            'ended_at': null,
+          }
+        ],
+        'portfolios': [
+          {'workspace_id': 'workspace-1', 'client_id': 'inv-1'}
+        ],
+      });
+
+      final repo = SupabaseOrderRepository(client);
+
+      expect(
+        () => repo.resolveInvestorContext(
+          investorProfileId: 'inv-1',
+          initiatorProfileId: 'inv-1',
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
+          selectedWorkspaceId: 'workspace-1',
+        ),
+        throwsA(isA<AccessDeniedFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('No active membership found for the investor'),
+        )),
+      );
+    });
+
+    test('proves the exact selected workspace reaches resolveInvestorContext via OrderBloc', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-selected',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          },
+          {
+            'workspace_id': 'workspace-selected',
+            'profile_id': 'advisor-1',
+            'role': 'advisor',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'portfolios': [
+          {'id': 'portfolio-1', 'workspace_id': 'workspace-selected', 'client_id': 'inv-1'}
+        ],
+        'mutual_funds': [
+          {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'}
+        ],
+        'portfolio_folio_references': [],
+      });
+
+      final repo = SupabaseOrderRepository(client);
+      final bloc = OrderBloc(repo);
+
+      await bloc.initiateForAdvisor(
+        advisorProfileId: 'advisor-1',
+        initiatorProfileId: 'advisor-1',
+        initiationRole: 'advisor',
+        initiationChannel: 'advisor_portal',
+      );
+
+      await bloc.updateBeneficiary('inv-1', 'workspace-selected');
+
+      expect(bloc.state.phase, OrderPhase.ready);
+      expect(bloc.state.draft.context?.workspaceId, 'workspace-selected');
+    });
+
+    test('database exception sanitisation hides raw DB/SQL schema details', () async {
+      final client = FakeSupabaseClient(
+        errorToThrow: const PostgrestException(
+          message: 'column "non_existent_column" does not exist',
+          code: '42703',
+          details: 'position 15, select * from portfolios...',
+        ),
+      );
+
+      final repo = SupabaseOrderRepository(client);
+
+      try {
+        await repo.resolveInvestorContext(
+          investorProfileId: 'inv-1',
+          initiatorProfileId: 'inv-1',
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
+        );
+        fail('Should have thrown ConfigurationFailure');
+      } catch (e) {
+        expect(e, isA<ConfigurationFailure>());
+        final msg = e.toString();
+        expect(msg, isNot(contains('column')));
+        expect(msg, isNot(contains('portfolios')));
+        expect(msg, isNot(contains('non_existent_column')));
+        expect(msg, contains('Failed to resolve investor context'));
+      }
+    });
+
+    test('database exception sanitisation through OrderBloc', () async {
+      final client = FakeSupabaseClient(
+        errorToThrow: const PostgrestException(
+          message: 'column "non_existent_column" does not exist',
+          code: '42703',
+          details: 'select * from portfolios...',
+        ),
+      );
+      final repo = SupabaseOrderRepository(client);
+      final bloc = OrderBloc(repo);
+
+      await bloc.initiateForInvestor(
+        investorProfileId: 'inv-1',
+        initiatorProfileId: 'inv-1',
+        initiationRole: 'investor',
+        initiationChannel: 'investor_portal',
+      );
+
+      expect(bloc.state.phase, OrderPhase.failure);
+      expect(bloc.state.errorMessage, isNotNull);
+      expect(bloc.state.errorMessage, isNot(contains('column')));
+      expect(bloc.state.errorMessage, isNot(contains('portfolios')));
+      expect(bloc.state.errorMessage, contains('Failed to resolve investor context'));
+    });
+
+    test('owner-admin submit persists initiated_by_role=advisor and initiation_channel=advisor_portal', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'order_requests': [
+          {'id': 'order-1'}
+        ]
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      const draft = OrderDraft(
+        context: OrderContext(
+          workspaceId: 'workspace-1',
+          investorProfileId: 'inv-1',
+          investorFullName: 'John Doe',
+          initiatorProfileId: 'admin-1',
+          initiationRole: 'admin',
+          initiationChannel: 'advisor_portal',
+        ),
+        schemeCode: 'SCH-1',
+        type: OrderType.buy,
+        amount: 5000,
+      );
+
+      final orderId = await repo.submitOrder(draft);
+      expect(orderId, 'order-1');
+      expect(client.lastInsertedPayload, isNotNull);
+      expect(client.lastInsertedPayload!['initiated_by_role'], 'advisor');
+      expect(client.lastInsertedPayload!['initiation_channel'], 'advisor_portal');
+    });
+
+    test('fetchAssignedInvestors excludes a non-owner admin workspace', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-non-owned',
+            'profile_id': 'admin-1',
+            'role': 'admin',
+            'status': 'active',
+            'ended_at': null,
+          },
+          {
+            'workspace_id': 'workspace-non-owned',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'workspaces': [
+          {'id': 'workspace-non-owned', 'owner_profile_id': 'different-admin'}
+        ],
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ]
+      });
+
+      final repo = SupabaseOrderRepository(client);
+      final list = await repo.fetchAssignedInvestors('admin-1');
+      expect(list, isEmpty);
+    });
+
+    test('preselected order initiation cannot launch without an exact workspace ID', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'profiles': [
+          {'id': 'inv-1', 'full_name': 'John Doe'}
+        ],
+        'workspace_memberships': [
+          {
+            'workspace_id': 'workspace-1',
+            'profile_id': 'inv-1',
+            'role': 'investor',
+            'status': 'active',
+            'ended_at': null,
+          }
+        ],
+        'portfolios': [
+          {'id': 'portfolio-1', 'workspace_id': 'workspace-1', 'client_id': 'inv-1'}
+        ]
+      });
+
+      final repo = SupabaseOrderRepository(client);
+
+      expect(
+        () => repo.resolveInvestorContext(
+          investorProfileId: 'inv-1',
+          initiatorProfileId: 'adv-1',
+          initiationRole: 'advisor',
+          initiationChannel: 'advisor_portal',
+          selectedWorkspaceId: null,
+        ),
+        throwsA(isA<ConfigurationFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('Selected workspace ID is required'),
+        )),
+      );
+    });
+  });
+}
+
+// Helper fake Supabase client classes for testing using implements and noSuchMethod
+class FakeSupabaseClient implements SupabaseClient {
+  final Map<String, List<Map<String, dynamic>>> queryResponses;
+  final Object? errorToThrow;
+  Map<String, dynamic>? lastInsertedPayload;
+
+  FakeSupabaseClient({
+    this.queryResponses = const {},
+    this.errorToThrow,
+  });
+
+  @override
+  SupabaseQueryBuilder from(String table) {
+    if (errorToThrow != null) {
+      throw errorToThrow!;
+    }
+    return FakeSupabaseQueryBuilder(table, queryResponses, onInsert: (payload) {
+      lastInsertedPayload = payload;
+    });
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
+  final String table;
+  final Map<String, List<Map<String, dynamic>>> queryResponses;
+  final void Function(Map<String, dynamic> payload)? onInsert;
+
+  FakeSupabaseQueryBuilder(this.table, this.queryResponses, {this.onInsert});
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> select([String columns = '*']) {
+    return FakePostgrestFilterBuilder(table, queryResponses);
+  }
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> insert(Object values, {Object? defaultToNull}) {
+    if (onInsert != null && values is Map<String, dynamic>) {
+      onInsert!(values);
+    }
+    return FakePostgrestFilterBuilder(table, queryResponses);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class FakePostgrestFilterBuilder implements PostgrestFilterBuilder<List<Map<String, dynamic>>> {
+  final String table;
+  final Map<String, List<Map<String, dynamic>>> queryResponses;
+  final Map<String, dynamic> filters = {};
+
+  FakePostgrestFilterBuilder(this.table, this.queryResponses);
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> select([String columns = '*']) {
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> eq(String column, Object value) {
+    filters[column] = value;
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> inFilter(String column, List values) {
+    filters[column] = values;
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> isFilter(String column, Object? value) {
+    filters[column] = value;
+    return this;
+  }
+
+  List<Map<String, dynamic>> _applyFilters() {
+    final list = queryResponses[table] ?? [];
+    if (filters.isEmpty) return list;
+    return list.where((row) {
+      for (final key in filters.keys) {
+        final val = filters[key];
+        if (val is List) {
+          if (!val.contains(row[key])) return false;
+        } else {
+          if (row[key] != val) return false;
+        }
+      }
+      return true;
+    }).toList();
+  }
+
+  @override
+  PostgrestTransformBuilder<Map<String, dynamic>?> maybeSingle() {
+    return FakePostgrestTransformBuilder<Map<String, dynamic>?>(() async {
+      final list = _applyFilters();
+      if (list.isEmpty) return null;
+      return list.first;
+    }());
+  }
+
+  @override
+  PostgrestTransformBuilder<Map<String, dynamic>> single() {
+    return FakePostgrestTransformBuilder<Map<String, dynamic>>(() async {
+      final list = _applyFilters();
+      if (list.isEmpty) throw Exception("No rows found");
+      return list.first;
+    }());
+  }
+
+  @override
+  Future<T> then<T>(FutureOr<T> Function(List<Map<String, dynamic>> value) onValue, {Function? onError}) {
+    final list = _applyFilters();
+    return Future.value(list).then(onValue, onError: onError);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class FakePostgrestTransformBuilder<T> implements PostgrestTransformBuilder<T> {
+  final Future<T> _future;
+
+  FakePostgrestTransformBuilder(this._future);
+
+  @override
+  Future<T2> then<T2>(FutureOr<T2> Function(T value) onValue, {Function? onError}) {
+    return _future.then(onValue, onError: onError);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

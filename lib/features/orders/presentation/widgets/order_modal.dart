@@ -18,12 +18,14 @@ class OrderModal extends StatefulWidget {
   final OrderRepository repository;
   final String? preSelectedClientId;
   final String? preSelectedClientName;
+  final String? preSelectedWorkspaceId;
 
   const OrderModal({
     super.key,
     required this.repository,
     this.preSelectedClientId,
     this.preSelectedClientName,
+    this.preSelectedWorkspaceId,
   });
 
   static void show(
@@ -31,6 +33,7 @@ class OrderModal extends StatefulWidget {
     required OrderRepository repository,
     String? preSelectedClientId,
     String? preSelectedClientName,
+    String? preSelectedWorkspaceId,
   }) {
     final showSidebar = MediaQuery.of(context).size.width > 900;
     if (showSidebar) {
@@ -46,6 +49,7 @@ class OrderModal extends StatefulWidget {
               repository: repository,
               preSelectedClientId: preSelectedClientId,
               preSelectedClientName: preSelectedClientName,
+              preSelectedWorkspaceId: preSelectedWorkspaceId,
             ),
           ),
         ),
@@ -69,6 +73,7 @@ class OrderModal extends StatefulWidget {
               repository: repository,
               preSelectedClientId: preSelectedClientId,
               preSelectedClientName: preSelectedClientName,
+              preSelectedWorkspaceId: preSelectedWorkspaceId,
             ),
           ),
         ),
@@ -103,27 +108,27 @@ class _OrderModalState extends State<OrderModal> {
       _hasInitialRefLoadCalled = true;
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final profileId = auth.userProfile?.id ?? '';
-      final role =
-          auth.userProfile?.role == UserRole.advisor ? 'advisor' : 'investor';
-      final channel = auth.userProfile?.role == UserRole.advisor
-          ? 'advisor_portal'
-          : 'investor_portal';
+      final userRole = auth.userProfile?.role;
 
-      if (auth.userProfile?.role == UserRole.advisor) {
+      if (userRole == UserRole.advisor || userRole == UserRole.admin) {
+        final role = userRole == UserRole.admin ? 'admin' : 'advisor';
         _bloc.initiateForAdvisor(
           advisorProfileId: profileId,
           preSelectedInvestorId: widget.preSelectedClientId,
+          selectedWorkspaceId: widget.preSelectedWorkspaceId,
           initiatorProfileId: profileId,
           initiationRole: role,
-          initiationChannel: channel,
+          initiationChannel: 'advisor_portal',
         );
-      } else {
+      } else if (userRole == UserRole.investor || userRole == UserRole.client) {
         _bloc.initiateForInvestor(
           investorProfileId: profileId,
           initiatorProfileId: profileId,
-          initiationRole: role,
-          initiationChannel: channel,
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
         );
+      } else {
+        _bloc.setAccessDenied("Access Denied: Unsupported role for order initiation.");
       }
     }
   }
@@ -141,7 +146,7 @@ class _OrderModalState extends State<OrderModal> {
     final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
     final colors = AppThemeColors(isDark);
     final auth = Provider.of<AuthProvider>(context);
-    final isAdvisor = auth.userProfile?.role == UserRole.advisor;
+    final isAdvisor = auth.userProfile?.role == UserRole.advisor || auth.userProfile?.role == UserRole.admin;
 
     return ChangeNotifierProvider<OrderBloc>.value(
       value: _bloc,

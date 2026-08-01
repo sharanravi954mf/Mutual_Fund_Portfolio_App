@@ -80,5 +80,6 @@ abstract class OrderRepository {
     required String initiatorProfileId,
     required String initiationRole,
     required String initiationChannel,
+    String? selectedWorkspaceId,
   });
 }

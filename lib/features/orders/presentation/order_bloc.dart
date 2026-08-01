@@ -79,6 +79,7 @@ class OrderBloc extends ChangeNotifier {
   Future<void> initiateForAdvisor({
     required String advisorProfileId,
     String? preSelectedInvestorId,
+    String? selectedWorkspaceId,
     required String initiatorProfileId,
     required String initiationRole,
     required String initiationChannel,
@@ -100,6 +101,7 @@ class OrderBloc extends ChangeNotifier {
           initiatorProfileId: initiatorProfileId,
           initiationRole: initiationRole,
           initiationChannel: initiationChannel,
+          selectedWorkspaceId: selectedWorkspaceId,
         );
 
         final funds = await _repository.fetchMutualFunds();
@@ -197,6 +199,7 @@ class OrderBloc extends ChangeNotifier {
         initiatorProfileId: _initiatorProfileId ?? '',
         initiationRole: _initiationRole ?? '',
         initiationChannel: _initiationChannel ?? '',
+        selectedWorkspaceId: workspaceId,
       );
 
       final folios =
@@ -370,6 +373,13 @@ class OrderBloc extends ChangeNotifier {
         errorMessage: 'An unexpected error occurred. Please try again.',
       ));
     }
+  }
+
+  void setAccessDenied(String message) {
+    _updateState(_state.copyWith(
+      phase: OrderPhase.accessDenied,
+      errorMessage: message,
+    ));
   }
 }
 

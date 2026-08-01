@@ -99,6 +99,38 @@ void main() {
       expect(find.text('Buy'), findsWidgets);
     });
 
+    testWidgets('renders OrderModal for UserRole.client and does not show Access Denied', (tester) async {
+      final clientAuth = FakeAuthProvider(
+        isAuthenticated: true,
+        userProfile: UserProfile(
+          id: 'client-1',
+          fullName: 'Client User',
+          email: 'client@example.com',
+          phoneNumber: '9876543210',
+          role: UserRole.client,
+          accountStatus: AccountStatus.active,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+        userAccount: UserAccount(
+          userId: 'user-1',
+          accountState: AccountState.linkedInvestor,
+          onboardingCompleted: true,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+      );
+
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: clientAuth));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+      expect(find.text('Access Denied'), findsNothing);
+    });
+
     testWidgets('renders preselected locked client in MFD flow',
         (tester) async {
       final repository = FakeOrderRepository();

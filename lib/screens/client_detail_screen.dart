@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/auth_provider.dart';
+import '../features/investor_identity/models/user_profile.dart';
 import '../providers/theme_provider.dart';
 import '../utils/finance.dart';
 import 'factsheet_dialog.dart';
@@ -12,11 +14,13 @@ import '../features/orders/presentation/widgets/order_modal.dart';
 class ClientDetailScreen extends StatefulWidget {
   final String clientId;
   final String clientName;
+  final String? workspaceId;
 
   const ClientDetailScreen({
     super.key,
     required this.clientId,
     required this.clientName,
+    this.workspaceId,
   });
 
   @override
@@ -75,6 +79,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
   Widget build(BuildContext context) {
     final isDark = Provider.of<ThemeProvider>(context).isDarkMode(context);
     final colors = AppThemeColors(isDark);
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final userRole = auth.userProfile?.role;
+    final isAdvisorOrAdmin = userRole == UserRole.advisor || userRole == UserRole.admin;
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -90,23 +97,25 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           ),
         ),
         actions: [
-          ElevatedButton.icon(
-            key: const Key('initiate-order-button'),
-            onPressed: () {
-              OrderModal.show(
-                context,
-                repository: SupabaseOrderRepository(Supabase.instance.client),
-                preSelectedClientId: widget.clientId,
-                preSelectedClientName: widget.clientName,
-              );
-            },
-            icon: const Icon(Icons.add_shopping_cart, size: 16),
-            label: const Text('Initiate Order'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              visualDensity: VisualDensity.compact,
+          if (isAdvisorOrAdmin && widget.workspaceId != null)
+            ElevatedButton.icon(
+              key: const Key('initiate-order-button'),
+              onPressed: () {
+                OrderModal.show(
+                  context,
+                  repository: SupabaseOrderRepository(Supabase.instance.client),
+                  preSelectedClientId: widget.clientId,
+                  preSelectedClientName: widget.clientName,
+                  preSelectedWorkspaceId: widget.workspaceId,
+                );
+              },
+              icon: const Icon(Icons.add_shopping_cart, size: 16),
+              label: const Text('Initiate Order'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                visualDensity: VisualDensity.compact,
+              ),
             ),
-          ),
           const SizedBox(width: 8),
           IconButton(
             icon: Icon(Icons.refresh, color: colors.textSecondary),
