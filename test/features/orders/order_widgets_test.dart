@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -352,6 +353,183 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
+  group('SearchableSchemePicker Stale-Result Protection Tests', () {
+    testWidgets(
+      'search A cannot overwrite search B during B\'s debounce interval',
+      (tester) async {
+        final searchQueries = <String>[];
+        final completers = <String, Completer<List<Map<String, dynamic>>>>{};
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SearchableSchemePicker(
+                initialItems: const [
+                  {
+                    'scheme_code': 'SCH-1',
+                    'scheme_name': 'HDFC Top 100',
+                  },
+                ],
+                selectedSchemeCode: null,
+                onSelected: (_) {},
+                onSearch: (query) {
+                  searchQueries.add(query);
+
+                  final completer = Completer<List<Map<String, dynamic>>>();
+
+                  completers[query] = completer;
+                  return completer.future;
+                },
+                label: 'Scheme',
+              ),
+            ),
+          ),
+        );
+
+        final finder = find.byType(TextFormField);
+
+        await tester.tap(finder);
+        await tester.pumpAndSettle();
+
+        // Start search A.
+        await tester.enterText(finder, 'A');
+        await tester.pump(const Duration(milliseconds: 350));
+
+        // A must now be running.
+        expect(searchQueries, equals(['A']));
+
+        // Type B, but do not let B's debounce finish yet.
+        await tester.enterText(finder, 'B');
+        await tester.pump(const Duration(milliseconds: 100));
+
+        // Complete A while B is still inside its debounce period.
+        completers['A']!.complete([
+          {
+            'scheme_code': 'SCH-A',
+            'scheme_name': 'Stale Scheme A',
+          },
+        ]);
+
+        await tester.pump();
+
+        // A is stale and must not appear.
+        expect(find.text('Stale Scheme A'), findsNothing);
+
+        // Allow B's debounce to finish.
+        await tester.pump(const Duration(milliseconds: 250));
+
+        expect(searchQueries, equals(['A', 'B']));
+
+        // Complete the latest search.
+        completers['B']!.complete([
+          {
+            'scheme_code': 'SCH-B',
+            'scheme_name': 'Current Scheme B',
+          },
+        ]);
+
+        await tester.pumpAndSettle();
+
+        expect(find.text('Current Scheme B'), findsOneWidget);
+        expect(find.text('Stale Scheme A'), findsNothing);
+      },
+    );
+
+    testWidgets(
+        'in-flight search A cannot overwrite search B when B completes first',
+        (tester) async {
+      final searchQueries = <String>[];
+      final completers = <String, Completer<List<Map<String, dynamic>>>>{};
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SearchableSchemePicker(
+            initialItems: const [
+              {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'}
+            ],
+            selectedSchemeCode: null,
+            onSelected: (_) {},
+            onSearch: (query) {
+              searchQueries.add(query);
+              final completer = Completer<List<Map<String, dynamic>>>();
+              completers[query] = completer;
+              return completer.future;
+            },
+            label: 'Scheme',
+          ),
+        ),
+      ));
+
+      final finder = find.byType(TextFormField);
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(finder, 'A');
+      await tester.pump(const Duration(milliseconds: 350));
+
+      await tester.enterText(finder, 'B');
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(searchQueries, equals(['A', 'B']));
+
+      completers['B']!.complete([
+        {'scheme_code': 'SCH-B', 'scheme_name': 'Scheme B Result'}
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Scheme B Result'), findsOneWidget);
+
+      completers['A']!.complete([
+        {'scheme_code': 'SCH-A', 'scheme_name': 'Scheme A Result'}
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Scheme B Result'), findsOneWidget);
+      expect(find.text('Scheme A Result'), findsNothing);
+    });
+
+    testWidgets(
+        'a running search cannot overwrite results after the field is cleared',
+        (tester) async {
+      final completers = <String, Completer<List<Map<String, dynamic>>>>{};
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SearchableSchemePicker(
+            initialItems: const [
+              {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'}
+            ],
+            selectedSchemeCode: null,
+            onSelected: (_) {},
+            onSearch: (query) {
+              final completer = Completer<List<Map<String, dynamic>>>();
+              completers[query] = completer;
+              return completer.future;
+            },
+            label: 'Scheme',
+          ),
+        ),
+      ));
+
+      final finder = find.byType(TextFormField);
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(finder, 'A');
+      await tester.pump(const Duration(milliseconds: 350));
+
+      await tester.enterText(finder, '');
+      await tester.pumpAndSettle();
+
+      completers['A']!.complete([
+        {'scheme_code': 'SCH-A', 'scheme_name': 'Scheme A Result'}
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Scheme A Result'), findsNothing);
+    });
+  });
+
   // Large Text Scale Test
   // ---------------------------------------------------------------------------
   group('Accessibility Tests', () {

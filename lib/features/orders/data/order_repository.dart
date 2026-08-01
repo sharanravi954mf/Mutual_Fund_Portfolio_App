@@ -67,6 +67,9 @@ abstract class OrderRepository {
   /// Fetch all available mutual funds.
   Future<List<Map<String, dynamic>>> fetchMutualFunds();
 
+  /// Fetch initial mutual funds with a limit.
+  Future<List<Map<String, dynamic>>> fetchInitialMutualFunds({int limit = 20});
+
   /// Search mutual funds by name or code.
   Future<List<Map<String, dynamic>>> searchMutualFunds(String query);
 

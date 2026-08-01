@@ -51,7 +51,7 @@ class OrderBloc extends ChangeNotifier {
         initiationChannel: initiationChannel,
       );
 
-      final funds = await _repository.fetchMutualFunds();
+      final funds = await _repository.fetchInitialMutualFunds();
       final folios =
           await _repository.fetchFolios(investorProfileId, context.workspaceId);
 
@@ -104,7 +104,7 @@ class OrderBloc extends ChangeNotifier {
           selectedWorkspaceId: selectedWorkspaceId,
         );
 
-        final funds = await _repository.fetchMutualFunds();
+        final funds = await _repository.fetchInitialMutualFunds();
         final folios = await _repository.fetchFolios(
             preSelectedInvestorId, context.workspaceId);
 
@@ -125,7 +125,7 @@ class OrderBloc extends ChangeNotifier {
           return;
         }
 
-        final funds = await _repository.fetchMutualFunds();
+        final funds = await _repository.fetchInitialMutualFunds();
 
         _updateState(_state.copyWith(
           phase: OrderPhase.ready,

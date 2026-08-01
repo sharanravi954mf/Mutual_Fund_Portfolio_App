@@ -1031,13 +1031,16 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _currentSearchId++;
     _searchController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
   void _onSearchChanged(String val) {
+    final searchId = ++_currentSearchId;
     _debounceTimer?.cancel();
+
     if (val.isEmpty) {
       if (mounted) {
         setState(() {
@@ -1050,13 +1053,13 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
     }
 
     _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
-      final searchId = ++_currentSearchId;
-      if (mounted) {
-        setState(() {
-          _isSearching = true;
-          _searchError = null;
-        });
+      if (!mounted || searchId != _currentSearchId) {
+        return;
       }
+      setState(() {
+        _isSearching = true;
+        _searchError = null;
+      });
 
       try {
         final results = await widget.onSearch(val);
@@ -1149,6 +1152,8 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
                                 title: Text(name),
                                 subtitle: Text(code),
                                 onTap: () {
+                                  _debounceTimer?.cancel();
+                                  _currentSearchId++;
                                   widget.onSelected(code);
                                   _searchController.clear();
                                   _focusNode.unfocus();

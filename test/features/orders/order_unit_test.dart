@@ -548,6 +548,18 @@ void main() {
       expect(
           bloc.state.errorMessage, isNot(contains('destination_scheme_code')));
     });
+
+    test('initial loading calls the bounded method fetchInitialMutualFunds',
+        () async {
+      repository.fetchInitialCalled = false;
+      await bloc.initiateForInvestor(
+        investorProfileId: 'investor-1',
+        initiatorProfileId: 'investor-1',
+        initiationRole: 'investor',
+        initiationChannel: 'investor_portal',
+      );
+      expect(repository.fetchInitialCalled, isTrue);
+    });
   });
   _registerSanitisationTests();
 }
@@ -607,9 +619,22 @@ class FakeOrderRepository implements OrderRepository {
     ];
   }
 
+  bool fetchInitialCalled = false;
+
   @override
   Future<List<Map<String, dynamic>>> fetchMutualFunds() async {
     _checkErrors();
+    return [
+      {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'},
+      {'scheme_code': 'SCH-2', 'scheme_name': 'SBI Bluechip'},
+    ];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchInitialMutualFunds(
+      {int limit = 20}) async {
+    _checkErrors();
+    fetchInitialCalled = true;
     return [
       {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'},
       {'scheme_code': 'SCH-2', 'scheme_name': 'SBI Bluechip'},
@@ -1363,6 +1388,20 @@ class FakePostgrestFilterBuilder
   PostgrestFilterBuilder<List<Map<String, dynamic>>> isFilter(
       String column, Object? value) {
     filters[column] = value;
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> order(String column,
+      {bool ascending = true,
+      bool nullsFirst = false,
+      String? referencedTable}) {
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<List<Map<String, dynamic>>> limit(int count,
+      {String? referencedTable}) {
     return this;
   }
 

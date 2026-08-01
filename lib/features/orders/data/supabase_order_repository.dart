@@ -226,6 +226,22 @@ class SupabaseOrderRepository implements OrderRepository {
   }
 
   @override
+  Future<List<Map<String, dynamic>>> fetchInitialMutualFunds(
+      {int limit = 20}) async {
+    try {
+      final response = await _client
+          .from('mutual_funds')
+          .select()
+          .order('scheme_name', ascending: true)
+          .limit(limit);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      _handleError(e);
+      rethrow;
+    }
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> searchMutualFunds(String query) async {
     try {
       final response = await _client
