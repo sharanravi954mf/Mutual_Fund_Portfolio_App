@@ -55,6 +55,14 @@ export type HandlerDependencies = {
       registrar: Registrar;
     }): Promise<IngestionRunContext>;
   };
+  workspaceAuthorizer: {
+    authorize(
+      req: Request,
+      input: {
+        workspaceId: string;
+      },
+    ): Promise<void>;
+  };
   mailboxClient: {
     poll(context: IngestionRunContext): Promise<MailMessage[]>;
     downloadAttachment(
@@ -454,6 +462,11 @@ export function createCamsKfintechIngestionHandler(
       const workspaceId = requiredString(body.workspace_id);
       const mailboxConnectionId = requiredString(body.mailbox_connection_id);
       const correlationId = requiredString(body.correlation_id);
+
+      stage(deps, "workspace_authorization");
+      await deps.workspaceAuthorizer.authorize(req, {
+        workspaceId,
+      });
 
       runIdentity = {
         workspaceId,

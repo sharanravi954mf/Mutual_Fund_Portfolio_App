@@ -9,6 +9,7 @@ import {
   CredentialEnvelopeCrypto,
   HttpMalwareScanner,
   RemotePdfTextExtractor,
+  SupabaseWorkspaceAuthorizer,
 } from "./adapters.ts";
 import { readBoundedStream } from "./security.ts";
 import { IngestionError, type IngestionRunContext } from "./types.ts";
@@ -65,6 +66,72 @@ function delayedFetch(signal?: AbortSignal): Promise<Response> {
       () => reject(new DOMException("aborted", "AbortError")),
     );
   });
+}
+
+class FakeQuery {
+  constructor(
+    private readonly rows: Record<string, unknown>[],
+    private readonly error: Error | null = null,
+  ) {}
+
+  select(): FakeQuery {
+    return this;
+  }
+
+  eq(): FakeQuery {
+    return this;
+  }
+
+  is(): FakeQuery {
+    return this;
+  }
+
+  in(): FakeQuery {
+    return this;
+  }
+
+  limit(): Promise<{ data: Record<string, unknown>[]; error: Error | null }> {
+    return Promise.resolve({ data: this.rows, error: this.error });
+  }
+}
+
+function authorizerClient(options: {
+  userId?: string | null;
+  profileRows?: Record<string, unknown>[];
+  membershipRows?: Record<string, unknown>[];
+} = {}) {
+  return {
+    auth: {
+      getUser: () =>
+        Promise.resolve({
+          data: {
+            user: options.userId === null
+              ? null
+              : { id: options.userId ?? "user-id" },
+          },
+          error: null,
+        }),
+    },
+    from: (table: string) => {
+      if (table === "profiles") {
+        return new FakeQuery(options.profileRows ?? [{ id: "profile-id" }]);
+      }
+      if (table === "workspace_memberships") {
+        return new FakeQuery(
+          options.membershipRows ?? [{ profile_id: "profile-id" }],
+        );
+      }
+      return new FakeQuery([]);
+    },
+  };
+}
+
+function authorizedRequest(token: string | null = "user-token"): Request {
+  const headers = new Headers();
+  if (token != null) {
+    headers.set("x-user-authorization", `Bearer ${token}`);
+  }
+  return new Request("http://localhost", { headers });
 }
 
 Deno.test("credential envelope encrypts and decrypts one JSON bundle with AAD", async () => {
@@ -164,6 +231,63 @@ Deno.test("credential envelope rejects invalid key nonce and wrong AAD", async (
     () => cryptoEnvelope.decrypt(encrypted, "other-workspace", "mailbox-id"),
     IngestionError,
     "oauth_credentials_unavailable",
+  );
+});
+
+Deno.test("workspace authorizer accepts exactly one active advisor/admin membership", async () => {
+  const authorizer = new SupabaseWorkspaceAuthorizer(
+    authorizerClient() as never,
+  );
+
+  await authorizer.authorize(authorizedRequest(), {
+    workspaceId: "workspace-id",
+  });
+});
+
+Deno.test("workspace authorizer rejects missing authenticated user token", async () => {
+  const authorizer = new SupabaseWorkspaceAuthorizer(
+    authorizerClient() as never,
+  );
+
+  await assertRejects(
+    () =>
+      authorizer.authorize(authorizedRequest(null), {
+        workspaceId: "workspace-id",
+      }),
+    IngestionError,
+    "authorization_required",
+  );
+});
+
+Deno.test("workspace authorizer fails closed for cross-workspace and non-advisor users", async () => {
+  const authorizer = new SupabaseWorkspaceAuthorizer(
+    authorizerClient({ membershipRows: [] }) as never,
+  );
+
+  await assertRejects(
+    () =>
+      authorizer.authorize(authorizedRequest(), {
+        workspaceId: "other-workspace",
+      }),
+    IngestionError,
+    "not_authorized",
+  );
+});
+
+Deno.test("workspace authorizer rejects ambiguous caller profile", async () => {
+  const ambiguousProfile = new SupabaseWorkspaceAuthorizer(
+    authorizerClient({
+      profileRows: [{ id: "profile-1" }, { id: "profile-2" }],
+    }) as never,
+  );
+
+  await assertRejects(
+    () =>
+      ambiguousProfile.authorize(authorizedRequest(), {
+        workspaceId: "workspace-id",
+      }),
+    IngestionError,
+    "not_authorized",
   );
 });
 

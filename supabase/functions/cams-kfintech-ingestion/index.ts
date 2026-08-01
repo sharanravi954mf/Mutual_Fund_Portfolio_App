@@ -8,6 +8,7 @@ import {
   SupabaseConfigRepository,
   SupabaseEncryptedStorage,
   SupabasePersistence,
+  SupabaseWorkspaceAuthorizer,
 } from "./adapters.ts";
 import { createCamsKfintechIngestionHandler } from "./handler.ts";
 import { CamsParser, KfintechParser, ParserRegistry } from "./parser.ts";
@@ -38,6 +39,7 @@ const mailboxAttachmentDownloadTimeoutMs = Number(
 
 serve(createCamsKfintechIngestionHandler({
   internalToken: Deno.env.get("MONEYBOWL_INTERNAL_INGESTION_TOKEN") || "",
+  workspaceAuthorizer: new SupabaseWorkspaceAuthorizer(client),
   configRepository: new SupabaseConfigRepository(
     client,
     Deno.env.get("MAILBOX_OAUTH_AES256_GCM_KEY_B64") || "",

@@ -25,19 +25,25 @@ import {
 } from "./types.ts";
 
 const internalToken = "internal-ingestion-token";
+const userToken = "workspace-advisor-token";
 let fixtureCounter = 0;
 const attachmentFixtureBytes = new Map<string, Uint8Array>();
 
 function request(
   body: Record<string, unknown>,
   token = internalToken,
+  authenticatedUserToken: string | null = userToken,
 ): Request {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+  };
+  if (authenticatedUserToken != null) {
+    headers["x-user-authorization"] = `Bearer ${authenticatedUserToken}`;
+  }
   return new Request("http://localhost/cams-kfintech-ingestion", {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -112,6 +118,7 @@ function deps(options: {
   claimRun?: HandlerDependencies["persistence"]["claimRun"];
   finalizeRun?: HandlerDependencies["persistence"]["finalizeRun"];
   recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
+  authorize?: HandlerDependencies["workspaceAuthorizer"]["authorize"];
 } = {}): HandlerDependencies {
   const stages = options.stages ?? [];
   const failureCodes = options.failureCodes ?? [];
@@ -122,6 +129,17 @@ function deps(options: {
   return {
     internalToken,
     onStage: (stage) => stages.push(stage),
+    workspaceAuthorizer: {
+      authorize: options.authorize ?? ((req, input) => {
+        if (req.headers.get("x-user-authorization") !== `Bearer ${userToken}`) {
+          return Promise.reject(new IngestionError("authorization_required"));
+        }
+        if (input.workspaceId !== workspaceId) {
+          return Promise.reject(new IngestionError("not_authorized"));
+        }
+        return Promise.resolve();
+      }),
+    },
     configRepository: {
       loadRunContext: (input) => {
         if (options.failContext != null) {
@@ -294,6 +312,44 @@ Deno.test("trusted internal invocation is allowed", async () => {
   assertEquals(body.data.processed_attachments, 1);
 });
 
+Deno.test("workspace authorization requires authenticated advisor context", async () => {
+  const claimedRuns: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({ claimedRuns }));
+  const response = await handler(request(validBody(), internalToken, null));
+  const body = await response.json();
+
+  assertEquals(response.status, 401);
+  assertEquals(body.error.code, "authorization_required");
+  assertEquals(claimedRuns, []);
+});
+
+Deno.test("cross-workspace ingestion is denied before run claim", async () => {
+  const claimedRuns: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({ claimedRuns }));
+  const response = await handler(request(validBody({
+    workspace_id: "93400000-0000-0000-0000-000000000099",
+  })));
+  const body = await response.json();
+
+  assertEquals(response.status, 403);
+  assertEquals(body.error.code, "not_authorized");
+  assertEquals(claimedRuns, []);
+});
+
+Deno.test("non-advisor workspace members cannot start ingestion", async () => {
+  const claimedRuns: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    claimedRuns,
+    authorize: () => Promise.reject(new IngestionError("not_authorized")),
+  }));
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 403);
+  assertEquals(body.error.code, "not_authorized");
+  assertEquals(claimedRuns, []);
+});
+
 Deno.test("request payload cannot carry trusted plaintext secrets", async () => {
   const handler = createCamsKfintechIngestionHandler(deps());
   const response = await handler(
@@ -313,6 +369,7 @@ Deno.test("pipeline stages execute in the required order", async () => {
   assertEquals(response.status, 200);
   assertEquals(stages, [
     "internal_authorization",
+    "workspace_authorization",
     "claim_ingestion_run",
     "load_credentials",
     "imap_oauth_connector",
@@ -365,7 +422,11 @@ Deno.test("terminal run replay returns immutable summary without mailbox polling
   assertEquals(body.data.attempted_attachments, 2);
   assertEquals(body.data.duplicate_attachments, 1);
   assertEquals(downloadCount.count, 0);
-  assertEquals(stages, ["internal_authorization", "claim_ingestion_run"]);
+  assertEquals(stages, [
+    "internal_authorization",
+    "workspace_authorization",
+    "claim_ingestion_run",
+  ]);
 });
 
 Deno.test("active run replay returns in-progress without execution side effects", async () => {
@@ -418,7 +479,11 @@ Deno.test("active run replay returns in-progress without execution side effects"
   assertEquals(downloadCount.count, 0);
   assertEquals(persistCount, 0);
   assertEquals(finalizedRuns, []);
-  assertEquals(stages, ["internal_authorization", "claim_ingestion_run"]);
+  assertEquals(stages, [
+    "internal_authorization",
+    "workspace_authorization",
+    "claim_ingestion_run",
+  ]);
 });
 
 Deno.test("sender validation precedes scan storage and parse", async () => {
@@ -673,6 +738,7 @@ Deno.test("credentials are loaded by trusted identifier and missing credentials 
   );
   assertEquals(stages, [
     "internal_authorization",
+    "workspace_authorization",
     "claim_ingestion_run",
     "load_credentials",
     "finalize_ingestion_run",
@@ -702,8 +768,9 @@ Deno.test("run is claimed before polling and finalized after poll failure", asyn
 
   assertEquals(response.status, 422);
   assertEquals(body.error.code, "mailbox_poll_failed");
-  assertEquals(stages.slice(0, 4), [
+  assertEquals(stages.slice(0, 5), [
     "internal_authorization",
+    "workspace_authorization",
     "claim_ingestion_run",
     "load_credentials",
     "imap_oauth_connector",

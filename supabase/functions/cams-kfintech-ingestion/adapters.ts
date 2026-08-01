@@ -80,6 +80,14 @@ type RegistrarConfigRow = {
   supported_file_types: ("CAS_PDF" | "DBF")[] | null;
 };
 
+function bearerTokenFromHeader(header: string | null): string | null {
+  if (header == null || !header.startsWith("Bearer ")) {
+    return null;
+  }
+  const token = header.substring("Bearer ".length).trim();
+  return token.length === 0 ? null : token;
+}
+
 function b64ToBytes(value: string): Uint8Array {
   try {
     return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
@@ -361,6 +369,54 @@ export function supabaseClient(serviceRoleKey: string): SupabaseClient {
       persistSession: false,
     },
   });
+}
+
+export class SupabaseWorkspaceAuthorizer {
+  constructor(private readonly client: SupabaseClient) {}
+
+  async authorize(
+    req: Request,
+    input: {
+      workspaceId: string;
+    },
+  ): Promise<void> {
+    const userToken = bearerTokenFromHeader(
+      req.headers.get("x-user-authorization"),
+    ) ?? bearerTokenFromHeader(req.headers.get("authorization"));
+    if (userToken == null) {
+      throw new IngestionError("authorization_required");
+    }
+
+    const userResult = await this.client.auth.getUser(userToken);
+    const userId = userResult.data.user?.id;
+    if (userResult.error != null || userId == null) {
+      throw new IngestionError("not_authorized");
+    }
+
+    const profileResult = await this.client
+      .from("profiles")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(2);
+    const profiles = profileResult.data ?? [];
+    if (profileResult.error != null || profiles.length !== 1) {
+      throw new IngestionError("not_authorized");
+    }
+
+    const membershipResult = await this.client
+      .from("workspace_memberships")
+      .select("profile_id")
+      .eq("workspace_id", input.workspaceId)
+      .eq("profile_id", profiles[0].id)
+      .eq("status", "active")
+      .is("ended_at", null)
+      .in("role", ["advisor", "admin"])
+      .limit(2);
+    const memberships = membershipResult.data ?? [];
+    if (membershipResult.error != null || memberships.length !== 1) {
+      throw new IngestionError("not_authorized");
+    }
+  }
 }
 
 export class SupabaseConfigRepository {

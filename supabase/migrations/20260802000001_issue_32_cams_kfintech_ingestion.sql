@@ -269,7 +269,10 @@ BEGIN
   IF EXISTS (
     SELECT 1
     FROM public.portfolio_folio_references AS mapping
-    GROUP BY mapping.folio_reference_id
+    JOIN public.portfolios AS portfolio
+      ON portfolio.id = mapping.portfolio_id
+    WHERE portfolio.workspace_id IS NOT NULL
+    GROUP BY portfolio.workspace_id, mapping.folio_reference_id
     HAVING pg_catalog.count(*) > 1
   ) THEN
     RAISE EXCEPTION 'issue_32_preflight_duplicate_folio_mapping';
@@ -412,7 +415,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS transactions_registrar_folio_txn_uidx
 CREATE UNIQUE INDEX IF NOT EXISTS portfolio_folio_references_pair_uidx
   ON public.portfolio_folio_references(portfolio_id, folio_reference_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS portfolio_folio_references_folio_uidx
+DROP INDEX IF EXISTS public.portfolio_folio_references_folio_uidx;
+
+CREATE INDEX IF NOT EXISTS portfolio_folio_references_folio_idx
   ON public.portfolio_folio_references(folio_reference_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS portfolios_workspace_client_uidx
@@ -2059,9 +2064,14 @@ BEGIN
     SELECT pg_catalog.count(*)::pg_catalog.int4
     INTO v_portfolio_count
     FROM public.portfolio_folio_references AS mapping
-    WHERE mapping.folio_reference_id = v_folio_reference_id;
+    JOIN public.portfolios AS portfolio
+      ON portfolio.id = mapping.portfolio_id
+    WHERE mapping.folio_reference_id = v_folio_reference_id
+      AND portfolio.workspace_id = p_workspace_id;
 
-    IF v_portfolio_count > 0 THEN
+    IF v_portfolio_count > 1 THEN
+      RAISE EXCEPTION 'portfolio_mapping_ambiguous';
+    ELSIF v_portfolio_count = 1 THEN
       SELECT portfolio.id
       INTO v_portfolio_id
       FROM public.portfolio_folio_references AS mapping
@@ -2100,6 +2110,7 @@ BEGIN
         registrar_transaction_id,
         registrar_transaction_code,
         transaction_direction,
+        folio_reference_id,
         source_folio_reference_id
       ) VALUES (
         v_portfolio_id,
@@ -2116,6 +2127,7 @@ BEGIN
         v_registrar_transaction_id,
         v_registrar_transaction_code,
         v_transaction_direction,
+        v_folio_reference_id,
         v_folio_reference_id
       );
     EXCEPTION WHEN unique_violation THEN

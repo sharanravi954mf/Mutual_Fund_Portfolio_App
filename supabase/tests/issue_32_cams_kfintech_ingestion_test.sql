@@ -261,7 +261,7 @@ BEGIN
      OR NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_indexes
        WHERE schemaname = 'public'
-         AND indexname = 'portfolio_folio_references_folio_uidx'
+         AND indexname = 'portfolio_folio_references_folio_idx'
      )
      OR NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_indexes
@@ -3363,7 +3363,10 @@ BEGIN
     IF EXISTS (
       SELECT 1
       FROM public.portfolio_folio_references AS mapping
-      GROUP BY mapping.folio_reference_id
+      JOIN public.portfolios AS portfolio
+        ON portfolio.id = mapping.portfolio_id
+      WHERE portfolio.workspace_id IS NOT NULL
+      GROUP BY portfolio.workspace_id, mapping.folio_reference_id
       HAVING pg_catalog.count(*) > 1
     ) THEN
       RAISE EXCEPTION 'issue_32_preflight_duplicate_folio_mapping';
@@ -3443,6 +3446,7 @@ BEGIN
     registrar_transaction_id,
     registrar_transaction_code,
     transaction_direction,
+    folio_reference_id,
     source_folio_reference_id
   ) VALUES (
     v_portfolio_id,
@@ -3459,6 +3463,7 @@ BEGIN
     'CAMS-ROW-1',
     'BUY',
     'INFLOW',
+    v_folio_id,
     v_folio_id
   );
 
