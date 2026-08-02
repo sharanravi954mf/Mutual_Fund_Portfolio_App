@@ -11,6 +11,9 @@ import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
 import 'rupee_rain_background.dart';
+import '../features/investor_identity/models/user_profile.dart';
+import '../features/orders/data/supabase_order_repository.dart';
+import '../features/orders/presentation/widgets/advisor_order_action.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
 import '../features/invoice_signer/invoice_signer_job_controller.dart';
@@ -910,6 +913,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ],
         ),
         actions: [
+          // Advisor-only: initiate an order without pre-selecting a client.
+          // Only rendered for advisor and admin (workspace-owner) roles.
+          // Never shown to investors, exploring investors, family guests,
+          // platform admins, or unauthenticated users.
+          if (authProvider.userProfile?.role == UserRole.advisor ||
+              authProvider.userProfile?.role == UserRole.admin)
+            AdvisorOrderAction(
+              repository: SupabaseOrderRepository(Supabase.instance.client),
+            ),
           IconButton(
             icon: Icon(Icons.refresh, color: colors.textSecondary),
             onPressed: _refreshClients,
