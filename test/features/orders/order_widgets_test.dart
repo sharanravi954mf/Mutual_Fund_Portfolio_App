@@ -141,6 +141,7 @@ void main() {
         repository: repository,
         preSelectedClientId: 'investor-1',
         preSelectedClientName: 'John Doe Client',
+        preSelectedWorkspaceId: 'workspace-1',
       );
 
       await tester.pumpWidget(buildTestableWidget(modal, auth: advisorAuth));
@@ -208,7 +209,7 @@ void main() {
       expect(find.text('Place Mutual Fund Order'), findsOneWidget);
     });
 
-    testWidgets('shows Sell requests temporarily unavailable notice',
+    testWidgets('Sell request renders folio and source holding workflow',
         (tester) async {
       final repository = FakeOrderRepository();
       final modal = OrderModal(repository: repository);
@@ -219,14 +220,16 @@ void main() {
       await tester.tap(find.text('Sell'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Temporarily Unavailable'), findsOneWidget);
+      expect(find.text('Temporarily Unavailable'), findsNothing);
+      expect(find.text('Verified Folio'), findsOneWidget);
+      expect(find.text('Holding Scheme to Sell'), findsOneWidget);
       expect(
-          find.text(
-              'Sell requests are temporarily unavailable while the secure folio-order contract is being completed.'),
-          findsOneWidget);
+        find.text('Select a verified folio to load available source holdings.'),
+        findsOneWidget,
+      );
     });
 
-    testWidgets('shows Switch requests temporarily unavailable notice',
+    testWidgets('Switch request renders folio, source and destination workflow',
         (tester) async {
       final repository = FakeOrderRepository();
       final modal = OrderModal(repository: repository);
@@ -237,11 +240,10 @@ void main() {
       await tester.tap(find.text('Switch'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Temporarily Unavailable'), findsOneWidget);
-      expect(
-          find.text(
-              'Switch requests are temporarily unavailable while source-folio and destination-scheme persistence is being completed.'),
-          findsOneWidget);
+      expect(find.text('Temporarily Unavailable'), findsNothing);
+      expect(find.text('Verified Folio'), findsOneWidget);
+      expect(find.text('Source Scheme (from holdings)'), findsOneWidget);
+      expect(find.text('Destination Scheme'), findsOneWidget);
     });
   });
 

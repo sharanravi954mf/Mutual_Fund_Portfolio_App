@@ -8,9 +8,11 @@ class SupabaseOrderRepository implements OrderRepository {
   SupabaseOrderRepository(this._client);
 
   void _handleError(Object error) {
-    final str = error.toString().toLowerCase();
+    final str = '$error'.toLowerCase();
     if (str.contains('auth') ||
         str.contains('permission') ||
+        str.contains('not_authorized') ||
+        str.contains('access denied') ||
         str.contains('violates row-level security')) {
       throw const AccessDeniedFailure(
           "Access Denied: You are not authorized to perform this operation.");
@@ -32,29 +34,36 @@ class SupabaseOrderRepository implements OrderRepository {
       throw const ConfigurationFailure("Order context is missing.");
     }
 
-    // Direct database submission must start strictly as: status = pending_qualification
-    // Section 4 validation: When the existing order_requests schema cannot persist Sell/Switch intent
+    final validationErrors = draft.validate();
+    if (validationErrors != null) {
+      throw ConfigurationFailure(validationErrors.join('\n'));
+    }
+
+    final payload = <String, dynamic>{
+      'workspace_id': ctx.workspaceId,
+      'investor_profile_id': ctx.investorProfileId,
+      'scheme_code': draft.schemeCode,
+      'type': draft.type.databaseValue,
+      'amount': draft.amount,
+      'units': draft.units,
+      'status': 'pending_qualification',
+      'initiated_by_profile_id': ctx.initiatorProfileId,
+      'initiated_by_role':
+          ctx.initiationRole == 'admin' ? 'advisor' : ctx.initiationRole,
+      'initiation_channel': ctx.initiationChannel,
+    };
+
     if (draft.type == OrderType.sell || draft.type == OrderType.switchOrder) {
-      throw const ConfigurationFailure(
-          "Sell and Switch orders are temporarily unavailable while the secure folio-order contract is being completed.");
+      payload['folio_reference_id'] = draft.folioReferenceId;
+    }
+    if (draft.type == OrderType.switchOrder) {
+      payload['destination_scheme_code'] = draft.destinationSchemeCode;
     }
 
     try {
       final response = await _client
           .from('order_requests')
-          .insert({
-            'workspace_id': ctx.workspaceId,
-            'investor_profile_id': ctx.investorProfileId,
-            'scheme_code': draft.schemeCode,
-            'type': draft.type.databaseValue,
-            'amount': draft.amount,
-            'units': draft.units,
-            'status': 'pending_qualification',
-            'initiated_by_profile_id': ctx.initiatorProfileId,
-            'initiated_by_role':
-                ctx.initiationRole == 'admin' ? 'advisor' : ctx.initiationRole,
-            'initiation_channel': ctx.initiationChannel,
-          })
+          .insert(payload)
           .select('id')
           .single();
 
@@ -91,13 +100,14 @@ class SupabaseOrderRepository implements OrderRepository {
       for (var row in (response as List)) {
         final ref = row['folio_references'] as Map<String, dynamic>?;
         if (ref != null) {
-          final folioNumber = ref['normalized_folio_number'] as String? ?? '';
+          final normalizedFolioValue =
+              ref['normalized_folio_number'] as String? ?? '';
           list.add(OrderFolio(
             folioReferenceId: ref['id'] as String,
             portfolioId: row['portfolio_id'] as String? ?? '',
             maskedFolioDisplay: ref['source_folio_masked'] as String? ??
-                (folioNumber.length > 4
-                    ? '••••${folioNumber.substring(folioNumber.length - 4)}'
+                (normalizedFolioValue.length > 4
+                    ? '••••${normalizedFolioValue.substring(normalizedFolioValue.length - 4)}'
                     : '••••••••••'),
             registrar: ref['registrar'] as String? ?? 'CAMS',
           ));
@@ -284,33 +294,62 @@ class SupabaseOrderRepository implements OrderRepository {
 
       final portfolioId = referencesRes.first['portfolio_id'] as String;
 
-      // 3. Fetch all transactions in this single portfolio with mutual fund details
+      // 3. Fetch only transactions in this exact portfolio and selected folio.
       final txsRes = await _client
           .from('transactions')
-          .select('*, mutual_funds(*)')
-          .eq('portfolio_id', portfolioId);
+          .select('transaction_type, transaction_direction, units, '
+              'mutual_funds(scheme_code, scheme_name)')
+          .eq('portfolio_id', portfolioId)
+          .eq('folio_reference_id', folioReferenceId);
 
       final holdingsMap = <String, Map<String, dynamic>>{};
       for (var tx in (txsRes as List)) {
         final fund = tx['mutual_funds'] as Map<String, dynamic>?;
         if (fund == null) continue;
-        final code = fund['scheme_code'] as String;
-        final type = tx['transaction_type'] as String;
-        final units = (tx['units'] as num).toDouble();
+        final rawCode = fund['scheme_code'];
+        final rawName = fund['scheme_name'];
+        final rawType = tx['transaction_type'];
+        final rawUnits = tx['units'];
+        if (rawCode is! String ||
+            rawName is! String ||
+            rawType is! String ||
+            rawUnits is! num) {
+          continue;
+        }
+        final units = rawUnits.toDouble();
+        if (!units.isFinite || units <= 0) continue;
+
+        final code = rawCode;
+        final type = rawType.toUpperCase();
+        final direction =
+            (tx['transaction_direction'] as String?)?.trim().toUpperCase();
+
+        double signedUnits;
+        if (type == 'BUY') {
+          signedUnits = units;
+        } else if (type == 'SELL') {
+          signedUnits = -units;
+        } else if (type == 'SWITCH') {
+          if (direction == 'INFLOW') {
+            signedUnits = units;
+          } else if (direction == 'OUTFLOW') {
+            signedUnits = -units;
+          } else {
+            continue;
+          }
+        } else {
+          continue;
+        }
 
         final current = holdingsMap.putIfAbsent(
             code,
             () => {
                   'scheme_code': code,
-                  'scheme_name': fund['scheme_name'] as String,
+                  'scheme_name': rawName,
                   'units': 0.0,
                 });
 
-        if (type == 'BUY') {
-          current['units'] = (current['units'] as double) + units;
-        } else if (type == 'SELL') {
-          current['units'] = (current['units'] as double) - units;
-        }
+        current['units'] = (current['units'] as double) + signedUnits;
       }
 
       return holdingsMap.values

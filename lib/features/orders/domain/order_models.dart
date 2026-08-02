@@ -82,7 +82,8 @@ enum OrderPhase {
   emptyHoldings,
   accessDenied,
   offline,
-  failure,
+  validationFailure,
+  recoverableFailure,
   validating,
   submitting,
   submitted,
@@ -138,10 +139,8 @@ class OrderDraft {
   final OrderType type;
   final double? amount;
   final double? units;
-  final String?
-      folioNumber; // Local-only for Buy, mapped to folio database objects for Sell/Switch
-  final String?
-      destSchemeCode; // Local-only for Buy/Sell, mapped to destination scheme for Switch
+  final String? folioReferenceId;
+  final String? destinationSchemeCode;
 
   const OrderDraft({
     this.context,
@@ -149,8 +148,8 @@ class OrderDraft {
     required this.type,
     this.amount,
     this.units,
-    this.folioNumber,
-    this.destSchemeCode,
+    this.folioReferenceId,
+    this.destinationSchemeCode,
   });
 
   OrderDraft copyWith({
@@ -159,12 +158,12 @@ class OrderDraft {
     OrderType? type,
     double? amount,
     double? units,
-    String? folioNumber,
-    String? destSchemeCode,
+    String? folioReferenceId,
+    String? destinationSchemeCode,
     bool clearAmount = false,
     bool clearUnits = false,
     bool clearFolio = false,
-    bool clearDestScheme = false,
+    bool clearDestinationScheme = false,
     bool clearContext = false,
   }) {
     return OrderDraft(
@@ -173,9 +172,11 @@ class OrderDraft {
       type: type ?? this.type,
       amount: clearAmount ? null : (amount ?? this.amount),
       units: clearUnits ? null : (units ?? this.units),
-      folioNumber: clearFolio ? null : (folioNumber ?? this.folioNumber),
-      destSchemeCode:
-          clearDestScheme ? null : (destSchemeCode ?? this.destSchemeCode),
+      folioReferenceId:
+          clearFolio ? null : (folioReferenceId ?? this.folioReferenceId),
+      destinationSchemeCode: clearDestinationScheme
+          ? null
+          : (destinationSchemeCode ?? this.destinationSchemeCode),
     );
   }
 
@@ -201,26 +202,34 @@ class OrderDraft {
     }
 
     if (type == OrderType.sell || type == OrderType.switchOrder) {
-      if (folioNumber == null || folioNumber!.trim().isEmpty) {
+      if (folioReferenceId == null || folioReferenceId!.trim().isEmpty) {
         errors.add('Folio selection is required for Sell/Switch orders.');
       }
     }
 
     if (type == OrderType.switchOrder) {
-      if (destSchemeCode == null || destSchemeCode!.trim().isEmpty) {
+      if (destinationSchemeCode == null ||
+          destinationSchemeCode!.trim().isEmpty) {
         errors.add('Destination scheme is required for Switch orders.');
-      } else if (destSchemeCode!.trim() == schemeCode.trim()) {
+      } else if (destinationSchemeCode!.trim() == schemeCode.trim()) {
         errors.add(
             'Source and destination schemes cannot be identical for Switch orders.');
       }
     }
 
-    // At least one of amount or units must be specified and positive
-    final hasAmount = amount != null && amount! > 0 && amount!.isFinite;
-    final hasUnits = units != null && units! > 0 && units!.isFinite;
+    final hasAmount = amount != null;
+    final hasUnits = units != null;
+    final amountIsValid = hasAmount && amount! > 0 && amount!.isFinite;
+    final unitsAreValid = hasUnits && units! > 0 && units!.isFinite;
 
-    if (!hasAmount && !hasUnits) {
-      errors.add('A positive finite amount or units is required.');
+    if (hasAmount && hasUnits) {
+      errors.add('Enter either amount or units, not both.');
+    } else if (hasAmount && !amountIsValid) {
+      errors.add('Amount must be positive and finite.');
+    } else if (hasUnits && !unitsAreValid) {
+      errors.add('Units must be positive and finite.');
+    } else if (!hasAmount && !hasUnits) {
+      errors.add('Enter a positive finite amount or units.');
     }
 
     return errors.isEmpty ? null : errors;

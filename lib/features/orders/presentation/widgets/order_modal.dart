@@ -157,8 +157,12 @@ class _OrderModalState extends State<OrderModal> {
           final state = bloc.state;
 
           if (state.phase == OrderPhase.loadingReferenceData) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+            return Scaffold(
+              body: Semantics(
+                liveRegion: true,
+                label: 'Loading order reference data',
+                child: const Center(child: CircularProgressIndicator()),
+              ),
             );
           }
 
@@ -242,7 +246,9 @@ class _OrderModalState extends State<OrderModal> {
                         context, state, colors, isAdvisor, auth),
                     const SizedBox(height: 20),
                     if (state.phase == OrderPhase.ready ||
-                        state.phase == OrderPhase.failure ||
+                        state.phase == OrderPhase.validationFailure ||
+                        state.phase == OrderPhase.recoverableFailure ||
+                        state.phase == OrderPhase.emptyHoldings ||
                         state.phase == OrderPhase.validating) ...[
                       _buildOrderTypeSelector(state, colors),
                       const SizedBox(height: 20),
@@ -255,23 +261,35 @@ class _OrderModalState extends State<OrderModal> {
                         const SizedBox(height: 24),
                         _buildActionButtons(state, colors, isAdvisor, auth),
                       ] else ...[
-                        _buildUnavailableNotice(state.draft.type, colors),
+                        _buildFolioSelector(state, colors),
+                        const SizedBox(height: 20),
+                        _buildSchemeInputs(state, colors),
+                        const SizedBox(height: 20),
+                        _buildValueInput(state, colors),
+                        const SizedBox(height: 24),
+                        _buildReviewPanel(state, colors, isAdvisor, auth),
+                        const SizedBox(height: 24),
+                        _buildActionButtons(state, colors, isAdvisor, auth),
                       ],
                     ],
                     if (state.phase == OrderPhase.submitting) ...[
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 40),
-                          child: Column(
-                            children: [
-                              const CircularProgressIndicator(),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Submitting order securely to queue...',
-                                style: GoogleFonts.inter(
-                                    color: colors.textSecondary),
-                              ),
-                            ],
+                      Semantics(
+                        liveRegion: true,
+                        label: 'Submitting order request',
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 40),
+                            child: Column(
+                              children: [
+                                const CircularProgressIndicator(),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Submitting order request...',
+                                  style: GoogleFonts.inter(
+                                      color: colors.textSecondary),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -431,9 +449,8 @@ class _OrderModalState extends State<OrderModal> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<OrderInvestor>(
-          // ignore: deprecated_member_use
           isExpanded: true,
-          value: state.draft.context == null
+          initialValue: state.draft.context == null
               ? null
               : state.assignedInvestors.firstWhere(
                   (i) =>
@@ -500,49 +517,6 @@ class _OrderModalState extends State<OrderModal> {
     );
   }
 
-  Widget _buildUnavailableNotice(OrderType type, AppThemeColors colors) {
-    final message = type == OrderType.sell
-        ? 'Sell requests are temporarily unavailable while the secure folio-order contract is being completed.'
-        : 'Switch requests are temporarily unavailable while source-folio and destination-scheme persistence is being completed.';
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colors.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.primary.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.info_outline, color: colors.primary),
-              const SizedBox(width: 8),
-              Text(
-                'Temporarily Unavailable',
-                style: GoogleFonts.outfit(
-                  color: colors.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            style: GoogleFonts.inter(
-              color: colors.textSecondary,
-              fontSize: 14,
-              height: 1.4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildSchemeInputs(OrderState state, AppThemeColors colors) {
     if (state.draft.type == OrderType.buy) {
       return SearchableSchemePicker(
@@ -577,8 +551,9 @@ class _OrderModalState extends State<OrderModal> {
         const SizedBox(height: 20),
         SearchableSchemePicker(
           initialItems: state.funds,
-          selectedSchemeCode: state.draft.destSchemeCode,
-          onSelected: (code) => _bloc.updateDestScheme(code),
+          selectedSchemeCode: state.draft.destinationSchemeCode,
+          excludeSchemeCode: state.draft.schemeCode,
+          onSelected: (code) => _bloc.updateDestinationScheme(code),
           onSearch: (q) => widget.repository.searchMutualFunds(q),
           label: 'Destination Scheme',
         ),
@@ -593,48 +568,65 @@ class _OrderModalState extends State<OrderModal> {
     required ValueChanged<String> onSelected,
     required AppThemeColors colors,
   }) {
+    Widget labelText() {
+      return Text(
+        label,
+        style: GoogleFonts.outfit(
+            color: colors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.bold),
+      );
+    }
+
     if (state.holdings.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: colors.warning.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: colors.warning),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'No holdings found in this portfolio context. You cannot execute a Sell/Switch.',
-                style: TextStyle(fontSize: 12),
-              ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          labelText(),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.warning.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
             ),
-          ],
-        ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: colors.warning),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    state.draft.folioReferenceId == null
+                        ? 'Select a verified folio to load available source holdings.'
+                        : 'No positive holdings were found in this selected folio.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: GoogleFonts.outfit(
-              color: colors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.bold),
-        ),
+        labelText(),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          // ignore: deprecated_member_use
-          value: selectedCode == null || selectedCode.isEmpty
+          isExpanded: true,
+          initialValue: selectedCode == null || selectedCode.isEmpty
               ? null
               : selectedCode,
           items: state.holdings.map((h) {
+            final units = h['units'] as double;
             return DropdownMenuItem<String>(
               value: h['scheme_code'] as String,
-              child: Text('${h['scheme_name']} (${h['scheme_code']})'),
+              child: Text(
+                '${h['scheme_name']} (${h['scheme_code']}) - ${units.toStringAsFixed(4)} units',
+                overflow: TextOverflow.ellipsis,
+              ),
             );
           }).toList(),
           decoration: const InputDecoration(hintText: 'Select held scheme'),
@@ -684,11 +676,11 @@ class _OrderModalState extends State<OrderModal> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          // ignore: deprecated_member_use
-          value: state.draft.folioNumber == null ||
-                  state.draft.folioNumber!.isEmpty
+          isExpanded: true,
+          initialValue: state.draft.folioReferenceId == null ||
+                  state.draft.folioReferenceId!.isEmpty
               ? null
-              : state.draft.folioNumber,
+              : state.draft.folioReferenceId,
           items: state.folios.map((folio) {
             return DropdownMenuItem<String>(
               value: folio.folioReferenceId,
@@ -826,11 +818,14 @@ class _OrderModalState extends State<OrderModal> {
             _buildReviewRow('Source Scheme', draft.schemeCode, colors),
             if (draft.type == OrderType.switchOrder)
               _buildReviewRow(
-                  'Destination Scheme', draft.destSchemeCode ?? '', colors),
+                'Destination Scheme',
+                draft.destinationSchemeCode ?? '',
+                colors,
+              ),
             if (draft.type == OrderType.sell ||
                 draft.type == OrderType.switchOrder)
               _buildReviewRow('Verified Folio',
-                  MaskingUtil.maskFolio(draft.folioNumber ?? ''), colors),
+                  _selectedFolioDisplay(state, draft.folioReferenceId), colors),
             if (draft.amount != null)
               _buildReviewRow(
                   'Amount', _currencyFormat.format(draft.amount), colors),
@@ -896,6 +891,18 @@ class _OrderModalState extends State<OrderModal> {
     );
   }
 
+  String _selectedFolioDisplay(OrderState state, String? folioReferenceId) {
+    if (folioReferenceId == null || folioReferenceId.isEmpty) {
+      return MaskingUtil.maskFolio('');
+    }
+    for (final folio in state.folios) {
+      if (folio.folioReferenceId == folioReferenceId) {
+        return folio.maskedFolioDisplay;
+      }
+    }
+    return MaskingUtil.maskFolio('');
+  }
+
   Widget _buildActionButtons(OrderState state, AppThemeColors colors,
       bool isAdvisor, AuthProvider auth) {
     final isValid = state.draft.validate() == null;
@@ -954,7 +961,7 @@ class _OrderModalState extends State<OrderModal> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Your order request was submitted successfully with status pending_qualification and is now in review.',
+                'Your order request was created with status pending_qualification and is now in review.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                     color: colors.textSecondary, fontSize: 14),
@@ -987,6 +994,7 @@ class _OrderModalState extends State<OrderModal> {
 class SearchableSchemePicker extends StatefulWidget {
   final List<Map<String, dynamic>> initialItems;
   final String? selectedSchemeCode;
+  final String? excludeSchemeCode;
   final ValueChanged<String> onSelected;
   final Future<List<Map<String, dynamic>>> Function(String query) onSearch;
   final String label;
@@ -994,6 +1002,7 @@ class SearchableSchemePicker extends StatefulWidget {
   const SearchableSchemePicker({
     required this.initialItems,
     required this.selectedSchemeCode,
+    this.excludeSchemeCode,
     required this.onSelected,
     required this.onSearch,
     required this.label,
@@ -1018,7 +1027,7 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
   @override
   void initState() {
     super.initState();
-    _filteredItems = widget.initialItems.take(10).toList();
+    _filteredItems = _visibleItems(widget.initialItems).take(10).toList();
     _focusNode.addListener(() {
       if (mounted) {
         setState(() {
@@ -1026,6 +1035,15 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
         });
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchableSchemePicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialItems != widget.initialItems ||
+        oldWidget.excludeSchemeCode != widget.excludeSchemeCode) {
+      _filteredItems = _visibleItems(widget.initialItems).take(10).toList();
+    }
   }
 
   @override
@@ -1044,7 +1062,7 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
     if (val.isEmpty) {
       if (mounted) {
         setState(() {
-          _filteredItems = widget.initialItems.take(10).toList();
+          _filteredItems = _visibleItems(widget.initialItems).take(10).toList();
           _isSearching = false;
           _searchError = null;
         });
@@ -1067,7 +1085,7 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
           return;
         }
         setState(() {
-          _filteredItems = results;
+          _filteredItems = _visibleItems(results);
           _isSearching = false;
         });
       } catch (e) {
@@ -1080,9 +1098,19 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
     });
   }
 
+  List<Map<String, dynamic>> _visibleItems(List<Map<String, dynamic>> items) {
+    final excluded = widget.excludeSchemeCode;
+    if (excluded == null || excluded.isEmpty) {
+      return items;
+    }
+    return items
+        .where((item) => item['scheme_code'] != excluded)
+        .toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final selectedItem = widget.initialItems.firstWhere(
+    final selectedItem = _visibleItems(widget.initialItems).firstWhere(
       (item) => item['scheme_code'] == widget.selectedSchemeCode,
       orElse: () => <String, dynamic>{},
     );

@@ -12,6 +12,7 @@ class OrderBloc extends ChangeNotifier {
   String? _initiatorProfileId;
   String? _initiationRole;
   String? _initiationChannel;
+  int _holdingsRequestId = 0;
 
   OrderBloc(this._repository)
       : _state = const OrderState(
@@ -65,7 +66,7 @@ class OrderBloc extends ChangeNotifier {
       _updatePhaseForFailure(e);
     } catch (_) {
       _updateState(_state.copyWith(
-        phase: OrderPhase.failure,
+        phase: OrderPhase.recoverableFailure,
         errorMessage:
             'Unable to initialize the order session. Please try again.',
       ));
@@ -137,7 +138,7 @@ class OrderBloc extends ChangeNotifier {
       _updatePhaseForFailure(e);
     } catch (_) {
       _updateState(_state.copyWith(
-        phase: OrderPhase.failure,
+        phase: OrderPhase.recoverableFailure,
         errorMessage:
             'Unable to initialize the advisor session. Please try again.',
       ));
@@ -146,7 +147,7 @@ class OrderBloc extends ChangeNotifier {
 
   /// Handle typed failures and update state phase accordingly
   void _updatePhaseForFailure(OrderFailure failure) {
-    OrderPhase nextPhase = OrderPhase.failure;
+    OrderPhase nextPhase = OrderPhase.recoverableFailure;
     if (failure is AccessDeniedFailure) {
       nextPhase = OrderPhase.accessDenied;
     } else if (failure is NetworkFailure) {
@@ -167,10 +168,11 @@ class OrderBloc extends ChangeNotifier {
   /// [_initiationChannel] are never read from the draft that was just cleared.
   Future<void> updateBeneficiary(
       String investorProfileId, String workspaceId) async {
+    _holdingsRequestId++;
     // Prevent setting workspaceId = investorProfileId
     if (workspaceId == investorProfileId) {
       _updateState(_state.copyWith(
-        phase: OrderPhase.failure,
+        phase: OrderPhase.validationFailure,
         errorMessage:
             'Invalid context mapping: Workspace ID cannot be identical to Investor Profile ID.',
       ));
@@ -187,7 +189,7 @@ class OrderBloc extends ChangeNotifier {
         clearAmount: true,
         clearUnits: true,
         clearFolio: true,
-        clearDestScheme: true,
+        clearDestinationScheme: true,
       ),
     ));
 
@@ -215,7 +217,7 @@ class OrderBloc extends ChangeNotifier {
       _updatePhaseForFailure(e);
     } catch (_) {
       _updateState(_state.copyWith(
-        phase: OrderPhase.failure,
+        phase: OrderPhase.recoverableFailure,
         errorMessage: 'Unable to load the selected client. Please try again.',
       ));
     }
@@ -223,96 +225,90 @@ class OrderBloc extends ChangeNotifier {
 
   /// Update order type (Buy/Sell/Switch) and reset stale inputs
   Future<void> updateOrderType(OrderType type) async {
-    final ctx = _state.draft.context;
+    _holdingsRequestId++;
     // Clear all stale financial fields on order type switch
-    var newDraft = _state.draft.copyWith(
+    final newDraft = _state.draft.copyWith(
       type: type,
       schemeCode: '',
       clearAmount: true,
       clearUnits: true,
       clearFolio: true,
-      clearDestScheme: true,
+      clearDestinationScheme: true,
     );
 
     _updateState(_state.copyWith(
       draft: newDraft,
+      holdings: const [],
       clearErrorMessage: true,
     ));
-
-    if (ctx != null &&
-        (type == OrderType.sell || type == OrderType.switchOrder)) {
-      final folio = _state.draft.folioNumber;
-      if (folio != null && folio.isNotEmpty) {
-        _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
-        try {
-          final holdings = await _repository.fetchHoldings(
-              ctx.investorProfileId, ctx.workspaceId, folio);
-          _updateState(_state.copyWith(
-            phase: OrderPhase.ready,
-            holdings: holdings,
-          ));
-        } on OrderFailure catch (e) {
-          _updatePhaseForFailure(e);
-        } catch (_) {
-          _updateState(_state.copyWith(
-            phase: OrderPhase.failure,
-            errorMessage: 'Unable to load holdings. Please try again.',
-          ));
-        }
-      } else {
-        _updateState(_state.copyWith(
-          holdings: const [],
-        ));
-      }
-    }
   }
 
   /// Update selected scheme
   void updateScheme(String schemeCode) {
+    final shouldClearDestination = _state.draft.type == OrderType.switchOrder &&
+        _state.draft.destinationSchemeCode == schemeCode;
     _updateState(_state.copyWith(
-      draft: _state.draft.copyWith(schemeCode: schemeCode),
+      draft: _state.draft.copyWith(
+        schemeCode: schemeCode,
+        clearDestinationScheme: shouldClearDestination,
+      ),
+      clearErrorMessage: true,
     ));
   }
 
   /// Update Switch destination scheme
-  void updateDestScheme(String destSchemeCode) {
+  void updateDestinationScheme(String destinationSchemeCode) {
     _updateState(_state.copyWith(
-      draft: _state.draft.copyWith(destSchemeCode: destSchemeCode),
+      draft:
+          _state.draft.copyWith(destinationSchemeCode: destinationSchemeCode),
+      clearErrorMessage: true,
     ));
   }
 
   /// Update selected folio & clear incompatible schemes
-  Future<void> updateFolio(String folioNumber) async {
-    var newDraft = _state.draft.copyWith(folioNumber: folioNumber);
+  Future<void> updateFolio(String folioReferenceId) async {
+    final requestId = ++_holdingsRequestId;
+    var newDraft = _state.draft.copyWith(
+      folioReferenceId: folioReferenceId,
+      schemeCode: '',
+      clearDestinationScheme: true,
+    );
     final ctx = _state.draft.context;
 
     if (ctx != null &&
         (_state.draft.type == OrderType.sell ||
             _state.draft.type == OrderType.switchOrder)) {
       // List only source schemes actually held in the selected folio
-      _updateState(_state.copyWith(phase: OrderPhase.loadingReferenceData));
+      _updateState(_state.copyWith(
+        phase: OrderPhase.loadingReferenceData,
+        draft: newDraft,
+        holdings: const [],
+        clearErrorMessage: true,
+      ));
       try {
         final holdings = await _repository.fetchHoldings(
-            ctx.investorProfileId, ctx.workspaceId, folioNumber);
+            ctx.investorProfileId, ctx.workspaceId, folioReferenceId);
 
-        // Check if current schemeCode is held in this folio.
-        // If not, clear the incompatible scheme.
-        final isHeld =
-            holdings.any((h) => h['scheme_code'] == _state.draft.schemeCode);
-        if (!isHeld) {
-          newDraft = newDraft.copyWith(schemeCode: '');
+        if (requestId != _holdingsRequestId ||
+            _state.draft.folioReferenceId != folioReferenceId) {
+          return;
         }
 
+        final nextPhase =
+            holdings.isEmpty ? OrderPhase.emptyHoldings : OrderPhase.ready;
+
         _updateState(_state.copyWith(
-          phase: OrderPhase.ready,
+          phase: nextPhase,
           draft: newDraft,
           holdings: holdings,
         ));
       } on OrderFailure catch (e) {
+        if (requestId != _holdingsRequestId) return;
         _updatePhaseForFailure(e);
       } catch (_) {
+        if (requestId != _holdingsRequestId) return;
         _updateState(_state.copyWith(
-          phase: OrderPhase.failure,
+          phase: OrderPhase.recoverableFailure,
           errorMessage: 'Unable to load folio holdings. Please try again.',
         ));
       }
@@ -326,8 +322,10 @@ class OrderBloc extends ChangeNotifier {
     _updateState(_state.copyWith(
       draft: _state.draft.copyWith(
         amount: amount,
+        clearAmount: amount == null,
         clearUnits: true,
       ),
+      clearErrorMessage: true,
     ));
   }
 
@@ -336,8 +334,10 @@ class OrderBloc extends ChangeNotifier {
     _updateState(_state.copyWith(
       draft: _state.draft.copyWith(
         units: units,
+        clearUnits: units == null,
         clearAmount: true,
       ),
+      clearErrorMessage: true,
     ));
   }
 
@@ -347,7 +347,7 @@ class OrderBloc extends ChangeNotifier {
     final errors = _state.draft.validate();
     if (errors != null && errors.isNotEmpty) {
       _updateState(_state.copyWith(
-        phase: OrderPhase.failure,
+        phase: OrderPhase.validationFailure,
         errorMessage: errors.join('\n'),
       ));
       return;
@@ -369,7 +369,7 @@ class OrderBloc extends ChangeNotifier {
       _updatePhaseForFailure(e);
     } catch (_) {
       _updateState(_state.copyWith(
-        phase: OrderPhase.failure,
+        phase: OrderPhase.recoverableFailure,
         errorMessage: 'An unexpected error occurred. Please try again.',
       ));
     }

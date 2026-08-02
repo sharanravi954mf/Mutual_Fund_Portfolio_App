@@ -166,9 +166,9 @@ void main() {
         context: mockContext,
         schemeCode: 'SCH-1',
         type: OrderType.switchOrder,
-        folioNumber: 'FOLIO-1',
+        folioReferenceId: 'folio-reference-1',
         amount: 1000,
-        destSchemeCode: 'SCH-1',
+        destinationSchemeCode: 'SCH-1',
       );
       final errors = draft.validate();
       expect(
@@ -185,8 +185,53 @@ void main() {
         amount: -100,
       );
       final errors = draft.validate();
+      expect(errors, contains('Amount must be positive and finite.'));
+    });
+
+    test('rejects both amount and units', () {
+      const draft = OrderDraft(
+        context: mockContext,
+        schemeCode: 'SCH-1',
+        type: OrderType.buy,
+        amount: 100,
+        units: 10,
+      );
+      expect(draft.validate(),
+          contains('Enter either amount or units, not both.'));
+    });
+
+    test('rejects missing amount and units', () {
+      const draft = OrderDraft(
+        context: mockContext,
+        schemeCode: 'SCH-1',
+        type: OrderType.buy,
+      );
       expect(
-          errors, contains('A positive finite amount or units is required.'));
+        draft.validate(),
+        contains('Enter a positive finite amount or units.'),
+      );
+    });
+
+    test('rejects NaN and infinity values', () {
+      const nanDraft = OrderDraft(
+        context: mockContext,
+        schemeCode: 'SCH-1',
+        type: OrderType.buy,
+        amount: double.nan,
+      );
+      const infinityDraft = OrderDraft(
+        context: mockContext,
+        schemeCode: 'SCH-1',
+        type: OrderType.buy,
+        units: double.infinity,
+      );
+
+      expect(
+          nanDraft.validate(), contains('Amount must be positive and finite.'));
+      expect(
+        infinityDraft.validate(),
+        contains('Units must be positive and finite.'),
+      );
     });
   });
 
@@ -334,7 +379,7 @@ void main() {
 
       expect(bloc.state.draft.type, OrderType.buy);
       expect(bloc.state.draft.amount, isNull);
-      expect(bloc.state.draft.folioNumber, isNull);
+      expect(bloc.state.draft.folioReferenceId, isNull);
     });
 
     test('submitOrder succeeds for Buy order', () async {
@@ -354,9 +399,7 @@ void main() {
       expect(bloc.state.submittedOrderId, 'mock-order-id');
     });
 
-    test(
-        'submitOrder blocks Sell/Switch due to database schema contract limitation',
-        () async {
+    test('submitOrder succeeds for Sell order with folio reference', () async {
       await bloc.initiateForInvestor(
         investorProfileId: 'investor-1',
         initiatorProfileId: 'investor-1',
@@ -365,16 +408,15 @@ void main() {
       );
 
       await bloc.updateOrderType(OrderType.sell);
-      // Select folio-a, then SCH-A (which is held in folio-a) so validation passes
       await bloc.updateFolio('folio-a');
       bloc.updateScheme('SCH-A');
       bloc.updateAmount(5000);
 
       await bloc.submitOrder();
 
-      expect(bloc.state.phase, OrderPhase.failure);
-      expect(bloc.state.errorMessage,
-          contains('Sell and Switch orders are temporarily unavailable'));
+      expect(bloc.state.phase, OrderPhase.submitted);
+      expect(repository.lastSubmittedDraft?.folioReferenceId, 'folio-a');
+      expect(repository.lastSubmittedDraft?.type, OrderType.sell);
     });
 
     test('submitOrder blocks duplicate calls while submitting', () async {
@@ -501,7 +543,7 @@ void main() {
               'Source scheme from Folio A must be cleared after moving to Folio B');
     });
 
-    test('Sell order does not attempt submission to repository', () async {
+    test('Sell order submits canonical source folio intent', () async {
       await bloc.initiateForInvestor(
         investorProfileId: 'investor-1',
         initiatorProfileId: 'investor-1',
@@ -517,16 +559,14 @@ void main() {
 
       await bloc.submitOrder();
 
-      // The repository should have been called (it throws ConfigurationFailure internally)
-      // but we verify no unsafe data reaches the backend by checking the failure state
-      expect(bloc.state.phase, OrderPhase.failure);
-      // The failure message must not contain raw DB column names
-      expect(bloc.state.errorMessage, isNotNull);
-      expect(bloc.state.errorMessage, isNot(contains('folio_reference_id')));
-      expect(bloc.state.errorMessage, isNot(contains('order_requests')));
+      expect(bloc.state.phase, OrderPhase.submitted);
+      expect(repository.submitCallCount, 1);
+      expect(repository.lastSubmittedDraft?.folioReferenceId, 'folio-a');
+      expect(repository.lastSubmittedDraft?.destinationSchemeCode, isNull);
     });
 
-    test('Switch order does not attempt submission to repository', () async {
+    test('Switch order submits canonical source folio and destination intent',
+        () async {
       await bloc.initiateForInvestor(
         investorProfileId: 'investor-1',
         initiatorProfileId: 'investor-1',
@@ -538,15 +578,15 @@ void main() {
       // Use folio-a and SCH-A (source) → SCH-B (dest) so validation passes
       await bloc.updateFolio('folio-a');
       bloc.updateScheme('SCH-A');
-      bloc.updateDestScheme('SCH-B');
+      bloc.updateDestinationScheme('SCH-B');
       bloc.updateAmount(5000);
 
       await bloc.submitOrder();
 
-      expect(bloc.state.phase, OrderPhase.failure);
-      expect(bloc.state.errorMessage, isNotNull);
-      expect(
-          bloc.state.errorMessage, isNot(contains('destination_scheme_code')));
+      expect(bloc.state.phase, OrderPhase.submitted);
+      expect(repository.submitCallCount, 1);
+      expect(repository.lastSubmittedDraft?.folioReferenceId, 'folio-a');
+      expect(repository.lastSubmittedDraft?.destinationSchemeCode, 'SCH-B');
     });
 
     test('initial loading calls the bounded method fetchInitialMutualFunds',
@@ -571,6 +611,7 @@ class FakeOrderRepository implements OrderRepository {
   int submitCallCount = 0;
   bool shouldThrowAccessDenied = false;
   bool shouldThrowNetworkError = false;
+  OrderDraft? lastSubmittedDraft;
 
   void _checkErrors() {
     if (shouldThrowAccessDenied) {
@@ -704,10 +745,7 @@ class FakeOrderRepository implements OrderRepository {
   Future<String> submitOrder(OrderDraft draft) async {
     _checkErrors();
     submitCallCount++;
-    if (draft.type == OrderType.sell || draft.type == OrderType.switchOrder) {
-      throw const ConfigurationFailure(
-          'Sell and Switch orders are temporarily unavailable while the secure folio-order contract is being completed.');
-    }
+    lastSubmittedDraft = draft;
     return 'mock-order-id';
   }
 
@@ -1188,7 +1226,7 @@ void _registerSanitisationTests() {
         initiationChannel: 'investor_portal',
       );
 
-      expect(bloc.state.phase, OrderPhase.failure);
+      expect(bloc.state.phase, OrderPhase.recoverableFailure);
       expect(bloc.state.errorMessage, isNotNull);
       expect(bloc.state.errorMessage, isNot(contains('column')));
       expect(bloc.state.errorMessage, isNot(contains('portfolios')));
@@ -1226,6 +1264,211 @@ void _registerSanitisationTests() {
       expect(client.lastInsertedPayload!['initiated_by_role'], 'advisor');
       expect(
           client.lastInsertedPayload!['initiation_channel'], 'advisor_portal');
+    });
+
+    test('Buy payload omits folio and destination scheme columns', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'order_requests': [
+          {'id': 'order-buy'}
+        ]
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      await repo.submitOrder(const OrderDraft(
+        context: OrderContext(
+          workspaceId: 'workspace-1',
+          investorProfileId: 'inv-1',
+          investorFullName: 'Investor One',
+          initiatorProfileId: 'inv-1',
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
+        ),
+        schemeCode: 'SCH-BUY',
+        type: OrderType.buy,
+        amount: 5000,
+      ));
+
+      expect(client.lastInsertedPayload!['type'], 'buy');
+      expect(client.lastInsertedPayload!['status'], 'pending_qualification');
+      expect(
+          client.lastInsertedPayload!.containsKey('folio_reference_id'), false);
+      expect(
+        client.lastInsertedPayload!.containsKey('destination_scheme_code'),
+        false,
+      );
+    });
+
+    test('Sell payload includes exact folio reference id', () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'order_requests': [
+          {'id': 'order-sell'}
+        ]
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      await repo.submitOrder(const OrderDraft(
+        context: OrderContext(
+          workspaceId: 'workspace-1',
+          investorProfileId: 'inv-1',
+          investorFullName: 'Investor One',
+          initiatorProfileId: 'inv-1',
+          initiationRole: 'investor',
+          initiationChannel: 'investor_portal',
+        ),
+        schemeCode: 'SCH-SOURCE',
+        type: OrderType.sell,
+        folioReferenceId: '11111111-1111-1111-1111-111111111111',
+        units: 25,
+      ));
+
+      expect(client.lastInsertedPayload!['type'], 'sell');
+      expect(client.lastInsertedPayload!['folio_reference_id'],
+          '11111111-1111-1111-1111-111111111111');
+      expect(
+        client.lastInsertedPayload!.containsKey('destination_scheme_code'),
+        false,
+      );
+    });
+
+    test('Switch payload includes exact folio and destination scheme',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'order_requests': [
+          {'id': 'order-switch'}
+        ]
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      await repo.submitOrder(const OrderDraft(
+        context: OrderContext(
+          workspaceId: 'workspace-1',
+          investorProfileId: 'inv-1',
+          investorFullName: 'Investor One',
+          initiatorProfileId: 'advisor-1',
+          initiationRole: 'advisor',
+          initiationChannel: 'advisor_portal',
+        ),
+        schemeCode: 'SCH-SOURCE',
+        type: OrderType.switchOrder,
+        folioReferenceId: '22222222-2222-2222-2222-222222222222',
+        destinationSchemeCode: 'SCH-DEST',
+        amount: 1000,
+      ));
+
+      expect(client.lastInsertedPayload!['type'], 'switch');
+      expect(client.lastInsertedPayload!['folio_reference_id'],
+          '22222222-2222-2222-2222-222222222222');
+      expect(
+          client.lastInsertedPayload!['destination_scheme_code'], 'SCH-DEST');
+      expect(
+          client.lastInsertedPayload!['initiated_by_profile_id'], 'advisor-1');
+      expect(client.lastInsertedPayload!['initiated_by_role'], 'advisor');
+    });
+
+    test('fetchHoldings uses exact folio scoping and switch direction math',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'portfolios': [
+          {
+            'id': 'portfolio-1',
+            'client_id': 'inv-1',
+            'workspace_id': 'workspace-1',
+          },
+          {
+            'id': 'portfolio-other',
+            'client_id': 'other-investor',
+            'workspace_id': 'workspace-1',
+          },
+        ],
+        'portfolio_folio_references': [
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-a',
+          },
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-b',
+          },
+        ],
+        'transactions': [
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-a',
+            'transaction_type': 'BUY',
+            'transaction_direction': null,
+            'units': 100,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-a',
+            'transaction_type': 'SELL',
+            'transaction_direction': null,
+            'units': 25,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-a',
+            'transaction_type': 'SWITCH',
+            'transaction_direction': 'INFLOW',
+            'units': 10,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-a',
+            'transaction_type': 'SWITCH',
+            'transaction_direction': 'OUTFLOW',
+            'units': 15,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-a',
+            'transaction_type': 'SWITCH',
+            'transaction_direction': null,
+            'units': 999,
+            'mutual_funds': {
+              'scheme_code': 'SCH-BAD',
+              'scheme_name': 'Bad Direction Fund',
+            },
+          },
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'folio-b',
+            'transaction_type': 'BUY',
+            'transaction_direction': null,
+            'units': 200,
+            'mutual_funds': {
+              'scheme_code': 'SCH-B',
+              'scheme_name': 'Other Folio Fund',
+            },
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final holdings =
+          await repo.fetchHoldings('inv-1', 'workspace-1', 'folio-a');
+
+      expect(holdings.length, 1);
+      expect(holdings.single['scheme_code'], 'SCH-A');
+      expect(holdings.single['units'], 70);
+      expect(holdings.any((h) => h['scheme_code'] == 'SCH-B'), false);
+      expect(holdings.any((h) => h['scheme_code'] == 'SCH-BAD'), false);
     });
 
     test('fetchAssignedInvestors excludes a non-owner admin workspace',
