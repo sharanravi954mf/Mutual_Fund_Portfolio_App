@@ -336,6 +336,20 @@ Deno.test("cross-workspace ingestion is denied before run claim", async () => {
   assertEquals(claimedRuns, []);
 });
 
+Deno.test("inactive workspace ingestion is denied before run claim", async () => {
+  const claimedRuns: string[] = [];
+  const handler = createCamsKfintechIngestionHandler(deps({
+    claimedRuns,
+    authorize: () => Promise.reject(new IngestionError("not_authorized")),
+  }));
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 403);
+  assertEquals(body.error.code, "not_authorized");
+  assertEquals(claimedRuns, []);
+});
+
 Deno.test("non-advisor workspace members cannot start ingestion", async () => {
   const claimedRuns: string[] = [];
   const handler = createCamsKfintechIngestionHandler(deps({

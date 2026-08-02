@@ -97,6 +97,7 @@ class FakeQuery {
 
 function authorizerClient(options: {
   userId?: string | null;
+  workspaceRows?: Record<string, unknown>[];
   profileRows?: Record<string, unknown>[];
   membershipRows?: Record<string, unknown>[];
 } = {}) {
@@ -113,6 +114,9 @@ function authorizerClient(options: {
         }),
     },
     from: (table: string) => {
+      if (table === "workspaces") {
+        return new FakeQuery(options.workspaceRows ?? [{ id: "workspace-id" }]);
+      }
       if (table === "profiles") {
         return new FakeQuery(options.profileRows ?? [{ id: "profile-id" }]);
       }
@@ -256,6 +260,21 @@ Deno.test("workspace authorizer rejects missing authenticated user token", async
       }),
     IngestionError,
     "authorization_required",
+  );
+});
+
+Deno.test("workspace authorizer rejects inactive workspaces before membership trust", async () => {
+  const authorizer = new SupabaseWorkspaceAuthorizer(
+    authorizerClient({ workspaceRows: [] }) as never,
+  );
+
+  await assertRejects(
+    () =>
+      authorizer.authorize(authorizedRequest(), {
+        workspaceId: "inactive-workspace",
+      }),
+    IngestionError,
+    "not_authorized",
   );
 });
 

@@ -393,6 +393,17 @@ export class SupabaseWorkspaceAuthorizer {
       throw new IngestionError("not_authorized");
     }
 
+    const workspaceResult = await this.client
+      .from("workspaces")
+      .select("id")
+      .eq("id", input.workspaceId)
+      .eq("workspace_status", "active")
+      .limit(2);
+    const workspaces = workspaceResult.data ?? [];
+    if (workspaceResult.error != null || workspaces.length !== 1) {
+      throw new IngestionError("not_authorized");
+    }
+
     const profileResult = await this.client
       .from("profiles")
       .select("id")
