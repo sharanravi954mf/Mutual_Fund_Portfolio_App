@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-SCENARIOS=20
+SCENARIOS=21
 DB_CONTAINER="${SUPABASE_DB_CONTAINER:-$(docker ps --filter "name=supabase_db_" --format "{{.Names}}" | head -n 1)}"
 
 if [ -z "${DB_CONTAINER}" ]; then
@@ -328,7 +328,7 @@ one_success_one_conflict() {
     cat "${WORKDIR}/${name}.right.out" >&2
     exit 1
   fi
-  if ! grep -qE "attachment_hash_mismatch|correlation_conflict|duplicate_attachment|persistence_conflict|ingestion_run_finalized" "${WORKDIR}/${name}.left.out" "${WORKDIR}/${name}.right.out"; then
+  if ! grep -qE "attachment_hash_mismatch|correlation_conflict|duplicate_attachment|folio_relationship_conflict|persistence_conflict|ingestion_run_finalized" "${WORKDIR}/${name}.left.out" "${WORKDIR}/${name}.right.out"; then
     echo "${name}: expected stable conflict code" >&2
     exit 1
   fi
@@ -405,6 +405,63 @@ COMMIT;
 SQL
 }
 
+write_process_cams_sql() {
+  file="$1"
+  pan="$2"
+  investor_name="$3"
+  scheme_code="$4"
+  scheme_name="$5"
+  rep_date="$6"
+  cat > "${file}" <<SQL
+\\pset tuples_only on
+\\pset format unaligned
+SET statement_timeout = '10s';
+SET lock_timeout = '5s';
+SET ROLE service_role;
+BEGIN;
+SELECT public.process_cams_records(
+  pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+    'clientPan', '${pan}',
+    'registrar', 'CAMS',
+    'investorName', '${investor_name}',
+    'schemeCode', '${scheme_code}',
+    'schemeName', '${scheme_name}',
+    'fundHouse', 'Money Bowl AMC',
+    'category', 'Equity',
+    'transactionType', 'BUY',
+    'units', '1.0000',
+    'nav', '10.0000',
+    'amount', '10.00',
+    'foliochk', 'CON-RACE-1',
+    'inv_name', '${investor_name}',
+    'address1', '',
+    'address2', '',
+    'address3', '',
+    'city', '',
+    'pincode', '',
+    'product', '${scheme_code}',
+    'sch_name', '${scheme_name}',
+    'clos_bal', '1.0000',
+    'rupee_bal', '10.00',
+    'email', '',
+    'mobile_no', '',
+    'bank_name', '',
+    'branch', '',
+    'ac_type', '',
+    'ac_no', '',
+    'ifsc_code', '',
+    'nom_name', '',
+    'relation', '',
+    'nom_percen', '0',
+    'rep_date', '${rep_date}',
+    'date', '${rep_date}'
+  )),
+  '94400000-0000-0000-0000-000000000001'
+);
+COMMIT;
+SQL
+}
+
 run_psql <<'SQL'
 DROP TRIGGER IF EXISTS issue32_concurrency_sleep_before_document_insert ON public.ingested_documents;
 DROP FUNCTION IF EXISTS public.issue32_concurrency_sleep_trigger();
@@ -420,6 +477,11 @@ WHERE event.entity_type = 'ingested_document'
   AND document.workspace_id = '94400000-0000-0000-0000-000000000001';
 DELETE FROM public.transactions
 WHERE registrar_transaction_id LIKE 'CON-TXN-%'
+   OR folio_reference_id IN (
+     SELECT id FROM public.folio_references
+     WHERE registrar = 'CAMS'
+       AND normalized_folio_number LIKE 'CONRACE%'
+   )
    OR source_document_id IN (
      SELECT id FROM public.ingested_documents
      WHERE workspace_id = '94400000-0000-0000-0000-000000000001'
@@ -438,17 +500,24 @@ DELETE FROM public.portfolio_folio_references AS mapping
 USING public.folio_references AS folio
 WHERE folio.id = mapping.folio_reference_id
   AND folio.registrar = 'CAMS'
-  AND folio.normalized_folio_number LIKE 'CONFOLIO%';
+  AND (
+    folio.normalized_folio_number LIKE 'CONFOLIO%'
+    OR folio.normalized_folio_number LIKE 'CONRACE%'
+  );
 DELETE FROM public.folio_references
 WHERE registrar = 'CAMS'
-  AND normalized_folio_number LIKE 'CONFOLIO%';
+  AND (
+    normalized_folio_number LIKE 'CONFOLIO%'
+    OR normalized_folio_number LIKE 'CONRACE%'
+  );
 ALTER TABLE public.cams_kfintech_ingestion_attempts ENABLE TRIGGER enforce_cams_kfintech_ingestion_attempts_immutability;
 ALTER TABLE public.ingestion_logs ENABLE TRIGGER enforce_ingestion_logs_immutability;
 
 INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
   ('94200000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'issue32-concurrency-owner@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
-  ('94200000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'issue32-concurrency-investor@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now())
+  ('94200000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'issue32-concurrency-investor@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now()),
+  ('94200000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'issue32-concurrency-investor-b@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now())
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE public.user_accounts
@@ -456,13 +525,19 @@ SET account_state = 'advisor'
 WHERE user_id = '94200000-0000-0000-0000-000000000001';
 UPDATE public.user_accounts
 SET account_state = 'linked_investor'
-WHERE user_id = '94200000-0000-0000-0000-000000000002';
+WHERE user_id IN (
+  '94200000-0000-0000-0000-000000000002',
+  '94200000-0000-0000-0000-000000000003'
+);
 UPDATE public.profiles
 SET id = '94300000-0000-0000-0000-000000000001', role = 'advisor', full_name = 'Issue 32 Concurrency Owner'
 WHERE user_id = '94200000-0000-0000-0000-000000000001';
 UPDATE public.profiles
 SET id = '94300000-0000-0000-0000-000000000002', role = 'investor', full_name = 'Issue 32 Concurrency Investor'
 WHERE user_id = '94200000-0000-0000-0000-000000000002';
+UPDATE public.profiles
+SET id = '94300000-0000-0000-0000-000000000003', role = 'investor', full_name = 'Issue 32 Concurrency Investor B'
+WHERE user_id = '94200000-0000-0000-0000-000000000003';
 
 INSERT INTO public.workspaces (id, name, slug, owner_profile_id, workspace_status)
 VALUES ('94400000-0000-0000-0000-000000000001', 'Issue 32 Concurrency Workspace', 'issue-32-concurrency-workspace', '94300000-0000-0000-0000-000000000001', 'active')
@@ -473,14 +548,21 @@ VALUES ('94400000-0000-0000-0000-000000000002', 'Issue 32 Concurrency Workspace 
 ON CONFLICT (id) DO NOTHING;
 
 DELETE FROM public.workspace_memberships
-WHERE profile_id IN ('94300000-0000-0000-0000-000000000001', '94300000-0000-0000-0000-000000000002');
+WHERE profile_id IN (
+  '94300000-0000-0000-0000-000000000001',
+  '94300000-0000-0000-0000-000000000002',
+  '94300000-0000-0000-0000-000000000003'
+);
 INSERT INTO public.workspace_memberships (workspace_id, profile_id, role, status)
 VALUES
   ('94400000-0000-0000-0000-000000000001', '94300000-0000-0000-0000-000000000001', 'admin', 'active'),
-  ('94400000-0000-0000-0000-000000000001', '94300000-0000-0000-0000-000000000002', 'investor', 'active');
+  ('94400000-0000-0000-0000-000000000001', '94300000-0000-0000-0000-000000000002', 'investor', 'active'),
+  ('94400000-0000-0000-0000-000000000001', '94300000-0000-0000-0000-000000000003', 'investor', 'active');
 
 INSERT INTO public.investor_account_links (user_id, profile_id, verification_method, verified_at, link_status)
-VALUES ('94200000-0000-0000-0000-000000000002', '94300000-0000-0000-0000-000000000002', 'verified_email', now(), 'active')
+VALUES
+  ('94200000-0000-0000-0000-000000000002', '94300000-0000-0000-0000-000000000002', 'verified_email', now(), 'active'),
+  ('94200000-0000-0000-0000-000000000003', '94300000-0000-0000-0000-000000000003', 'verified_email', now(), 'active')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO public.profile_pan_records (
@@ -508,6 +590,32 @@ INSERT INTO public.profile_pan_records (
 UPDATE public.profiles
 SET canonical_pan_record_id = '94210000-0000-0000-0000-000000000001'
 WHERE id = '94300000-0000-0000-0000-000000000002';
+
+INSERT INTO public.profile_pan_records (
+  id,
+  profile_id,
+  pan_ciphertext,
+  pan_lookup_hmac,
+  masked_pan,
+  source,
+  source_system,
+  status,
+  verified_at
+) VALUES (
+  '94210000-0000-0000-0000-000000000002',
+  '94300000-0000-0000-0000-000000000003',
+  extensions.pgp_sym_encrypt('ZYXWV9876K', public.pan_encryption_key(), 'cipher-algo=aes256, compress-algo=0'),
+  extensions.hmac('ZYXWV9876K', public.pan_lookup_hmac_key(), 'sha256'),
+  public.mask_pan('ZYXWV9876K'),
+  'INVESTOR',
+  'MANUAL',
+  'VERIFIED',
+  now()
+) ON CONFLICT (id) DO NOTHING;
+
+UPDATE public.profiles
+SET canonical_pan_record_id = '94210000-0000-0000-0000-000000000002'
+WHERE id = '94300000-0000-0000-0000-000000000003';
 
 INSERT INTO public.registrar_configs (
   id,
@@ -863,6 +971,45 @@ assert_sql "DO \$\$ DECLARE v_logs int; v_attempts int; BEGIN
   SELECT count(*)::int INTO v_logs FROM public.ingestion_logs WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000920' AND failure_code = 'parse_failed';
   SELECT count(*)::int INTO v_attempts FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000920' AND failure_code = 'parse_failed';
   IF v_logs <> 1 OR v_attempts <> 1 THEN RAISE EXCEPTION 'scenario20 failure replay lineage counts %, %', v_logs, v_attempts; END IF;
+END \$\$;"
+
+assert_sql "INSERT INTO public.folio_references (
+  registrar,
+  normalized_folio_number,
+  amc_identity,
+  source_folio_masked
+) VALUES (
+  'CAMS',
+  'CONRACE1',
+  'Money Bowl AMC',
+  'CON***'
+) ON CONFLICT (registrar, normalized_folio_number) DO NOTHING;"
+write_process_cams_sql "${WORKDIR}/s21a.sql" "ABCDE1234F" "Issue 32 Concurrency Investor" "MF32RACEA" "Issue 32 Race Fund A" "2026-07-30"
+write_process_cams_sql "${WORKDIR}/s21b.sql" "ZYXWV9876K" "Issue 32 Concurrency Investor B" "MF32RACEB" "Issue 32 Race Fund B" "2026-07-31"
+run_pair "scenario21_process_same_folio_two_investors" "${WORKDIR}/s21a.sql" "${WORKDIR}/s21b.sql"
+one_success_one_conflict "scenario21_process_same_folio_two_investors"
+assert_sql "DO \$\$ DECLARE v_count int; BEGIN
+  SELECT count(*)::int INTO v_count
+  FROM public.portfolio_folio_references AS mapping
+  JOIN public.portfolios AS portfolio
+    ON portfolio.id = mapping.portfolio_id
+  JOIN public.folio_references AS folio
+    ON folio.id = mapping.folio_reference_id
+  WHERE portfolio.workspace_id = '94400000-0000-0000-0000-000000000001'
+    AND folio.registrar = 'CAMS'
+    AND folio.normalized_folio_number = 'CONRACE1';
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario21 workspace folio mapping count %', v_count; END IF;
+
+  SELECT count(*)::int INTO v_count
+  FROM public.transactions AS transaction
+  JOIN public.folio_references AS folio
+    ON folio.id = transaction.folio_reference_id
+  JOIN public.mutual_funds AS fund
+    ON fund.id = transaction.mutual_fund_id
+  WHERE folio.registrar = 'CAMS'
+    AND folio.normalized_folio_number = 'CONRACE1'
+    AND fund.scheme_code IN ('MF32RACEA', 'MF32RACEB');
+  IF v_count <> 1 THEN RAISE EXCEPTION 'scenario21 transaction count %', v_count; END IF;
 END \$\$;"
 
 run_psql <<'SQL'

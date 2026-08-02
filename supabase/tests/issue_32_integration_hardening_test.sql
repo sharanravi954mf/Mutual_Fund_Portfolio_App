@@ -45,7 +45,8 @@ VALUES
   ('95400000-0000-0000-0000-000000000001', '95300000-0000-0000-0000-000000000002', 'investor', 'active'),
   ('95400000-0000-0000-0000-000000000002', '95300000-0000-0000-0000-000000000001', 'admin', 'active'),
   ('95400000-0000-0000-0000-000000000002', '95300000-0000-0000-0000-000000000002', 'investor', 'active'),
-  ('95400000-0000-0000-0000-000000000003', '95300000-0000-0000-0000-000000000003', 'admin', 'active');
+  ('95400000-0000-0000-0000-000000000003', '95300000-0000-0000-0000-000000000003', 'admin', 'active'),
+  ('95400000-0000-0000-0000-000000000003', '95300000-0000-0000-0000-000000000002', 'investor', 'active');
 
 INSERT INTO public.investor_account_links (user_id, profile_id, verification_method, verified_at, link_status)
 VALUES ('95200000-0000-0000-0000-000000000002', '95300000-0000-0000-0000-000000000002', 'verified_email', now(), 'active');
@@ -397,6 +398,353 @@ BEGIN
   IF v_status IS DISTINCT FROM 'claimed' THEN
     RAISE EXCEPTION 'inactive workspace finalization changed run status: %', v_status;
   END IF;
+END;
+$$;
+
+DO $$
+DECLARE
+  v_folio_id pg_catalog.uuid;
+  v_workspace_a_portfolio_id pg_catalog.uuid;
+  v_workspace_b_portfolio_id pg_catalog.uuid;
+  v_source_fund_id pg_catalog.uuid;
+  v_dest_fund_id pg_catalog.uuid;
+  v_balance pg_catalog.numeric;
+BEGIN
+  INSERT INTO public.folio_references (
+    registrar,
+    normalized_folio_number,
+    amc_identity,
+    source_folio_masked
+  ) VALUES (
+    'CAMS',
+    'HISO001',
+    'House H',
+    'HIS***'
+  )
+  ON CONFLICT (registrar, normalized_folio_number) DO UPDATE
+  SET amc_identity = EXCLUDED.amc_identity
+  RETURNING id INTO v_folio_id;
+
+  SELECT portfolio.id
+  INTO v_workspace_a_portfolio_id
+  FROM public.portfolios AS portfolio
+  WHERE portfolio.workspace_id = '95400000-0000-0000-0000-000000000001'
+    AND portfolio.client_id = '95300000-0000-0000-0000-000000000002';
+
+  IF v_workspace_a_portfolio_id IS NULL THEN
+    INSERT INTO public.portfolios (
+      workspace_id,
+      client_id,
+      total_invested_value,
+      current_market_value
+    ) VALUES (
+      '95400000-0000-0000-0000-000000000001',
+      '95300000-0000-0000-0000-000000000002',
+      0,
+      0
+    )
+    RETURNING id INTO v_workspace_a_portfolio_id;
+  END IF;
+
+  SELECT portfolio.id
+  INTO v_workspace_b_portfolio_id
+  FROM public.portfolios AS portfolio
+  WHERE portfolio.workspace_id = '95400000-0000-0000-0000-000000000003'
+    AND portfolio.client_id = '95300000-0000-0000-0000-000000000002';
+
+  IF v_workspace_b_portfolio_id IS NULL THEN
+    INSERT INTO public.portfolios (
+      workspace_id,
+      client_id,
+      total_invested_value,
+      current_market_value
+    ) VALUES (
+      '95400000-0000-0000-0000-000000000003',
+      '95300000-0000-0000-0000-000000000002',
+      0,
+      0
+    )
+    RETURNING id INTO v_workspace_b_portfolio_id;
+  END IF;
+
+  INSERT INTO public.portfolio_folio_references (portfolio_id, folio_reference_id)
+  VALUES
+    (v_workspace_a_portfolio_id, v_folio_id),
+    (v_workspace_b_portfolio_id, v_folio_id)
+  ON CONFLICT (portfolio_id, folio_reference_id) DO NOTHING;
+
+  INSERT INTO public.mutual_funds (scheme_code, scheme_name, fund_house, category, current_nav, nav_date)
+  VALUES
+    ('I32HARD-ISO', 'Issue 32 Isolation Fund', 'House H', 'Debt', 10, '2026-08-02'),
+    ('I32HARD-ISO-DEST', 'Issue 32 Isolation Destination Fund', 'House H', 'Debt', 10, '2026-08-02')
+  ON CONFLICT (scheme_code) DO UPDATE
+  SET scheme_name = EXCLUDED.scheme_name;
+
+  SELECT id INTO v_source_fund_id FROM public.mutual_funds WHERE scheme_code = 'I32HARD-ISO';
+  SELECT id INTO v_dest_fund_id FROM public.mutual_funds WHERE scheme_code = 'I32HARD-ISO-DEST';
+
+  INSERT INTO public.transactions (
+    portfolio_id,
+    folio_reference_id,
+    mutual_fund_id,
+    transaction_type,
+    units,
+    nav_at_transaction,
+    amount,
+    execution_date,
+    registrar,
+    source_row_number,
+    source_attachment_sha256,
+    registrar_transaction_id,
+    registrar_transaction_code,
+    transaction_direction
+  ) VALUES (
+    v_workspace_b_portfolio_id,
+    v_folio_id,
+    v_source_fund_id,
+    'BUY',
+    25,
+    10,
+    250,
+    '2026-08-02',
+    'CAMS',
+    1,
+    repeat('e', 64),
+    'HISO-B-BUY-1',
+    'BUY',
+    'INFLOW'
+  );
+
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      folio_reference_id,
+      status
+    ) VALUES (
+      '95600000-0000-0000-0000-000000000010',
+      '95400000-0000-0000-0000-000000000001',
+      '95300000-0000-0000-0000-000000000002',
+      '95300000-0000-0000-0000-000000000002',
+      'investor',
+      'investor_portal',
+      'I32HARD-ISO',
+      'sell',
+      10,
+      v_folio_id,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'workspace B BUY authorized workspace A sell';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%scheme_not_held_in_selected_folio%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      destination_scheme_code,
+      type,
+      amount,
+      folio_reference_id,
+      status
+    ) VALUES (
+      '95600000-0000-0000-0000-000000000011',
+      '95400000-0000-0000-0000-000000000001',
+      '95300000-0000-0000-0000-000000000002',
+      '95300000-0000-0000-0000-000000000002',
+      'investor',
+      'investor_portal',
+      'I32HARD-ISO',
+      'I32HARD-ISO-DEST',
+      'switch',
+      10,
+      v_folio_id,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'workspace B BUY authorized workspace A switch';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%scheme_not_held_in_selected_folio%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  INSERT INTO public.transactions (
+    portfolio_id,
+    folio_reference_id,
+    mutual_fund_id,
+    transaction_type,
+    units,
+    nav_at_transaction,
+    amount,
+    execution_date,
+    registrar,
+    source_row_number,
+    source_attachment_sha256,
+    registrar_transaction_id,
+    registrar_transaction_code,
+    source_folio_reference_id
+  ) VALUES (
+    v_workspace_b_portfolio_id,
+    v_folio_id,
+    v_source_fund_id,
+    'SWITCH',
+    1,
+    10,
+    10,
+    '2026-08-03',
+    'CAMS',
+    2,
+    repeat('f', 64),
+    'HISO-B-BAD-SWITCH',
+    'SWITCHOUT',
+    v_folio_id
+  );
+
+  BEGIN
+    INSERT INTO public.order_requests (
+      id,
+      workspace_id,
+      investor_profile_id,
+      initiated_by_profile_id,
+      initiated_by_role,
+      initiation_channel,
+      scheme_code,
+      type,
+      amount,
+      folio_reference_id,
+      status
+    ) VALUES (
+      '95600000-0000-0000-0000-000000000012',
+      '95400000-0000-0000-0000-000000000001',
+      '95300000-0000-0000-0000-000000000002',
+      '95300000-0000-0000-0000-000000000002',
+      'investor',
+      'investor_portal',
+      'I32HARD-ISO',
+      'sell',
+      10,
+      v_folio_id,
+      'pending_qualification'
+    );
+    RAISE EXCEPTION 'workspace B malformed switch blocked workspace A with the wrong result';
+  EXCEPTION
+    WHEN others THEN
+      IF SQLERRM NOT LIKE '%scheme_not_held_in_selected_folio%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  INSERT INTO public.transactions (
+    portfolio_id,
+    folio_reference_id,
+    mutual_fund_id,
+    transaction_type,
+    units,
+    nav_at_transaction,
+    amount,
+    execution_date,
+    registrar,
+    source_row_number,
+    source_attachment_sha256,
+    registrar_transaction_id,
+    registrar_transaction_code,
+    transaction_direction,
+    source_folio_reference_id
+  ) VALUES
+    (v_workspace_a_portfolio_id, v_folio_id, v_source_fund_id, 'BUY', 10, 10, 100, '2026-08-04', 'CAMS', 3, repeat('a', 64), 'HISO-A-BUY-1', 'BUY', 'INFLOW', NULL),
+    (v_workspace_a_portfolio_id, v_folio_id, v_source_fund_id, 'SELL', 2, 10, 20, '2026-08-05', 'CAMS', 4, repeat('b', 64), 'HISO-A-SELL-1', 'SELL', 'OUTFLOW', NULL),
+    (v_workspace_a_portfolio_id, v_folio_id, v_source_fund_id, 'SWITCH', 3, 10, 30, '2026-08-06', 'CAMS', 5, repeat('c', 64), 'HISO-A-SWITCH-IN-1', 'SWITCHIN', 'INFLOW', v_folio_id),
+    (v_workspace_a_portfolio_id, v_folio_id, v_source_fund_id, 'SWITCH', 4, 10, 40, '2026-08-07', 'CAMS', 6, repeat('d', 64), 'HISO-A-SWITCH-OUT-1', 'SWITCHOUT', 'OUTFLOW', v_folio_id);
+
+  SELECT COALESCE(SUM(
+    CASE
+      WHEN transaction.transaction_type = 'BUY' THEN transaction.units
+      WHEN transaction.transaction_type = 'SELL' THEN -transaction.units
+      WHEN transaction.transaction_type = 'SWITCH' AND transaction.transaction_direction = 'INFLOW' THEN transaction.units
+      WHEN transaction.transaction_type = 'SWITCH' AND transaction.transaction_direction = 'OUTFLOW' THEN -transaction.units
+      ELSE 0
+    END
+  ), 0)
+  INTO v_balance
+  FROM public.transactions AS transaction
+  WHERE transaction.portfolio_id = v_workspace_a_portfolio_id
+    AND transaction.folio_reference_id = v_folio_id
+    AND transaction.mutual_fund_id = v_source_fund_id;
+
+  IF v_balance <> 7 THEN
+    RAISE EXCEPTION 'workspace A isolated balance is wrong: %', v_balance;
+  END IF;
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    type,
+    amount,
+    folio_reference_id,
+    status
+  ) VALUES (
+    '95600000-0000-0000-0000-000000000013',
+    '95400000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000002',
+    '95300000-0000-0000-0000-000000000002',
+    'investor',
+    'investor_portal',
+    'I32HARD-ISO',
+    'sell',
+    10,
+    v_folio_id,
+    'pending_qualification'
+  );
+
+  INSERT INTO public.order_requests (
+    id,
+    workspace_id,
+    investor_profile_id,
+    initiated_by_profile_id,
+    initiated_by_role,
+    initiation_channel,
+    scheme_code,
+    destination_scheme_code,
+    type,
+    amount,
+    folio_reference_id,
+    status
+  ) VALUES (
+    '95600000-0000-0000-0000-000000000014',
+    '95400000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000002',
+    '95300000-0000-0000-0000-000000000002',
+    'investor',
+    'investor_portal',
+    'I32HARD-ISO',
+    'I32HARD-ISO-DEST',
+    'switch',
+    10,
+    v_folio_id,
+    'pending_qualification'
+  );
 END;
 $$;
 
