@@ -13,6 +13,7 @@ class OrderBloc extends ChangeNotifier {
   String? _initiationRole;
   String? _initiationChannel;
   int _holdingsRequestId = 0;
+  int _beneficiaryRequestId = 0;
 
   OrderBloc(this._repository)
       : _state = const OrderState(
@@ -27,6 +28,15 @@ class OrderBloc extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _nextBeneficiaryRequest() {
+    _holdingsRequestId++;
+    return ++_beneficiaryRequestId;
+  }
+
+  bool _isCurrentBeneficiaryRequest(int requestId) {
+    return requestId == _beneficiaryRequestId;
+  }
+
   /// Initialize context for Investor Flow
   Future<void> initiateForInvestor({
     required String investorProfileId,
@@ -34,6 +44,7 @@ class OrderBloc extends ChangeNotifier {
     required String initiationRole,
     required String initiationChannel,
   }) async {
+    final requestId = _nextBeneficiaryRequest();
     _initiatorProfileId = initiatorProfileId;
     _initiationRole = initiationRole;
     _initiationChannel = initiationChannel;
@@ -51,10 +62,14 @@ class OrderBloc extends ChangeNotifier {
         initiationRole: initiationRole,
         initiationChannel: initiationChannel,
       );
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
       final funds = await _repository.fetchInitialMutualFunds();
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
+
       final folios =
           await _repository.fetchFolios(investorProfileId, context.workspaceId);
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
       _updateState(_state.copyWith(
         phase: OrderPhase.ready,
@@ -63,8 +78,10 @@ class OrderBloc extends ChangeNotifier {
         folios: folios,
       ));
     } on OrderFailure catch (e) {
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
       _updatePhaseForFailure(e);
     } catch (_) {
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
       _updateState(_state.copyWith(
         phase: OrderPhase.recoverableFailure,
         errorMessage:
@@ -85,6 +102,7 @@ class OrderBloc extends ChangeNotifier {
     required String initiationRole,
     required String initiationChannel,
   }) async {
+    final requestId = _nextBeneficiaryRequest();
     _initiatorProfileId = initiatorProfileId;
     _initiationRole = initiationRole;
     _initiationChannel = initiationChannel;
@@ -104,10 +122,14 @@ class OrderBloc extends ChangeNotifier {
           initiationChannel: initiationChannel,
           selectedWorkspaceId: selectedWorkspaceId,
         );
+        if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
         final funds = await _repository.fetchInitialMutualFunds();
+        if (!_isCurrentBeneficiaryRequest(requestId)) return;
+
         final folios = await _repository.fetchFolios(
             preSelectedInvestorId, context.workspaceId);
+        if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
         _updateState(_state.copyWith(
           phase: OrderPhase.ready,
@@ -118,6 +140,8 @@ class OrderBloc extends ChangeNotifier {
       } else {
         final assigned =
             await _repository.fetchAssignedInvestors(advisorProfileId);
+        if (!_isCurrentBeneficiaryRequest(requestId)) return;
+
         if (assigned.isEmpty) {
           _updateState(_state.copyWith(
             phase: OrderPhase.emptyInvestors,
@@ -127,6 +151,7 @@ class OrderBloc extends ChangeNotifier {
         }
 
         final funds = await _repository.fetchInitialMutualFunds();
+        if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
         _updateState(_state.copyWith(
           phase: OrderPhase.ready,
@@ -135,8 +160,10 @@ class OrderBloc extends ChangeNotifier {
         ));
       }
     } on OrderFailure catch (e) {
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
       _updatePhaseForFailure(e);
     } catch (_) {
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
       _updateState(_state.copyWith(
         phase: OrderPhase.recoverableFailure,
         errorMessage:
@@ -168,7 +195,7 @@ class OrderBloc extends ChangeNotifier {
   /// [_initiationChannel] are never read from the draft that was just cleared.
   Future<void> updateBeneficiary(
       String investorProfileId, String workspaceId) async {
-    _holdingsRequestId++;
+    final requestId = _nextBeneficiaryRequest();
     // Prevent setting workspaceId = investorProfileId
     if (workspaceId == investorProfileId) {
       _updateState(_state.copyWith(
@@ -203,9 +230,11 @@ class OrderBloc extends ChangeNotifier {
         initiationChannel: _initiationChannel ?? '',
         selectedWorkspaceId: workspaceId,
       );
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
       final folios =
           await _repository.fetchFolios(investorProfileId, context.workspaceId);
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
 
       _updateState(_state.copyWith(
         phase: OrderPhase.ready,
@@ -214,8 +243,10 @@ class OrderBloc extends ChangeNotifier {
         holdings: const [],
       ));
     } on OrderFailure catch (e) {
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
       _updatePhaseForFailure(e);
     } catch (_) {
+      if (!_isCurrentBeneficiaryRequest(requestId)) return;
       _updateState(_state.copyWith(
         phase: OrderPhase.recoverableFailure,
         errorMessage: 'Unable to load the selected client. Please try again.',

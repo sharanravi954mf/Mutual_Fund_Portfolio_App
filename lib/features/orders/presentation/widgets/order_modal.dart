@@ -58,7 +58,7 @@ class OrderModal extends StatefulWidget {
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0x00000000),
         builder: (context) => DraggableScrollableSheet(
           initialChildSize: 0.9,
           minChildSize: 0.5,
@@ -140,6 +140,22 @@ class _OrderModalState extends State<OrderModal> {
     _unitsController.dispose();
     _bloc.dispose();
     super.dispose();
+  }
+
+  void _invalidateConfirmation() {
+    if (!_hasConfirmedReview) return;
+    setState(() {
+      _hasConfirmedReview = false;
+    });
+  }
+
+  void _resetOrderValueInputs() {
+    setState(() {
+      _hasConfirmedReview = false;
+      _isAmountMode = true;
+      _amountController.clear();
+      _unitsController.clear();
+    });
   }
 
   @override
@@ -350,6 +366,9 @@ class _OrderModalState extends State<OrderModal> {
     AuthProvider auth,
   ) {
     if (widget.preSelectedClientId != null) {
+      final beneficiaryName = state.draft.context?.investorFullName ??
+          widget.preSelectedClientName ??
+          'Unnamed Client';
       return Card(
         color: colors.activeBackground,
         child: Padding(
@@ -371,7 +390,7 @@ class _OrderModalState extends State<OrderModal> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      widget.preSelectedClientName ?? 'Unnamed Client',
+                      beneficiaryName,
                       style: GoogleFonts.outfit(
                           color: colors.textPrimary,
                           fontSize: 16,
@@ -477,6 +496,7 @@ class _OrderModalState extends State<OrderModal> {
           ),
           onChanged: (val) {
             if (val != null) {
+              _resetOrderValueInputs();
               _bloc.updateBeneficiary(val.investorProfileId, val.workspaceId);
             }
           },
@@ -509,6 +529,7 @@ class _OrderModalState extends State<OrderModal> {
           selected: {state.draft.type},
           onSelectionChanged: (set) {
             if (set.isNotEmpty) {
+              _resetOrderValueInputs();
               _bloc.updateOrderType(set.first);
             }
           },
@@ -522,7 +543,10 @@ class _OrderModalState extends State<OrderModal> {
       return SearchableSchemePicker(
         initialItems: state.funds,
         selectedSchemeCode: state.draft.schemeCode,
-        onSelected: (code) => _bloc.updateScheme(code),
+        onSelected: (code) {
+          _invalidateConfirmation();
+          _bloc.updateScheme(code);
+        },
         onSearch: (q) => widget.repository.searchMutualFunds(q),
         label: 'Scheme',
       );
@@ -533,7 +557,10 @@ class _OrderModalState extends State<OrderModal> {
         state: state,
         label: 'Holding Scheme to Sell',
         selectedCode: state.draft.schemeCode,
-        onSelected: (code) => _bloc.updateScheme(code),
+        onSelected: (code) {
+          _invalidateConfirmation();
+          _bloc.updateScheme(code);
+        },
         colors: colors,
       );
     }
@@ -545,7 +572,10 @@ class _OrderModalState extends State<OrderModal> {
           state: state,
           label: 'Source Scheme (from holdings)',
           selectedCode: state.draft.schemeCode,
-          onSelected: (code) => _bloc.updateScheme(code),
+          onSelected: (code) {
+            _invalidateConfirmation();
+            _bloc.updateScheme(code);
+          },
           colors: colors,
         ),
         const SizedBox(height: 20),
@@ -553,7 +583,10 @@ class _OrderModalState extends State<OrderModal> {
           initialItems: state.funds,
           selectedSchemeCode: state.draft.destinationSchemeCode,
           excludeSchemeCode: state.draft.schemeCode,
-          onSelected: (code) => _bloc.updateDestinationScheme(code),
+          onSelected: (code) {
+            _invalidateConfirmation();
+            _bloc.updateDestinationScheme(code);
+          },
           onSearch: (q) => widget.repository.searchMutualFunds(q),
           label: 'Destination Scheme',
         ),
@@ -632,6 +665,7 @@ class _OrderModalState extends State<OrderModal> {
           decoration: const InputDecoration(hintText: 'Select held scheme'),
           onChanged: (val) {
             if (val != null) {
+              _invalidateConfirmation();
               onSelected(val);
             }
           },
@@ -690,6 +724,7 @@ class _OrderModalState extends State<OrderModal> {
           decoration: const InputDecoration(hintText: 'Choose verified folio'),
           onChanged: (val) {
             if (val != null) {
+              _invalidateConfirmation();
               _bloc.updateFolio(val);
             }
           },
@@ -726,6 +761,7 @@ class _OrderModalState extends State<OrderModal> {
                     selected: _isAmountMode,
                     onSelected: (val) {
                       setState(() {
+                        _hasConfirmedReview = false;
                         _isAmountMode = true;
                         _unitsController.clear();
                         _bloc.updateUnits(null);
@@ -737,6 +773,7 @@ class _OrderModalState extends State<OrderModal> {
                     selected: !_isAmountMode,
                     onSelected: (val) {
                       setState(() {
+                        _hasConfirmedReview = false;
                         _isAmountMode = false;
                         _amountController.clear();
                         _bloc.updateAmount(null);
@@ -761,6 +798,7 @@ class _OrderModalState extends State<OrderModal> {
               prefixText: '₹ ',
             ),
             onChanged: (val) {
+              _invalidateConfirmation();
               final parsed = double.tryParse(val);
               _bloc.updateAmount(parsed);
             },
@@ -776,6 +814,7 @@ class _OrderModalState extends State<OrderModal> {
               hintText: 'Enter quantity of units',
             ),
             onChanged: (val) {
+              _invalidateConfirmation();
               final parsed = double.tryParse(val);
               _bloc.updateUnits(parsed);
             },
@@ -945,11 +984,11 @@ class _OrderModalState extends State<OrderModal> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
+                  color: colors.success.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_circle_outline,
-                    size: 72, color: Colors.green),
+                child: Icon(Icons.check_circle_outline,
+                    size: 72, color: colors.success),
               ),
               const SizedBox(height: 24),
               Text(
@@ -1115,6 +1154,8 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
       orElse: () => <String, dynamic>{},
     );
     final selectedName = selectedItem['scheme_name'] as String? ?? '';
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1130,7 +1171,7 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
           decoration: InputDecoration(
             hintText:
                 selectedName.isNotEmpty ? selectedName : 'Search schemes...',
-            suffixIcon: const Icon(Icons.search),
+            suffixIcon: Icon(Icons.search, color: colorScheme.onSurfaceVariant),
           ),
           onChanged: _onSearchChanged,
         ),
@@ -1139,7 +1180,7 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
           Container(
             constraints: const BoxConstraints(maxHeight: 200),
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(color: colorScheme.outlineVariant),
               borderRadius: BorderRadius.circular(8),
             ),
             child: _isSearching
@@ -1152,13 +1193,13 @@ class _SearchableSchemePickerState extends State<SearchableSchemePicker> {
                         padding: const EdgeInsets.all(8.0),
                         child: Row(
                           children: [
-                            const Icon(Icons.error_outline,
-                                color: Colors.red, size: 16),
+                            Icon(Icons.error_outline,
+                                color: colorScheme.error, size: 16),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 _searchError!,
-                                style: const TextStyle(color: Colors.red),
+                                style: TextStyle(color: colorScheme.error),
                               ),
                             ),
                           ],

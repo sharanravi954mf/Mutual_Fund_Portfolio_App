@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/widgets/order_modal.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/widgets/advisor_order_action.dart';
+import 'package:mutual_fund_portfolio_app/features/orders/domain/order_models.dart';
 import 'package:mutual_fund_portfolio_app/providers/auth_provider.dart';
 import 'package:mutual_fund_portfolio_app/providers/language_provider.dart';
 import 'package:mutual_fund_portfolio_app/providers/theme_provider.dart';
@@ -84,6 +85,82 @@ void main() {
     );
   });
 
+  Finder submitButtonFinder() =>
+      find.widgetWithText(ElevatedButton, 'Submit Request');
+
+  ElevatedButton submitButton(WidgetTester tester) =>
+      tester.widget<ElevatedButton>(submitButtonFinder());
+
+  List<String> textFieldTexts(WidgetTester tester) {
+    return tester
+        .widgetList<TextFormField>(find.byType(TextFormField))
+        .map((field) => field.controller?.text ?? '')
+        .toList();
+  }
+
+  Future<void> selectBuyScheme(WidgetTester tester,
+      {String schemeName = 'HDFC Top 100'}) async {
+    final schemeField = find.byType(TextFormField).first;
+    await tester.ensureVisible(schemeField);
+    await tester.pumpAndSettle();
+    await tester.tap(schemeField);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(schemeName).last);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> enterCurrentValue(WidgetTester tester, String text) async {
+    final valueField = find.byType(TextFormField).last;
+    await tester.ensureVisible(valueField);
+    await tester.pumpAndSettle();
+    await tester.enterText(valueField, text);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> confirmReview(WidgetTester tester) async {
+    final checkbox = find.byType(Checkbox);
+    await tester.ensureVisible(checkbox);
+    await tester.tap(checkbox);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> prepareConfirmedBuyOrder(WidgetTester tester,
+      {String amount = '5000'}) async {
+    await selectBuyScheme(tester);
+    await enterCurrentValue(tester, amount);
+    await confirmReview(tester);
+    expect(submitButton(tester).onPressed, isNotNull);
+  }
+
+  Future<void> selectDropdownText(
+    WidgetTester tester,
+    Finder dropdown,
+    Pattern text,
+  ) async {
+    await tester.ensureVisible(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining(text).last);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> tapOrderType(WidgetTester tester, String label) async {
+    final button = find.text(label);
+    await tester.ensureVisible(button);
+    await tester.pumpAndSettle();
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+  }
+
+  Finder dropdownAt(int index) {
+    return find
+        .byWidgetPredicate(
+          (widget) => widget is DropdownButtonFormField<dynamic>,
+        )
+        .at(index);
+  }
+
   // ---------------------------------------------------------------------------
   // OrderModal Widget Tests
   // ---------------------------------------------------------------------------
@@ -134,13 +211,13 @@ void main() {
       expect(find.text('Access Denied'), findsNothing);
     });
 
-    testWidgets('renders preselected locked client in MFD flow',
+    testWidgets('renders resolved locked client name in MFD flow',
         (tester) async {
-      final repository = FakeOrderRepository();
+      final repository = ResolvedNameOrderRepository('Verified Client Name');
       final modal = OrderModal(
         repository: repository,
         preSelectedClientId: 'investor-1',
-        preSelectedClientName: 'John Doe Client',
+        preSelectedClientName: 'Placeholder Client',
         preSelectedWorkspaceId: 'workspace-1',
       );
 
@@ -148,7 +225,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Advisor-Assisted Order'), findsOneWidget);
-      expect(find.text('John Doe Client'), findsOneWidget);
+      expect(find.text('Verified Client Name'), findsOneWidget);
+      expect(find.text('Placeholder Client'), findsNothing);
       expect(find.text('Beneficiary Client (Locked)'), findsOneWidget);
     });
 
@@ -190,6 +268,7 @@ void main() {
 
       // No overflow or uncaught exceptions at 320px
       expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('supports desktop-width layout', (tester) async {
@@ -207,6 +286,170 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'confirmation invalidates when beneficiary changes and clears stale amount text',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: advisorAuth));
+      await tester.pumpAndSettle();
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(0),
+        'John Doe',
+      );
+      await prepareConfirmedBuyOrder(tester);
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(0),
+        'Jane Smith',
+      );
+
+      expect(submitButton(tester).onPressed, isNull);
+      expect(textFieldTexts(tester), isNot(contains('5000')));
+
+      await prepareConfirmedBuyOrder(tester, amount: '6000');
+      expect(submitButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets(
+        'confirmation invalidates when order type changes and clears stale amount text',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+      await prepareConfirmedBuyOrder(tester);
+
+      await tapOrderType(tester, 'Sell');
+
+      expect(submitButton(tester).onPressed, isNull);
+      expect(textFieldTexts(tester), isNot(contains('5000')));
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(0),
+        '••••5678',
+      );
+      await selectDropdownText(
+        tester,
+        dropdownAt(1),
+        'Scheme Alpha Fund',
+      );
+      await enterCurrentValue(tester, '7000');
+      await confirmReview(tester);
+
+      expect(submitButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('confirmation invalidates for amount and units edits',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+      await prepareConfirmedBuyOrder(tester);
+
+      await enterCurrentValue(tester, '5500');
+      expect(submitButton(tester).onPressed, isNull);
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+
+      await tester.tap(find.text('Units'));
+      await tester.pumpAndSettle();
+      await enterCurrentValue(tester, '12.5');
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+
+      await enterCurrentValue(tester, '13.5');
+      expect(submitButton(tester).onPressed, isNull);
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('confirmation invalidates for folio and source scheme edits',
+        (tester) async {
+      final repository = MultiHoldingOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+      await tapOrderType(tester, 'Sell');
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(0),
+        '••••5678',
+      );
+      await selectDropdownText(
+        tester,
+        dropdownAt(1),
+        'Scheme Alpha Fund',
+      );
+      await enterCurrentValue(tester, '5000');
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(1),
+        'Scheme Gamma Fund',
+      );
+      expect(submitButton(tester).onPressed, isNull);
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(0),
+        '••••9012',
+      );
+      expect(submitButton(tester).onPressed, isNull);
+      await selectDropdownText(
+        tester,
+        dropdownAt(1),
+        'Scheme Beta Fund',
+      );
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('confirmation invalidates for destination scheme edits',
+        (tester) async {
+      final repository = FakeOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+      await tapOrderType(tester, 'Switch');
+
+      await selectDropdownText(
+        tester,
+        dropdownAt(0),
+        '••••5678',
+      );
+      await selectDropdownText(
+        tester,
+        dropdownAt(1),
+        'Scheme Alpha Fund',
+      );
+      await selectBuyScheme(tester, schemeName: 'HDFC Top 100');
+      await enterCurrentValue(tester, '5000');
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
+
+      await selectBuyScheme(tester, schemeName: 'SBI Bluechip');
+      expect(submitButton(tester).onPressed, isNull);
+      await confirmReview(tester);
+      expect(submitButton(tester).onPressed, isNotNull);
     });
 
     testWidgets('Sell request renders folio and source holding workflow',
@@ -331,6 +574,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('renders correctly in dark mode', (tester) async {
@@ -351,6 +595,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Place Mutual Fund Order'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -660,4 +905,61 @@ class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
 
   @override
   Future<void> signOut() async {}
+}
+
+class ResolvedNameOrderRepository extends FakeOrderRepository {
+  ResolvedNameOrderRepository(this.resolvedName);
+
+  final String resolvedName;
+
+  @override
+  Future<OrderContext> resolveInvestorContext({
+    required String investorProfileId,
+    required String initiatorProfileId,
+    required String initiationRole,
+    required String initiationChannel,
+    String? selectedWorkspaceId,
+  }) async {
+    final base = await super.resolveInvestorContext(
+      investorProfileId: investorProfileId,
+      initiatorProfileId: initiatorProfileId,
+      initiationRole: initiationRole,
+      initiationChannel: initiationChannel,
+      selectedWorkspaceId: selectedWorkspaceId,
+    );
+    return OrderContext(
+      workspaceId: base.workspaceId,
+      investorProfileId: base.investorProfileId,
+      investorFullName: resolvedName,
+      initiatorProfileId: base.initiatorProfileId,
+      initiationRole: base.initiationRole,
+      initiationChannel: base.initiationChannel,
+    );
+  }
+}
+
+class MultiHoldingOrderRepository extends FakeOrderRepository {
+  @override
+  Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
+      String workspaceId, String folioReferenceId) async {
+    if (folioReferenceId == 'folio-a') {
+      return [
+        {
+          'scheme_code': 'SCH-A',
+          'scheme_name': 'Scheme Alpha Fund',
+          'units': 100.0,
+        },
+        {
+          'scheme_code': 'SCH-C',
+          'scheme_name': 'Scheme Gamma Fund',
+          'units': 25.0,
+        },
+      ];
+    }
+    return super.fetchHoldings(
+      investorProfileId,
+      workspaceId,
+      folioReferenceId,
+    );
+  }
 }

@@ -600,6 +600,114 @@ void main() {
       );
       expect(repository.fetchInitialCalled, isTrue);
     });
+
+    test(
+        'stale beneficiary success cannot overwrite the latest beneficiary folios',
+        () async {
+      final raceRepository = BeneficiaryRaceOrderRepository();
+      final raceBloc = OrderBloc(raceRepository);
+      addTearDown(raceBloc.dispose);
+
+      await raceBloc.initiateForAdvisor(
+        advisorProfileId: 'advisor-1',
+        initiatorProfileId: 'advisor-1',
+        initiationRole: 'advisor',
+        initiationChannel: 'advisor_portal',
+      );
+
+      final staleA = raceBloc.updateBeneficiary('investor-a', 'workspace-a');
+      raceRepository.completeContext(
+        investorProfileId: 'investor-a',
+        workspaceId: 'workspace-a',
+        investorFullName: 'Investor A',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final freshB = raceBloc.updateBeneficiary('investor-b', 'workspace-b');
+      raceRepository.completeContext(
+        investorProfileId: 'investor-b',
+        workspaceId: 'workspace-b',
+        investorFullName: 'Investor B',
+      );
+      await Future<void>.delayed(Duration.zero);
+      raceRepository.completeFolios(
+        investorProfileId: 'investor-b',
+        folios: const [
+          OrderFolio(
+            folioReferenceId: 'folio-b',
+            portfolioId: 'portfolio-b',
+            maskedFolioDisplay: '••••0002',
+            registrar: 'KFINTECH',
+          ),
+        ],
+      );
+      await freshB;
+
+      raceRepository.completeFolios(
+        investorProfileId: 'investor-a',
+        folios: const [
+          OrderFolio(
+            folioReferenceId: 'folio-a',
+            portfolioId: 'portfolio-a',
+            maskedFolioDisplay: '••••0001',
+            registrar: 'CAMS',
+          ),
+        ],
+      );
+      await staleA;
+
+      expect(raceBloc.state.phase, OrderPhase.ready);
+      expect(raceBloc.state.draft.context?.investorProfileId, 'investor-b');
+      expect(raceBloc.state.draft.context?.workspaceId, 'workspace-b');
+      expect(raceBloc.state.folios.single.folioReferenceId, 'folio-b');
+    });
+
+    test('stale beneficiary failure after a fresh success leaves state intact',
+        () async {
+      final raceRepository = BeneficiaryRaceOrderRepository();
+      final raceBloc = OrderBloc(raceRepository);
+      addTearDown(raceBloc.dispose);
+
+      await raceBloc.initiateForAdvisor(
+        advisorProfileId: 'advisor-1',
+        initiatorProfileId: 'advisor-1',
+        initiationRole: 'advisor',
+        initiationChannel: 'advisor_portal',
+      );
+
+      final staleA = raceBloc.updateBeneficiary('investor-a', 'workspace-a');
+      final freshB = raceBloc.updateBeneficiary('investor-b', 'workspace-b');
+
+      raceRepository.completeContext(
+        investorProfileId: 'investor-b',
+        workspaceId: 'workspace-b',
+        investorFullName: 'Investor B',
+      );
+      await Future<void>.delayed(Duration.zero);
+      raceRepository.completeFolios(
+        investorProfileId: 'investor-b',
+        folios: const [
+          OrderFolio(
+            folioReferenceId: 'folio-b',
+            portfolioId: 'portfolio-b',
+            maskedFolioDisplay: '••••0002',
+            registrar: 'KFINTECH',
+          ),
+        ],
+      );
+      await freshB;
+
+      raceRepository.failContext(
+        investorProfileId: 'investor-a',
+        failure: const NetworkFailure('Stale beneficiary failed'),
+      );
+      await staleA;
+
+      expect(raceBloc.state.phase, OrderPhase.ready);
+      expect(raceBloc.state.errorMessage, isNull);
+      expect(raceBloc.state.draft.context?.investorProfileId, 'investor-b');
+      expect(raceBloc.state.folios.single.folioReferenceId, 'folio-b');
+    });
   });
   _registerSanitisationTests();
 }
@@ -853,6 +961,61 @@ class FakeOrderRepository implements OrderRepository {
         email: 'investor@example.com',
       );
     }).toList();
+  }
+}
+
+class BeneficiaryRaceOrderRepository extends FakeOrderRepository {
+  final _contextCompleters = <String, Completer<OrderContext>>{};
+  final _folioCompleters = <String, Completer<List<OrderFolio>>>{};
+
+  @override
+  Future<OrderContext> resolveInvestorContext({
+    required String investorProfileId,
+    required String initiatorProfileId,
+    required String initiationRole,
+    required String initiationChannel,
+    String? selectedWorkspaceId,
+  }) {
+    final completer = Completer<OrderContext>();
+    _contextCompleters[investorProfileId] = completer;
+    return completer.future;
+  }
+
+  @override
+  Future<List<OrderFolio>> fetchFolios(
+      String investorProfileId, String workspaceId) {
+    final completer = Completer<List<OrderFolio>>();
+    _folioCompleters[investorProfileId] = completer;
+    return completer.future;
+  }
+
+  void completeContext({
+    required String investorProfileId,
+    required String workspaceId,
+    required String investorFullName,
+  }) {
+    _contextCompleters[investorProfileId]!.complete(OrderContext(
+      workspaceId: workspaceId,
+      investorProfileId: investorProfileId,
+      investorFullName: investorFullName,
+      initiatorProfileId: 'advisor-1',
+      initiationRole: 'advisor',
+      initiationChannel: 'advisor_portal',
+    ));
+  }
+
+  void failContext({
+    required String investorProfileId,
+    required OrderFailure failure,
+  }) {
+    _contextCompleters[investorProfileId]!.completeError(failure);
+  }
+
+  void completeFolios({
+    required String investorProfileId,
+    required List<OrderFolio> folios,
+  }) {
+    _folioCompleters[investorProfileId]!.complete(folios);
   }
 }
 
