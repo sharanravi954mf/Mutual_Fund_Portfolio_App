@@ -353,6 +353,82 @@ success_or_processing_incomplete() {
   fi
 }
 
+success_or_finalization_race_terminal() {
+  name="$1"
+  run_id="$2"
+  success_count=0
+  finalized_count=0
+  incomplete_count=0
+
+  for side in left right; do
+    status="$(cat "${WORKDIR}/${name}.${side}.status")"
+    if [ "${status}" = "0" ]; then
+      success_count=$((success_count + 1))
+    elif grep -q "ingestion_run_finalized" "${WORKDIR}/${name}.${side}.out"; then
+      finalized_count=$((finalized_count + 1))
+    elif grep -q "processing_incomplete" "${WORKDIR}/${name}.${side}.out"; then
+      incomplete_count=$((incomplete_count + 1))
+    else
+      echo "${name}: ${side} session failed without processing_incomplete or ingestion_run_finalized" >&2
+      cat "${WORKDIR}/${name}.left.out" >&2
+      cat "${WORKDIR}/${name}.right.out" >&2
+      exit 1
+    fi
+  done
+
+  if [ "${success_count}" -lt 1 ]; then
+    echo "${name}: expected at least one session to succeed" >&2
+    cat "${WORKDIR}/${name}.left.out" >&2
+    cat "${WORKDIR}/${name}.right.out" >&2
+    exit 1
+  fi
+
+  assert_sql "DO \$\$ DECLARE
+    v_status text;
+    v_attempts int;
+    v_duplicate_lineage int;
+    v_contradictory_lineage int;
+  BEGIN
+    SELECT status INTO v_status
+    FROM public.cams_kfintech_ingestion_runs
+    WHERE ingestion_run_id = '${run_id}';
+
+    IF ${finalized_count} > 0 AND v_status = 'claimed' THEN
+      RAISE EXCEPTION '${name} observed ingestion_run_finalized but run remained claimed';
+    END IF;
+
+    SELECT count(*)::int INTO v_attempts
+    FROM public.cams_kfintech_ingestion_attempts
+    WHERE ingestion_run_id = '${run_id}';
+
+    IF v_attempts > 1 THEN
+      RAISE EXCEPTION '${name} durable attempt count %', v_attempts;
+    END IF;
+
+    SELECT count(*)::int INTO v_duplicate_lineage
+    FROM (
+      SELECT attachment_attempt_key
+      FROM public.cams_kfintech_ingestion_attempts
+      WHERE ingestion_run_id = '${run_id}'
+      GROUP BY attachment_attempt_key
+      HAVING count(*) > 1
+    ) AS duplicate_lineage;
+
+    SELECT count(*)::int INTO v_contradictory_lineage
+    FROM (
+      SELECT provider_message_id, provider_attachment_id
+      FROM public.cams_kfintech_ingestion_attempts
+      WHERE ingestion_run_id = '${run_id}'
+      GROUP BY provider_message_id, provider_attachment_id
+      HAVING count(DISTINCT outcome) > 1
+    ) AS contradictory_lineage;
+
+    IF ${incomplete_count} > 0 AND (v_duplicate_lineage > 0 OR v_contradictory_lineage > 0) THEN
+      RAISE EXCEPTION '${name} contradictory or duplicate durable attempt lineage survived';
+    END IF;
+  END \$\$;"
+}
+
 both_fail_with_code() {
   name="$1"
   code="$2"
@@ -921,7 +997,7 @@ SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-0000000
 write_persist_sql "${WORKDIR}/s16a.sql" "94900000-0000-0000-0000-000000000916" "s16-message" "s16-attachment" "s16-attempt" "2" "CON-FOLIO-16" "CON-TXN-16" 1 "94900000-0000-0000-0000-000000000916"
 write_finalize_sql "${WORKDIR}/s16b.sql" "94900000-0000-0000-0000-000000000916" "NULL" "NULL" "1"
 run_pair "scenario16_persist_races_finalization" "${WORKDIR}/s16a.sql" "${WORKDIR}/s16b.sql"
-success_or_processing_incomplete "scenario16_persist_races_finalization"
+success_or_finalization_race_terminal "scenario16_persist_races_finalization" "94900000-0000-0000-0000-000000000916"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
   SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000916';
   IF v_count > 1 THEN RAISE EXCEPTION 'scenario16 attempt count %', v_count; END IF;
@@ -932,7 +1008,7 @@ SELECT public.claim_cams_kfintech_ingestion_run('94400000-0000-0000-0000-0000000
 write_exact_failure_sql "${WORKDIR}/s17a.sql" "94900000-0000-0000-0000-000000000917" "94900000-0000-0000-0000-000000000917" "s17-message" "s17-attachment" "s17-attempt" "89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567" "concurrency/s17-failure" "malware_detected"
 write_finalize_sql "${WORKDIR}/s17b.sql" "94900000-0000-0000-0000-000000000917" "NULL" "NULL" "1"
 run_pair "scenario17_failure_races_finalization" "${WORKDIR}/s17a.sql" "${WORKDIR}/s17b.sql"
-success_or_processing_incomplete "scenario17_failure_races_finalization"
+success_or_finalization_race_terminal "scenario17_failure_races_finalization" "94900000-0000-0000-0000-000000000917"
 assert_sql "DO \$\$ DECLARE v_count int; BEGIN
   SELECT count(*)::int INTO v_count FROM public.cams_kfintech_ingestion_attempts WHERE ingestion_run_id = '94900000-0000-0000-0000-000000000917';
   IF v_count > 1 THEN RAISE EXCEPTION 'scenario17 attempt count %', v_count; END IF;
