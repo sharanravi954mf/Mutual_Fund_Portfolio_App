@@ -55,14 +55,12 @@ BEGIN
 
   -- Setup folio-scoped portfolios for Test Investor
   INSERT INTO public.portfolios (id, client_id, workspace_id, total_invested_value, current_market_value)
-  VALUES
-    ('82500000-0000-0000-0000-000000000001', v_investor_profile_id, '82200000-0000-0000-0000-000000000001', 0.00, 0.00),
-    ('82500000-0000-0000-0000-000000000002', v_investor_profile_id, '82200000-0000-0000-0000-000000000001', 0.00, 0.00);
+  VALUES ('82500000-0000-0000-0000-000000000001', v_investor_profile_id, '82200000-0000-0000-0000-000000000001', 0.00, 0.00);
 
   INSERT INTO public.portfolio_folio_references (portfolio_id, folio_reference_id)
   VALUES
     ('82500000-0000-0000-0000-000000000001', '82400000-0000-0000-0000-000000000001'),
-    ('82500000-0000-0000-0000-000000000002', '82400000-0000-0000-0000-000000000002');
+    ('82500000-0000-0000-0000-000000000001', '82400000-0000-0000-0000-000000000002');
 
   -- 2. Constraint Tests: amount XOR units
   BEGIN

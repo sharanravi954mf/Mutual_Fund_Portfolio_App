@@ -1,182 +1,75 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { ImapClient } from "./imap_client.ts";
-import { RtaFileParser } from "./parser.ts";
-import { DatabaseSyncService } from "./database.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { requireAdvisor } from "../_shared/authorization.ts";
+import {
+  ConnectorCredentialRefresher,
+  ConnectorMailboxClient,
+  HttpMalwareScanner,
+  RemotePdfTextExtractor,
+  supabaseClient,
+  SupabaseConfigRepository,
+  SupabaseEncryptedStorage,
+  SupabasePersistence,
+  SupabaseWorkspaceAuthorizer,
+} from "./adapters.ts";
+import { createCamsKfintechIngestionHandler } from "./handler.ts";
+import { CamsParser, KfintechParser, ParserRegistry } from "./parser.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const client = supabaseClient(serviceRoleKey);
+const pdfExtractor = new RemotePdfTextExtractor(
+  Deno.env.get("PDF_TEXT_EXTRACTOR_URL") || "",
+  Deno.env.get("PDF_TEXT_EXTRACTOR_SERVICE_TOKEN") || "",
+  Number(Deno.env.get("PDF_TEXT_EXTRACTOR_TIMEOUT_MS") || "5000"),
+  Number(Deno.env.get("PDF_TEXT_EXTRACTOR_MAX_RESPONSE_BYTES") || "1048576"),
+  Deno.env.get("ALLOW_INSECURE_PDF_TEXT_EXTRACTOR_URL") === "true",
+);
+const mailboxConnectorUrl = Deno.env.get("MAILBOX_CONNECTOR_URL") || "";
+const mailboxConnectorToken = Deno.env.get("MAILBOX_CONNECTOR_SERVICE_TOKEN") ||
+  "";
+const allowInsecureConnector = Deno.env.get("ALLOW_INSECURE_CONNECTOR_URL") ===
+  "true";
+const mailboxConnectorTimeoutMs = Number(
+  Deno.env.get("MAILBOX_CONNECTOR_TIMEOUT_MS") || "5000",
+);
+const mailboxConnectorMaxResponseBytes = Number(
+  Deno.env.get("MAILBOX_CONNECTOR_MAX_RESPONSE_BYTES") || "1048576",
+);
+const mailboxAttachmentDownloadTimeoutMs = Number(
+  Deno.env.get("MAILBOX_ATTACHMENT_DOWNLOAD_TIMEOUT_MS") || "10000",
+);
 
-async function requestWorkspaceId(req: Request): Promise<string | null> {
-  const headerWorkspaceId = req.headers.get("x-workspace-id")?.trim();
-  if (headerWorkspaceId != null && headerWorkspaceId.length > 0) {
-    return headerWorkspaceId;
-  }
-
-  const contentType = req.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return null;
-  }
-
-  const payload = await req.json().catch(() => null);
-  const workspaceId = payload?.workspace_id;
-  return typeof workspaceId === "string" && workspaceId.trim().length > 0
-    ? workspaceId.trim()
-    : null;
-}
-
-serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  const authorization = await requireAdvisor(req);
-  if ("failure" in authorization) {
-    return new Response(
-      JSON.stringify({ error: authorization.failure.message }),
-      {
-        status: authorization.failure.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
-  }
-
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL") || "",
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
-  );
-
-  const workspaceId = await requestWorkspaceId(req);
-  if (workspaceId == null) {
-    return new Response(
-      JSON.stringify({ error: "workspace_id is required." }),
-      {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("user_id", authorization.userId)
-    .maybeSingle();
-
-  if (profileError != null || profile == null) {
-    return new Response(
-      JSON.stringify({ error: "Advisor access is required." }),
-      {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
-  }
-
-  const { data: membership, error: membershipError } = await supabase
-    .from("workspace_memberships")
-    .select("workspace_id")
-    .eq("workspace_id", workspaceId)
-    .eq("profile_id", profile.id)
-    .eq("status", "active")
-    .in("role", ["advisor", "admin"])
-    .maybeSingle();
-
-  if (membershipError != null || membership == null) {
-    return new Response(
-      JSON.stringify({ error: "Workspace advisor access is required." }),
-      {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
-  }
-
-  // 1. Log beginning of the ingestion job
-  const { data: logEntry } = await supabase
-    .from("ingestion_logs")
-    .insert({ status: "RUNNING" })
-    .select("id")
-    .single();
-
-  const logId = logEntry?.id;
-  let recordsProcessed = 0;
-  let parser: RtaFileParser | null = null;
-
-  try {
-    const imap = new ImapClient();
-    parser = new RtaFileParser();
-    const db = new DatabaseSyncService();
-
-    // 2. Fetch attachments
-    const attachments = await imap.fetchNewReportAttachments();
-
-    // 3. Process each attachment in a single batch
-    for (const attachment of attachments) {
-      const parsedStream = parser.parseFileStream(attachment.filename, attachment.data);
-      const batch = [];
-      for await (const record of parsedStream) {
-        batch.push(record);
-      }
-      if (batch.length > 0) {
-        console.log(`Ingesting batch of ${batch.length} parsed records...`);
-        await db.processParsedRecordsBatch(batch, workspaceId);
-        recordsProcessed += batch.length;
-      }
-    }
-
-    // 4. Update log success status
-    if (logId) {
-      await supabase
-        .from("ingestion_logs")
-        .update({
-          status: "SUCCESS",
-          completed_at: new Date().toISOString(),
-          records_processed: recordsProcessed,
-          log_details: {
-            totalLinesProcessed: parser.totalLinesProcessed,
-            totalRecordsParsed: parser.totalRecordsParsed,
-            totalErrors: parser.totalErrors,
-            errors: parser.errors
-          }
-        })
-        .eq("id", logId);
-    }
-
-    return new Response(JSON.stringify({ 
-      success: true, 
-      processed: recordsProcessed,
-      totalLines: parser.totalLinesProcessed,
-      totalErrors: parser.totalErrors
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    // 5. Update log failure status
-    if (logId) {
-      await supabase
-        .from("ingestion_logs")
-        .update({
-          status: "FAILED",
-          completed_at: new Date().toISOString(),
-          error_message: err instanceof Error ? err.message : String(err),
-          log_details: {
-            totalLinesProcessed: parser?.totalLinesProcessed || 0,
-            totalRecordsParsed: parser?.totalRecordsParsed || 0,
-            totalErrors: parser?.totalErrors || 0,
-            errors: parser?.errors || []
-          }
-        })
-        .eq("id", logId);
-    }
-
-    return new Response(JSON.stringify({ success: false, error: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-});
+serve(createCamsKfintechIngestionHandler({
+  internalToken: Deno.env.get("MONEYBOWL_INTERNAL_INGESTION_TOKEN") || "",
+  workspaceAuthorizer: new SupabaseWorkspaceAuthorizer(client),
+  configRepository: new SupabaseConfigRepository(
+    client,
+    Deno.env.get("MAILBOX_OAUTH_AES256_GCM_KEY_B64") || "",
+    new ConnectorCredentialRefresher(
+      mailboxConnectorUrl,
+      mailboxConnectorToken,
+      allowInsecureConnector,
+      mailboxConnectorTimeoutMs,
+      mailboxConnectorMaxResponseBytes,
+    ),
+  ),
+  mailboxClient: new ConnectorMailboxClient(
+    mailboxConnectorUrl,
+    mailboxConnectorToken,
+    allowInsecureConnector,
+    mailboxConnectorTimeoutMs,
+    mailboxConnectorMaxResponseBytes,
+    mailboxAttachmentDownloadTimeoutMs,
+  ),
+  malwareScanner: new HttpMalwareScanner(
+    Deno.env.get("MALWARE_SCANNER_URL") || "",
+    Deno.env.get("MALWARE_SCANNER_SERVICE_TOKEN") || "",
+    Number(Deno.env.get("MALWARE_SCANNER_TIMEOUT_MS") || "5000"),
+    Number(Deno.env.get("MALWARE_SCANNER_MAX_RESPONSE_BYTES") || "4096"),
+    Deno.env.get("ALLOW_INSECURE_MALWARE_SCANNER_URL") === "true",
+  ),
+  storage: new SupabaseEncryptedStorage(client, "ingested-documents"),
+  parserRegistry: new ParserRegistry([
+    new CamsParser(pdfExtractor),
+    new KfintechParser(pdfExtractor),
+  ]),
+  persistence: new SupabasePersistence(client),
+}));
