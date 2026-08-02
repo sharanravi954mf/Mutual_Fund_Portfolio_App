@@ -1,541 +1,476 @@
-import * as zip from "npm:@zip.js/zip.js";
+import {
+  type NormalizedTransaction,
+  type Registrar,
+  type StatementFileType,
+} from "./types.ts";
+import { IngestionError } from "./types.ts";
 
-export interface ParsedTransaction {
-  clientPan: string;
-  registrar: "CAMS" | "KFINTECH";
-  investorName: string;
-  folioNumber: string;
-  schemeCode: string;
-  schemeName: string;
-  fundHouse: string;
-  category: string;
-  transactionType: "BUY" | "SELL" | "SWITCH";
-  units: number;
-  nav: number;
-  amount: number;
-  date: Date;
-
-  // CAMS WBR9 Blueprint Schema
-  foliochk: string;
-  inv_name: string;
-  address1: string;
-  address2: string;
-  address3: string;
-  city: string;
-  pincode: string;
-  product: string;
-  sch_name: string;
-  rep_date: Date;
-  clos_bal: number;
-  rupee_bal: number;
-  pan_no: string;
-  joint1_pan: string;
-  joint2_pan: string;
-  guard_pan: string;
-  email: string;
-  mobile_no: string;
-  bank_name: string;
-  branch: string;
-  ac_type: string;
-  ac_no: string;
-  ifsc_code: string;
-  nom_name: string;
-  relation: string;
-  nom_percen: number;
-}
-
-export interface ParsingError {
-  line: string;
-  lineNumber: number;
-  reason: string;
-}
-
-interface DbfField {
+type DbfField = {
   name: string;
   type: string;
   length: number;
+};
+
+export type ParseInput = {
+  registrar: Registrar;
+  fileType: StatementFileType;
+  filename: string;
+  bytes: Uint8Array;
+};
+
+export type PdfExtractionInput = ParseInput;
+
+export interface StatementParser {
+  readonly registrar: Registrar;
+  parse(input: ParseInput): Promise<NormalizedTransaction[]>;
 }
 
-function parseDecimal(val: any): number {
-  const parsed = parseFloat(val);
-  if (isNaN(parsed)) return 0;
-  // Format/align decimals up to 6 decimal positions
+export interface PdfTextExtractor {
+  extractRows(input: PdfExtractionInput): Promise<Record<string, unknown>[]>;
+}
+
+type FieldAliases = {
+  transactionCode: string[];
+  units: string[];
+  amount: string[];
+  nav: string[];
+  date: string[];
+  pan: string[];
+  folioNumber: string[];
+  schemeCode: string[];
+  schemeName: string[];
+  fundHouse: string[];
+  category: string[];
+  investorName: string[];
+  registrarTransactionId: string[];
+};
+
+type TransactionCodeRule = {
+  type: "BUY" | "SELL" | "SWITCH";
+  sign: "positive" | "negative";
+  direction: "INFLOW" | "OUTFLOW";
+};
+
+const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+const fieldAliases: Record<Registrar, FieldAliases> = {
+  CAMS: {
+    transactionCode: ["TRX_TYPE", "TRXN_TYPE", "TRDESC", "TRADESC"],
+    units: ["UNITS", "TRXN_UNITS", "UNIT_BAL"],
+    amount: ["AMOUNT", "TRXN_AMOUNT", "AMT"],
+    nav: ["NAV", "PURPRICE"],
+    date: ["TRX_DATE", "TRXN_DATE", "POSTDATE"],
+    pan: ["PAN", "INV_PAN", "APPL_PAN"],
+    folioNumber: ["FOLIO_NO", "FOLIOCHK", "FOLIO"],
+    schemeCode: ["SCHEME_CD", "PRODCODE", "PRODUCT"],
+    schemeName: ["SCHEME_NM", "SCHEME_NAME"],
+    fundHouse: ["FUND_HOUSE", "AMC_NAME"],
+    category: ["CATEGORY", "SCHEME_CAT"],
+    investorName: ["INV_NAME", "INVESTOR_NAME"],
+    registrarTransactionId: ["TRX_ID", "TRXNNO", "REGISTRAR_TXN_ID"],
+  },
+  KFINTECH: {
+    transactionCode: ["TD_TRTYPE", "TRTYPE", "TRDESC", "TRAN_TYPE"],
+    units: ["TD_UNITS", "UNITS", "TR_UNITS"],
+    amount: ["TD_AMT", "AMOUNT", "TR_AMT"],
+    nav: ["TD_NAV", "NAV", "PRICE"],
+    date: ["TD_TRDATE", "TR_DATE", "POST_DATE"],
+    pan: ["PAN1", "PAN", "IHNO"],
+    folioNumber: ["ACNO", "FOLIO_NO", "FOLIO"],
+    schemeCode: ["FUNDCODE", "SCHEME", "SCH_CODE"],
+    schemeName: ["FUND_DESC", "SCHEME_NAME", "SCH_NAME"],
+    fundHouse: ["AMC_CODE", "AMC_NAME", "FUND_HOUSE"],
+    category: ["ASSETTYPE", "CATEGORY", "SCHEME_CAT"],
+    investorName: ["INVNAME", "INVESTOR_NAME", "NAME"],
+    registrarTransactionId: ["TD_TRNO", "TRNO", "REGISTRAR_TXN_ID"],
+  },
+};
+
+const transactionCodeRules: Record<
+  Registrar,
+  Record<string, TransactionCodeRule>
+> = {
+  CAMS: {
+    BUY: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    PURCHASE: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    PUR: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    SIP: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    SELL: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    REDEMPTION: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    RED: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    SWITCHIN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SWITCH_IN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SWITCHOUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+    SWITCH_OUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+  },
+  KFINTECH: {
+    P: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    PURCHASE: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    ADDITIONAL_PURCHASE: {
+      type: "BUY",
+      sign: "positive",
+      direction: "INFLOW",
+    },
+    SIP: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    R: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    REDEMPTION: { type: "SELL", sign: "negative", direction: "OUTFLOW" },
+    FULL_REDEMPTION: {
+      type: "SELL",
+      sign: "negative",
+      direction: "OUTFLOW",
+    },
+    SI: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SWITCH_IN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
+    SO: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+    SWITCH_OUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+  },
+};
+
+function parseDecimal(value: unknown, allowZero = false): number {
+  const raw = String(value ?? "").replace(/,/g, "").trim();
+  if (!/^-?\d+(\.\d+)?$/.test(raw)) {
+    throw new IngestionError("parse_failed");
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new IngestionError("parse_failed");
+  }
+  if (allowZero ? parsed < 0 : parsed <= 0) {
+    throw new IngestionError("parse_failed");
+  }
   return Math.round(parsed * 1000000) / 1000000;
 }
 
-function registrarFromFilename(filename: string): "CAMS" | "KFINTECH" {
-  return filename.toLowerCase().includes("kfin") ? "KFINTECH" : "CAMS";
+function parseSignedDecimal(value: unknown): number {
+  const raw = String(value ?? "").replace(/,/g, "").trim();
+  if (!/^-?\d+(\.\d+)?$/.test(raw)) {
+    throw new IngestionError("parse_failed");
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed === 0) {
+    throw new IngestionError("parse_failed");
+  }
+  return Math.round(parsed * 1000000) / 1000000;
 }
 
-// 1. Pure TypeScript DBF File Format Parser
-function parseDbf(data: Uint8Array): Array<Record<string, any>> {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  
-  // Read dBASE III header details
-  const numRecords = view.getUint32(4, true);
+function parseDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  let year: number;
+  let month: number;
+  let day: number;
+  if (/^\d{8}$/.test(raw)) {
+    year = Number(raw.substring(0, 4));
+    month = Number(raw.substring(4, 6));
+    day = Number(raw.substring(6, 8));
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    year = Number(raw.substring(0, 4));
+    month = Number(raw.substring(5, 7));
+    day = Number(raw.substring(8, 10));
+  } else {
+    throw new IngestionError("parse_failed");
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() + 1 !== month ||
+    date.getUTCDate() !== day
+  ) {
+    throw new IngestionError("parse_failed");
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function getValue(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    const foundKey = Object.keys(record).find((candidate) =>
+      candidate.toUpperCase() === key.toUpperCase()
+    );
+    if (foundKey != null) return record[foundKey];
+  }
+  return undefined;
+}
+
+function normalizeCode(value: unknown): string {
+  const code = String(value ?? "").trim().toUpperCase();
+  if (code === "") throw new IngestionError("parse_failed");
+  return code.replace(/[\s/-]+/g, "_").replace(/_+/g, "_");
+}
+
+function lookupTransactionRule(
+  registrar: Registrar,
+  value: unknown,
+): { code: string; rule: TransactionCodeRule } {
+  const code = normalizeCode(value);
+  const rule = transactionCodeRules[registrar][code];
+  if (rule == null) {
+    throw new IngestionError("parse_failed");
+  }
+  return { code, rule };
+}
+
+function validateSignedMagnitude(
+  value: number,
+  rule: TransactionCodeRule,
+): number {
+  if (rule.sign === "positive" && value <= 0) {
+    throw new IngestionError("parse_failed");
+  }
+  if (rule.sign === "negative" && value >= 0) {
+    throw new IngestionError("parse_failed");
+  }
+  return Math.round(Math.abs(value) * 1000000) / 1000000;
+}
+
+function normalizedPan(value: unknown): string {
+  const pan = String(value ?? "").toUpperCase().trim();
+  if (!panPattern.test(pan)) {
+    throw new IngestionError("parse_failed");
+  }
+  return pan;
+}
+
+function normalizeTransaction(
+  record: Record<string, unknown>,
+  registrar: Registrar,
+  sourceRowNumber: number,
+): NormalizedTransaction {
+  const aliases = fieldAliases[registrar];
+  const { code, rule } = lookupTransactionRule(
+    registrar,
+    getValue(record, aliases.transactionCode),
+  );
+
+  const units = validateSignedMagnitude(
+    parseSignedDecimal(getValue(record, aliases.units)),
+    rule,
+  );
+  const amount = validateSignedMagnitude(
+    parseSignedDecimal(getValue(record, aliases.amount)),
+    rule,
+  );
+  const nav = parseDecimal(getValue(record, aliases.nav));
+  const date = parseDate(getValue(record, aliases.date));
+  const clientPan = normalizedPan(getValue(record, aliases.pan));
+  const folioNumber = String(
+    getValue(record, aliases.folioNumber) ?? "",
+  ).trim();
+  const schemeCode = String(
+    getValue(record, aliases.schemeCode) ?? "",
+  ).trim();
+  const investorName = String(
+    getValue(record, aliases.investorName) ?? "",
+  ).trim();
+
+  if (
+    folioNumber === "" || schemeCode === "" || investorName === "" ||
+    sourceRowNumber <= 0 || !Number.isInteger(sourceRowNumber)
+  ) {
+    throw new IngestionError("parse_failed");
+  }
+
+  return {
+    registrar,
+    clientPan,
+    investorName,
+    folioNumber,
+    schemeCode,
+    schemeName: String(
+      getValue(record, aliases.schemeName) ?? schemeCode,
+    ).trim(),
+    fundHouse: String(
+      getValue(record, aliases.fundHouse) ?? "Mutual Fund",
+    ).trim(),
+    category: String(
+      getValue(record, aliases.category) ?? "Mutual Fund",
+    ).trim(),
+    transactionType: rule.type,
+    transactionDirection: rule.direction,
+    registrarTransactionCode: code,
+    units,
+    nav,
+    amount,
+    date,
+    sourceRowNumber,
+    registrarTransactionId:
+      String(getValue(record, aliases.registrarTransactionId) ?? "")
+        .trim() ||
+      undefined,
+  };
+}
+
+function parseDbf(bytes: Uint8Array): Record<string, unknown>[] {
+  if (bytes.byteLength < 33) {
+    throw new IngestionError("unsupported_statement_format");
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const recordCount = view.getUint32(4, true);
   const headerLength = view.getUint16(8, true);
   const recordLength = view.getUint16(10, true);
-  
-  // Read field descriptors
+
+  if (
+    headerLength >= bytes.byteLength || bytes[headerLength - 1] !== 0x0d ||
+    recordLength <= 1
+  ) {
+    throw new IngestionError("unsupported_statement_format");
+  }
+
   const fields: DbfField[] = [];
   let offset = 32;
-  
-  while (offset < data.length && data[offset] !== 0x0D) {
-    // Field name (11 bytes, null-padded)
-    const nameBytes = data.subarray(offset, offset + 11);
-    let name = "";
-    for (let i = 0; i < nameBytes.length; i++) {
-      if (nameBytes[i] === 0) break;
-      name += String.fromCharCode(nameBytes[i]);
+  while (offset + 32 <= headerLength - 1) {
+    const nameBytes = bytes.subarray(offset, offset + 11);
+    const zero = nameBytes.indexOf(0);
+    const name = new TextDecoder().decode(
+      zero === -1 ? nameBytes : nameBytes.subarray(0, zero),
+    ).trim();
+    const type = String.fromCharCode(bytes[offset + 11]);
+    const length = bytes[offset + 16];
+    if (name !== "" && length > 0) {
+      fields.push({ name, type, length });
     }
-    name = name.trim();
-    
-    // Field type (1 byte at offset 11)
-    const type = String.fromCharCode(data[offset + 11]);
-    
-    // Field length (1 byte at offset 16)
-    const length = data[offset + 16];
-    
-    fields.push({ name, type, length });
     offset += 32;
   }
-  
-  // Records begin at offset headerLength
+
+  if (fields.length === 0) {
+    throw new IngestionError("unsupported_statement_format");
+  }
+
+  const records: Record<string, unknown>[] = [];
   let recordOffset = headerLength;
-  const records: Array<Record<string, any>> = [];
-  
-  for (let r = 0; r < numRecords; r++) {
-    if (recordOffset + recordLength > data.length) break;
-    
-    // Check deletion flag (0x2A '*' means deleted, 0x20 ' ' means active)
-    const isDeleted = data[recordOffset] === 0x2A;
-    if (!isDeleted) {
-      const record: Record<string, any> = {};
-      let fieldOffset = recordOffset + 1; // Skip the deletion flag
-      
+  const decoder = new TextDecoder();
+  for (let index = 0; index < recordCount; index++) {
+    if (recordOffset + recordLength > bytes.byteLength) {
+      throw new IngestionError("unsupported_statement_format");
+    }
+    const deleted = bytes[recordOffset] === 0x2a;
+    if (!deleted) {
+      const record: Record<string, unknown> = {};
+      let fieldOffset = recordOffset + 1;
       for (const field of fields) {
-        const fieldBytes = data.subarray(fieldOffset, fieldOffset + field.length);
-        let valStr = "";
-        for (let i = 0; i < fieldBytes.length; i++) {
-          valStr += String.fromCharCode(fieldBytes[i]);
-        }
-        valStr = valStr.trim();
-        
-        // Convert to numeric if field is Numeric or Float
-        if (field.type === 'N' || field.type === 'F') {
-          record[field.name] = valStr ? parseFloat(valStr) : 0;
-        } else {
-          record[field.name] = valStr;
-        }
-        
+        const raw = decoder.decode(
+          bytes.subarray(fieldOffset, fieldOffset + field.length),
+        ).trim();
+        record[field.name] = field.type === "N" || field.type === "F"
+          ? raw
+          : raw;
         fieldOffset += field.length;
       }
       records.push(record);
     }
-    
     recordOffset += recordLength;
   }
-  
   return records;
 }
 
-// 2. Map CAMS WBR9 keys to dynamic ParsedTransaction model
-function mapDbfRecordToTransaction(rec: Record<string, any>): ParsedTransaction {
-  const getVal = (keys: string[]): any => {
-    for (const k of keys) {
-      if (rec[k] !== undefined) return rec[k];
-      const upperK = k.toUpperCase();
-      const match = Object.keys(rec).find(rk => rk.toUpperCase() === upperK);
-      if (match) return rec[match];
-    }
-    return null;
-  };
+abstract class BaseRegistrarParser implements StatementParser {
+  abstract readonly registrar: Registrar;
 
-  // CAMS WBR9 Explicit Alphanumeric, Date and Numeric Attributes
-  const foliochk = String(getVal(["foliochk", "folio_no", "folio"]) || "").trim();
-  const inv_name = String(getVal(["inv_name", "holder_name", "name", "inv_nm"]) || "Unknown").trim();
-  const address1 = String(getVal(["address1", "add1"]) || "").trim();
-  const address2 = String(getVal(["address2", "add2"]) || "").trim();
-  const address3 = String(getVal(["address3", "add3"]) || "").trim();
-  const city = String(getVal(["city"]) || "").trim();
-  const pincode = String(getVal(["pincode", "pin"]) || "").trim();
-  const product = String(getVal(["product", "prodcode", "scheme_cd", "sch_code", "fm_code"]) || "").trim();
-  const sch_name = String(getVal(["sch_name", "scheme", "scheme_nm", "scheme_name", "fm_name"]) || "Unknown Scheme").trim();
-  
-  const rawRepDate = getVal(["rep_date", "trx_date", "tx_date", "date", "execution_date"]);
-  let rep_date = new Date();
-  if (rawRepDate) {
-    const dStr = String(rawRepDate).trim();
-    if (dStr.length === 8 && /^\d+$/.test(dStr)) {
-      // YYYYMMDD format support
-      const y = parseInt(dStr.substring(0, 4));
-      const m = parseInt(dStr.substring(4, 6)) - 1;
-      const d = parseInt(dStr.substring(6, 8));
-      rep_date = new Date(y, m, d);
-    } else {
-      rep_date = new Date(dStr);
-    }
-  }
-  
-  // Align decimals up to 6 decimal positions
-  const clos_bal = parseDecimal(getVal(["clos_bal", "units", "qty", "unit_qty"]));
-  const rupee_bal = parseDecimal(getVal(["rupee_bal", "amount", "amt", "trx_amt"]));
-  
-  const pan_no = String(getVal(["pan_no", "pan", "appl_pan"]) || "").toUpperCase().trim();
-  const joint1_pan = String(getVal(["joint1_pan"]) || "").toUpperCase().trim();
-  const joint2_pan = String(getVal(["joint2_pan"]) || "").toUpperCase().trim();
-  const guard_pan = String(getVal(["guard_pan"]) || "").toUpperCase().trim();
-  
-  const email = String(getVal(["email"]) || "").trim();
-  const mobile_no = String(getVal(["mobile_no", "mobile"]) || "").trim();
-  
-  const bank_name = String(getVal(["bank_name", "bank"]) || "").trim();
-  const branch = String(getVal(["branch"]) || "").trim();
-  const ac_type = String(getVal(["ac_type"]) || "").trim();
-  const ac_no = String(getVal(["ac_no", "acno"]) || "").trim();
-  const ifsc_code = String(getVal(["ifsc_code", "ifsc"]) || "").trim();
-  
-  const nom_name = String(getVal(["nom_name", "nominee"]) || "").trim();
-  const relation = String(getVal(["relation"]) || "").trim();
-  const nom_percen = parseDecimal(getVal(["nom_percen", "nominee_percent"]));
+  constructor(private readonly pdfTextExtractor?: PdfTextExtractor) {}
 
-  // Backward compatible mappings for portfolios sync
-  const clientPan = pan_no;
-  const investorName = inv_name;
-  const folioNumber = foliochk;
-  const schemeCode = product;
-  const schemeName = sch_name;
-  const fundHouse = String(getVal(["fund_house", "fm_house", "amc_name", "amc"]) || "Mutual Fund").trim();
-  const category = String(getVal(["category", "scheme_cat", "cat"]) || "Mutual Fund").trim();
-  
-  const rawType = String(getVal(["trx_type", "tx_type", "type", "tr_type"]) || "").toUpperCase();
-  let transactionType: "BUY" | "SELL" | "SWITCH" = "BUY";
-  if (rawType.includes("SELL") || rawType.includes("RED") || rawType.includes("OUT") || clos_bal < 0) {
-    transactionType = "SELL";
-  } else if (rawType.includes("SWITCH") || rawType.includes("SWI")) {
-    transactionType = "SWITCH";
+  async parse(input: ParseInput): Promise<NormalizedTransaction[]> {
+    if (input.registrar !== this.registrar) {
+      throw new IngestionError("unsupported_registrar");
+    }
+
+    const records = input.fileType === "DBF"
+      ? parseDbf(input.bytes)
+      : await this.extractPdfRows(input);
+
+    const parsed = records.map((record, index) =>
+      normalizeTransaction(record, this.registrar, index + 1)
+    );
+    if (parsed.length === 0) {
+      throw new IngestionError("parse_failed");
+    }
+    return parsed;
   }
 
-  const units = Math.abs(clos_bal);
-  const amount = Math.abs(rupee_bal);
-  const navVal = parseFloat(getVal(["nav", "price", "rate"]) || "0");
-  const nav = navVal > 0 ? navVal : (units > 0 ? Math.round((amount / units) * 10000) / 10000 : 0);
-
-  return {
-    clientPan,
-    registrar: "CAMS",
-    investorName,
-    folioNumber,
-    schemeCode,
-    schemeName,
-    fundHouse,
-    category,
-    transactionType,
-    units,
-    nav,
-    amount,
-    date: rep_date,
-
-    foliochk,
-    inv_name,
-    address1,
-    address2,
-    address3,
-    city,
-    pincode,
-    product,
-    sch_name,
-    rep_date,
-    clos_bal,
-    rupee_bal,
-    pan_no,
-    joint1_pan,
-    joint2_pan,
-    guard_pan,
-    email,
-    mobile_no,
-    bank_name,
-    branch,
-    ac_type,
-    ac_no,
-    ifsc_code,
-    nom_name,
-    relation,
-    nom_percen
-  };
+  private async extractPdfRows(
+    input: ParseInput,
+  ): Promise<Record<string, unknown>[]> {
+    if (this.pdfTextExtractor == null) {
+      throw new IngestionError("unsupported_statement_format");
+    }
+    return await this.pdfTextExtractor.extractRows(input);
+  }
 }
 
-// 3. Schema and values validation helper
-function validateParsedTransaction(tx: ParsedTransaction): string[] {
-  const errors: string[] = [];
-  if (!tx.foliochk) errors.push("Folio number is missing");
-  
-  const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-  if (!tx.pan_no) {
-    errors.push("PAN is missing");
-  } else if (!panRegex.test(tx.pan_no.toUpperCase())) {
-    errors.push("PAN format is invalid");
-  }
-  
-  if (!tx.inv_name) errors.push("Investor name is missing");
-  if (!tx.product) errors.push("Scheme product code is missing");
-  if (!tx.sch_name) errors.push("Scheme name is missing");
-  
-  if (isNaN(tx.clos_bal)) {
-    errors.push(`Invalid closing balance: "${tx.clos_bal}"`);
-  }
-  
-  if (isNaN(tx.rupee_bal)) {
-    errors.push(`Invalid rupee balance: "${tx.rupee_bal}"`);
-  }
-  
-  if (isNaN(tx.rep_date.getTime())) {
-    errors.push(`Invalid date format: "${tx.rep_date}"`);
-  }
-  
-  return errors;
+export class CamsParser extends BaseRegistrarParser {
+  readonly registrar = "CAMS" as const;
 }
 
-export class RtaFileParser {
-  private decryptionPassword = Deno.env.get("RTA_DECRYPTION_PASSWORD") || "";
+export class KfintechParser extends BaseRegistrarParser {
+  readonly registrar = "KFINTECH" as const;
+}
 
-  // Track metrics for reporting/validation
-  public totalLinesProcessed = 0;
-  public totalRecordsParsed = 0;
-  public totalErrors = 0;
-  public errors: ParsingError[] = [];
+export class ParserRegistry {
+  private readonly parsers: Map<Registrar, StatementParser>;
 
-  /**
-   * Decrypts (if needed) and parses an RTA file.
-   * Supports password-protected ZIP archive extraction and binary DBF database parsing.
-   */
-  async *parseFileStream(filename: string, fileData: Uint8Array): AsyncGenerator<ParsedTransaction> {
-    let dataToParse = fileData;
-    let targetFilename = filename;
-
-    // Check if attachment is a ZIP archive
-    if (filename.toLowerCase().endsWith(".zip")) {
-      console.log(`Unzipping password-protected archive: ${filename}`);
-      try {
-        const zipReader = new zip.ZipReader(new zip.Uint8ArrayReader(fileData), {
-          password: this.decryptionPassword || "cams123"
-        });
-        const entries = await zipReader.getEntries();
-        
-        // Search for DBF, TXT, or CSV targets
-        const targetEntry = entries.find(e => 
-          e.filename.toLowerCase().endsWith(".dbf") || 
-          e.filename.toLowerCase().endsWith(".txt") ||
-          e.filename.toLowerCase().endsWith(".csv")
-        );
-        
-        if (!targetEntry) {
-          throw new Error("No parseable .dbf, .txt, or .csv files found inside ZIP archive.");
-        }
-        
-        console.log(`Extracting file: ${targetEntry.filename}`);
-        const uint8Writer = new zip.Uint8ArrayWriter();
-        dataToParse = await (targetEntry as any).getData(uint8Writer);
-        targetFilename = targetEntry.filename;
-      } catch (err) {
-        console.error("ZIP decompression failed:", err);
-        throw new Error(`Failed to decrypt and extract ZIP archive: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    // Check if target file is a dBASE database file (.dbf)
-    if (targetFilename.toLowerCase().endsWith(".dbf")) {
-      console.log(`Parsing DBF database structure: ${targetFilename}`);
-      try {
-        const records = parseDbf(dataToParse);
-        console.log(`Successfully extracted ${records.length} records from DBF.`);
-        
-        let rowNum = 0;
-        for (const rec of records) {
-          rowNum++;
-          this.totalLinesProcessed++; // Map DBF records to lines processed for logging
-          
-          const transaction = mapDbfRecordToTransaction(rec);
-          transaction.registrar = registrarFromFilename(filename);
-          const validationErrors = validateParsedTransaction(transaction);
-          
-          if (validationErrors.length > 0) {
-            this.totalErrors++;
-            this.errors.push({
-              line: "[REDACTED]",
-              lineNumber: rowNum,
-              reason: validationErrors.join(", ")
-            });
-            continue;
-          }
-          
-          this.totalRecordsParsed++;
-          yield transaction;
-        }
-        return;
-      } catch (err) {
-        console.error("DBF parsing failed:", err);
-        throw new Error(`Failed to parse DBF database: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    // Default line-by-line fallback text parser for CSV/TXT
-    const rawData = await this.decryptAttachmentIfNeeded(targetFilename, dataToParse);
-    
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(rawData);
-        controller.close();
-      }
-    });
-
-    const textStream = stream.pipeThrough(new TextDecoderStream());
-    const reader = textStream.getReader();
-    let { value: chunk, done } = await reader.read();
-    let remaining = "";
-    let lineNum = 0;
-
-    while (!done) {
-      const lines = (remaining + chunk).split(/\r?\n/);
-      remaining = lines.pop() || "";
-
-      for (const line of lines) {
-        lineNum++;
-        this.totalLinesProcessed++;
-        const parsed = this.parseLine(line, targetFilename, lineNum);
-        if (parsed) {
-          parsed.registrar = registrarFromFilename(filename);
-          this.totalRecordsParsed++;
-          yield parsed;
-        }
-      }
-
-      const res = await reader.read();
-      chunk = res.value;
-      done = res.done;
-    }
-
-    if (remaining.trim()) {
-      lineNum++;
-      this.totalLinesProcessed++;
-      const parsed = this.parseLine(remaining, targetFilename, lineNum);
-      if (parsed) {
-        parsed.registrar = registrarFromFilename(filename);
-        this.totalRecordsParsed++;
-        yield parsed;
-      }
-    }
+  constructor(parsers: StatementParser[]) {
+    this.parsers = new Map(parsers.map((parser) => [parser.registrar, parser]));
   }
 
-  private async decryptAttachmentIfNeeded(filename: string, fileData: Uint8Array): Promise<Uint8Array> {
-    return fileData;
+  async parse(input: ParseInput): Promise<NormalizedTransaction[]> {
+    const parser = this.parsers.get(input.registrar);
+    if (parser == null) {
+      throw new IngestionError("unsupported_registrar");
+    }
+    return await parser.parse(input);
   }
+}
 
-  private parseLine(line: string, filename: string, lineNum: number): ParsedTransaction | null {
-    const trimmed = line.trim();
-    if (!trimmed) return null;
+export function createSyntheticDbf(
+  records: Record<string, string>[],
+  fields?: DbfField[],
+): Uint8Array {
+  const dbfFields = fields ?? [
+    { name: "PAN", type: "C", length: 10 },
+    { name: "INV_NAME", type: "C", length: 24 },
+    { name: "FOLIO_NO", type: "C", length: 16 },
+    { name: "SCHEME_CD", type: "C", length: 12 },
+    { name: "SCHEME_NM", type: "C", length: 32 },
+    { name: "FUND_HOUSE", type: "C", length: 28 },
+    { name: "CATEGORY", type: "C", length: 18 },
+    { name: "TRX_TYPE", type: "C", length: 12 },
+    { name: "UNITS", type: "N", length: 14 },
+    { name: "NAV", type: "N", length: 12 },
+    { name: "AMOUNT", type: "N", length: 14 },
+    { name: "TRX_DATE", type: "C", length: 8 },
+  ];
+  const headerLength = 32 + dbfFields.length * 32 + 1;
+  const recordLength = 1 +
+    dbfFields.reduce((sum, field) => sum + field.length, 0);
+  const bytes = new Uint8Array(headerLength + recordLength * records.length);
+  const view = new DataView(bytes.buffer);
+  bytes[0] = 0x03;
+  view.setUint32(4, records.length, true);
+  view.setUint16(8, headerLength, true);
+  view.setUint16(10, recordLength, true);
 
-    const lower = trimmed.toLowerCase();
-    if (lower.includes("folio") && (lower.includes("pan") || lower.includes("scheme"))) {
-      return null;
-    }
-
-    const delimiter = trimmed.includes(";") ? ";" : (trimmed.includes(",") ? "," : null);
-    if (!delimiter) {
-      this.totalErrors++;
-      this.errors.push({
-        line: "[REDACTED]",
-        lineNumber: lineNum,
-        reason: "No valid delimiter (; or ,) found in line."
-      });
-      return null;
-    }
-
-    const parts = trimmed.split(delimiter).map(p => p.trim());
-    if (parts.length < 12) {
-      this.totalErrors++;
-      this.errors.push({
-        line: "[REDACTED]",
-        lineNumber: lineNum,
-        reason: `Incorrect number of fields: expected at least 12, got ${parts.length}`
-      });
-      return null;
-    }
-
-    const [
-      folio,
-      pan,
-      name,
-      schemeCode,
-      schemeName,
-      fundHouse,
-      category,
-      type,
-      unitsStr,
-      navStr,
-      amountStr,
-      dateStr
-    ] = parts;
-
-    // Convert parsed CSV line to the ParsedTransaction blueprint structure
-    const clos_bal = parseDecimal(unitsStr);
-    const rupee_bal = parseDecimal(amountStr);
-    const rep_date = new Date(dateStr);
-
-    const transaction = {
-      clientPan: pan.toUpperCase(),
-      registrar: registrarFromFilename(filename),
-      investorName: name,
-      folioNumber: folio,
-      schemeCode,
-      schemeName,
-      fundHouse,
-      category,
-      transactionType: type.toUpperCase() as "BUY" | "SELL" | "SWITCH",
-      units: clos_bal,
-      nav: parseFloat(navStr),
-      amount: rupee_bal,
-      date: rep_date,
-
-      foliochk: folio,
-      inv_name: name,
-      address1: "",
-      address2: "",
-      address3: "",
-      city: "",
-      pincode: "",
-      product: schemeCode,
-      sch_name: schemeName,
-      rep_date,
-      clos_bal,
-      rupee_bal,
-      pan_no: pan.toUpperCase(),
-      joint1_pan: "",
-      joint2_pan: "",
-      guard_pan: "",
-      email: "",
-      mobile_no: "",
-      bank_name: "",
-      branch: "",
-      ac_type: "",
-      ac_no: "",
-      ifsc_code: "",
-      nom_name: "",
-      relation: "",
-      nom_percen: 0.0
-    };
-
-    const validationErrors = validateParsedTransaction(transaction);
-    if (validationErrors.length > 0) {
-      this.totalErrors++;
-      this.errors.push({
-        line: "[REDACTED]",
-        lineNumber: lineNum,
-        reason: validationErrors.join(", ")
-      });
-      return null;
-    }
-
-    return transaction;
+  const encoder = new TextEncoder();
+  let offset = 32;
+  for (const field of dbfFields) {
+    bytes.set(encoder.encode(field.name).subarray(0, 11), offset);
+    bytes[offset + 11] = field.type.charCodeAt(0);
+    bytes[offset + 16] = field.length;
+    offset += 32;
   }
+  bytes[offset] = 0x0d;
+
+  records.forEach((record, recordIndex) => {
+    let recordOffset = headerLength + recordIndex * recordLength;
+    bytes[recordOffset] = 0x20;
+    recordOffset += 1;
+    for (const field of dbfFields) {
+      const value = (record[field.name] ?? "").padEnd(field.length, " ").slice(
+        0,
+        field.length,
+      );
+      bytes.set(encoder.encode(value), recordOffset);
+      recordOffset += field.length;
+    }
+  });
+
+  return bytes;
 }

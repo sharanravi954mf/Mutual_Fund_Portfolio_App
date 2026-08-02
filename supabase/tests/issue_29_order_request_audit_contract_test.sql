@@ -980,7 +980,7 @@ DECLARE
     'advisor',
     'advisor_portal',
     'SCH29-ADV',
-    'sell',
+    'buy',
     1200.00,
     'pending_qualification'
   )

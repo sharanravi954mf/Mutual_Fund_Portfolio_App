@@ -341,7 +341,7 @@ BEGIN
 	    'advisor',
 	    'advisor_portal',
 	    'SCH102',
-	    'sell',
+	    'buy',
 	    1000.00,
 	    'pending_review'
 	  );
@@ -391,7 +391,7 @@ BEGIN
 	    'advisor',
 	    'advisor_portal',
 	    'SCH103',
-	    'sell',
+	    'buy',
 	    1000.00,
 	    'pending_review'
 	  );
