@@ -1,4 +1,5 @@
 import '../domain/qualification_queue_models.dart';
+import '../domain/order_models.dart';
 
 abstract class QualificationQueueSubscription {
   Future<void> cancel();
@@ -19,7 +20,15 @@ abstract class QualificationQueueRepository {
     required String reviewerProfileId,
   });
 
-  Future<void> qualifyOrder({
+  Future<int> fetchPendingReviewCount({
+    required String reviewerProfileId,
+  });
+
+  Future<OrderStatus?> fetchOrderStatus({
+    required String orderId,
+  });
+
+  Future<QualificationOrderResult> qualifyOrder({
     required String orderId,
     required QualificationDecision decision,
     String? rejectionReason,

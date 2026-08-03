@@ -20,14 +20,12 @@ import 'package:mutual_fund_portfolio_app/providers/theme_provider.dart';
 
 void main() {
   group('QualificationQueueItem', () {
-    test('maps pending review display data and masks investor details', () {
+    test('maps pending review display data without raw contact PII', () {
       final item = _queueItem();
 
       expect(item.status, OrderStatus.pendingReview);
       expect(item.orderTypeLabel, 'Buy');
       expect(item.schemeDisplay, 'HDFC Top 100 (SCH-001)');
-      expect(item.maskedEmail, 'ra•••@example.com');
-      expect(item.maskedPhone, '••••••3210');
       expect(item.isSameInitiator(_advisorId), isTrue);
       expect(item.isSameInitiator(_investorId), isFalse);
     });
@@ -133,6 +131,143 @@ void main() {
       expect(timers.every((timer) => timer.cancelled), isTrue);
       expect(repository.cancelledSubscriptions, 1);
     });
+
+    test('network timeout reconciles a decision that actually succeeded',
+        () async {
+      final repository = _FakeQualificationQueueRepository(
+        snapshots: [
+          QualificationQueueSnapshot(
+            items: [_queueItem()],
+            fetchedAt: DateTime.utc(2026, 8, 4),
+          ),
+          QualificationQueueSnapshot(
+            items: const [],
+            fetchedAt: DateTime.utc(2026, 8, 4, 0, 0, 1),
+          ),
+        ],
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.network,
+          'The network connection is unavailable. Please try again.',
+        ),
+        statusResponses: [OrderStatus.approved],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.approve(controller.items.single);
+
+      expect(repository.qualifyCalls.length, 1);
+      expect(repository.statusFetchCalls, 1);
+      expect(controller.message, 'Order approved.');
+      expect(controller.errorMessage, isNull);
+      controller.dispose();
+    });
+
+    test('network timeout keeps pending order retry deliberate', () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.network,
+          'The network connection is unavailable. Please try again.',
+        ),
+        statusResponses: [OrderStatus.pendingReview],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.approve(controller.items.single);
+
+      expect(repository.qualifyCalls.length, 1);
+      expect(repository.statusFetchCalls, 1);
+      expect(controller.message, isNull);
+      expect(controller.errorMessage, contains('not confirmed'));
+      expect(controller.items, isNotEmpty);
+      controller.dispose();
+    });
+
+    test('ambiguous response refreshes without automatic resubmission',
+        () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.ambiguous,
+          'The qualification result could not be confirmed.',
+        ),
+        statusResponses: [OrderStatus.pendingReview],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.reject(controller.items.single, '  Check offline  ');
+
+      expect(repository.qualifyCalls.length, 1);
+      expect(repository.qualifyCalls.single.rejectionReason, 'Check offline');
+      expect(repository.statusFetchCalls, 1);
+      expect(repository.fetchCalls, greaterThanOrEqualTo(2));
+      expect(controller.errorMessage, contains('not confirmed'));
+      controller.dispose();
+    });
+
+    test('count controller refreshes on realtime, bus, fallback and dispose',
+        () async {
+      final repository = _FakeQualificationQueueRepository(counts: [2, 1, 0]);
+      final oneShotCallbacks = <void Function()>[];
+      final periodicCallbacks = <void Function(Timer)>[];
+      final timers = <_FakeTimer>[];
+      final controller = QualificationQueueCountController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+        periodicTimerFactory: (duration, callback) {
+          periodicCallbacks.add(callback);
+          final timer = _FakeTimer();
+          timers.add(timer);
+          return timer;
+        },
+        oneShotTimerFactory: (duration, callback) {
+          final timer = _FakeTimer();
+          oneShotCallbacks.add(() {
+            timer.cancel();
+            callback();
+          });
+          timers.add(timer);
+          return timer;
+        },
+      );
+
+      await controller.start();
+      expect(controller.count, 2);
+
+      controller.realtimeChangedForTest();
+      oneShotCallbacks.removeLast()();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.count, 1);
+
+      QualificationQueueRefreshBus.notifyChanged();
+      await Future<void>.delayed(Duration.zero);
+      oneShotCallbacks.removeLast()();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.count, 0);
+
+      periodicCallbacks.single(_FakeTimer());
+      await Future<void>.delayed(Duration.zero);
+      expect(repository.countCalls, 4);
+
+      controller.dispose();
+      await Future<void>.delayed(Duration.zero);
+      expect(timers.every((timer) => timer.cancelled), isTrue);
+      expect(repository.cancelledSubscriptions, 1);
+    });
   });
 
   group('SupabaseQualificationQueueRepository', () {
@@ -178,14 +313,10 @@ void main() {
           {
             'id': _investorId,
             'full_name': 'Ravi Investor',
-            'email': 'ravi@example.com',
-            'phone_number': '9876543210',
           },
           {
             'id': _advisorId,
             'full_name': 'Ravi Advisor',
-            'email': 'advisor@example.com',
-            'phone_number': '9123456780',
           },
         ],
         'mutual_funds': [
@@ -208,6 +339,131 @@ void main() {
           snapshot.items
               .every((item) => item.status == OrderStatus.pendingReview),
           isTrue);
+      expect(client.selectCalls['profiles'], ['id, full_name']);
+    });
+
+    test('count fetch uses native count and no profile or fund data', () async {
+      final client = _FakeSupabaseClient({
+        'workspace_memberships': [
+          {
+            'workspace_id': _workspaceId,
+            'profile_id': _advisorId,
+            'role': 'advisor',
+            'status': 'active',
+            'ended_at': null,
+          },
+        ],
+        'order_requests': [
+          _orderRow(
+            id: _orderA,
+            workspaceId: _workspaceId,
+            status: 'pending_review',
+            createdAt: '2026-08-04T09:30:00Z',
+          ),
+        ],
+      });
+      final repository = SupabaseQualificationQueueRepository(client);
+
+      final count = await repository.fetchPendingReviewCount(
+        reviewerProfileId: _advisorId,
+      );
+
+      expect(count, 1);
+      expect(client.countCallsByTable, ['order_requests']);
+      expect(client.selectCalls.containsKey('order_requests'), isFalse);
+      expect(client.selectCalls.containsKey('profiles'), isFalse);
+      expect(client.selectCalls.containsKey('mutual_funds'), isFalse);
+    });
+
+    test('validates approved and rejected RPC responses', () async {
+      final approvedClient = _FakeSupabaseClient(
+        const {},
+        rpcResponse: {'id': _orderA, 'status': 'approved'},
+      );
+      final approvedRepository =
+          SupabaseQualificationQueueRepository(approvedClient);
+
+      final approved = await approvedRepository.qualifyOrder(
+        orderId: _orderA,
+        decision: QualificationDecision.approved,
+      );
+
+      expect(approved.orderId, _orderA);
+      expect(approved.status, OrderStatus.approved);
+
+      final rejectedClient = _FakeSupabaseClient(
+        const {},
+        rpcResponse: {'id': _orderA, 'status': 'rejected'},
+      );
+      final rejectedRepository =
+          SupabaseQualificationQueueRepository(rejectedClient);
+
+      final rejected = await rejectedRepository.qualifyOrder(
+        orderId: _orderA,
+        decision: QualificationDecision.rejected,
+        rejectionReason: 'Needs review',
+      );
+
+      expect(rejected.orderId, _orderA);
+      expect(rejected.status, OrderStatus.rejected);
+    });
+
+    test('classifies null, wrong order and wrong status as ambiguous',
+        () async {
+      for (final response in [
+        null,
+        {'id': _orderB, 'status': 'approved'},
+        {'id': _orderA, 'status': 'pending_review'},
+      ]) {
+        final repository = SupabaseQualificationQueueRepository(
+          _FakeSupabaseClient(const {}, rpcResponse: response),
+        );
+
+        expect(
+          () => repository.qualifyOrder(
+            orderId: _orderA,
+            decision: QualificationDecision.approved,
+          ),
+          throwsA(isA<QualificationQueueFailure>().having(
+            (error) => error.kind,
+            'kind',
+            QualificationFailureKind.ambiguous,
+          )),
+        );
+      }
+    });
+
+    test('classifies order not found as stale and not_authorized as denied',
+        () async {
+      final staleRepository = SupabaseQualificationQueueRepository(
+        _FakeSupabaseClient(const {}, rpcError: Exception('Order not found')),
+      );
+      expect(
+        () => staleRepository.qualifyOrder(
+          orderId: _orderA,
+          decision: QualificationDecision.approved,
+        ),
+        throwsA(isA<QualificationQueueFailure>().having(
+          (error) => error.kind,
+          'kind',
+          QualificationFailureKind.stale,
+        )),
+      );
+
+      final deniedRepository = SupabaseQualificationQueueRepository(
+        _FakeSupabaseClient(const {}, rpcError: Exception('not_authorized')),
+      );
+      expect(
+        () => deniedRepository.qualifyOrder(
+          orderId: _orderA,
+          decision: QualificationDecision.approved,
+        ),
+        throwsA(isA<QualificationQueueFailure>().having(
+          (error) => error.kind,
+          'kind',
+          QualificationFailureKind.accessDenied,
+        )),
+      );
     });
   });
 
@@ -221,8 +477,6 @@ void main() {
 
       expect(find.text('MFD qualification queue'), findsOneWidget);
       expect(find.text('Ravi Investor'), findsOneWidget);
-      expect(find.text('ra•••@example.com'), findsOneWidget);
-      expect(find.text('••••••3210'), findsOneWidget);
       expect(find.text('Ravi Advisor'), findsOneWidget);
       expect(find.text('Advisor / Advisor console'), findsOneWidget);
       expect(find.text('Pending review'), findsOneWidget);
@@ -251,18 +505,35 @@ void main() {
       expect(repository.fetchCalls, 0);
     });
 
-    testWidgets(
-        'approve uses qualify_order decision and prevents duplicate taps',
+    testWidgets('approve cancel performs no RPC', (tester) async {
+      final repository = _FakeQualificationQueueRepository();
+      await _pumpQueue(tester, repository: repository);
+      await tester.pump();
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.widgetWithText(FilledButton, 'Confirm approval'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(repository.qualifyCalls, isEmpty);
+    });
+
+    testWidgets('approve confirmation performs exactly one RPC',
         (tester) async {
       final repository = _FakeQualificationQueueRepository(
-        qualifyCompleter: Completer<void>(),
+        qualifyCompleter: Completer<QualificationOrderResult>(),
       );
       await _pumpQueue(tester, repository: repository);
       await tester.pump();
 
-      final approveButton = find.widgetWithText(FilledButton, 'Approve');
-      await tester.tap(approveButton);
-      await tester.tap(approveButton);
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirm approval'));
       await tester.pump();
 
       expect(repository.qualifyCalls.length, 1);
@@ -270,9 +541,54 @@ void main() {
           QualificationDecision.approved);
       expect(repository.qualifyCalls.single.rejectionReason, isNull);
 
-      repository.qualifyCompleter!.complete();
+      repository.qualifyCompleter!.complete(
+        const QualificationOrderResult(
+          orderId: _orderA,
+          status: OrderStatus.approved,
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Order approved.'), findsOneWidget);
+    });
+
+    testWidgets('same-user order remains approvable after confirmation',
+        (tester) async {
+      final repository = _FakeQualificationQueueRepository();
+      await _pumpQueue(tester, repository: repository);
+      await tester.pump();
+
+      expect(find.text('Initiated by you'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirm approval'));
+      await tester.pumpAndSettle();
+
+      expect(repository.qualifyCalls.length, 1);
+    });
+
+    testWidgets('rapid approval confirmation taps submit once', (tester) async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyCompleter: Completer<QualificationOrderResult>(),
+      );
+      await _pumpQueue(tester, repository: repository);
+      await tester.pump();
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await tester.pumpAndSettle();
+      final confirmButton =
+          find.widgetWithText(FilledButton, 'Confirm approval');
+      await tester.tap(confirmButton);
+      await tester.tap(confirmButton, warnIfMissed: false);
+      await tester.pump();
+
+      expect(repository.qualifyCalls.length, 1);
+      repository.qualifyCompleter!.complete(
+        const QualificationOrderResult(
+          orderId: _orderA,
+          status: OrderStatus.approved,
+        ),
+      );
+      await tester.pumpAndSettle();
     });
 
     testWidgets('reject trims blank reasons to null and refreshes',
@@ -310,11 +626,14 @@ void main() {
             fetchedAt: DateTime.utc(2026, 8, 4, 0, 0, 1),
           ),
         ],
+        statusResponses: const [null],
       );
 
       await _pumpQueue(tester, repository: repository);
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirm approval'));
       await tester.pumpAndSettle();
 
       expect(find.text('No orders awaiting qualification.'), findsOneWidget);
@@ -362,14 +681,10 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('count badge uses the queue repository source', (tester) async {
+    testWidgets('count badge uses lightweight count and resets by reviewer',
+        (tester) async {
       final repository = _FakeQualificationQueueRepository(
-        snapshots: [
-          QualificationQueueSnapshot(
-            items: [_queueItem(), _queueItem(id: _orderB)],
-            fetchedAt: DateTime.utc(2026, 8, 4),
-          ),
-        ],
+        counts: [2, 5],
       );
 
       await tester.pumpWidget(
@@ -392,7 +707,32 @@ void main() {
       await tester.pump();
 
       expect(find.text('2'), findsOneWidget);
-      expect(repository.fetchCalls, 1);
+      expect(repository.countCalls, 1);
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(
+              value: _FakeAuthProvider(
+                isAuthenticated: true,
+                userProfile: _profile(
+                  UserRole.advisor,
+                  id: '35000000-0000-0000-0000-000000000003',
+                ),
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: MfdQueueCountBadge(repository: repository),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('5'), findsOneWidget);
+      expect(repository.countCalls, 2);
     });
   });
 }
@@ -451,8 +791,6 @@ QualificationQueueItem _queueItem({
       workspaceId: _workspaceId,
       investorProfileId: _investorId,
       investorName: 'Ravi Investor',
-      investorEmail: 'ravi@example.com',
-      investorPhone: '9876543210',
       initiatedByProfileId: _advisorId,
       initiatorName: 'Ravi Advisor',
       initiatedByRole: 'advisor',
@@ -501,25 +839,33 @@ class _FakeQualificationQueueRepository
     implements QualificationQueueRepository {
   _FakeQualificationQueueRepository({
     List<QualificationQueueSnapshot>? snapshots,
+    List<int>? counts,
+    List<OrderStatus?>? statusResponses,
     this.fetchFailure,
     this.qualifyFailure,
     this.fetchCompleter,
     this.qualifyCompleter,
-  }) : snapshots = snapshots ??
+  })  : snapshots = snapshots ??
             [
               QualificationQueueSnapshot(
                 items: [_queueItem()],
                 fetchedAt: DateTime.utc(2026, 8, 4),
               ),
-            ];
+            ],
+        counts = counts ?? const [],
+        statusResponses = statusResponses ?? const [];
 
   final List<QualificationQueueSnapshot> snapshots;
+  final List<int> counts;
+  final List<OrderStatus?> statusResponses;
   final QualificationQueueFailure? fetchFailure;
   final QualificationQueueFailure? qualifyFailure;
   final Completer<QualificationQueueSnapshot>? fetchCompleter;
-  final Completer<void>? qualifyCompleter;
+  final Completer<QualificationOrderResult>? qualifyCompleter;
   final qualifyCalls = <_QualifyCall>[];
   int fetchCalls = 0;
+  int countCalls = 0;
+  int statusFetchCalls = 0;
   int activeFetches = 0;
   int maxConcurrentFetches = 0;
   int cancelledSubscriptions = 0;
@@ -550,7 +896,33 @@ class _FakeQualificationQueueRepository
   }
 
   @override
-  Future<void> qualifyOrder({
+  Future<int> fetchPendingReviewCount({
+    required String reviewerProfileId,
+  }) async {
+    countCalls += 1;
+    if (counts.isNotEmpty) {
+      final index = countCalls - 1;
+      if (index >= counts.length) return counts.last;
+      return counts[index];
+    }
+    final index = fetchCalls;
+    if (index >= snapshots.length) return snapshots.last.items.length;
+    return snapshots[index].items.length;
+  }
+
+  @override
+  Future<OrderStatus?> fetchOrderStatus({
+    required String orderId,
+  }) async {
+    statusFetchCalls += 1;
+    if (statusResponses.isEmpty) return OrderStatus.pendingReview;
+    final index = statusFetchCalls - 1;
+    if (index >= statusResponses.length) return statusResponses.last;
+    return statusResponses[index];
+  }
+
+  @override
+  Future<QualificationOrderResult> qualifyOrder({
     required String orderId,
     required QualificationDecision decision,
     String? rejectionReason,
@@ -558,6 +930,12 @@ class _FakeQualificationQueueRepository
     qualifyCalls.add(_QualifyCall(orderId, decision, rejectionReason));
     if (qualifyFailure != null) throw qualifyFailure!;
     if (qualifyCompleter != null) return qualifyCompleter!.future;
+    return QualificationOrderResult(
+      orderId: orderId,
+      status: decision == QualificationDecision.approved
+          ? OrderStatus.approved
+          : OrderStatus.rejected,
+    );
   }
 
   @override
@@ -570,28 +948,63 @@ class _FakeQualificationQueueRepository
 }
 
 class _FakeSupabaseClient implements SupabaseClient {
-  _FakeSupabaseClient(this.rowsByTable);
+  _FakeSupabaseClient(
+    this.rowsByTable, {
+    this.rpcResponse,
+    this.rpcError,
+  });
 
   final Map<String, List<Map<String, dynamic>>> rowsByTable;
+  final Object? rpcResponse;
+  final Object? rpcError;
+  final selectCalls = <String, List<String>>{};
+  final countCallsByTable = <String>[];
 
   @override
-  SupabaseQueryBuilder from(String table) =>
-      _FakeSupabaseQueryBuilder(table, rowsByTable);
+  SupabaseQueryBuilder from(String table) => _FakeSupabaseQueryBuilder(
+        table,
+        rowsByTable,
+        selectCalls,
+        countCallsByTable,
+      );
+
+  @override
+  PostgrestFilterBuilder<T> rpc<T>(
+    String fn, {
+    Map<String, dynamic>? params,
+    get = false,
+  }) =>
+      _FakeRpcFilterBuilder<T>(rpcResponse, rpcError);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
-  _FakeSupabaseQueryBuilder(this.table, this.rowsByTable);
+  _FakeSupabaseQueryBuilder(
+    this.table,
+    this.rowsByTable,
+    this.selectCalls,
+    this.countCallsByTable,
+  );
 
   final String table;
   final Map<String, List<Map<String, dynamic>>> rowsByTable;
+  final Map<String, List<String>> selectCalls;
+  final List<String> countCallsByTable;
 
   @override
   PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
-          [String columns = '*']) =>
-      _FakePostgrestFilterBuilder(table, rowsByTable);
+      [String columns = '*']) {
+    selectCalls.putIfAbsent(table, () => []).add(columns);
+    return _FakePostgrestFilterBuilder(table, rowsByTable);
+  }
+
+  @override
+  PostgrestFilterBuilder<int> count([CountOption option = CountOption.exact]) {
+    countCallsByTable.add(table);
+    return _FakePostgrestCountBuilder(table, rowsByTable);
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -667,6 +1080,103 @@ class _FakePostgrestFilterBuilder
     Function? onError,
   }) =>
       Future.value(_filteredRows()).then(onValue, onError: onError);
+
+  @override
+  PostgrestTransformBuilder<Map<String, dynamic>?> maybeSingle() =>
+      _FakePostgrestTransformBuilder<Map<String, dynamic>?>(() async {
+        final rows = _filteredRows();
+        if (rows.isEmpty) return null;
+        return rows.first;
+      }());
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakePostgrestTransformBuilder<T>
+    implements PostgrestTransformBuilder<T> {
+  _FakePostgrestTransformBuilder(this.future);
+
+  final Future<T> future;
+
+  @override
+  Future<T2> then<T2>(
+    FutureOr<T2> Function(T value) onValue, {
+    Function? onError,
+  }) =>
+      future.then(onValue, onError: onError);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakePostgrestCountBuilder implements PostgrestFilterBuilder<int> {
+  _FakePostgrestCountBuilder(this.table, this.rowsByTable);
+
+  final String table;
+  final Map<String, List<Map<String, dynamic>>> rowsByTable;
+  final Map<String, Object?> filters = {};
+
+  @override
+  PostgrestFilterBuilder<int> eq(String column, Object value) {
+    filters[column] = value;
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<int> inFilter(String column, List values) {
+    filters[column] = values;
+    return this;
+  }
+
+  @override
+  PostgrestFilterBuilder<int> isFilter(String column, Object? value) {
+    filters[column] = value;
+    return this;
+  }
+
+  int _filteredCount() {
+    final rows = rowsByTable[table] ?? const <Map<String, dynamic>>[];
+    return rows.where((row) {
+      for (final entry in filters.entries) {
+        final expected = entry.value;
+        if (expected is List) {
+          if (!expected.contains(row[entry.key])) return false;
+        } else if (row[entry.key] != expected) {
+          return false;
+        }
+      }
+      return true;
+    }).length;
+  }
+
+  @override
+  Future<T> then<T>(
+    FutureOr<T> Function(int value) onValue, {
+    Function? onError,
+  }) =>
+      Future.value(_filteredCount()).then(onValue, onError: onError);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeRpcFilterBuilder<T> implements PostgrestFilterBuilder<T> {
+  _FakeRpcFilterBuilder(this.response, this.error);
+
+  final Object? response;
+  final Object? error;
+
+  @override
+  Future<T2> then<T2>(
+    FutureOr<T2> Function(T value) onValue, {
+    Function? onError,
+  }) {
+    final future = error == null
+        ? Future<T>.value(response as T)
+        : Future<T>.error(error!);
+    return future.then(onValue, onError: onError);
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

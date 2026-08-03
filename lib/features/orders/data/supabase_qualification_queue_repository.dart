@@ -81,13 +81,61 @@ class SupabaseQualificationQueueRepository
   }
 
   @override
-  Future<void> qualifyOrder({
+  Future<int> fetchPendingReviewCount({
+    required String reviewerProfileId,
+  }) async {
+    try {
+      final allowedWorkspaceIds =
+          await _resolveAllowedWorkspaceIds(reviewerProfileId);
+      if (allowedWorkspaceIds.isEmpty) {
+        throw const QualificationQueueFailure(
+          QualificationFailureKind.accessDenied,
+          'This queue is available only to authorised MFD users.',
+        );
+      }
+
+      final orderRows = await _client
+          .from('order_requests')
+          .count(CountOption.exact)
+          .eq('status', OrderStatus.pendingReview.databaseValue)
+          .inFilter('workspace_id', allowedWorkspaceIds.toList());
+      return orderRows;
+    } on QualificationQueueFailure {
+      rethrow;
+    } catch (error) {
+      throw _mapFailure(error,
+          fallback: 'The qualification queue count is unavailable.');
+    }
+  }
+
+  @override
+  Future<OrderStatus?> fetchOrderStatus({
+    required String orderId,
+  }) async {
+    try {
+      final row = await _client
+          .from('order_requests')
+          .select('id, status')
+          .eq('id', orderId)
+          .maybeSingle();
+      if (row == null) return null;
+      final status = row['status'];
+      if (status is! String) return null;
+      return OrderStatus.fromDatabase(status);
+    } catch (error) {
+      throw _mapFailure(error,
+          fallback: 'The order status could not be confirmed.');
+    }
+  }
+
+  @override
+  Future<QualificationOrderResult> qualifyOrder({
     required String orderId,
     required QualificationDecision decision,
     String? rejectionReason,
   }) async {
     try {
-      await _client.rpc(
+      final response = await _client.rpc(
         'qualify_order',
         params: {
           'p_order_id': orderId,
@@ -97,7 +145,9 @@ class SupabaseQualificationQueueRepository
               : null,
         },
       );
+      return _validateQualificationResponse(response, orderId, decision);
     } catch (error) {
+      if (error is QualificationQueueFailure) rethrow;
       throw _mapFailure(
         error,
         fallback: 'The order could not be qualified.',
@@ -171,7 +221,7 @@ class SupabaseQualificationQueueRepository
     if (profileIds.isEmpty) return const {};
     final rows = await _client
         .from('profiles')
-        .select('id, full_name, email, phone_number')
+        .select('id, full_name')
         .inFilter('id', profileIds.toList());
     return {
       for (final row in List<Map<String, dynamic>>.from(rows as List))
@@ -208,8 +258,6 @@ class SupabaseQualificationQueueRepository
       workspaceId: row['workspace_id'] as String,
       investorProfileId: investorProfileId,
       investorName: (investor['full_name'] as String?) ?? 'Unnamed investor',
-      investorEmail: investor['email'] as String?,
-      investorPhone: investor['phone_number'] as String?,
       initiatedByProfileId: initiatorProfileId,
       initiatorName: (initiator['full_name'] as String?) ?? 'Unknown initiator',
       initiatedByRole: (row['initiated_by_role'] as String?) ?? 'advisor',
@@ -234,12 +282,53 @@ class SupabaseQualificationQueueRepository
     return double.tryParse(value.toString());
   }
 
+  QualificationOrderResult _validateQualificationResponse(
+    Object? response,
+    String orderId,
+    QualificationDecision decision,
+  ) {
+    final row = _extractResponseRow(response);
+    if (row == null) {
+      throw const QualificationQueueFailure(
+        QualificationFailureKind.ambiguous,
+        'The qualification result could not be confirmed.',
+      );
+    }
+
+    final returnedOrderId = row['id'];
+    final returnedStatus = row['status'];
+    if (returnedOrderId != orderId ||
+        returnedStatus != decision.databaseValue) {
+      throw const QualificationQueueFailure(
+        QualificationFailureKind.ambiguous,
+        'The qualification result could not be confirmed.',
+      );
+    }
+
+    return QualificationOrderResult(
+      orderId: orderId,
+      status: OrderStatus.fromDatabase(returnedStatus as String),
+    );
+  }
+
+  Map<String, dynamic>? _extractResponseRow(Object? response) {
+    if (response is Map<String, dynamic>) return response;
+    if (response is Map) return Map<String, dynamic>.from(response);
+    if (response is List && response.length == 1) {
+      final first = response.single;
+      if (first is Map<String, dynamic>) return first;
+      if (first is Map) return Map<String, dynamic>.from(first);
+    }
+    return null;
+  }
+
   QualificationQueueFailure _mapFailure(
     Object error, {
     required String fallback,
   }) {
     final text = '$error'.toLowerCase();
     if (text.contains('invalid_qualification_state') ||
+        text.contains('order not found') ||
         text.contains('already resolved') ||
         text.contains('pending_review') ||
         text.contains('not pending')) {
@@ -252,8 +341,7 @@ class SupabaseQualificationQueueRepository
         text.contains('not authorized') ||
         text.contains('access denied') ||
         text.contains('permission') ||
-        text.contains('row-level security') ||
-        text.contains('order not found')) {
+        text.contains('row-level security')) {
       return const QualificationQueueFailure(
         QualificationFailureKind.accessDenied,
         'You are not authorised to qualify this order.',

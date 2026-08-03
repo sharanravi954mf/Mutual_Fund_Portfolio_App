@@ -32,63 +32,109 @@ class MfdQueueScreen extends StatefulWidget {
 }
 
 class MfdQueueCountBadge extends StatefulWidget {
-  const MfdQueueCountBadge({super.key, this.repository});
+  const MfdQueueCountBadge({
+    super.key,
+    this.repository,
+    this.debounceDuration = const Duration(milliseconds: 350),
+    this.periodicTimerFactory,
+    this.oneShotTimerFactory,
+  });
 
   final QualificationQueueRepository? repository;
+  final Duration debounceDuration;
+  final PeriodicTimerFactory? periodicTimerFactory;
+  final OneShotTimerFactory? oneShotTimerFactory;
 
   @override
   State<MfdQueueCountBadge> createState() => _MfdQueueCountBadgeState();
 }
 
 class _MfdQueueCountBadgeState extends State<MfdQueueCountBadge> {
-  late final QualificationQueueRepository _repository;
-  Future<QualificationQueueSnapshot>? _snapshot;
-
-  @override
-  void initState() {
-    super.initState();
-    _repository = widget.repository ??
-        SupabaseQualificationQueueRepository.fromDefaultClient();
-  }
+  QualificationQueueCountController? _controller;
+  String? _controllerProfileId;
+  bool? _controllerAuthorized;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final profile = context.read<AuthProvider>().userProfile;
-    if (_isAuthorisedMfdProfile(profile) && _snapshot == null) {
-      _snapshot = _repository.fetchQueue(reviewerProfileId: profile!.id);
+    _ensureController();
+  }
+
+  @override
+  void didUpdateWidget(covariant MfdQueueCountBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository != widget.repository ||
+        oldWidget.debounceDuration != widget.debounceDuration) {
+      _disposeController();
+      _ensureController();
     }
+  }
+
+  @override
+  void dispose() {
+    _disposeController();
+    super.dispose();
+  }
+
+  void _ensureController() {
+    final profile = context.read<AuthProvider>().userProfile;
+    final isAuthorized = _isAuthorisedMfdProfile(profile);
+    if (_controller != null &&
+        _controllerProfileId == profile?.id &&
+        _controllerAuthorized == isAuthorized) {
+      return;
+    }
+
+    _disposeController();
+    final controller = QualificationQueueCountController(
+      repository: widget.repository ??
+          SupabaseQualificationQueueRepository.fromDefaultClient(),
+      reviewerProfileId: profile?.id,
+      isAuthorizedReviewer: isAuthorized,
+      debounceDuration: widget.debounceDuration,
+      periodicTimerFactory: widget.periodicTimerFactory,
+      oneShotTimerFactory: widget.oneShotTimerFactory,
+    );
+    controller.addListener(_onControllerChanged);
+    _controller = controller;
+    _controllerProfileId = profile?.id;
+    _controllerAuthorized = isAuthorized;
+    unawaited(controller.start());
+  }
+
+  void _disposeController() {
+    _controller?.removeListener(_onControllerChanged);
+    _controller?.dispose();
+    _controller = null;
+  }
+
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final profile = context.watch<AuthProvider>().userProfile;
-    if (!_isAuthorisedMfdProfile(profile)) return const SizedBox.shrink();
+    final count = _controller?.count;
+    if (!_isAuthorisedMfdProfile(profile) || count == null || count == 0) {
+      return const SizedBox.shrink();
+    }
 
-    return FutureBuilder<QualificationQueueSnapshot>(
-      future: _snapshot,
-      builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.items.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        final count = snapshot.data!.items.length;
-        return Container(
-          constraints: const BoxConstraints(minWidth: 24, minHeight: 20),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            count > 99 ? '99+' : '$count',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimary,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-        );
-      },
+    return Container(
+      constraints: const BoxConstraints(minWidth: 24, minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
     );
   }
 }
@@ -282,7 +328,8 @@ class _MfdQueueScreenState extends State<MfdQueueScreen> {
                     actionDecision: controller.activeActionOrderId == item.id
                         ? controller.activeActionDecision
                         : null,
-                    onApprove: () => controller.approve(item),
+                    onApprove: () =>
+                        _showApproveDialog(context, controller, item),
                     onReject: () =>
                         _showRejectDialog(context, controller, item),
                   );
@@ -292,6 +339,62 @@ class _MfdQueueScreenState extends State<MfdQueueScreen> {
           ),
         );
     }
+  }
+
+  Future<void> _showApproveDialog(
+    BuildContext context,
+    QualificationQueueController controller,
+    QualificationQueueItem item,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        var submitting = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Confirm approval'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ConfirmationLine(label: 'Investor', value: item.investorName),
+                _ConfirmationLine(
+                    label: 'Order type', value: item.orderTypeLabel),
+                _ConfirmationLine(label: 'Scheme', value: item.schemeDisplay),
+                _ConfirmationLine(
+                  label: 'Amount / units',
+                  value: _amountUnitsLabel(item, _currency),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed:
+                    submitting ? null : () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                icon: submitting
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check_circle_outline),
+                label: const Text('Confirm approval'),
+                onPressed: submitting
+                    ? null
+                    : () {
+                        setDialogState(() => submitting = true);
+                        Navigator.of(context).pop(true);
+                      },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await controller.approve(item);
   }
 
   Future<void> _showRejectDialog(
@@ -332,6 +435,19 @@ class _MfdQueueScreenState extends State<MfdQueueScreen> {
     });
     if (reason == null || !mounted) return;
     await controller.reject(item, reason);
+  }
+
+  static String _amountUnitsLabel(
+    QualificationQueueItem item,
+    NumberFormat currency,
+  ) {
+    final amount = item.amount == null ? null : currency.format(item.amount);
+    final units =
+        item.units == null ? null : '${item.units!.toStringAsFixed(4)} units';
+    return [
+      if (amount != null) amount,
+      if (units != null) units,
+    ].join(' / ');
   }
 }
 
@@ -455,16 +571,6 @@ class _QualificationOrderCard extends StatelessWidget {
         value: item.investorName,
       ),
       _DetailLine(
-        icon: Icons.alternate_email,
-        label: 'Masked email',
-        value: item.maskedEmail,
-      ),
-      _DetailLine(
-        icon: Icons.phone_outlined,
-        label: 'Masked phone',
-        value: item.maskedPhone,
-      ),
-      _DetailLine(
         icon: Icons.account_circle_outlined,
         label: 'Initiator',
         value: item.initiatorName,
@@ -499,7 +605,7 @@ class _QualificationOrderCard extends StatelessWidget {
       _DetailLine(
         icon: Icons.payments_outlined,
         label: 'Amount / units',
-        value: _amountUnitsLabel(item),
+        value: _MfdQueueScreenState._amountUnitsLabel(item, currency),
       ),
       _DetailLine(
         icon: Icons.schedule,
@@ -570,22 +676,34 @@ class _QualificationOrderCard extends StatelessWidget {
     );
   }
 
-  String _amountUnitsLabel(QualificationQueueItem item) {
-    final amount = item.amount == null ? null : currency.format(item.amount);
-    final units =
-        item.units == null ? null : '${item.units!.toStringAsFixed(4)} units';
-    return [
-      if (amount != null) amount,
-      if (units != null) units,
-    ].join(' / ');
-  }
-
   static String _label(String value) =>
       value.replaceAll('_', ' ').replaceFirstMapped(
           RegExp(r'^.'), (match) => match.group(0)!.toUpperCase());
 
   static String _shortId(String value) =>
       value.length <= 8 ? value : value.substring(0, 8);
+}
+
+class _ConfirmationLine extends StatelessWidget {
+  const _ConfirmationLine({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
+            Text(value),
+          ],
+        ),
+      );
 }
 
 class _DetailLine extends StatelessWidget {

@@ -1,5 +1,4 @@
 import 'order_models.dart';
-import 'masking.dart';
 
 enum QualificationQueuePhase {
   initial,
@@ -23,6 +22,7 @@ enum QualificationFailureKind {
   stale,
   accessDenied,
   network,
+  ambiguous,
   unknown,
 }
 
@@ -46,6 +46,16 @@ class QualificationQueueSnapshot {
   final DateTime fetchedAt;
 }
 
+class QualificationOrderResult {
+  const QualificationOrderResult({
+    required this.orderId,
+    required this.status,
+  });
+
+  final String orderId;
+  final OrderStatus status;
+}
+
 class QualificationQueueItem {
   const QualificationQueueItem({
     required this.id,
@@ -60,8 +70,6 @@ class QualificationQueueItem {
     required this.type,
     required this.schemeCode,
     required this.createdAt,
-    this.investorEmail,
-    this.investorPhone,
     this.schemeName,
     this.destinationSchemeCode,
     this.destinationSchemeName,
@@ -73,8 +81,6 @@ class QualificationQueueItem {
   final String workspaceId;
   final String investorProfileId;
   final String investorName;
-  final String? investorEmail;
-  final String? investorPhone;
   final String initiatedByProfileId;
   final String initiatorName;
   final String initiatedByRole;
@@ -91,14 +97,6 @@ class QualificationQueueItem {
 
   bool isSameInitiator(String? currentProfileId) =>
       currentProfileId != null && currentProfileId == initiatedByProfileId;
-
-  String get maskedEmail => investorEmail == null
-      ? 'No email on file'
-      : MaskingUtil.maskEmail(investorEmail!);
-
-  String get maskedPhone => investorPhone == null
-      ? 'No phone on file'
-      : MaskingUtil.maskPhone(investorPhone!);
 
   String get schemeDisplay => schemeName == null || schemeName!.trim().isEmpty
       ? schemeCode
