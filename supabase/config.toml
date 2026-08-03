@@ -173,6 +173,9 @@ enabled = true
 policy = "oneshot"
 inspector_port = 8083
 
+[functions.order-auto-approval-worker]
+verify_jwt = false
+
 [analytics]
 enabled = false
 port = 54327

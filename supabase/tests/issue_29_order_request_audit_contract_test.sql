@@ -150,12 +150,13 @@ DECLARE
 	    RAISE EXCEPTION 'cancel_order has an unexpected non-authenticated execution grant';
 	  END IF;
 
-	  IF NOT pg_catalog.has_function_privilege('service_role', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE') THEN
+	  IF NOT pg_catalog.has_function_privilege('service_role', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
 	    RAISE EXCEPTION 'service_role cannot execute apply_auto_approval_decision';
 	  END IF;
 
-	  IF pg_catalog.has_function_privilege('anon', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE')
-	     OR pg_catalog.has_function_privilege('authenticated', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE') THEN
+	  IF pg_catalog.has_function_privilege('service_role', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid)', 'EXECUTE')
+	     OR pg_catalog.has_function_privilege('anon', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE')
+	     OR pg_catalog.has_function_privilege('authenticated', 'public.apply_auto_approval_decision(pg_catalog.uuid, public.order_status, pg_catalog.uuid, pg_catalog.int4, pg_catalog.uuid, pg_catalog.uuid)', 'EXECUTE') THEN
 	    RAISE EXCEPTION 'apply_auto_approval_decision has an unexpected client execution grant';
 	  END IF;
 
@@ -1481,7 +1482,9 @@ DECLARE
   UPDATE public.event_outbox
   SET status = 'processing',
       claimed_at = now(),
-      claimed_by = '99100000-0000-0000-0000-000000000004'
+      claimed_by = '99100000-0000-0000-0000-000000000004',
+      claim_token = '99100000-0000-0000-0000-000000000004',
+      claim_expires_at = now() + '120 seconds'::pg_catalog.interval
   WHERE id = v_outbox.id;
 
   v_order := public.apply_auto_approval_decision(
@@ -1489,7 +1492,8 @@ DECLARE
     'pending_review',
     null,
     null,
-    v_outbox.id
+    v_outbox.id,
+    '99100000-0000-0000-0000-000000000004'
   );
 
   IF v_order.status <> 'pending_review' THEN
@@ -1574,7 +1578,9 @@ DECLARE
   UPDATE public.event_outbox
   SET status = 'processing',
       claimed_at = now(),
-      claimed_by = '99100000-0000-0000-0000-000000000004'
+      claimed_by = '99100000-0000-0000-0000-000000000004',
+      claim_token = '99100000-0000-0000-0000-000000000004',
+      claim_expires_at = now() + '120 seconds'::pg_catalog.interval
   WHERE id = v_outbox.id;
 
   v_order := public.apply_auto_approval_decision(
@@ -1582,7 +1588,8 @@ DECLARE
     'auto_approved',
     '99500000-0000-0000-0000-000000000001',
     1,
-    v_outbox.id
+    v_outbox.id,
+    '99100000-0000-0000-0000-000000000004'
   );
 
   IF v_order.status <> 'auto_approved' THEN
