@@ -37,8 +37,13 @@ void main() {
         dashboard,
         contains(
             'case 1:\n        return const AdvisorVerificationQueueScreen('));
-    expect(dashboard, contains("? t('verification_queue')"));
-    expect(dashboard, contains('if (index == 3)'));
+    expect(dashboard, contains("t('mfd_qualification_queue')"));
+    expect(dashboard, contains('Icons.assignment_turned_in_outlined'));
+    expect(dashboard, contains('return const MfdQueueScreen();'));
+    expect(dashboard, contains('AdvisorOrderAction('));
+    expect(dashboard, contains("return t('verification_queue');"));
+    expect(dashboard, contains("return t('mfd_qualification_console');"));
+    expect(dashboard, contains('if (index == 4)'));
   });
 }
 
