@@ -196,8 +196,8 @@ void main() {
         () async {
       final repository = _FakeQualificationQueueRepository(
         qualifyFailure: const QualificationQueueFailure(
-          QualificationFailureKind.ambiguous,
-          'The qualification result could not be confirmed.',
+          QualificationFailureKind.unknown,
+          'The order could not be qualified.',
         ),
         statusResponses: [OrderStatus.pendingReview],
       );
@@ -215,6 +215,251 @@ void main() {
       expect(repository.statusFetchCalls, 1);
       expect(repository.fetchCalls, greaterThanOrEqualTo(2));
       expect(controller.errorMessage, contains('not confirmed'));
+      controller.dispose();
+    });
+
+    test('tracks independent in-flight actions per order', () async {
+      final approveA = Completer<QualificationOrderResult>();
+      final rejectB = Completer<QualificationOrderResult>();
+      final repository = _FakeQualificationQueueRepository(
+        snapshots: [
+          QualificationQueueSnapshot(
+            items: [
+              _queueItem(id: _orderA),
+              _queueItem(id: _orderB),
+            ],
+            fetchedAt: DateTime.utc(2026, 8, 4),
+          ),
+        ],
+        qualifyCompletersByOrder: {
+          _orderA: approveA,
+          _orderB: rejectB,
+        },
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      final orderA = controller.items.firstWhere((item) => item.id == _orderA);
+      final orderB = controller.items.firstWhere((item) => item.id == _orderB);
+
+      final actionA = controller.approve(orderA);
+      final actionB = controller.reject(orderB, 'Needs review');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.activeDecisionFor(_orderA),
+          QualificationDecision.approved);
+      expect(controller.activeDecisionFor(_orderB),
+          QualificationDecision.rejected);
+      expect(controller.isOrderActionActive(_orderA), isTrue);
+      expect(controller.isOrderActionActive(_orderB), isTrue);
+
+      await controller.approve(orderA);
+      expect(repository.qualifyCalls.where((call) => call.orderId == _orderA),
+          hasLength(1));
+
+      approveA.complete(
+        const QualificationOrderResult(
+          orderId: _orderA,
+          status: OrderStatus.approved,
+        ),
+      );
+      await actionA;
+      expect(controller.isOrderActionActive(_orderA), isFalse);
+      expect(controller.activeDecisionFor(_orderB),
+          QualificationDecision.rejected);
+
+      rejectB.complete(
+        const QualificationOrderResult(
+          orderId: _orderB,
+          status: OrderStatus.rejected,
+        ),
+      );
+      await actionB;
+
+      expect(controller.isOrderActionActive(_orderB), isFalse);
+      expect(repository.qualifyCalls.where((call) => call.orderId == _orderB),
+          hasLength(1));
+      expect(repository.qualifyCalls, hasLength(2));
+      controller.dispose();
+    });
+
+    test('unknown RPC failure reconciles confirmed approved status', () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.unknown,
+          'The order could not be qualified.',
+        ),
+        statusResponses: [OrderStatus.approved],
+        snapshots: [
+          QualificationQueueSnapshot(
+            items: [_queueItem()],
+            fetchedAt: DateTime.utc(2026, 8, 4),
+          ),
+          QualificationQueueSnapshot(
+            items: const [],
+            fetchedAt: DateTime.utc(2026, 8, 4, 0, 0, 1),
+          ),
+        ],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.approve(controller.items.single);
+
+      expect(repository.qualifyCalls, hasLength(1));
+      expect(repository.statusFetchCalls, 1);
+      expect(controller.message, 'Order approved.');
+      expect(controller.errorMessage, isNull);
+      controller.dispose();
+    });
+
+    test('unknown RPC failure reconciles confirmed rejected status', () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.unknown,
+          'The order could not be qualified.',
+        ),
+        statusResponses: [OrderStatus.rejected],
+        snapshots: [
+          QualificationQueueSnapshot(
+            items: [_queueItem()],
+            fetchedAt: DateTime.utc(2026, 8, 4),
+          ),
+          QualificationQueueSnapshot(
+            items: const [],
+            fetchedAt: DateTime.utc(2026, 8, 4, 0, 0, 1),
+          ),
+        ],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.reject(controller.items.single, 'Mismatch');
+
+      expect(repository.qualifyCalls, hasLength(1));
+      expect(repository.statusFetchCalls, 1);
+      expect(controller.message, 'Order rejected.');
+      expect(controller.errorMessage, isNull);
+      controller.dispose();
+    });
+
+    test('unknown RPC failure keeps pending retry deliberate', () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.unknown,
+          'The order could not be qualified.',
+        ),
+        statusResponses: [OrderStatus.pendingReview],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.approve(controller.items.single);
+
+      expect(repository.qualifyCalls, hasLength(1));
+      expect(repository.statusFetchCalls, 1);
+      expect(controller.message, isNull);
+      expect(controller.errorMessage, contains('not confirmed'));
+      expect(controller.isOrderActionActive(_orderA), isFalse);
+      controller.dispose();
+    });
+
+    test('unknown RPC failure reports a different terminal status', () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.unknown,
+          'The order could not be qualified.',
+        ),
+        statusResponses: [OrderStatus.rejected],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.approve(controller.items.single);
+
+      expect(repository.qualifyCalls, hasLength(1));
+      expect(repository.statusFetchCalls, 1);
+      expect(controller.message, contains('already resolved as rejected'));
+      expect(controller.errorMessage, isNull);
+      controller.dispose();
+    });
+
+    test('active state stays set during unknown failure reconciliation',
+        () async {
+      final statusCompleter = Completer<OrderStatus?>();
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.ambiguous,
+          'The qualification result could not be confirmed.',
+        ),
+        statusCompleter: statusCompleter,
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      final action = controller.approve(controller.items.single);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.activeDecisionFor(_orderA),
+          QualificationDecision.approved);
+      expect(repository.qualifyCalls, hasLength(1));
+
+      statusCompleter.complete(OrderStatus.pendingReview);
+      await action;
+
+      expect(repository.qualifyCalls, hasLength(1));
+      expect(controller.isOrderActionActive(_orderA), isFalse);
+      expect(controller.errorMessage, contains('not confirmed'));
+      controller.dispose();
+    });
+
+    test('access denied qualification does not reconcile as ambiguous',
+        () async {
+      final repository = _FakeQualificationQueueRepository(
+        qualifyFailure: const QualificationQueueFailure(
+          QualificationFailureKind.accessDenied,
+          'You are not authorised to qualify this order.',
+        ),
+        statusResponses: [OrderStatus.approved],
+      );
+      final controller = QualificationQueueController(
+        repository: repository,
+        reviewerProfileId: _advisorId,
+        isAuthorizedReviewer: true,
+      );
+
+      await controller.start();
+      await controller.approve(controller.items.single);
+
+      expect(repository.qualifyCalls, hasLength(1));
+      expect(repository.statusFetchCalls, 0);
+      expect(controller.message, isNull);
+      expect(controller.errorMessage,
+          'You are not authorised to qualify this order.');
       controller.dispose();
     });
 
@@ -462,6 +707,27 @@ void main() {
           (error) => error.kind,
           'kind',
           QualificationFailureKind.accessDenied,
+        )),
+      );
+    });
+
+    test('classifies generic qualification RPC errors as ambiguous', () async {
+      final repository = SupabaseQualificationQueueRepository(
+        _FakeSupabaseClient(
+          const {},
+          rpcError: Exception('XMLHttpRequest error'),
+        ),
+      );
+
+      expect(
+        () => repository.qualifyOrder(
+          orderId: _orderA,
+          decision: QualificationDecision.approved,
+        ),
+        throwsA(isA<QualificationQueueFailure>().having(
+          (error) => error.kind,
+          'kind',
+          QualificationFailureKind.ambiguous,
         )),
       );
     });
@@ -845,6 +1111,9 @@ class _FakeQualificationQueueRepository
     this.qualifyFailure,
     this.fetchCompleter,
     this.qualifyCompleter,
+    this.statusCompleter,
+    Map<String, Completer<QualificationOrderResult>>? qualifyCompletersByOrder,
+    Map<String, QualificationQueueFailure>? qualifyFailuresByOrder,
   })  : snapshots = snapshots ??
             [
               QualificationQueueSnapshot(
@@ -853,7 +1122,9 @@ class _FakeQualificationQueueRepository
               ),
             ],
         counts = counts ?? const [],
-        statusResponses = statusResponses ?? const [];
+        statusResponses = statusResponses ?? const [],
+        qualifyCompletersByOrder = qualifyCompletersByOrder ?? const {},
+        qualifyFailuresByOrder = qualifyFailuresByOrder ?? const {};
 
   final List<QualificationQueueSnapshot> snapshots;
   final List<int> counts;
@@ -862,6 +1133,10 @@ class _FakeQualificationQueueRepository
   final QualificationQueueFailure? qualifyFailure;
   final Completer<QualificationQueueSnapshot>? fetchCompleter;
   final Completer<QualificationOrderResult>? qualifyCompleter;
+  final Completer<OrderStatus?>? statusCompleter;
+  final Map<String, Completer<QualificationOrderResult>>
+      qualifyCompletersByOrder;
+  final Map<String, QualificationQueueFailure> qualifyFailuresByOrder;
   final qualifyCalls = <_QualifyCall>[];
   int fetchCalls = 0;
   int countCalls = 0;
@@ -915,6 +1190,7 @@ class _FakeQualificationQueueRepository
     required String orderId,
   }) async {
     statusFetchCalls += 1;
+    if (statusCompleter != null) return statusCompleter!.future;
     if (statusResponses.isEmpty) return OrderStatus.pendingReview;
     final index = statusFetchCalls - 1;
     if (index >= statusResponses.length) return statusResponses.last;
@@ -928,7 +1204,11 @@ class _FakeQualificationQueueRepository
     String? rejectionReason,
   }) async {
     qualifyCalls.add(_QualifyCall(orderId, decision, rejectionReason));
+    final orderFailure = qualifyFailuresByOrder[orderId];
+    if (orderFailure != null) throw orderFailure;
     if (qualifyFailure != null) throw qualifyFailure!;
+    final orderCompleter = qualifyCompletersByOrder[orderId];
+    if (orderCompleter != null) return orderCompleter.future;
     if (qualifyCompleter != null) return qualifyCompleter!.future;
     return QualificationOrderResult(
       orderId: orderId,

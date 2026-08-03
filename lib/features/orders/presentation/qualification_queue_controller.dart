@@ -55,8 +55,7 @@ class QualificationQueueController extends ChangeNotifier {
   DateTime? _fetchedAt;
   String? _message;
   String? _errorMessage;
-  String? _activeActionOrderId;
-  QualificationDecision? _activeActionDecision;
+  final Map<String, QualificationDecision> _activeActions = {};
   bool _refreshInFlight = false;
   bool _refreshQueued = false;
   bool _started = false;
@@ -70,9 +69,13 @@ class QualificationQueueController extends ChangeNotifier {
   DateTime? get fetchedAt => _fetchedAt;
   String? get message => _message;
   String? get errorMessage => _errorMessage;
-  String? get activeActionOrderId => _activeActionOrderId;
-  QualificationDecision? get activeActionDecision => _activeActionDecision;
   bool get isRefreshing => _refreshInFlight;
+
+  QualificationDecision? activeDecisionFor(String orderId) =>
+      _activeActions[orderId];
+
+  bool isOrderActionActive(String orderId) =>
+      _activeActions.containsKey(orderId);
 
   Future<void> start() async {
     if (_started) return;
@@ -161,10 +164,9 @@ class QualificationQueueController extends ChangeNotifier {
     QualificationDecision decision,
     String? reason,
   ) async {
-    if (_activeActionOrderId == item.id) return;
+    if (isOrderActionActive(item.id)) return;
 
-    _activeActionOrderId = item.id;
-    _activeActionDecision = decision;
+    _activeActions[item.id] = decision;
     _message = null;
     _errorMessage = null;
     _notify();
@@ -194,7 +196,8 @@ class QualificationQueueController extends ChangeNotifier {
       if (_disposed) return;
       if (error.kind == QualificationFailureKind.stale ||
           error.kind == QualificationFailureKind.network ||
-          error.kind == QualificationFailureKind.ambiguous) {
+          error.kind == QualificationFailureKind.ambiguous ||
+          error.kind == QualificationFailureKind.unknown) {
         await _reconcileQualification(item, decision);
       } else {
         _errorMessage = error.message;
@@ -204,8 +207,7 @@ class QualificationQueueController extends ChangeNotifier {
       _errorMessage = 'The order could not be qualified.';
     } finally {
       if (!_disposed) {
-        _activeActionOrderId = null;
-        _activeActionDecision = null;
+        _activeActions.remove(item.id);
         _notify();
       }
     }

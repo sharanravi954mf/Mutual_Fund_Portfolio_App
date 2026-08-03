@@ -325,9 +325,7 @@ class _MfdQueueScreenState extends State<MfdQueueScreen> {
                     colors: colors,
                     currency: _currency,
                     dateFormat: _dateFormat,
-                    actionDecision: controller.activeActionOrderId == item.id
-                        ? controller.activeActionDecision
-                        : null,
+                    actionDecision: controller.activeDecisionFor(item.id),
                     onApprove: () =>
                         _showApproveDialog(context, controller, item),
                     onReject: () =>

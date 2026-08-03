@@ -148,10 +148,17 @@ class SupabaseQualificationQueueRepository
       return _validateQualificationResponse(response, orderId, decision);
     } catch (error) {
       if (error is QualificationQueueFailure) rethrow;
-      throw _mapFailure(
+      final failure = _mapFailure(
         error,
         fallback: 'The order could not be qualified.',
       );
+      if (failure.kind == QualificationFailureKind.unknown) {
+        throw const QualificationQueueFailure(
+          QualificationFailureKind.ambiguous,
+          'The qualification result could not be confirmed.',
+        );
+      }
+      throw failure;
     }
   }
 
