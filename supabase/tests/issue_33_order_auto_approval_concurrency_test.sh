@@ -109,11 +109,11 @@ SET statement_timeout = '10s';
 SET lock_timeout = '5s';
 SET ROLE service_role;
 BEGIN;
-SELECT claim_state || ':' || event_outbox_id::text || ':' || attempt::text
+SELECT claim_state || ':' || event_outbox_id::text || ':' || attempt::text || ':' || (claim_token IS NOT NULL)::text
 FROM public.claim_order_auto_approval_event(
-  'a33c0000-0000-4000-8000-000000000401',
   '${EVENT_ID}',
-  3
+  3,
+  120
 );
 SELECT pg_sleep(2);
 COMMIT;
@@ -125,11 +125,11 @@ cat > "${WORKDIR}/right.sql" <<SQL
 SET statement_timeout = '10s';
 SET lock_timeout = '5s';
 SET ROLE service_role;
-SELECT claim_state || ':' || event_outbox_id::text || ':' || attempt::text
+SELECT claim_state || ':' || event_outbox_id::text || ':' || attempt::text || ':' || (claim_token IS NOT NULL)::text
 FROM public.claim_order_auto_approval_event(
-  'a33c0000-0000-4000-8000-000000000402',
   '${EVENT_ID}',
-  3
+  3,
+  120
 );
 SQL
 
@@ -142,14 +142,14 @@ RIGHT_PID=$!
 wait "${LEFT_PID}"
 wait "${RIGHT_PID}"
 
-if ! grep -q "newly_claimed:${EVENT_ID}:1" "${WORKDIR}/left.out" "${WORKDIR}/right.out"; then
+if ! grep -q "newly_claimed:${EVENT_ID}:1:true" "${WORKDIR}/left.out" "${WORKDIR}/right.out"; then
   echo "Issue #33 concurrency: expected one newly_claimed result" >&2
   cat "${WORKDIR}/left.out" >&2
   cat "${WORKDIR}/right.out" >&2
   exit 1
 fi
 
-if ! grep -q "active_in_progress:${EVENT_ID}:1" "${WORKDIR}/left.out" "${WORKDIR}/right.out"; then
+if ! grep -q "active_in_progress:${EVENT_ID}:1:true" "${WORKDIR}/left.out" "${WORKDIR}/right.out"; then
   echo "Issue #33 concurrency: expected one active_in_progress result" >&2
   cat "${WORKDIR}/left.out" >&2
   cat "${WORKDIR}/right.out" >&2

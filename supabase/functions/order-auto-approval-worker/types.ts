@@ -15,10 +15,14 @@ export type ClaimedOrderEvent = {
     | "completed_replay"
     | "active_in_progress"
     | "terminal_failed"
+    | "invalid_event"
     | "not_found"
     | "no_event";
   event_status: string | null;
   event_type: string | null;
+  entity_type: string | null;
+  claim_token: string | null;
+  claim_expires_at: string | null;
 };
 
 export type OrderRecord = {
@@ -41,8 +45,15 @@ export type AutoApprovalRule = {
   max_amount: string | number | null;
   trusted_client_only: boolean;
   category_restrictions: string[] | null;
+  effective_from: string;
+  effective_to: string | null;
   is_active: boolean;
   rule_version: number;
+};
+
+export type RuleEvaluationContext = {
+  investor_is_trusted: boolean;
+  scheme_category: string | null;
 };
 
 export type Decision = {
@@ -53,11 +64,16 @@ export type Decision = {
 
 export type Persistence = {
   claimEvent(input: {
-    workerId: string;
     eventOutboxId: string | null;
     maxAttempts: number;
+    leaseSeconds: number;
   }): Promise<ClaimedOrderEvent>;
   loadOrder(orderId: string): Promise<OrderRecord | null>;
+  loadRuleEvaluationContext(input: {
+    workspaceId: string;
+    investorProfileId: string;
+    schemeCode: string;
+  }): Promise<RuleEvaluationContext>;
   listRules(input: {
     workspaceId: string;
     transactionType: OrderRecord["type"];
@@ -68,10 +84,11 @@ export type Persistence = {
     ruleId: string | null;
     ruleVersion: number | null;
     correlationId: string;
+    claimToken: string;
   }): Promise<{ data: OrderRecord | null; error: RpcError | null }>;
   recordFailure(input: {
     eventOutboxId: string;
-    workerId: string;
+    claimToken: string;
     errorCode: string;
     errorMessage: string | null;
     retryable: boolean;

@@ -5,12 +5,14 @@ import type {
   OrderRecord,
   Persistence,
   RpcError,
+  RuleEvaluationContext,
 } from "./types.ts";
 
 export type HandlerDependencies = {
   internalToken: string;
+  maxAttempts: number;
+  leaseSeconds: number;
   persistence: Persistence;
-  workerId?: () => string;
   log?: (entry: Record<string, unknown>) => void;
 };
 
@@ -23,9 +25,11 @@ const nonRetryableCodes = new Set([
   "event_not_found",
   "event_order_mismatch",
   "invalid_event_type",
+  "invalid_event_entity_type",
   "invalid_correlation_id",
   "event_not_claimed",
   "event_already_completed",
+  "claim_not_owned",
   "rule_not_found",
   "rule_inactive",
   "rule_workspace_mismatch",
@@ -53,13 +57,6 @@ function requiredUuid(value: unknown): string | null {
   return typeof value === "string" && uuidPattern.test(value) ? value : null;
 }
 
-function positiveInt(value: unknown, fallback: number): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    return fallback;
-  }
-  return value;
-}
-
 function numeric(value: string | number | null): number | null {
   if (value == null) return null;
   const parsed = typeof value === "number" ? value : Number(value);
@@ -81,12 +78,18 @@ function payloadOrderId(event: ClaimedOrderEvent): string | null {
 function ruleMatches(
   order: OrderRecord,
   rule: AutoApprovalRule,
-  payload: Record<string, unknown>,
+  context: RuleEvaluationContext,
 ): boolean {
   if (!rule.is_active) return false;
   if (rule.workspace_id !== order.workspace_id) return false;
   if (rule.transaction_type !== order.type) return false;
-  if (rule.trusted_client_only) return false;
+  if (rule.trusted_client_only && !context.investor_is_trusted) return false;
+
+  const now = Date.now();
+  if (Date.parse(rule.effective_from) > now) return false;
+  if (rule.effective_to != null && Date.parse(rule.effective_to) <= now) {
+    return false;
+  }
 
   const amount = numeric(order.amount);
   if (amount == null) return false;
@@ -100,10 +103,9 @@ function ruleMatches(
   if (
     rule.category_restrictions != null && rule.category_restrictions.length > 0
   ) {
-    const category = payload.category ?? payload.scheme_category;
     if (
-      typeof category !== "string" ||
-      !rule.category_restrictions.includes(category)
+      context.scheme_category == null ||
+      !rule.category_restrictions.includes(context.scheme_category)
     ) {
       return false;
     }
@@ -115,9 +117,9 @@ function ruleMatches(
 function decide(
   order: OrderRecord,
   rules: AutoApprovalRule[],
-  payload: Record<string, unknown>,
+  context: RuleEvaluationContext,
 ): Decision {
-  const matchingRule = rules.find((rule) => ruleMatches(order, rule, payload));
+  const matchingRule = rules.find((rule) => ruleMatches(order, rule, context));
   if (matchingRule == null) {
     return { decision: "pending_review", rule_id: null, rule_version: null };
   }
@@ -133,7 +135,6 @@ async function recordFailure(
   deps: HandlerDependencies,
   input: {
     event: ClaimedOrderEvent;
-    workerId: string;
     errorCode: string;
     errorMessage?: string | null;
     maxAttempts: number;
@@ -148,14 +149,32 @@ async function recordFailure(
     return jsonResponse({ error: { code: input.errorCode } }, 422);
   }
 
-  const failure = await deps.persistence.recordFailure({
-    eventOutboxId,
-    workerId: input.workerId,
-    errorCode: input.errorCode,
-    errorMessage: input.errorMessage ?? null,
-    retryable,
-    maxAttempts: input.maxAttempts,
-  });
+  let failure;
+  try {
+    failure = await deps.persistence.recordFailure({
+      eventOutboxId,
+      claimToken: input.event.claim_token ?? "",
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage ?? null,
+      retryable,
+      maxAttempts: input.maxAttempts,
+    });
+  } catch (error) {
+    const code = safeErrorCode(error, "failure_recording_failed");
+    logOutcome(
+      deps,
+      input.event,
+      input.errorCode,
+      input.outcome ?? "failure_recording_failed",
+    );
+    return jsonResponse({
+      error: {
+        code: "failure_recording_failed",
+        original_error_code: input.errorCode,
+        failure_error_code: code,
+      },
+    }, 500);
+  }
 
   if (failure.error != null) {
     const code = errorCode(failure.error);
@@ -194,9 +213,21 @@ function logOutcome(
     order_id: event.order_id,
     correlation_id: event.correlation_id,
     attempt: event.attempt,
+    claim_token: event.claim_token,
     outcome,
     error_code: code,
   });
+}
+
+function safeErrorCode(
+  error: unknown,
+  fallback = "worker_unexpected_error",
+): string {
+  if (error instanceof Error) {
+    const match = error.message.match(/([a-z][a-z0-9_]+)$/);
+    return match?.[1] ?? fallback;
+  }
+  return fallback;
 }
 
 export function createOrderAutoApprovalWorkerHandler(
@@ -229,15 +260,26 @@ export function createOrderAutoApprovalWorkerHandler(
       return jsonResponse({ error: { code: "invalid_event_outbox_id" } }, 400);
     }
 
-    const maxAttempts = positiveInt(body.max_attempts, 3);
-    const workerId = requiredUuid(body.worker_id) ?? deps.workerId?.() ??
-      crypto.randomUUID();
-
-    const event = await deps.persistence.claimEvent({
-      workerId,
-      eventOutboxId,
-      maxAttempts,
-    });
+    let event: ClaimedOrderEvent;
+    try {
+      event = await deps.persistence.claimEvent({
+        eventOutboxId,
+        maxAttempts: deps.maxAttempts,
+        leaseSeconds: deps.leaseSeconds,
+      });
+    } catch (error) {
+      const code = safeErrorCode(error, "event_claim_failed");
+      deps.log?.({
+        event_outbox_id: eventOutboxId,
+        order_id: null,
+        correlation_id: eventOutboxId,
+        attempt: 0,
+        claim_token: null,
+        outcome: "claim_failed",
+        error_code: code,
+      });
+      return jsonResponse({ error: { code: "event_claim_failed" } }, 500);
+    }
 
     if (event.claim_state === "no_event") {
       logOutcome(deps, event, null, "no_event");
@@ -255,6 +297,10 @@ export function createOrderAutoApprovalWorkerHandler(
       logOutcome(deps, event, "event_retry_exhausted", "terminal_failed");
       return jsonResponse({ error: { code: "event_retry_exhausted" } }, 409);
     }
+    if (event.claim_state === "invalid_event") {
+      logOutcome(deps, event, "invalid_event_type", "invalid_event");
+      return jsonResponse({ error: { code: "invalid_event_type" } }, 422);
+    }
     if (event.claim_state === "completed_replay") {
       logOutcome(deps, event, null, "idempotent_replay");
       return jsonResponse({
@@ -268,11 +314,20 @@ export function createOrderAutoApprovalWorkerHandler(
     if (event.event_type !== "order.created") {
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: "invalid_event_type",
         errorMessage: event.event_type,
         retryable: false,
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
+      });
+    }
+
+    if (event.entity_type !== "order_request") {
+      return await recordFailure(deps, {
+        event,
+        errorCode: "invalid_event_entity_type",
+        errorMessage: event.entity_type,
+        retryable: false,
+        maxAttempts: deps.maxAttempts,
       });
     }
 
@@ -282,10 +337,9 @@ export function createOrderAutoApprovalWorkerHandler(
     ) {
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: "invalid_correlation_id",
         retryable: false,
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
       });
     }
 
@@ -293,10 +347,9 @@ export function createOrderAutoApprovalWorkerHandler(
     if (orderId == null || !uuidPattern.test(orderId)) {
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: "invalid_event_order_binding",
         retryable: false,
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
       });
     }
 
@@ -304,23 +357,31 @@ export function createOrderAutoApprovalWorkerHandler(
     if (payloadBoundOrderId != null && payloadBoundOrderId !== orderId) {
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: "event_order_mismatch",
         errorMessage:
           `payload order ${payloadBoundOrderId} does not match event entity ${orderId}`,
         retryable: false,
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
       });
     }
 
-    const order = await deps.persistence.loadOrder(orderId);
+    let order: OrderRecord | null;
+    try {
+      order = await deps.persistence.loadOrder(orderId);
+    } catch (error) {
+      return await recordFailure(deps, {
+        event,
+        errorCode: safeErrorCode(error, "order_load_failed"),
+        retryable: true,
+        maxAttempts: deps.maxAttempts,
+      });
+    }
     if (order == null) {
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: "order_not_found",
         retryable: false,
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
       });
     }
 
@@ -337,38 +398,82 @@ export function createOrderAutoApprovalWorkerHandler(
       }
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: "stale_order_state",
         errorMessage: order.status,
         retryable: false,
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
         outcome,
       });
     }
 
-    const rules = await deps.persistence.listRules({
-      workspaceId: order.workspace_id,
-      transactionType: order.type,
-    });
-    const decision = decide(order, rules, event.payload ?? {});
+    let context: RuleEvaluationContext;
+    try {
+      context = await deps.persistence.loadRuleEvaluationContext({
+        workspaceId: order.workspace_id,
+        investorProfileId: order.investor_profile_id,
+        schemeCode: order.scheme_code,
+      });
+    } catch (error) {
+      return await recordFailure(deps, {
+        event,
+        errorCode: safeErrorCode(error, "rule_context_load_failed"),
+        retryable: true,
+        maxAttempts: deps.maxAttempts,
+      });
+    }
 
-    const applied = await deps.persistence.applyDecision({
-      orderId,
-      decision: decision.decision,
-      ruleId: decision.rule_id,
-      ruleVersion: decision.rule_version,
-      correlationId: event.correlation_id,
-    });
+    let rules: AutoApprovalRule[];
+    try {
+      rules = await deps.persistence.listRules({
+        workspaceId: order.workspace_id,
+        transactionType: order.type,
+      });
+    } catch (error) {
+      return await recordFailure(deps, {
+        event,
+        errorCode: safeErrorCode(error, "rule_load_failed"),
+        retryable: true,
+        maxAttempts: deps.maxAttempts,
+      });
+    }
+    const decision = decide(order, rules, context);
+
+    if (event.claim_token == null) {
+      return await recordFailure(deps, {
+        event,
+        errorCode: "claim_token_required",
+        retryable: false,
+        maxAttempts: deps.maxAttempts,
+      });
+    }
+
+    let applied;
+    try {
+      applied = await deps.persistence.applyDecision({
+        orderId,
+        decision: decision.decision,
+        ruleId: decision.rule_id,
+        ruleVersion: decision.rule_version,
+        correlationId: event.correlation_id,
+        claimToken: event.claim_token,
+      });
+    } catch (error) {
+      return await recordFailure(deps, {
+        event,
+        errorCode: safeErrorCode(error, "decision_apply_failed"),
+        retryable: true,
+        maxAttempts: deps.maxAttempts,
+      });
+    }
 
     if (applied.error != null) {
       const code = errorCode(applied.error);
       return await recordFailure(deps, {
         event,
-        workerId,
         errorCode: code,
         errorMessage: applied.error.message ?? null,
         retryable: !nonRetryableCodes.has(code),
-        maxAttempts,
+        maxAttempts: deps.maxAttempts,
         outcome: code === "stale_order_state" ? "stale" : undefined,
       });
     }
