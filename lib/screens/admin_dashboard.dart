@@ -14,6 +14,7 @@ import 'rupee_rain_background.dart';
 import '../features/investor_identity/models/user_profile.dart';
 import '../features/orders/data/supabase_order_repository.dart';
 import '../features/orders/presentation/widgets/advisor_order_action.dart';
+import '../features/investor_identity/presentation/screens/mfd_queue_screen.dart';
 import '../services/supabase_service.dart';
 import '../utils/file_picker_helper.dart' as fph;
 import '../features/invoice_signer/invoice_signer_job_controller.dart';
@@ -82,6 +83,41 @@ class _AdminDashboardState extends State<AdminDashboard> {
   String? _fundSearchError;
   Timer? _debounceTimer;
   String _selectedChartRange = "1Y";
+
+  bool _canShowMfdQualificationQueue(UserProfile? profile) {
+    if (profile == null || !profile.isActive) return false;
+    return profile.role == UserRole.advisor || profile.role == UserRole.admin;
+  }
+
+  String _sectionTitle(String Function(String) t) {
+    switch (_selectedTab) {
+      case 0:
+        return t('clients_directory');
+      case 1:
+        return t('verification_queue');
+      case 2:
+        return t('mfd_qualification_console');
+      case 3:
+        return t('data_ingestion_engine');
+      case 4:
+        return t('factsheets_manager');
+      case 5:
+        return t('invoice_signer');
+      case 6:
+        return t('settings_console');
+      default:
+        return t('clients_directory');
+    }
+  }
+
+  void _selectAdminTab(int index) {
+    setState(() {
+      _selectedTab = index;
+      if (index == 4) {
+        _fetchFundsList();
+      }
+    });
+  }
 
   // Invoice Signer variables
   fph.PickedFileData? _selectedInvoicePdf;
@@ -787,13 +823,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               Icons.people_outline, colors, context),
                           _buildDrawerItem(1, t('verification_queue'),
                               Icons.verified_user_outlined, colors, context),
-                          _buildDrawerItem(2, t('data_ingestion'),
+                          if (_canShowMfdQualificationQueue(
+                              authProvider.userProfile))
+                            _buildDrawerItem(
+                              2,
+                              t('mfd_qualification_queue'),
+                              Icons.assignment_turned_in_outlined,
+                              colors,
+                              context,
+                              badge: const MfdQueueCountBadge(),
+                            ),
+                          _buildDrawerItem(3, t('data_ingestion'),
                               Icons.cloud_upload_outlined, colors, context),
-                          _buildDrawerItem(3, t('factsheets_manager'),
+                          _buildDrawerItem(4, t('factsheets_manager'),
                               Icons.document_scanner_outlined, colors, context),
-                          _buildDrawerItem(4, t('invoice_signer'),
+                          _buildDrawerItem(5, t('invoice_signer'),
                               Icons.draw_outlined, colors, context),
-                          _buildDrawerItem(5, t('settings'),
+                          _buildDrawerItem(6, t('settings'),
                               Icons.settings_outlined, colors, context),
                         ],
                       ),
@@ -893,17 +939,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
             Text(
-              _selectedTab == 0
-                  ? t('clients_directory')
-                  : (_selectedTab == 1
-                      ? t('verification_queue')
-                      : (_selectedTab == 2
-                          ? t('data_ingestion_engine')
-                          : (_selectedTab == 3
-                              ? t('factsheets_manager')
-                              : (_selectedTab == 4
-                                  ? t('invoice_signer')
-                                  : t('settings_console'))))),
+              _sectionTitle(t),
               style: GoogleFonts.outfit(
                 fontWeight: FontWeight.w600,
                 fontSize: 18,
@@ -972,17 +1008,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Widget _buildTopHeaderBar(AppThemeColors colors, String Function(String) t,
       AuthProvider authProvider) {
-    final sectionTitle = _selectedTab == 0
-        ? t('clients_directory')
-        : (_selectedTab == 1
-            ? t('verification_queue')
-            : (_selectedTab == 2
-                ? t('data_ingestion_engine')
-                : (_selectedTab == 3
-                    ? t('factsheets_manager')
-                    : (_selectedTab == 4
-                        ? t('invoice_signer')
-                        : t('settings_console')))));
+    final sectionTitle = _sectionTitle(t);
 
     return Container(
       height: 64,
@@ -1176,14 +1202,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     0, t('clients_management'), Icons.people_outline, colors),
                 _buildSidebarItem(1, t('verification_queue'),
                     Icons.verified_user_outlined, colors),
-                _buildSidebarItem(2, t('data_ingestion'),
+                if (_canShowMfdQualificationQueue(authProvider.userProfile))
+                  _buildSidebarItem(
+                    2,
+                    t('mfd_qualification_queue'),
+                    Icons.assignment_turned_in_outlined,
+                    colors,
+                    badge: const MfdQueueCountBadge(),
+                  ),
+                _buildSidebarItem(3, t('data_ingestion'),
                     Icons.cloud_upload_outlined, colors),
-                _buildSidebarItem(3, t('factsheets_manager'),
+                _buildSidebarItem(4, t('factsheets_manager'),
                     Icons.document_scanner_outlined, colors),
                 _buildSidebarItem(
-                    4, t('invoice_signer'), Icons.draw_outlined, colors),
+                    5, t('invoice_signer'), Icons.draw_outlined, colors),
                 _buildSidebarItem(
-                    5, t('settings'), Icons.settings_outlined, colors),
+                    6, t('settings'), Icons.settings_outlined, colors),
               ],
             ),
           ),
@@ -1231,7 +1265,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildSidebarItem(
-      int index, String title, IconData icon, AppThemeColors colors) {
+    int index,
+    String title,
+    IconData icon,
+    AppThemeColors colors, {
+    Widget? badge,
+  }) {
     final isSelected = _selectedTab == index;
 
     if (!_isSidebarExpanded) {
@@ -1241,12 +1280,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           message: title,
           child: InkWell(
             onTap: () {
-              setState(() {
-                _selectedTab = index;
-                if (index == 3) {
-                  _fetchFundsList();
-                }
-              });
+              _selectAdminTab(index);
             },
             borderRadius: BorderRadius.circular(12),
             child: Container(
@@ -1256,12 +1290,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Center(
-                child: Icon(
-                  icon,
-                  color: isSelected
-                      ? colors.sidebarTextPrimary
-                      : colors.sidebarTextSecondary,
-                  size: 22,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(
+                      icon,
+                      color: isSelected
+                          ? colors.sidebarTextPrimary
+                          : colors.sidebarTextSecondary,
+                      size: 22,
+                    ),
+                    if (badge != null)
+                      Positioned(
+                        right: -14,
+                        top: -10,
+                        child: badge,
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -1274,12 +1319,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: InkWell(
         onTap: () {
-          setState(() {
-            _selectedTab = index;
-            if (index == 3) {
-              _fetchFundsList();
-            }
-          });
+          _selectAdminTab(index);
         },
         borderRadius: BorderRadius.circular(12),
         child: Container(
@@ -1313,6 +1353,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
               ),
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                badge,
+              ],
             ],
           ),
         ),
@@ -1320,20 +1364,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildDrawerItem(int index, String label, IconData icon,
-      AppThemeColors colors, BuildContext context) {
+  Widget _buildDrawerItem(
+    int index,
+    String label,
+    IconData icon,
+    AppThemeColors colors,
+    BuildContext context, {
+    Widget? badge,
+  }) {
     final isSelected = _selectedTab == index;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
       child: InkWell(
         onTap: () {
           Navigator.pop(context); // Close the drawer natively
-          setState(() {
-            _selectedTab = index;
-            if (index == 3) {
-              _fetchFundsList();
-            }
-          });
+          _selectAdminTab(index);
         },
         borderRadius: BorderRadius.circular(10),
         child: Container(
@@ -1365,6 +1410,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
               ),
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                badge,
+              ],
             ],
           ),
         ),
@@ -1379,12 +1428,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
       case 1:
         return const AdvisorVerificationQueueScreen();
       case 2:
-        return _buildIngestionContent();
+        if (_canShowMfdQualificationQueue(
+            Provider.of<AuthProvider>(context, listen: false).userProfile)) {
+          return const MfdQueueScreen();
+        }
+        return const SizedBox.shrink();
       case 3:
-        return _buildFactsheetsContent();
+        return _buildIngestionContent();
       case 4:
-        return _buildInvoiceSignerContent();
+        return _buildFactsheetsContent();
       case 5:
+        return _buildInvoiceSignerContent();
+      case 6:
         return _buildSettingsContent();
       default:
         return const SizedBox.shrink();
