@@ -65,9 +65,6 @@ VALUES
   ('64000000-0000-0000-0000-000000000004', '62000000-0000-0000-0000-000000000004', 10000.0, 12000.0),
   ('64000000-0000-0000-0000-000000000006', '62000000-0000-0000-0000-000000000006', 10000.0, 12000.0);
 
--- Grant public table privileges to authenticated role for test queries
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
-
 -- Switch role to authenticated to execute RLS and logic tests
 SET ROLE authenticated;
 
