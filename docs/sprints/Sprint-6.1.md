@@ -42,3 +42,12 @@ This sprint implements the core order execution engine (Buy/Sell/Switch transact
 - [ ] **feat(database): create service-only apply_auto_approval_decision RPC with stable outbox-event idempotency and rule-version validation (scope includes claimed-event validation, completed-event update, failure state update, rule_inactive code, empty search path, and outbox uniqueness dependency) [BRD-FR-005, BRD-BR-005, BRD-BR-006, Section 6.B, Section 6.C, Section 8, NFR-003, NFR-005]** (#59)
 - [x] **docs/implementation: complete Sprint 6.1 canonical alignment (covering canonical documents, migration contracts, issue scopes, test evidence, and project board synchronization) [Section 1, Section 18]** (#60)
 - [x] **feat(database): add folio_reference_id (FK to folio_references) and destination_scheme_code columns to order_requests to enable Sell/Switch persistence — merged through PR #90 (merge commit: `cf71c9d88da042ee0e5b4d22546d942960171708`) and integrated into PR #88; includes RPC projection updates, audit log coverage, type-specific constraints, and pgTAP regression [BRD-FR-005, Section 3.A, Section 6.A]** (#89)
+
+## Post-Sprint Carryover
+
+Sprint 6.1 closed on 6 August 2026. Issues that remained open at sprint closure were carried into Sprint 8.1 without changing their implementation status.
+
+Carried over issues: #39, #40, #41, #43, #44, #48, #49, #50, #51, #53, #59.
+
+- **Issue #95** — security follow-up discovered on 8 August 2026 after Sprint 6.1 closure. The Buy/Sell/Switch order workflow was found to directly access protected folio mapping/reference tables. The issue is tracked for implementation in Sprint 8.1 and is not counted as incomplete original Sprint 6.1 scope. Related: Issue #34 / PR #88, Issue #89 / PR #90, PR #94.
+
