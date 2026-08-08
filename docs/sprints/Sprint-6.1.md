@@ -28,8 +28,6 @@ This sprint implements the core order execution engine (Buy/Sell/Switch transact
     - Unit tests cover masking, validation, bloc phases, advisor initiator identity preservation, canonical Buy/Sell/Switch payloads, folio-scoped holdings isolation, Switch direction arithmetic, relationship tuple model, and safe error messages
     - Widget tests cover Buy/Sell/Switch modal states, advisor selector, `AdvisorOrderAction` composability, light/dark mode, responsive layout (320px–1440px), large text scale
 
-- [ ] **security(database/flutter): replace direct browser access to protected folio mapping/reference tables in Buy/Sell/Switch order flows with narrow SECURITY DEFINER projection RPC(s), preserving folio ACL isolation, caller-bound authorization, masked-only folio disclosure, exact investor/workspace/portfolio/folio isolation, and positive/negative SQL + Flutter regression coverage [BRD-FR-005, BRD-BR-003, Section 3.A, Section 6.A, Section 17.F]** (#95)
-
 - [x] **feat(flutter): build MFD Qualification Queue Screen (queue interface displays investor, initiator profile, initiator role, initiation channel, current status, and an informational same-user marker if the reviewer is also the initiator) [BRD-FR-006, Section 3.A]** (#35) — Implemented on `feature/issue-35-mfd-qualification-queue`; pending review/merge.
 - [ ] **feat(database): implement dual MFD and Investor subscriptions, billing-owner payment events and entitlement RLS (scope includes subscription_plans, workspace_billing, investor_subscriptions, payment_events, Owner XOR, Investor-owned payment-event RLS, full state machine, and billing status/idempotency) [BRD-FR-010, BRD-BR-011, BC-009, Section 5, Section 13]** (#39)
 - [ ] **feat(database): implement investor referrals, conversions, rewards and profile-resolved RLS [BRD-FR-011, BC-018, Section 12]** (#40)
@@ -44,3 +42,12 @@ This sprint implements the core order execution engine (Buy/Sell/Switch transact
 - [ ] **feat(database): create service-only apply_auto_approval_decision RPC with stable outbox-event idempotency and rule-version validation (scope includes claimed-event validation, completed-event update, failure state update, rule_inactive code, empty search path, and outbox uniqueness dependency) [BRD-FR-005, BRD-BR-005, BRD-BR-006, Section 6.B, Section 6.C, Section 8, NFR-003, NFR-005]** (#59)
 - [x] **docs/implementation: complete Sprint 6.1 canonical alignment (covering canonical documents, migration contracts, issue scopes, test evidence, and project board synchronization) [Section 1, Section 18]** (#60)
 - [x] **feat(database): add folio_reference_id (FK to folio_references) and destination_scheme_code columns to order_requests to enable Sell/Switch persistence — merged through PR #90 (merge commit: `cf71c9d88da042ee0e5b4d22546d942960171708`) and integrated into PR #88; includes RPC projection updates, audit log coverage, type-specific constraints, and pgTAP regression [BRD-FR-005, Section 3.A, Section 6.A]** (#89)
+
+## Post-Sprint Carryover
+
+Sprint 6.1 closed on 6 August 2026. Issues that remained open at sprint closure were carried into Sprint 8.1 without changing their implementation status.
+
+Carried over issues: #39, #40, #41, #43, #44, #48, #49, #50, #51, #53, #59.
+
+- **Issue #95** — security follow-up discovered on 8 August 2026 after Sprint 6.1 closure. The Buy/Sell/Switch order workflow was found to directly access protected folio mapping/reference tables. The issue is tracked for implementation in Sprint 8.1 and is not counted as incomplete original Sprint 6.1 scope. Related: Issue #34 / PR #88, Issue #89 / PR #90, PR #94.
+
