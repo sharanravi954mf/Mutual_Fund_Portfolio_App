@@ -251,20 +251,22 @@ class SupabaseOrderRepository implements OrderRepository {
 
   @override
   Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
-      String workspaceId, String folioReferenceId) async {
+      String workspaceId, String portfolioId, String folioReferenceId) async {
     try {
       final referencesRes = await _client.rpc(
         'resolve_order_folio_portfolio',
         params: {
           'p_investor_profile_id': investorProfileId,
           'p_workspace_id': workspaceId,
+          'p_portfolio_id': portfolioId,
           'p_folio_reference_id': folioReferenceId,
         },
       );
 
       if ((referencesRes as List).isEmpty) return [];
 
-      final portfolioId = referencesRes.first['portfolio_id'] as String;
+      final resolvedPortfolioId = referencesRes.first['portfolio_id'] as String;
+      if (resolvedPortfolioId != portfolioId) return [];
 
       final txsRes = await _client
           .from('transactions')

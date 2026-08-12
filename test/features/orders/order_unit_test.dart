@@ -8,6 +8,15 @@ import 'package:mutual_fund_portfolio_app/features/orders/domain/order_models.da
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/order_bloc.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/order_state.dart';
 
+OrderFolio _folio(OrderBloc bloc, String folioReferenceId,
+    {String? portfolioId}) {
+  return bloc.state.folios.firstWhere(
+    (folio) =>
+        folio.folioReferenceId == folioReferenceId &&
+        (portfolioId == null || folio.portfolioId == portfolioId),
+  );
+}
+
 void main() {
   // ---------------------------------------------------------------------------
   // MaskingUtil Tests — strict fail-closed validation
@@ -372,7 +381,7 @@ void main() {
       );
 
       bloc.updateScheme('SCH-1');
-      await bloc.updateFolio('12345678');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateAmount(5000);
 
       await bloc.updateOrderType(OrderType.buy);
@@ -408,7 +417,7 @@ void main() {
       );
 
       await bloc.updateOrderType(OrderType.sell);
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateScheme('SCH-A');
       bloc.updateAmount(5000);
 
@@ -523,7 +532,7 @@ void main() {
       await bloc.updateOrderType(OrderType.sell);
 
       // Select Folio A — only SCH-A should appear, never SCH-B
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-A'), true,
           reason: 'SCH-A must appear in Folio A');
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-B'), false,
@@ -533,7 +542,7 @@ void main() {
       expect(bloc.state.draft.schemeCode, 'SCH-A');
 
       // Select Folio B — SCH-B appears, SCH-A must be cleared
-      await bloc.updateFolio('folio-b');
+      await bloc.updateFolio(_folio(bloc, 'folio-b'));
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-B'), true,
           reason: 'SCH-B must appear in Folio B');
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-A'), false,
@@ -541,6 +550,38 @@ void main() {
       expect(bloc.state.draft.schemeCode, isEmpty,
           reason:
               'Source scheme from Folio A must be cleared after moving to Folio B');
+    });
+
+    test('same folio reference on two portfolios preserves selected portfolio',
+        () async {
+      final sharedRepository = SharedFolioOrderRepository();
+      final sharedBloc = OrderBloc(sharedRepository);
+      await sharedBloc.initiateForInvestor(
+        investorProfileId: 'investor-1',
+        initiatorProfileId: 'investor-1',
+        initiationRole: 'investor',
+        initiationChannel: 'investor_portal',
+      );
+      await sharedBloc.updateOrderType(OrderType.sell);
+
+      expect(sharedBloc.state.folios, hasLength(2));
+      expect(
+        sharedBloc.state.folios.map((folio) => folio.folioReferenceId).toSet(),
+        {'shared-folio'},
+      );
+      expect(
+        sharedBloc.state.folios.map((folio) => folio.portfolioId).toSet(),
+        {'portfolio-1', 'portfolio-2'},
+      );
+
+      await sharedBloc.updateFolio(
+        _folio(sharedBloc, 'shared-folio', portfolioId: 'portfolio-2'),
+      );
+
+      expect(sharedBloc.state.selectedFolio?.portfolioId, 'portfolio-2');
+      expect(sharedBloc.state.draft.folioReferenceId, 'shared-folio');
+      expect(sharedRepository.lastHoldingsPortfolioId, 'portfolio-2');
+      expect(sharedRepository.lastHoldingsFolioReferenceId, 'shared-folio');
     });
 
     test('Sell order submits canonical source folio intent', () async {
@@ -553,7 +594,7 @@ void main() {
 
       await bloc.updateOrderType(OrderType.sell);
       // Use folio-a and SCH-A so validation passes; repository block is what causes failure
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateScheme('SCH-A');
       bloc.updateAmount(5000);
 
@@ -576,7 +617,7 @@ void main() {
 
       await bloc.updateOrderType(OrderType.switchOrder);
       // Use folio-a and SCH-A (source) → SCH-B (dest) so validation passes
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateScheme('SCH-A');
       bloc.updateDestinationScheme('SCH-B');
       bloc.updateAmount(5000);
@@ -720,6 +761,8 @@ class FakeOrderRepository implements OrderRepository {
   bool shouldThrowAccessDenied = false;
   bool shouldThrowNetworkError = false;
   OrderDraft? lastSubmittedDraft;
+  String? lastHoldingsPortfolioId;
+  String? lastHoldingsFolioReferenceId;
 
   void _checkErrors() {
     if (shouldThrowAccessDenied) {
@@ -805,8 +848,10 @@ class FakeOrderRepository implements OrderRepository {
   /// vice-versa.
   @override
   Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
-      String workspaceId, String folioReferenceId) async {
+      String workspaceId, String portfolioId, String folioReferenceId) async {
     _checkErrors();
+    lastHoldingsPortfolioId = portfolioId;
+    lastHoldingsFolioReferenceId = folioReferenceId;
     if (folioReferenceId == 'folio-a') {
       return [
         {
@@ -961,6 +1006,27 @@ class FakeOrderRepository implements OrderRepository {
         email: 'investor@example.com',
       );
     }).toList();
+  }
+}
+
+class SharedFolioOrderRepository extends FakeOrderRepository {
+  @override
+  Future<List<OrderFolio>> fetchFolios(
+      String investorProfileId, String workspaceId) async {
+    return const [
+      OrderFolio(
+        folioReferenceId: 'shared-folio',
+        portfolioId: 'portfolio-1',
+        maskedFolioDisplay: '••••1234',
+        registrar: 'CAMS',
+      ),
+      OrderFolio(
+        folioReferenceId: 'shared-folio',
+        portfolioId: 'portfolio-2',
+        maskedFolioDisplay: '••••1234',
+        registrar: 'CAMS',
+      ),
+    ];
   }
 }
 
@@ -1607,8 +1673,8 @@ void _registerSanitisationTests() {
       });
       final repo = SupabaseOrderRepository(client);
 
-      final holdings =
-          await repo.fetchHoldings('inv-1', 'workspace-1', 'folio-a');
+      final holdings = await repo.fetchHoldings(
+          'inv-1', 'workspace-1', 'portfolio-1', 'folio-a');
 
       expect(holdings.length, 1);
       expect(holdings.single['scheme_code'], 'SCH-A');
@@ -1619,6 +1685,7 @@ void _registerSanitisationTests() {
       expect(client.lastRpcParams, {
         'p_investor_profile_id': 'inv-1',
         'p_workspace_id': 'workspace-1',
+        'p_portfolio_id': 'portfolio-1',
         'p_folio_reference_id': 'folio-a',
       });
       expect(
@@ -1677,13 +1744,47 @@ void _registerSanitisationTests() {
       });
       final repo = SupabaseOrderRepository(client);
 
-      final holdings =
-          await repo.fetchHoldings('inv-1', 'workspace-1', 'forged-folio');
+      final holdings = await repo.fetchHoldings(
+          'inv-1', 'workspace-1', 'forged-portfolio', 'forged-folio');
 
       expect(holdings, isEmpty);
       expect(client.rpcCalls, ['resolve_order_folio_portfolio']);
       expect(client.tableCalls, isNot(contains('transactions')));
       expect(client.tableCalls, isNot(contains('portfolio_folio_references')));
+    });
+
+    test('fetchHoldings rejects a resolver portfolio mismatch before tx read',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'rpc:resolve_order_folio_portfolio': [
+          {'portfolio_id': 'different-portfolio'},
+        ],
+        'transactions': [
+          {
+            'portfolio_id': 'selected-portfolio',
+            'folio_reference_id': 'shared-folio',
+            'transaction_type': 'BUY',
+            'units': 10,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final holdings = await repo.fetchHoldings(
+          'inv-1', 'workspace-1', 'selected-portfolio', 'shared-folio');
+
+      expect(holdings, isEmpty);
+      expect(client.lastRpcParams, {
+        'p_investor_profile_id': 'inv-1',
+        'p_workspace_id': 'workspace-1',
+        'p_portfolio_id': 'selected-portfolio',
+        'p_folio_reference_id': 'shared-folio',
+      });
+      expect(client.tableCalls, isNot(contains('transactions')));
     });
 
     test('fetchAssignedInvestors excludes a non-owner admin workspace',

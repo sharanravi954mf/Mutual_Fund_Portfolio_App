@@ -51,6 +51,7 @@ class OrderBloc extends ChangeNotifier {
 
     _updateState(_state.copyWith(
       phase: OrderPhase.loadingReferenceData,
+      clearSelectedFolio: true,
       clearErrorMessage: true,
       clearSubmittedOrderId: true,
     ));
@@ -109,6 +110,7 @@ class OrderBloc extends ChangeNotifier {
 
     _updateState(_state.copyWith(
       phase: OrderPhase.loadingReferenceData,
+      clearSelectedFolio: true,
       clearErrorMessage: true,
       clearSubmittedOrderId: true,
     ));
@@ -218,6 +220,7 @@ class OrderBloc extends ChangeNotifier {
         clearFolio: true,
         clearDestinationScheme: true,
       ),
+      clearSelectedFolio: true,
     ));
 
     try {
@@ -270,6 +273,7 @@ class OrderBloc extends ChangeNotifier {
     _updateState(_state.copyWith(
       draft: newDraft,
       holdings: const [],
+      clearSelectedFolio: true,
       clearErrorMessage: true,
     ));
   }
@@ -297,8 +301,9 @@ class OrderBloc extends ChangeNotifier {
   }
 
   /// Update selected folio & clear incompatible schemes
-  Future<void> updateFolio(String folioReferenceId) async {
+  Future<void> updateFolio(OrderFolio folio) async {
     final requestId = ++_holdingsRequestId;
+    final folioReferenceId = folio.folioReferenceId;
     var newDraft = _state.draft.copyWith(
       folioReferenceId: folioReferenceId,
       schemeCode: '',
@@ -313,15 +318,21 @@ class OrderBloc extends ChangeNotifier {
       _updateState(_state.copyWith(
         phase: OrderPhase.loadingReferenceData,
         draft: newDraft,
+        selectedFolio: folio,
         holdings: const [],
         clearErrorMessage: true,
       ));
       try {
         final holdings = await _repository.fetchHoldings(
-            ctx.investorProfileId, ctx.workspaceId, folioReferenceId);
+          ctx.investorProfileId,
+          ctx.workspaceId,
+          folio.portfolioId,
+          folioReferenceId,
+        );
 
         if (requestId != _holdingsRequestId ||
-            _state.draft.folioReferenceId != folioReferenceId) {
+            _state.selectedFolio?.portfolioId != folio.portfolioId ||
+            _state.selectedFolio?.folioReferenceId != folioReferenceId) {
           return;
         }
 
@@ -344,7 +355,7 @@ class OrderBloc extends ChangeNotifier {
         ));
       }
     } else {
-      _updateState(_state.copyWith(draft: newDraft));
+      _updateState(_state.copyWith(draft: newDraft, selectedFolio: folio));
     }
   }
 

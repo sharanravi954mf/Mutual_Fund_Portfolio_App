@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/widgets/order_modal.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/widgets/advisor_order_action.dart';
+import 'package:mutual_fund_portfolio_app/features/orders/data/order_repository.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/domain/order_models.dart';
 import 'package:mutual_fund_portfolio_app/providers/auth_provider.dart';
 import 'package:mutual_fund_portfolio_app/providers/language_provider.dart';
@@ -470,6 +471,37 @@ void main() {
         find.text('Select a verified folio to load available source holdings.'),
         findsOneWidget,
       );
+    });
+
+    testWidgets(
+        'same folio reference on two portfolios remains a distinct selection',
+        (tester) async {
+      final repository = SharedFolioOrderRepository();
+      final modal = OrderModal(repository: repository);
+
+      await tester.pumpWidget(buildTestableWidget(modal, auth: investorAuth));
+      await tester.pumpAndSettle();
+      await tapOrderType(tester, 'Sell');
+
+      final formField = find.byType(DropdownButtonFormField<OrderFolio>).first;
+      final dropdown = tester.widget<DropdownButton<OrderFolio>>(
+        find.descendant(
+          of: formField,
+          matching: find.byType(DropdownButton<OrderFolio>),
+        ),
+      );
+      final items = dropdown.items!;
+      expect(items, hasLength(2));
+      expect(items[0].value?.folioReferenceId, 'shared-folio');
+      expect(items[1].value?.folioReferenceId, 'shared-folio');
+      expect(items[0].value?.portfolioId, 'portfolio-1');
+      expect(items[1].value?.portfolioId, 'portfolio-2');
+
+      dropdown.onChanged!(items[1].value);
+      await tester.pumpAndSettle();
+
+      expect(repository.lastHoldingsPortfolioId, 'portfolio-2');
+      expect(repository.lastHoldingsFolioReferenceId, 'shared-folio');
     });
 
     testWidgets('Switch request renders folio, source and destination workflow',
@@ -941,7 +973,7 @@ class ResolvedNameOrderRepository extends FakeOrderRepository {
 class MultiHoldingOrderRepository extends FakeOrderRepository {
   @override
   Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
-      String workspaceId, String folioReferenceId) async {
+      String workspaceId, String portfolioId, String folioReferenceId) async {
     if (folioReferenceId == 'folio-a') {
       return [
         {
@@ -959,6 +991,7 @@ class MultiHoldingOrderRepository extends FakeOrderRepository {
     return super.fetchHoldings(
       investorProfileId,
       workspaceId,
+      portfolioId,
       folioReferenceId,
     );
   }

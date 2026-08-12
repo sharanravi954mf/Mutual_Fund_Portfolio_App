@@ -2,6 +2,11 @@
 
 BEGIN;
 
+-- Exercise the resolver independently of the current one-portfolio-per-client/
+-- workspace index. This rollback-only fixture protects the exact tuple contract
+-- if that separate schema invariant is relaxed in a future migration.
+DROP INDEX public.portfolios_workspace_client_uidx;
+
 INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
   ('95000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'issue95-investor-a@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now()),
@@ -63,7 +68,8 @@ INSERT INTO public.portfolios (id, client_id, workspace_id, total_invested_value
 VALUES
   ('95300000-0000-0000-0000-000000000001', '95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', 1000, 1100),
   ('95300000-0000-0000-0000-000000000002', '95100000-0000-0000-0000-000000000002', '95200000-0000-0000-0000-000000000001', 2000, 2100),
-  ('95300000-0000-0000-0000-000000000003', '95100000-0000-0000-0000-000000000006', '95200000-0000-0000-0000-000000000001', 3000, 3100);
+  ('95300000-0000-0000-0000-000000000003', '95100000-0000-0000-0000-000000000006', '95200000-0000-0000-0000-000000000001', 3000, 3100),
+  ('95300000-0000-0000-0000-000000000004', '95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', 4000, 4100);
 
 INSERT INTO public.folio_references (id, registrar, normalized_folio_number, amc_identity, source_folio_masked)
 VALUES
@@ -75,7 +81,8 @@ INSERT INTO public.portfolio_folio_references (portfolio_id, folio_reference_id)
 VALUES
   ('95300000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001'),
   ('95300000-0000-0000-0000-000000000002', '95400000-0000-0000-0000-000000000002'),
-  ('95300000-0000-0000-0000-000000000003', '95400000-0000-0000-0000-000000000003');
+  ('95300000-0000-0000-0000-000000000003', '95400000-0000-0000-0000-000000000003'),
+  ('95300000-0000-0000-0000-000000000004', '95400000-0000-0000-0000-000000000001');
 
 INSERT INTO public.verification_requests (id, user_id, method_code, status, submitted_at, resolved_at)
 VALUES
@@ -94,8 +101,9 @@ VALUES
 DO $$
 DECLARE
   v_list_oid pg_catalog.oid := 'public.list_order_folios(pg_catalog.uuid, pg_catalog.uuid)'::pg_catalog.regprocedure::pg_catalog.oid;
-  v_resolve_oid pg_catalog.oid := 'public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid)'::pg_catalog.regprocedure::pg_catalog.oid;
+  v_resolve_oid pg_catalog.oid := 'public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid)'::pg_catalog.regprocedure::pg_catalog.oid;
   v_column_names pg_catalog.text[];
+  v_resolve_input_names pg_catalog.text[];
   v_resolve_column_names pg_catalog.text[];
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc WHERE oid = v_list_oid AND prosecdef AND proconfig @> ARRAY['search_path=""']) THEN
@@ -171,6 +179,23 @@ BEGIN
   END IF;
 
   SELECT pg_catalog.array_agg(parameter_name::pg_catalog.text ORDER BY ordinal_position)
+  INTO v_resolve_input_names
+  FROM information_schema.parameters
+  WHERE specific_schema = 'public'
+    AND specific_name = (
+      SELECT specific_name
+      FROM information_schema.routines
+      WHERE routine_schema = 'public'
+        AND routine_name = 'resolve_order_folio_portfolio'
+      LIMIT 1
+    )
+    AND parameter_mode = 'IN';
+
+  IF v_resolve_input_names <> ARRAY['p_investor_profile_id', 'p_workspace_id', 'p_portfolio_id', 'p_folio_reference_id'] THEN
+    RAISE EXCEPTION 'issue95:resolve_order_folio_portfolio_input_contract_mismatch:%', v_resolve_input_names;
+  END IF;
+
+  SELECT pg_catalog.array_agg(parameter_name::pg_catalog.text ORDER BY ordinal_position)
   INTO v_resolve_column_names
   FROM information_schema.parameters
   WHERE specific_schema = 'public'
@@ -214,10 +239,15 @@ BEGIN
 
   SELECT pg_catalog.count(*) INTO v_count
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
-  IF v_count <> 1 THEN RAISE EXCEPTION 'issue95:investor_expected_one_own_folio:%', v_count; END IF;
+  IF v_count <> 2 THEN RAISE EXCEPTION 'issue95:investor_expected_two_shared_folio_projections:%', v_count; END IF;
+
+  SELECT pg_catalog.count(DISTINCT (portfolio_id, folio_reference_id)) INTO v_count
+  FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
+  IF v_count <> 2 THEN RAISE EXCEPTION 'issue95:shared_folio_projections_not_distinct:%', v_count; END IF;
 
   SELECT * INTO v_row
-  FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
+  FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001')
+  WHERE portfolio_id = '95300000-0000-0000-0000-000000000001';
   IF v_row.folio_reference_id <> '95400000-0000-0000-0000-000000000001'
      OR v_row.portfolio_id <> '95300000-0000-0000-0000-000000000001'
      OR v_row.registrar <> 'CAMS'
@@ -229,11 +259,32 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000001',
     '95400000-0000-0000-0000-000000000001'
   );
   IF v_row.portfolio_id <> '95300000-0000-0000-0000-000000000001' THEN
     RAISE EXCEPTION 'issue95:legitimate_folio_did_not_resolve_exact_portfolio';
   END IF;
+
+  SELECT * INTO v_row
+  FROM public.resolve_order_folio_portfolio(
+    '95100000-0000-0000-0000-000000000001',
+    '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000004',
+    '95400000-0000-0000-0000-000000000001'
+  );
+  IF v_row.portfolio_id <> '95300000-0000-0000-0000-000000000004' THEN
+    RAISE EXCEPTION 'issue95:shared_folio_second_portfolio_did_not_resolve_exactly';
+  END IF;
+
+  SELECT pg_catalog.count(*) INTO v_count
+  FROM public.resolve_order_folio_portfolio(
+    '95100000-0000-0000-0000-000000000001',
+    '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000099',
+    '95400000-0000-0000-0000-000000000001'
+  );
+  IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:forged_portfolio_id_resolved'; END IF;
 
   SELECT pg_catalog.count(*) INTO v_count
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000002', '95200000-0000-0000-0000-000000000001');
@@ -247,6 +298,7 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000002',
     '95400000-0000-0000-0000-000000000002'
   );
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:forged_folio_resolved'; END IF;
@@ -255,6 +307,7 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000002',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000001',
     '95400000-0000-0000-0000-000000000001'
   );
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:forged_investor_profile_resolved'; END IF;
@@ -263,6 +316,7 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000002',
+    '95300000-0000-0000-0000-000000000001',
     '95400000-0000-0000-0000-000000000001'
   );
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:forged_workspace_resolved'; END IF;
@@ -287,7 +341,7 @@ BEGIN
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:inactive_membership_authorized_list'; END IF;
   SELECT pg_catalog.count(*) INTO v_count
-  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
+  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95300000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:inactive_membership_authorized_resolve'; END IF;
 END;
 $$;
@@ -313,7 +367,7 @@ BEGIN
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:revoked_investor_link_authorized_list'; END IF;
   SELECT pg_catalog.count(*) INTO v_count
-  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
+  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95300000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:revoked_investor_link_authorized_resolve'; END IF;
 END;
 $$;
@@ -337,7 +391,7 @@ BEGIN
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:non_linked_investor_account_authorized_list'; END IF;
   SELECT pg_catalog.count(*) INTO v_count
-  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
+  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95300000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:non_linked_investor_account_authorized_resolve'; END IF;
 END;
 $$;
@@ -363,7 +417,7 @@ BEGIN
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:revoked_folio_grant_authorized_list'; END IF;
   SELECT pg_catalog.count(*) INTO v_count
-  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
+  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95300000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:revoked_folio_grant_authorized_resolve'; END IF;
 END;
 $$;
@@ -389,7 +443,7 @@ BEGIN
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:inactive_investor_profile_authorized_list'; END IF;
   SELECT pg_catalog.count(*) INTO v_count
-  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
+  FROM public.resolve_order_folio_portfolio('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001', '95300000-0000-0000-0000-000000000001', '95400000-0000-0000-0000-000000000001');
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:inactive_investor_profile_authorized_resolve'; END IF;
 END;
 $$;
@@ -413,6 +467,7 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000001',
     '95400000-0000-0000-0000-000000000001'
   );
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:unrelated_investor_resolved_other_folio'; END IF;
@@ -428,12 +483,13 @@ DECLARE
 BEGIN
   SELECT pg_catalog.count(*) INTO v_count
   FROM public.list_order_folios('95100000-0000-0000-0000-000000000001', '95200000-0000-0000-0000-000000000001');
-  IF v_count <> 1 THEN RAISE EXCEPTION 'issue95:authorized_advisor_expected_one_folio:%', v_count; END IF;
+  IF v_count <> 2 THEN RAISE EXCEPTION 'issue95:authorized_advisor_expected_two_shared_folio_projections:%', v_count; END IF;
 
   SELECT pg_catalog.count(*) INTO v_count
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000001',
     '95400000-0000-0000-0000-000000000001'
   );
   IF v_count <> 1 THEN RAISE EXCEPTION 'issue95:authorized_advisor_resolve_failed'; END IF;
@@ -442,6 +498,7 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000002',
     '95400000-0000-0000-0000-000000000002'
   );
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:forged_portfolio_relationship_obtained'; END IF;
@@ -463,6 +520,7 @@ BEGIN
   FROM public.resolve_order_folio_portfolio(
     '95100000-0000-0000-0000-000000000001',
     '95200000-0000-0000-0000-000000000001',
+    '95300000-0000-0000-0000-000000000001',
     '95400000-0000-0000-0000-000000000001'
   );
   IF v_count <> 0 THEN RAISE EXCEPTION 'issue95:unrelated_advisor_resolved_folio'; END IF;
@@ -514,6 +572,7 @@ BEGIN
     PERFORM * FROM public.resolve_order_folio_portfolio(
       '95100000-0000-0000-0000-000000000001',
       '95200000-0000-0000-0000-000000000001',
+      '95300000-0000-0000-0000-000000000001',
       '95400000-0000-0000-0000-000000000001'
     );
     RAISE EXCEPTION 'issue95:anon_executed_resolve_order_folio_portfolio';

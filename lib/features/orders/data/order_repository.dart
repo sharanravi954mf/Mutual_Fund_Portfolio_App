@@ -74,8 +74,8 @@ abstract class OrderRepository {
   Future<List<Map<String, dynamic>>> searchMutualFunds(String query);
 
   /// Fetch currently held schemes for the investor's portfolio, scoped to selected folio
-  Future<List<Map<String, dynamic>>> fetchHoldings(
-      String investorProfileId, String workspaceId, String folioReferenceId);
+  Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
+      String workspaceId, String portfolioId, String folioReferenceId);
 
   /// Resolves the active workspace membership/portfolio details for the investor
   Future<OrderContext> resolveInvestorContext({

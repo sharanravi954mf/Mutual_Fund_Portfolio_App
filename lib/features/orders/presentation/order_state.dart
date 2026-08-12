@@ -6,6 +6,7 @@ class OrderState {
   final OrderDraft draft;
   final List<Map<String, dynamic>> funds;
   final List<OrderFolio> folios;
+  final OrderFolio? selectedFolio;
   final List<OrderInvestor> assignedInvestors;
   final List<Map<String, dynamic>> holdings;
   final String? errorMessage;
@@ -16,6 +17,7 @@ class OrderState {
     required this.draft,
     this.funds = const [],
     this.folios = const [],
+    this.selectedFolio,
     this.assignedInvestors = const [],
     this.holdings = const [],
     this.errorMessage,
@@ -27,18 +29,22 @@ class OrderState {
     OrderDraft? draft,
     List<Map<String, dynamic>>? funds,
     List<OrderFolio>? folios,
+    OrderFolio? selectedFolio,
     List<OrderInvestor>? assignedInvestors,
     List<Map<String, dynamic>>? holdings,
     String? errorMessage,
     String? submittedOrderId,
     bool clearErrorMessage = false,
     bool clearSubmittedOrderId = false,
+    bool clearSelectedFolio = false,
   }) {
     return OrderState(
       phase: phase ?? this.phase,
       draft: draft ?? this.draft,
       funds: funds ?? this.funds,
       folios: folios ?? this.folios,
+      selectedFolio:
+          clearSelectedFolio ? null : (selectedFolio ?? this.selectedFolio),
       assignedInvestors: assignedInvestors ?? this.assignedInvestors,
       holdings: holdings ?? this.holdings,
       errorMessage:

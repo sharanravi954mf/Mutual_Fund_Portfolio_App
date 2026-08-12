@@ -78,6 +78,7 @@ GRANT EXECUTE ON FUNCTION public.list_order_folios(pg_catalog.uuid, pg_catalog.u
 CREATE OR REPLACE FUNCTION public.resolve_order_folio_portfolio(
   p_investor_profile_id pg_catalog.uuid,
   p_workspace_id pg_catalog.uuid,
+  p_portfolio_id pg_catalog.uuid,
   p_folio_reference_id pg_catalog.uuid
 )
 RETURNS TABLE(
@@ -100,7 +101,7 @@ BEGIN
   END IF;
 
   RETURN QUERY
-  SELECT portfolio.id AS portfolio_id
+  SELECT DISTINCT portfolio.id AS portfolio_id
   FROM public.portfolios AS portfolio
   JOIN public.workspace_memberships AS investor_membership
     ON investor_membership.workspace_id = portfolio.workspace_id
@@ -127,20 +128,19 @@ BEGIN
    AND investor_account.account_state = 'linked_investor'
   WHERE portfolio.client_id = p_investor_profile_id
     AND portfolio.workspace_id = p_workspace_id
+    AND portfolio.id = p_portfolio_id
     AND (
       v_caller_profile_id <> p_investor_profile_id
       OR investor_link.user_id = auth.uid()
-    )
-  ORDER BY portfolio.id
-  LIMIT 1;
+    );
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '';
 
-REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM anon;
-REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM authenticated;
-REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM service_role;
-GRANT EXECUTE ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM authenticated;
+REVOKE ALL ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM service_role;
+GRANT EXECUTE ON FUNCTION public.resolve_order_folio_portfolio(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) TO authenticated;
 
 REVOKE ALL ON TABLE
   public.folio_references,
