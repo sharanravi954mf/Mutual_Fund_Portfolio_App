@@ -1322,7 +1322,7 @@ void _registerSanitisationTests() {
         'mutual_funds': [
           {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'}
         ],
-        'portfolio_folio_references': [],
+        'rpc:list_order_folios': [],
       });
 
       final repo = SupabaseOrderRepository(client);
@@ -1531,26 +1531,9 @@ void _registerSanitisationTests() {
     test('fetchHoldings uses exact folio scoping and switch direction math',
         () async {
       final client = FakeSupabaseClient(queryResponses: {
-        'portfolios': [
-          {
-            'id': 'portfolio-1',
-            'client_id': 'inv-1',
-            'workspace_id': 'workspace-1',
-          },
-          {
-            'id': 'portfolio-other',
-            'client_id': 'other-investor',
-            'workspace_id': 'workspace-1',
-          },
-        ],
-        'portfolio_folio_references': [
+        'rpc:resolve_order_folio_portfolio': [
           {
             'portfolio_id': 'portfolio-1',
-            'folio_reference_id': 'folio-a',
-          },
-          {
-            'portfolio_id': 'portfolio-1',
-            'folio_reference_id': 'folio-b',
           },
         ],
         'transactions': [
@@ -1632,6 +1615,75 @@ void _registerSanitisationTests() {
       expect(holdings.single['units'], 70);
       expect(holdings.any((h) => h['scheme_code'] == 'SCH-B'), false);
       expect(holdings.any((h) => h['scheme_code'] == 'SCH-BAD'), false);
+      expect(client.rpcCalls, ['resolve_order_folio_portfolio']);
+      expect(client.lastRpcParams, {
+        'p_investor_profile_id': 'inv-1',
+        'p_workspace_id': 'workspace-1',
+        'p_folio_reference_id': 'folio-a',
+      });
+      expect(
+          client.lastFilters['transactions']?['portfolio_id'], 'portfolio-1');
+      expect(
+          client.lastFilters['transactions']?['folio_reference_id'], 'folio-a');
+    });
+
+    test('fetchFolios maps the safe projection RPC without protected tables',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'rpc:list_order_folios': [
+          {
+            'folio_reference_id': 'folio-safe',
+            'portfolio_id': 'portfolio-safe',
+            'registrar': 'KFINTECH',
+            'masked_folio': 'KFI***321',
+            'normalized_folio_number': 'SHOULD_NOT_BE_USED',
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final folios = await repo.fetchFolios('inv-1', 'workspace-1');
+
+      expect(folios, hasLength(1));
+      expect(folios.single.folioReferenceId, 'folio-safe');
+      expect(folios.single.portfolioId, 'portfolio-safe');
+      expect(folios.single.registrar, 'KFINTECH');
+      expect(folios.single.maskedFolioDisplay, 'KFI***321');
+      expect(client.rpcCalls, ['list_order_folios']);
+      expect(client.lastRpcParams, {
+        'p_investor_profile_id': 'inv-1',
+        'p_workspace_id': 'workspace-1',
+      });
+      expect(client.tableCalls, isNot(contains('folio_references')));
+      expect(client.tableCalls, isNot(contains('portfolio_folio_references')));
+    });
+
+    test('fetchHoldings returns empty when selected folio does not resolve',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'rpc:resolve_order_folio_portfolio': [],
+        'transactions': [
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'forged-folio',
+            'transaction_type': 'BUY',
+            'units': 10,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final holdings =
+          await repo.fetchHoldings('inv-1', 'workspace-1', 'forged-folio');
+
+      expect(holdings, isEmpty);
+      expect(client.rpcCalls, ['resolve_order_folio_portfolio']);
+      expect(client.tableCalls, isNot(contains('transactions')));
+      expect(client.tableCalls, isNot(contains('portfolio_folio_references')));
     });
 
     test('fetchAssignedInvestors excludes a non-owner admin workspace',
@@ -1716,6 +1768,10 @@ class FakeSupabaseClient implements SupabaseClient {
   final Map<String, List<Map<String, dynamic>>> queryResponses;
   final Object? errorToThrow;
   Map<String, dynamic>? lastInsertedPayload;
+  final tableCalls = <String>[];
+  final rpcCalls = <String>[];
+  Map<String, dynamic>? lastRpcParams;
+  final lastFilters = <String, Map<String, dynamic>>{};
 
   FakeSupabaseClient({
     this.queryResponses = const {},
@@ -1727,9 +1783,32 @@ class FakeSupabaseClient implements SupabaseClient {
     if (errorToThrow != null) {
       throw errorToThrow!;
     }
-    return FakeSupabaseQueryBuilder(table, queryResponses, onInsert: (payload) {
-      lastInsertedPayload = payload;
-    });
+    tableCalls.add(table);
+    return FakeSupabaseQueryBuilder(
+      table,
+      queryResponses,
+      onInsert: (payload) {
+        lastInsertedPayload = payload;
+      },
+      onFilters: (filters) {
+        lastFilters[table] = Map<String, dynamic>.from(filters);
+      },
+    );
+  }
+
+  @override
+  PostgrestFilterBuilder<T> rpc<T>(
+    String fn, {
+    Map<String, dynamic>? params,
+    get = false,
+  }) {
+    if (errorToThrow != null) {
+      throw errorToThrow!;
+    }
+    rpcCalls.add(fn);
+    lastRpcParams = params;
+    return FakePostgrestFilterBuilder('rpc:$fn', queryResponses)
+        as PostgrestFilterBuilder<T>;
   }
 
   @override
@@ -1740,13 +1819,20 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
   final String table;
   final Map<String, List<Map<String, dynamic>>> queryResponses;
   final void Function(Map<String, dynamic> payload)? onInsert;
+  final void Function(Map<String, dynamic> filters)? onFilters;
 
-  FakeSupabaseQueryBuilder(this.table, this.queryResponses, {this.onInsert});
+  FakeSupabaseQueryBuilder(
+    this.table,
+    this.queryResponses, {
+    this.onInsert,
+    this.onFilters,
+  });
 
   @override
   PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
       [String columns = '*']) {
-    return FakePostgrestFilterBuilder(table, queryResponses);
+    return FakePostgrestFilterBuilder(table, queryResponses,
+        onFilters: onFilters);
   }
 
   @override
@@ -1755,7 +1841,8 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
     if (onInsert != null && values is Map<String, dynamic>) {
       onInsert!(values);
     }
-    return FakePostgrestFilterBuilder(table, queryResponses);
+    return FakePostgrestFilterBuilder(table, queryResponses,
+        onFilters: onFilters);
   }
 
   @override
@@ -1766,9 +1853,10 @@ class FakePostgrestFilterBuilder
     implements PostgrestFilterBuilder<List<Map<String, dynamic>>> {
   final String table;
   final Map<String, List<Map<String, dynamic>>> queryResponses;
+  final void Function(Map<String, dynamic> filters)? onFilters;
   final Map<String, dynamic> filters = {};
 
-  FakePostgrestFilterBuilder(this.table, this.queryResponses);
+  FakePostgrestFilterBuilder(this.table, this.queryResponses, {this.onFilters});
 
   @override
   PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
@@ -1812,6 +1900,7 @@ class FakePostgrestFilterBuilder
   }
 
   List<Map<String, dynamic>> _applyFilters() {
+    onFilters?.call(filters);
     final list = queryResponses[table] ?? [];
     if (filters.isEmpty) return list;
     return list.where((row) {

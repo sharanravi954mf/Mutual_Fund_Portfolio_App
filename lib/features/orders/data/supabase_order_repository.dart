@@ -78,40 +78,22 @@ class SupabaseOrderRepository implements OrderRepository {
   Future<List<OrderFolio>> fetchFolios(
       String investorProfileId, String workspaceId) async {
     try {
-      // 1. Fetch portfolios matching client and workspace context
-      final portfoliosRes = await _client
-          .from('portfolios')
-          .select('id')
-          .eq('client_id', investorProfileId)
-          .eq('workspace_id', workspaceId);
-
-      final portfolioIds =
-          (portfoliosRes as List).map((p) => p['id'] as String).toList();
-
-      if (portfolioIds.isEmpty) return [];
-
-      // 2. Fetch portfolio folio references joining folio references
-      final response = await _client
-          .from('portfolio_folio_references')
-          .select('portfolio_id, folio_references(*)')
-          .inFilter('portfolio_id', portfolioIds);
+      final response = await _client.rpc(
+        'list_order_folios',
+        params: {
+          'p_investor_profile_id': investorProfileId,
+          'p_workspace_id': workspaceId,
+        },
+      );
 
       final list = <OrderFolio>[];
       for (var row in (response as List)) {
-        final ref = row['folio_references'] as Map<String, dynamic>?;
-        if (ref != null) {
-          final normalizedFolioValue =
-              ref['normalized_folio_number'] as String? ?? '';
-          list.add(OrderFolio(
-            folioReferenceId: ref['id'] as String,
-            portfolioId: row['portfolio_id'] as String? ?? '',
-            maskedFolioDisplay: ref['source_folio_masked'] as String? ??
-                (normalizedFolioValue.length > 4
-                    ? '••••${normalizedFolioValue.substring(normalizedFolioValue.length - 4)}'
-                    : '••••••••••'),
-            registrar: ref['registrar'] as String? ?? 'CAMS',
-          ));
-        }
+        list.add(OrderFolio(
+          folioReferenceId: row['folio_reference_id'] as String,
+          portfolioId: row['portfolio_id'] as String,
+          maskedFolioDisplay: row['masked_folio'] as String,
+          registrar: row['registrar'] as String? ?? 'CAMS',
+        ));
       }
       return list;
     } catch (e) {
@@ -271,30 +253,19 @@ class SupabaseOrderRepository implements OrderRepository {
   Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
       String workspaceId, String folioReferenceId) async {
     try {
-      // 1. Fetch portfolios for the investor & workspace context
-      final portfoliosRes = await _client
-          .from('portfolios')
-          .select('id')
-          .eq('client_id', investorProfileId)
-          .eq('workspace_id', workspaceId);
-
-      final portfolioIds =
-          (portfoliosRes as List).map((p) => p['id'] as String).toList();
-
-      if (portfolioIds.isEmpty) return [];
-
-      // 2. Filter portfolio matching folioReferenceId
-      final referencesRes = await _client
-          .from('portfolio_folio_references')
-          .select('portfolio_id')
-          .inFilter('portfolio_id', portfolioIds)
-          .eq('folio_reference_id', folioReferenceId);
+      final referencesRes = await _client.rpc(
+        'resolve_order_folio_portfolio',
+        params: {
+          'p_investor_profile_id': investorProfileId,
+          'p_workspace_id': workspaceId,
+          'p_folio_reference_id': folioReferenceId,
+        },
+      );
 
       if ((referencesRes as List).isEmpty) return [];
 
       final portfolioId = referencesRes.first['portfolio_id'] as String;
 
-      // 3. Fetch only transactions in this exact portfolio and selected folio.
       final txsRes = await _client
           .from('transactions')
           .select('transaction_type, transaction_direction, units, '
