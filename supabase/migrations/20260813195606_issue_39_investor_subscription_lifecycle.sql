@@ -318,9 +318,13 @@ BEGIN
   RETURN EXISTS (
     SELECT 1
     FROM public.workspace_billing AS billing
+    JOIN public.workspace_memberships AS membership
+      ON membership.workspace_id = billing.workspace_id
     WHERE billing.plan_id = p_plan_id
       AND billing.status IN ('trialing', 'active')
-      AND public.has_active_workspace_membership(billing.workspace_id)
+      AND membership.profile_id = public.current_user_profile_id()
+      AND membership.role IN ('advisor', 'admin', 'operations')
+      AND membership.status = 'active'
   ) OR EXISTS (
     SELECT 1
     FROM public.investor_subscriptions AS subscription

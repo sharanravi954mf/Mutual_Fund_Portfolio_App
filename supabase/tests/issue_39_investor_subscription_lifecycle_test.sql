@@ -58,12 +58,10 @@ VALUES (
   'active'
 );
 INSERT INTO public.workspace_memberships (workspace_id, profile_id, role, status)
-VALUES (
-  '39400000-0000-0000-0000-000000000001',
-  '39100000-0000-0000-0000-000000000003',
-  'admin',
-  'active'
-);
+VALUES
+  ('39400000-0000-0000-0000-000000000001', '39100000-0000-0000-0000-000000000003', 'admin', 'active'),
+  ('39400000-0000-0000-0000-000000000001', '39100000-0000-0000-0000-000000000001', 'investor', 'active'),
+  ('39400000-0000-0000-0000-000000000001', '39100000-0000-0000-0000-000000000002', 'investor', 'active');
 INSERT INTO public.workspace_billing (workspace_id, plan_id, status)
 VALUES (
   '39400000-0000-0000-0000-000000000001',
@@ -183,7 +181,8 @@ BEGIN
 END;
 $$;
 
--- Investor entitlement exposure starts in trialing and includes only own plan.
+-- A mapped Investor's workspace membership does not expose the MFD plan;
+-- trialing entitlement exposure comes only from the Investor's own plan.
 SELECT set_config('request.jwt.claims', '{"sub":"39000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 SET LOCAL ROLE authenticated;
 DO $$
@@ -193,7 +192,7 @@ BEGIN
        SELECT 1 FROM public.plan_entitlements
        WHERE entitlement_key = 'issue_39_investor_feature'
      ) THEN
-    RAISE EXCEPTION 'trialing investor entitlement visibility is incorrect';
+    RAISE EXCEPTION 'mapped trialing investor entitlement visibility is incorrect';
   END IF;
 
   BEGIN
@@ -302,7 +301,7 @@ SELECT set_config('request.jwt.claims', '{"sub":"39000000-0000-0000-0000-0000000
 SET LOCAL ROLE authenticated;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM public.plan_entitlements) THEN
-    RAISE EXCEPTION 'past_due investor retained entitlement access';
+    RAISE EXCEPTION 'mapped past_due investor retained own or MFD entitlement access';
   END IF;
 END $$;
 RESET ROLE;
@@ -314,7 +313,7 @@ SELECT set_config('request.jwt.claims', '{"sub":"39000000-0000-0000-0000-0000000
 SET LOCAL ROLE authenticated;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM public.plan_entitlements) THEN
-    RAISE EXCEPTION 'suspended investor retained entitlement access';
+    RAISE EXCEPTION 'mapped suspended investor retained own or MFD entitlement access';
   END IF;
 END $$;
 RESET ROLE;
@@ -339,12 +338,25 @@ SELECT set_config('request.jwt.claims', '{"sub":"39000000-0000-0000-0000-0000000
 SET LOCAL ROLE authenticated;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM public.plan_entitlements) THEN
-    RAISE EXCEPTION 'cancelled investor retained entitlement access';
+    RAISE EXCEPTION 'mapped cancelled investor retained own or MFD entitlement access';
   END IF;
 END $$;
 RESET ROLE;
 
--- Workspace billing exposes only its current plan to an active member.
+-- An active mapped Investor with no Investor subscription receives no plan
+-- entitlements from workspace membership alone.
+DELETE FROM public.investor_subscriptions
+WHERE id = '39500000-0000-0000-0000-000000000002';
+SELECT set_config('request.jwt.claims', '{"sub":"39000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
+SET LOCAL ROLE authenticated;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM public.plan_entitlements) THEN
+    RAISE EXCEPTION 'mapped investor without subscription received MFD entitlement access';
+  END IF;
+END $$;
+RESET ROLE;
+
+-- Workspace billing exposes its current plan to an authorised MFD-side member.
 SELECT set_config('request.jwt.claims', '{"sub":"39000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
 SET LOCAL ROLE authenticated;
 DO $$ BEGIN
