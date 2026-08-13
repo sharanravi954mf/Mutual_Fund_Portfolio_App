@@ -709,15 +709,12 @@ class _OrderModalState extends State<OrderModal> {
               fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
+        DropdownButtonFormField<OrderFolio>(
           isExpanded: true,
-          initialValue: state.draft.folioReferenceId == null ||
-                  state.draft.folioReferenceId!.isEmpty
-              ? null
-              : state.draft.folioReferenceId,
+          initialValue: state.selectedFolio,
           items: state.folios.map((folio) {
-            return DropdownMenuItem<String>(
-              value: folio.folioReferenceId,
+            return DropdownMenuItem<OrderFolio>(
+              value: folio,
               child: Text('${folio.maskedFolioDisplay} (${folio.registrar})'),
             );
           }).toList(),
@@ -863,8 +860,8 @@ class _OrderModalState extends State<OrderModal> {
               ),
             if (draft.type == OrderType.sell ||
                 draft.type == OrderType.switchOrder)
-              _buildReviewRow('Verified Folio',
-                  _selectedFolioDisplay(state, draft.folioReferenceId), colors),
+              _buildReviewRow(
+                  'Verified Folio', _selectedFolioDisplay(state), colors),
             if (draft.amount != null)
               _buildReviewRow(
                   'Amount', _currencyFormat.format(draft.amount), colors),
@@ -930,16 +927,8 @@ class _OrderModalState extends State<OrderModal> {
     );
   }
 
-  String _selectedFolioDisplay(OrderState state, String? folioReferenceId) {
-    if (folioReferenceId == null || folioReferenceId.isEmpty) {
-      return MaskingUtil.maskFolio('');
-    }
-    for (final folio in state.folios) {
-      if (folio.folioReferenceId == folioReferenceId) {
-        return folio.maskedFolioDisplay;
-      }
-    }
-    return MaskingUtil.maskFolio('');
+  String _selectedFolioDisplay(OrderState state) {
+    return state.selectedFolio?.maskedFolioDisplay ?? MaskingUtil.maskFolio('');
   }
 
   Widget _buildActionButtons(OrderState state, AppThemeColors colors,

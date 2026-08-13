@@ -8,6 +8,15 @@ import 'package:mutual_fund_portfolio_app/features/orders/domain/order_models.da
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/order_bloc.dart';
 import 'package:mutual_fund_portfolio_app/features/orders/presentation/order_state.dart';
 
+OrderFolio _folio(OrderBloc bloc, String folioReferenceId,
+    {String? portfolioId}) {
+  return bloc.state.folios.firstWhere(
+    (folio) =>
+        folio.folioReferenceId == folioReferenceId &&
+        (portfolioId == null || folio.portfolioId == portfolioId),
+  );
+}
+
 void main() {
   // ---------------------------------------------------------------------------
   // MaskingUtil Tests — strict fail-closed validation
@@ -372,7 +381,7 @@ void main() {
       );
 
       bloc.updateScheme('SCH-1');
-      await bloc.updateFolio('12345678');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateAmount(5000);
 
       await bloc.updateOrderType(OrderType.buy);
@@ -408,7 +417,7 @@ void main() {
       );
 
       await bloc.updateOrderType(OrderType.sell);
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateScheme('SCH-A');
       bloc.updateAmount(5000);
 
@@ -523,7 +532,7 @@ void main() {
       await bloc.updateOrderType(OrderType.sell);
 
       // Select Folio A — only SCH-A should appear, never SCH-B
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-A'), true,
           reason: 'SCH-A must appear in Folio A');
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-B'), false,
@@ -533,7 +542,7 @@ void main() {
       expect(bloc.state.draft.schemeCode, 'SCH-A');
 
       // Select Folio B — SCH-B appears, SCH-A must be cleared
-      await bloc.updateFolio('folio-b');
+      await bloc.updateFolio(_folio(bloc, 'folio-b'));
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-B'), true,
           reason: 'SCH-B must appear in Folio B');
       expect(bloc.state.holdings.any((h) => h['scheme_code'] == 'SCH-A'), false,
@@ -541,6 +550,38 @@ void main() {
       expect(bloc.state.draft.schemeCode, isEmpty,
           reason:
               'Source scheme from Folio A must be cleared after moving to Folio B');
+    });
+
+    test('same folio reference on two portfolios preserves selected portfolio',
+        () async {
+      final sharedRepository = SharedFolioOrderRepository();
+      final sharedBloc = OrderBloc(sharedRepository);
+      await sharedBloc.initiateForInvestor(
+        investorProfileId: 'investor-1',
+        initiatorProfileId: 'investor-1',
+        initiationRole: 'investor',
+        initiationChannel: 'investor_portal',
+      );
+      await sharedBloc.updateOrderType(OrderType.sell);
+
+      expect(sharedBloc.state.folios, hasLength(2));
+      expect(
+        sharedBloc.state.folios.map((folio) => folio.folioReferenceId).toSet(),
+        {'shared-folio'},
+      );
+      expect(
+        sharedBloc.state.folios.map((folio) => folio.portfolioId).toSet(),
+        {'portfolio-1', 'portfolio-2'},
+      );
+
+      await sharedBloc.updateFolio(
+        _folio(sharedBloc, 'shared-folio', portfolioId: 'portfolio-2'),
+      );
+
+      expect(sharedBloc.state.selectedFolio?.portfolioId, 'portfolio-2');
+      expect(sharedBloc.state.draft.folioReferenceId, 'shared-folio');
+      expect(sharedRepository.lastHoldingsPortfolioId, 'portfolio-2');
+      expect(sharedRepository.lastHoldingsFolioReferenceId, 'shared-folio');
     });
 
     test('Sell order submits canonical source folio intent', () async {
@@ -553,7 +594,7 @@ void main() {
 
       await bloc.updateOrderType(OrderType.sell);
       // Use folio-a and SCH-A so validation passes; repository block is what causes failure
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateScheme('SCH-A');
       bloc.updateAmount(5000);
 
@@ -576,7 +617,7 @@ void main() {
 
       await bloc.updateOrderType(OrderType.switchOrder);
       // Use folio-a and SCH-A (source) → SCH-B (dest) so validation passes
-      await bloc.updateFolio('folio-a');
+      await bloc.updateFolio(_folio(bloc, 'folio-a'));
       bloc.updateScheme('SCH-A');
       bloc.updateDestinationScheme('SCH-B');
       bloc.updateAmount(5000);
@@ -720,6 +761,8 @@ class FakeOrderRepository implements OrderRepository {
   bool shouldThrowAccessDenied = false;
   bool shouldThrowNetworkError = false;
   OrderDraft? lastSubmittedDraft;
+  String? lastHoldingsPortfolioId;
+  String? lastHoldingsFolioReferenceId;
 
   void _checkErrors() {
     if (shouldThrowAccessDenied) {
@@ -805,8 +848,10 @@ class FakeOrderRepository implements OrderRepository {
   /// vice-versa.
   @override
   Future<List<Map<String, dynamic>>> fetchHoldings(String investorProfileId,
-      String workspaceId, String folioReferenceId) async {
+      String workspaceId, String portfolioId, String folioReferenceId) async {
     _checkErrors();
+    lastHoldingsPortfolioId = portfolioId;
+    lastHoldingsFolioReferenceId = folioReferenceId;
     if (folioReferenceId == 'folio-a') {
       return [
         {
@@ -961,6 +1006,27 @@ class FakeOrderRepository implements OrderRepository {
         email: 'investor@example.com',
       );
     }).toList();
+  }
+}
+
+class SharedFolioOrderRepository extends FakeOrderRepository {
+  @override
+  Future<List<OrderFolio>> fetchFolios(
+      String investorProfileId, String workspaceId) async {
+    return const [
+      OrderFolio(
+        folioReferenceId: 'shared-folio',
+        portfolioId: 'portfolio-1',
+        maskedFolioDisplay: '••••1234',
+        registrar: 'CAMS',
+      ),
+      OrderFolio(
+        folioReferenceId: 'shared-folio',
+        portfolioId: 'portfolio-2',
+        maskedFolioDisplay: '••••1234',
+        registrar: 'CAMS',
+      ),
+    ];
   }
 }
 
@@ -1322,7 +1388,7 @@ void _registerSanitisationTests() {
         'mutual_funds': [
           {'scheme_code': 'SCH-1', 'scheme_name': 'HDFC Top 100'}
         ],
-        'portfolio_folio_references': [],
+        'rpc:list_order_folios': [],
       });
 
       final repo = SupabaseOrderRepository(client);
@@ -1531,26 +1597,9 @@ void _registerSanitisationTests() {
     test('fetchHoldings uses exact folio scoping and switch direction math',
         () async {
       final client = FakeSupabaseClient(queryResponses: {
-        'portfolios': [
-          {
-            'id': 'portfolio-1',
-            'client_id': 'inv-1',
-            'workspace_id': 'workspace-1',
-          },
-          {
-            'id': 'portfolio-other',
-            'client_id': 'other-investor',
-            'workspace_id': 'workspace-1',
-          },
-        ],
-        'portfolio_folio_references': [
+        'rpc:resolve_order_folio_portfolio': [
           {
             'portfolio_id': 'portfolio-1',
-            'folio_reference_id': 'folio-a',
-          },
-          {
-            'portfolio_id': 'portfolio-1',
-            'folio_reference_id': 'folio-b',
           },
         ],
         'transactions': [
@@ -1624,14 +1673,118 @@ void _registerSanitisationTests() {
       });
       final repo = SupabaseOrderRepository(client);
 
-      final holdings =
-          await repo.fetchHoldings('inv-1', 'workspace-1', 'folio-a');
+      final holdings = await repo.fetchHoldings(
+          'inv-1', 'workspace-1', 'portfolio-1', 'folio-a');
 
       expect(holdings.length, 1);
       expect(holdings.single['scheme_code'], 'SCH-A');
       expect(holdings.single['units'], 70);
       expect(holdings.any((h) => h['scheme_code'] == 'SCH-B'), false);
       expect(holdings.any((h) => h['scheme_code'] == 'SCH-BAD'), false);
+      expect(client.rpcCalls, ['resolve_order_folio_portfolio']);
+      expect(client.lastRpcParams, {
+        'p_investor_profile_id': 'inv-1',
+        'p_workspace_id': 'workspace-1',
+        'p_portfolio_id': 'portfolio-1',
+        'p_folio_reference_id': 'folio-a',
+      });
+      expect(
+          client.lastFilters['transactions']?['portfolio_id'], 'portfolio-1');
+      expect(
+          client.lastFilters['transactions']?['folio_reference_id'], 'folio-a');
+    });
+
+    test('fetchFolios maps the safe projection RPC without protected tables',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'rpc:list_order_folios': [
+          {
+            'folio_reference_id': 'folio-safe',
+            'portfolio_id': 'portfolio-safe',
+            'registrar': 'KFINTECH',
+            'masked_folio': 'KFI***321',
+            'normalized_folio_number': 'SHOULD_NOT_BE_USED',
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final folios = await repo.fetchFolios('inv-1', 'workspace-1');
+
+      expect(folios, hasLength(1));
+      expect(folios.single.folioReferenceId, 'folio-safe');
+      expect(folios.single.portfolioId, 'portfolio-safe');
+      expect(folios.single.registrar, 'KFINTECH');
+      expect(folios.single.maskedFolioDisplay, 'KFI***321');
+      expect(client.rpcCalls, ['list_order_folios']);
+      expect(client.lastRpcParams, {
+        'p_investor_profile_id': 'inv-1',
+        'p_workspace_id': 'workspace-1',
+      });
+      expect(client.tableCalls, isNot(contains('folio_references')));
+      expect(client.tableCalls, isNot(contains('portfolio_folio_references')));
+    });
+
+    test('fetchHoldings returns empty when selected folio does not resolve',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'rpc:resolve_order_folio_portfolio': [],
+        'transactions': [
+          {
+            'portfolio_id': 'portfolio-1',
+            'folio_reference_id': 'forged-folio',
+            'transaction_type': 'BUY',
+            'units': 10,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final holdings = await repo.fetchHoldings(
+          'inv-1', 'workspace-1', 'forged-portfolio', 'forged-folio');
+
+      expect(holdings, isEmpty);
+      expect(client.rpcCalls, ['resolve_order_folio_portfolio']);
+      expect(client.tableCalls, isNot(contains('transactions')));
+      expect(client.tableCalls, isNot(contains('portfolio_folio_references')));
+    });
+
+    test('fetchHoldings rejects a resolver portfolio mismatch before tx read',
+        () async {
+      final client = FakeSupabaseClient(queryResponses: {
+        'rpc:resolve_order_folio_portfolio': [
+          {'portfolio_id': 'different-portfolio'},
+        ],
+        'transactions': [
+          {
+            'portfolio_id': 'selected-portfolio',
+            'folio_reference_id': 'shared-folio',
+            'transaction_type': 'BUY',
+            'units': 10,
+            'mutual_funds': {
+              'scheme_code': 'SCH-A',
+              'scheme_name': 'Scheme Alpha',
+            },
+          },
+        ],
+      });
+      final repo = SupabaseOrderRepository(client);
+
+      final holdings = await repo.fetchHoldings(
+          'inv-1', 'workspace-1', 'selected-portfolio', 'shared-folio');
+
+      expect(holdings, isEmpty);
+      expect(client.lastRpcParams, {
+        'p_investor_profile_id': 'inv-1',
+        'p_workspace_id': 'workspace-1',
+        'p_portfolio_id': 'selected-portfolio',
+        'p_folio_reference_id': 'shared-folio',
+      });
+      expect(client.tableCalls, isNot(contains('transactions')));
     });
 
     test('fetchAssignedInvestors excludes a non-owner admin workspace',
@@ -1716,6 +1869,10 @@ class FakeSupabaseClient implements SupabaseClient {
   final Map<String, List<Map<String, dynamic>>> queryResponses;
   final Object? errorToThrow;
   Map<String, dynamic>? lastInsertedPayload;
+  final tableCalls = <String>[];
+  final rpcCalls = <String>[];
+  Map<String, dynamic>? lastRpcParams;
+  final lastFilters = <String, Map<String, dynamic>>{};
 
   FakeSupabaseClient({
     this.queryResponses = const {},
@@ -1727,9 +1884,32 @@ class FakeSupabaseClient implements SupabaseClient {
     if (errorToThrow != null) {
       throw errorToThrow!;
     }
-    return FakeSupabaseQueryBuilder(table, queryResponses, onInsert: (payload) {
-      lastInsertedPayload = payload;
-    });
+    tableCalls.add(table);
+    return FakeSupabaseQueryBuilder(
+      table,
+      queryResponses,
+      onInsert: (payload) {
+        lastInsertedPayload = payload;
+      },
+      onFilters: (filters) {
+        lastFilters[table] = Map<String, dynamic>.from(filters);
+      },
+    );
+  }
+
+  @override
+  PostgrestFilterBuilder<T> rpc<T>(
+    String fn, {
+    Map<String, dynamic>? params,
+    get = false,
+  }) {
+    if (errorToThrow != null) {
+      throw errorToThrow!;
+    }
+    rpcCalls.add(fn);
+    lastRpcParams = params;
+    return FakePostgrestFilterBuilder('rpc:$fn', queryResponses)
+        as PostgrestFilterBuilder<T>;
   }
 
   @override
@@ -1740,13 +1920,20 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
   final String table;
   final Map<String, List<Map<String, dynamic>>> queryResponses;
   final void Function(Map<String, dynamic> payload)? onInsert;
+  final void Function(Map<String, dynamic> filters)? onFilters;
 
-  FakeSupabaseQueryBuilder(this.table, this.queryResponses, {this.onInsert});
+  FakeSupabaseQueryBuilder(
+    this.table,
+    this.queryResponses, {
+    this.onInsert,
+    this.onFilters,
+  });
 
   @override
   PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
       [String columns = '*']) {
-    return FakePostgrestFilterBuilder(table, queryResponses);
+    return FakePostgrestFilterBuilder(table, queryResponses,
+        onFilters: onFilters);
   }
 
   @override
@@ -1755,7 +1942,8 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
     if (onInsert != null && values is Map<String, dynamic>) {
       onInsert!(values);
     }
-    return FakePostgrestFilterBuilder(table, queryResponses);
+    return FakePostgrestFilterBuilder(table, queryResponses,
+        onFilters: onFilters);
   }
 
   @override
@@ -1766,9 +1954,10 @@ class FakePostgrestFilterBuilder
     implements PostgrestFilterBuilder<List<Map<String, dynamic>>> {
   final String table;
   final Map<String, List<Map<String, dynamic>>> queryResponses;
+  final void Function(Map<String, dynamic> filters)? onFilters;
   final Map<String, dynamic> filters = {};
 
-  FakePostgrestFilterBuilder(this.table, this.queryResponses);
+  FakePostgrestFilterBuilder(this.table, this.queryResponses, {this.onFilters});
 
   @override
   PostgrestFilterBuilder<List<Map<String, dynamic>>> select(
@@ -1812,6 +2001,7 @@ class FakePostgrestFilterBuilder
   }
 
   List<Map<String, dynamic>> _applyFilters() {
+    onFilters?.call(filters);
     final list = queryResponses[table] ?? [];
     if (filters.isEmpty) return list;
     return list.where((row) {
