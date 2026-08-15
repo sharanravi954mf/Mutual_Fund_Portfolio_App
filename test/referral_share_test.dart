@@ -6,6 +6,7 @@ import 'package:mutual_fund_portfolio_app/features/referrals/data/supabase_refer
 import 'package:mutual_fund_portfolio_app/features/referrals/domain/investor_referral.dart';
 import 'package:mutual_fund_portfolio_app/features/referrals/presentation/referral_share_card.dart';
 import 'package:mutual_fund_portfolio_app/providers/theme_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
   group('ReferralShareLinkBuilder', () {
@@ -60,6 +61,58 @@ void main() {
         throwsA(isA<ReferralRepositoryException>()),
       );
     });
+
+    test('processes the opaque code through the caller-bound conversion RPC',
+        () async {
+      final client = _FakeRpcClient(
+        [
+          {
+            'conversion_id': 'server-only-id',
+            'replayed': false,
+            'reward_entitlement_count': 2,
+          }
+        ],
+        expectedFunction: 'process_investor_referral_conversion',
+        expectedParameters: const <String, dynamic>{
+          'p_referral_code': 'opaque-code',
+        },
+      );
+      final repository = SupabaseReferralRepository(client);
+
+      final result = await repository
+          .processCurrentInvestorReferralConversion('opaque-code');
+
+      expect(result.replayed, isFalse);
+      expect(result.rewardEntitlementCount, 2);
+    });
+
+    for (final errorCase in <(String, ReferralRepositoryFailure)>[
+      ('referral_code_invalid', ReferralRepositoryFailure.invalidCode),
+      ('referral_self_not_allowed', ReferralRepositoryFailure.selfReferral),
+      ('referral_conversion_conflict', ReferralRepositoryFailure.conflict),
+    ]) {
+      test('maps terminal server error ${errorCase.$1}', () async {
+        final repository = SupabaseReferralRepository(
+          _FakeRpcClient(
+            null,
+            error: PostgrestException(message: errorCase.$1),
+            expectedFunction: 'process_investor_referral_conversion',
+            expectedParameters: const <String, dynamic>{
+              'p_referral_code': 'opaque-code',
+            },
+          ),
+        );
+
+        await expectLater(
+          repository.processCurrentInvestorReferralConversion('opaque-code'),
+          throwsA(
+            isA<ReferralRepositoryException>()
+                .having((error) => error.reason, 'reason', errorCase.$2)
+                .having((error) => error.isTerminal, 'isTerminal', isTrue),
+          ),
+        );
+      });
+    }
   });
 
   group('ReferralShareController', () {
@@ -217,14 +270,25 @@ Widget _testApp(
 }
 
 class _FakeRpcClient implements ReferralRpcClient {
-  _FakeRpcClient(this.response, {this.error});
+  _FakeRpcClient(
+    this.response, {
+    this.error,
+    this.expectedFunction = 'get_or_create_investor_referral',
+    this.expectedParameters = const <String, dynamic>{},
+  });
 
   final dynamic response;
   final Object? error;
+  final String expectedFunction;
+  final Map<String, dynamic> expectedParameters;
 
   @override
-  Future<dynamic> call(String functionName) async {
-    expect(functionName, 'get_or_create_investor_referral');
+  Future<dynamic> call(
+    String functionName, {
+    Map<String, dynamic> parameters = const <String, dynamic>{},
+  }) async {
+    expect(functionName, expectedFunction);
+    expect(parameters, expectedParameters);
     if (error case final error?) throw error;
     return response;
   }
@@ -246,6 +310,16 @@ class _FakeReferralRepository implements ReferralRepository {
     return InvestorReferral(
       code: 'test-code',
       createdAt: DateTime.utc(2026, 8, 14),
+    );
+  }
+
+  @override
+  Future<ReferralConversionResult> processCurrentInvestorReferralConversion(
+    String referralCode,
+  ) async {
+    return const ReferralConversionResult(
+      replayed: false,
+      rewardEntitlementCount: 2,
     );
   }
 }

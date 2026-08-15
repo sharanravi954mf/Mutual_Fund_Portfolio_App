@@ -159,4 +159,27 @@ if [ "${COUNTS}" != "1:2:2" ]; then
   exit 1
 fi
 
+check_entitlement() {
+  user_id="$1"
+  result="$(${PSQL} <<SQL | grep -E '^(true|false)$' | head -n 1
+\pset tuples_only on
+\pset format unaligned
+SELECT set_config(
+  'request.jwt.claims',
+  '{"sub":"${user_id}","role":"authenticated"}',
+  false
+);
+SET ROLE authenticated;
+SELECT public.has_investor_entitlement('family_hub_enabled')::text;
+SQL
+)"
+  if [ "${result}" != "true" ]; then
+    echo "Issue #40 concurrency: reward did not authorize Premium entitlement for ${user_id}" >&2
+    exit 1
+  fi
+}
+
+check_entitlement "${REFERRER_USER_ID}"
+check_entitlement "${REFEREE_USER_ID}"
+
 echo "Issue #40 concurrent duplicate referral conversion protection passed"
