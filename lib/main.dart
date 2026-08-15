@@ -8,13 +8,18 @@ import 'providers/theme_provider.dart';
 import 'providers/language_provider.dart';
 import 'features/authentication/presentation/onboarding_screens.dart';
 import 'features/authentication/services/route_guard.dart';
+import 'features/referrals/application/referral_attribution_controller.dart';
+import 'features/referrals/data/supabase_referral_repository.dart';
+import 'features/referrals/presentation/referral_join_route.dart';
 import 'screens/admin_dashboard.dart';
 import 'screens/client_dashboard.dart';
 import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
+import 'web_url_strategy.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configureWebUrlStrategy();
 
   // Retrieve environment variables via --dart-define (or fall back to placeholder values)
   const supabaseUrl = String.fromEnvironment(
@@ -41,6 +46,13 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(
+          create: (_) => ReferralAttributionController(
+            repository: SupabaseReferralRepository.fromClient(
+              Supabase.instance.client,
+            ),
+          ),
+        ),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => LanguageProvider()),
       ],
@@ -50,7 +62,9 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({this.initialRoute, super.key});
+
+  final String? initialRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +75,34 @@ class MyApp extends StatelessWidget {
       themeMode: themeProvider.getThemeMode(),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      home: const AuthWrapper(),
+      initialRoute: initialRoute,
+      onGenerateRoute: _onGenerateRoute,
+      onUnknownRoute: (_) => MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '/'),
+        builder: (_) => const AuthWrapper(),
+      ),
+      builder: (context, child) => ReferralAttributionLifecycle(
+        child: child ?? const SizedBox.shrink(),
+      ),
+    );
+  }
+
+  Route<void>? _onGenerateRoute(RouteSettings settings) {
+    if (settings.name == null || settings.name == '/') {
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => const AuthWrapper(),
+      );
+    }
+
+    final referralCode = ReferralJoinRoute.referralCodeFrom(settings.name);
+    if (referralCode == null) return null;
+    return MaterialPageRoute<void>(
+      settings: settings,
+      builder: (_) => ReferralJoinEntry(
+        referralCode: referralCode,
+        child: const AuthWrapper(),
+      ),
     );
   }
 }

@@ -560,6 +560,10 @@ To protect user privacy and prevent tracking vulnerabilities, referrers are reso
 * Referral codes are random, high-entropy, cryptographically secure tokens.
 * Plaintext token keys are visible only when required for sharing purposes.
 * Hashed token values (`token_hash`) are stored on the database to verify matches.
+* Pre-authentication onboarding uses server-issued 256-bit opaque claim tokens stored as SHA-256 hashes (`claim_token_hash`) with a server-enforced 24-hour security TTL (`expires_at`).
+* Claim binding and conversion RPCs deterministically reject expired unconsumed claims with `referral_claim_expired`.
+* Expired unconsumed claims are purged via a service-role-only batch cleanup RPC (`cleanup_expired_referral_onboarding_claims`) backed by a partial cleanup index `(expires_at) WHERE consumed_at IS NULL`; consumed conversion and reward provenance rows are strictly preserved for audit integrity.
+* Deployment Prerequisite: Ingress rate-limiting / bot protection at the API gateway / Edge layer (e.g. Supabase Edge / Cloudflare WAF on `/rest/v1/rpc/create_referral_onboarding_claim`) is required to throttle anonymous claim creation.
 * Referral attribution must never capture or store raw PAN or bank-account details.
 * Fraud collision validation checks use deterministic SHA-256 HMAC lookups against unique client identifiers.
 * Referral conversion and reward issuance workflows must be idempotent.

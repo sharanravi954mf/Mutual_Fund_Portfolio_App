@@ -18,16 +18,23 @@ import 'factsheet_dialog.dart';
 import 'rupee_rain_background.dart';
 import '../features/orders/data/supabase_order_repository.dart';
 import '../features/orders/presentation/widgets/order_modal.dart';
+import '../features/referrals/application/referral_share_controller.dart';
+import '../features/referrals/data/supabase_referral_repository.dart';
+import '../features/referrals/domain/investor_referral.dart';
+import '../features/referrals/presentation/referral_share_card.dart';
+import '../features/referrals/presentation/url_launcher_referral_external_launcher.dart';
 
 class ClientDashboard extends StatefulWidget {
   const ClientDashboard({
     super.key,
     this.portfolioRepository,
     this.folioVerificationRouteFactory,
+    this.referralShareController,
   });
 
   final PortfolioRepository? portfolioRepository;
   final FolioVerificationRouteFactory? folioVerificationRouteFactory;
+  final ReferralShareController? referralShareController;
 
   @override
   State<ClientDashboard> createState() => _ClientDashboardState();
@@ -45,6 +52,16 @@ class _ClientDashboardState extends State<ClientDashboard> {
   final currencyFormat =
       NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
   final dateFormat = DateFormat('dd-MMM-yyyy');
+  ReferralShareController? _referralShareControllerInstance;
+  ReferralShareController get _referralShareController =>
+      _referralShareControllerInstance ??= widget.referralShareController ??
+          ReferralShareController(
+            repository: SupabaseReferralRepository.fromClient(
+              Supabase.instance.client,
+            ),
+            launcher: const UrlLauncherReferralExternalLauncher(),
+            linkBuilder: ReferralShareLinkBuilder.fromEnvironment(),
+          );
   int _selectedTab =
       0; // 0: Portfolio, 1: Factsheets, 2: Settings, 3: About Us, 4: Contact Us
   bool _isSidebarExpanded = true;
@@ -69,6 +86,9 @@ class _ClientDashboardState extends State<ClientDashboard> {
   void dispose() {
     _fundSearchController.dispose();
     _debounce?.cancel();
+    if (widget.referralShareController == null) {
+      _referralShareControllerInstance?.dispose();
+    }
     super.dispose();
   }
 
@@ -2280,6 +2300,28 @@ class _ClientDashboardState extends State<ClientDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(
+            'Referrals',
+            style: GoogleFonts.outfit(
+              color: colors.textPrimary,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ).premiumReveal(index: 0),
+          const SizedBox(height: 6),
+          Text(
+            'Invite people you trust without sharing account or portfolio data.',
+            style: GoogleFonts.inter(
+              color: colors.textSecondary,
+              fontSize: 12,
+            ),
+          ).premiumReveal(index: 0),
+          const SizedBox(height: 16),
+          ReferralShareCard(
+            controller: _referralShareController,
+            colors: colors,
+          ).premiumReveal(index: 1),
+          const SizedBox(height: 36),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
