@@ -99,12 +99,36 @@ CREATE TEMP TABLE issue_40_entitlement_values AS
 SELECT referral_code
 FROM public.get_or_create_investor_referral();
 GRANT SELECT ON issue_40_entitlement_values TO authenticated;
+GRANT SELECT ON issue_40_entitlement_values TO anon;
 RESET ROLE;
+
+CREATE TEMP TABLE issue_40_entitlement_claim (
+  claim_token pg_catalog.text NOT NULL
+);
+GRANT SELECT ON issue_40_entitlement_claim TO authenticated;
+GRANT INSERT ON issue_40_entitlement_claim TO anon;
+SET LOCAL ROLE anon;
+INSERT INTO issue_40_entitlement_claim(claim_token)
+SELECT claim_token
+FROM public.create_referral_onboarding_claim(
+  (SELECT referral_code FROM issue_40_entitlement_values)
+);
+RESET ROLE;
+
+-- This test is intentionally one transaction. Move the privileged Auth
+-- fixture timestamp after the server claim to emulate the real later signup
+-- transaction while keeping the production comparison server-owned.
+UPDATE auth.users
+SET created_at = pg_catalog.clock_timestamp() + pg_catalog.make_interval(secs => 1)
+WHERE id = '40e00000-0000-4000-8000-000000000002';
 
 SELECT set_config('request.jwt.claims', '{"sub":"40e00000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 SET LOCAL ROLE authenticated;
+SELECT * FROM public.bind_referral_onboarding_claim(
+  (SELECT claim_token FROM issue_40_entitlement_claim)
+);
 SELECT * FROM public.process_investor_referral_conversion(
-  (SELECT referral_code FROM issue_40_entitlement_values)
+  (SELECT claim_token FROM issue_40_entitlement_claim)
 );
 DO $$
 DECLARE

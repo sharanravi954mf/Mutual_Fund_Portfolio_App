@@ -69,6 +69,7 @@ CREATE TEMP TABLE issue_40_values (
   value text NOT NULL
 );
 GRANT SELECT, INSERT ON TABLE issue_40_values TO authenticated;
+GRANT SELECT, INSERT ON TABLE issue_40_values TO anon;
 GRANT SELECT ON TABLE issue_40_values TO service_role;
 
 DO $$
@@ -107,7 +108,7 @@ BEGIN
   IF EXISTS (
        SELECT 1 FROM (VALUES
          ('investor_referrals'), ('referral_conversions'), ('referral_rewards'),
-         ('referral_reward_audit_logs')
+         ('referral_reward_audit_logs'), ('referral_onboarding_claims')
        ) AS target(table_name)
        WHERE NOT EXISTS (
          SELECT 1 FROM pg_catalog.pg_class AS c
@@ -132,24 +133,57 @@ BEGIN
     RAISE EXCEPTION 'Issue #40 table privilege contract is not exact';
   END IF;
 
+  IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_policies
+       WHERE schemaname = 'public'
+         AND tablename = 'referral_onboarding_claims'
+     )
+     OR has_table_privilege(
+       'anon', 'public.referral_onboarding_claims', 'SELECT,INSERT,UPDATE,DELETE'
+     )
+     OR has_table_privilege(
+       'authenticated', 'public.referral_onboarding_claims', 'SELECT,INSERT,UPDATE,DELETE'
+     )
+     OR has_table_privilege(
+       'service_role', 'public.referral_onboarding_claims', 'SELECT,INSERT,UPDATE,DELETE'
+     ) THEN
+    RAISE EXCEPTION 'Issue #40 onboarding claim table is not private';
+  END IF;
+
   IF has_function_privilege('anon', 'public.get_or_create_investor_referral()', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.get_or_create_investor_referral()', 'EXECUTE')
      OR has_function_privilege('service_role', 'public.get_or_create_investor_referral()', 'EXECUTE')
      OR has_function_privilege('anon', 'public.process_investor_referral_conversion(text)', 'EXECUTE')
      OR NOT has_function_privilege('authenticated', 'public.process_investor_referral_conversion(text)', 'EXECUTE')
-     OR has_function_privilege('service_role', 'public.process_investor_referral_conversion(text)', 'EXECUTE') THEN
+     OR has_function_privilege('service_role', 'public.process_investor_referral_conversion(text)', 'EXECUTE')
+     OR NOT has_function_privilege('anon', 'public.create_referral_onboarding_claim(text)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.create_referral_onboarding_claim(text)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public.create_referral_onboarding_claim(text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.bind_referral_onboarding_claim(text)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.bind_referral_onboarding_claim(text)', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public.bind_referral_onboarding_claim(text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'Issue #40 RPC privilege contract is not exact';
   END IF;
 
   IF (SELECT count(*) FROM pg_catalog.pg_proc AS p
       JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public'
-        AND p.proname IN ('get_or_create_investor_referral', 'process_investor_referral_conversion')) <> 2
+        AND p.proname IN (
+          'get_or_create_investor_referral',
+          'create_referral_onboarding_claim',
+          'bind_referral_onboarding_claim',
+          'process_investor_referral_conversion'
+        )) <> 4
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_proc AS p
        JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public'
-         AND p.proname IN ('get_or_create_investor_referral', 'process_investor_referral_conversion')
+         AND p.proname IN (
+           'get_or_create_investor_referral',
+           'create_referral_onboarding_claim',
+           'bind_referral_onboarding_claim',
+           'process_investor_referral_conversion'
+         )
          AND (NOT p.prosecdef OR p.proconfig <> ARRAY['search_path=""']::text[])
      ) THEN
     RAISE EXCEPTION 'Issue #40 exposes a spoofable overload or unsafe function';
@@ -161,6 +195,8 @@ BEGIN
        WHERE n.nspname = 'public'
          AND p.proname = 'process_investor_referral_conversion'
          AND p.prosrc LIKE '%pg_advisory_xact_lock%'
+         AND p.prosrc LIKE '%referral_onboarding_claims%'
+         AND p.prosrc LIKE '%auth.users%'
          AND p.prosrc LIKE '%FOR UPDATE%'
          AND p.prosrc LIKE '%ON CONFLICT%'
      ) THEN
@@ -180,6 +216,17 @@ BEGIN
   BEGIN
     PERFORM * FROM public.process_investor_referral_conversion('not-a-code');
     RAISE EXCEPTION 'anonymous referral conversion was permitted';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM * FROM public.create_referral_onboarding_claim('not-a-code');
+    RAISE EXCEPTION 'invalid anonymous referral code was accepted';
+  EXCEPTION WHEN SQLSTATE 'P0001' THEN
+    IF SQLERRM <> 'referral_code_invalid' THEN RAISE; END IF;
+  END;
+  BEGIN
+    PERFORM * FROM public.bind_referral_onboarding_claim('not-a-claim');
+    RAISE EXCEPTION 'anonymous referral claim binding was permitted';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
 END;
@@ -242,14 +289,46 @@ END;
 $$;
 RESET ROLE;
 
+-- Public codes create opaque, server-timestamped claims before signup. The
+-- production path creates Auth users in a later transaction; this legacy
+-- all-in-one regression moves only its privileged fixture timestamps forward
+-- so the same trusted ordering can be exercised without weakening the RPC.
+SET LOCAL ROLE anon;
+INSERT INTO issue_40_values(name, value)
+SELECT 'first_claim', claim_token
+FROM public.create_referral_onboarding_claim(
+  (SELECT value FROM issue_40_values WHERE name = 'first_code')
+);
+INSERT INTO issue_40_values(name, value)
+SELECT 'self_claim', claim_token
+FROM public.create_referral_onboarding_claim(
+  (SELECT value FROM issue_40_values WHERE name = 'first_code')
+);
+INSERT INTO issue_40_values(name, value)
+SELECT 'second_claim', claim_token
+FROM public.create_referral_onboarding_claim(
+  (SELECT value FROM issue_40_values WHERE name = 'second_code')
+);
+RESET ROLE;
+
+UPDATE auth.users
+SET created_at = pg_catalog.clock_timestamp() + pg_catalog.make_interval(secs => 1)
+WHERE id IN (
+  '40000000-0000-0000-0000-000000000001',
+  '40000000-0000-0000-0000-000000000002'
+);
+
 -- Self attribution is rejected without state change.
 SELECT set_config('request.jwt.claims', '{"sub":"40000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 SET LOCAL ROLE authenticated;
 DO $$
 BEGIN
+  PERFORM * FROM public.bind_referral_onboarding_claim(
+    (SELECT value FROM issue_40_values WHERE name = 'self_claim')
+  );
   BEGIN
     PERFORM * FROM public.process_investor_referral_conversion(
-      (SELECT value FROM issue_40_values WHERE name = 'first_code')
+      (SELECT value FROM issue_40_values WHERE name = 'self_claim')
     );
     RAISE EXCEPTION 'self referral was permitted';
   EXCEPTION WHEN SQLSTATE 'P0001' THEN
@@ -263,10 +342,16 @@ RESET ROLE;
 -- conflicting second code is rejected.
 SELECT set_config('request.jwt.claims', '{"sub":"40000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 SET LOCAL ROLE authenticated;
+SELECT * FROM public.bind_referral_onboarding_claim(
+  (SELECT value FROM issue_40_values WHERE name = 'first_claim')
+);
+SELECT * FROM public.bind_referral_onboarding_claim(
+  (SELECT value FROM issue_40_values WHERE name = 'second_claim')
+);
 INSERT INTO issue_40_values(name, value)
 SELECT 'conversion_id', conversion_id::text
 FROM public.process_investor_referral_conversion(
-  (SELECT value FROM issue_40_values WHERE name = 'first_code')
+  (SELECT value FROM issue_40_values WHERE name = 'first_claim')
 )
 WHERE replayed = false AND reward_entitlement_count = 2;
 DO $$
@@ -276,7 +361,7 @@ DECLARE
 BEGIN
   SELECT replayed, reward_entitlement_count INTO v_replayed, v_count
   FROM public.process_investor_referral_conversion(
-    (SELECT value FROM issue_40_values WHERE name = 'first_code')
+    (SELECT value FROM issue_40_values WHERE name = 'first_claim')
   );
   IF NOT v_replayed OR v_count <> 2 THEN
     RAISE EXCEPTION 'exact conversion replay did not return stable state';
@@ -284,7 +369,7 @@ BEGIN
 
   BEGIN
     PERFORM * FROM public.process_investor_referral_conversion(
-      (SELECT value FROM issue_40_values WHERE name = 'second_code')
+      (SELECT value FROM issue_40_values WHERE name = 'second_claim')
     );
     RAISE EXCEPTION 'conflicting referral attribution was permitted';
   EXCEPTION WHEN SQLSTATE 'P0001' THEN
@@ -361,9 +446,9 @@ BEGIN
   END IF;
   BEGIN
     PERFORM * FROM public.process_investor_referral_conversion('not-a-code');
-    RAISE EXCEPTION 'invalid code was accepted';
+    RAISE EXCEPTION 'invalid claim was accepted';
   EXCEPTION WHEN SQLSTATE 'P0001' THEN
-    IF SQLERRM <> 'referral_code_invalid' THEN RAISE; END IF;
+    IF SQLERRM <> 'referral_claim_invalid' THEN RAISE; END IF;
   END;
 END;
 $$;

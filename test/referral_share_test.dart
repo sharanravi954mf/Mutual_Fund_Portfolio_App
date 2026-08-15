@@ -62,7 +62,46 @@ void main() {
       );
     });
 
-    test('processes the opaque code through the caller-bound conversion RPC',
+    test('creates an opaque server onboarding claim from the public code',
+        () async {
+      final repository = SupabaseReferralRepository(
+        _FakeRpcClient(
+          [
+            {
+              'claim_token': 'server-claim',
+              'captured_at': '2026-08-15T12:00:00Z',
+            }
+          ],
+          expectedFunction: 'create_referral_onboarding_claim',
+          expectedParameters: const <String, dynamic>{
+            'p_referral_code': 'opaque-code',
+          },
+        ),
+      );
+
+      expect(
+        await repository.createReferralOnboardingClaim('opaque-code'),
+        'server-claim',
+      );
+    });
+
+    test('binds the claim to the current server-resolved Auth user', () async {
+      final repository = SupabaseReferralRepository(
+        _FakeRpcClient(
+          [
+            {'bound': true, 'replayed': false}
+          ],
+          expectedFunction: 'bind_referral_onboarding_claim',
+          expectedParameters: const <String, dynamic>{
+            'p_claim_token': 'server-claim',
+          },
+        ),
+      );
+
+      await repository.bindCurrentUserReferralOnboardingClaim('server-claim');
+    });
+
+    test('processes the opaque claim through the caller-bound conversion RPC',
         () async {
       final client = _FakeRpcClient(
         [
@@ -74,13 +113,13 @@ void main() {
         ],
         expectedFunction: 'process_investor_referral_conversion',
         expectedParameters: const <String, dynamic>{
-          'p_referral_code': 'opaque-code',
+          'p_claim_token': 'server-claim',
         },
       );
       final repository = SupabaseReferralRepository(client);
 
       final result = await repository
-          .processCurrentInvestorReferralConversion('opaque-code');
+          .processCurrentInvestorReferralConversion('server-claim');
 
       expect(result.replayed, isFalse);
       expect(result.rewardEntitlementCount, 2);
@@ -88,6 +127,15 @@ void main() {
 
     for (final errorCase in <(String, ReferralRepositoryFailure)>[
       ('referral_code_invalid', ReferralRepositoryFailure.invalidCode),
+      ('referral_claim_invalid', ReferralRepositoryFailure.invalidClaim),
+      (
+        'referral_claim_account_predates_capture',
+        ReferralRepositoryFailure.accountPredatesClaim,
+      ),
+      (
+        'referral_claim_account_conflict',
+        ReferralRepositoryFailure.claimAccountConflict,
+      ),
       ('referral_self_not_allowed', ReferralRepositoryFailure.selfReferral),
       ('referral_conversion_conflict', ReferralRepositoryFailure.conflict),
     ]) {
@@ -98,13 +146,13 @@ void main() {
             error: PostgrestException(message: errorCase.$1),
             expectedFunction: 'process_investor_referral_conversion',
             expectedParameters: const <String, dynamic>{
-              'p_referral_code': 'opaque-code',
+              'p_claim_token': 'server-claim',
             },
           ),
         );
 
         await expectLater(
-          repository.processCurrentInvestorReferralConversion('opaque-code'),
+          repository.processCurrentInvestorReferralConversion('server-claim'),
           throwsA(
             isA<ReferralRepositoryException>()
                 .having((error) => error.reason, 'reason', errorCase.$2)
@@ -299,6 +347,13 @@ class _FakeReferralRepository implements ReferralRepository {
 
   int failuresRemaining;
   int calls = 0;
+
+  @override
+  Future<String> createReferralOnboardingClaim(String referralCode) async =>
+      'server-claim';
+
+  @override
+  Future<void> bindCurrentUserReferralOnboardingClaim(String claimToken) async {}
 
   @override
   Future<InvestorReferral> getOrCreateCurrentInvestorReferral() async {

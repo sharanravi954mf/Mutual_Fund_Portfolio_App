@@ -3,8 +3,12 @@ import '../domain/investor_referral.dart';
 abstract class ReferralRepository {
   Future<InvestorReferral> getOrCreateCurrentInvestorReferral();
 
+  Future<String> createReferralOnboardingClaim(String referralCode);
+
+  Future<void> bindCurrentUserReferralOnboardingClaim(String claimToken);
+
   Future<ReferralConversionResult> processCurrentInvestorReferralConversion(
-    String referralCode,
+    String claimToken,
   );
 }
 
@@ -19,6 +23,10 @@ class ReferralRepositoryException implements Exception {
 
   bool get isTerminal => switch (reason) {
         ReferralRepositoryFailure.invalidCode ||
+        ReferralRepositoryFailure.invalidClaim ||
+        ReferralRepositoryFailure.accountPredatesClaim ||
+        ReferralRepositoryFailure.claimAccountConflict ||
+        ReferralRepositoryFailure.claimConsumptionConflict ||
         ReferralRepositoryFailure.selfReferral ||
         ReferralRepositoryFailure.conflict ||
         ReferralRepositoryFailure.inactiveCode ||
@@ -35,6 +43,10 @@ class ReferralRepositoryException implements Exception {
 
 enum ReferralRepositoryFailure {
   invalidCode,
+  invalidClaim,
+  accountPredatesClaim,
+  claimAccountConflict,
+  claimConsumptionConflict,
   selfReferral,
   conflict,
   inactiveCode,
