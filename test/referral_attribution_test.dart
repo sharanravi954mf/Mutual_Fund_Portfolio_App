@@ -77,6 +77,7 @@ void main() {
 
     for (final failure in <ReferralRepositoryFailure>[
       ReferralRepositoryFailure.invalidClaim,
+      ReferralRepositoryFailure.expiredClaim,
       ReferralRepositoryFailure.accountPredatesClaim,
       ReferralRepositoryFailure.claimAccountConflict,
       ReferralRepositoryFailure.claimConsumptionConflict,
@@ -100,6 +101,22 @@ void main() {
         expect(repository.conversionCalls, 1);
       });
     }
+
+    test('expired claim during binding clears the claim and rejects cleanly',
+        () async {
+      final repository = _FakeRepository(
+        bindFailure: ReferralRepositoryFailure.expiredClaim,
+      );
+      final controller = _controller(repository)..capture('opaque-code');
+
+      await controller.synchronize(userId: 'user-a', profile: null);
+
+      expect(controller.state, ReferralAttributionState.rejected);
+      expect(controller.failure, ReferralRepositoryFailure.expiredClaim);
+      expect(controller.hasPendingAttribution, isFalse);
+      expect(repository.bindCalls, 1);
+      expect(repository.conversionCalls, 0);
+    });
 
     test('invalid public code stops before authentication or binding',
         () async {
@@ -266,6 +283,7 @@ class _FakeRepository implements ReferralRepository {
   _FakeRepository({
     this.replayed = false,
     this.createFailure,
+    this.bindFailure,
     this.conversionFailure,
     this.conversionFailuresRemaining = 0,
     this.processGate,
@@ -273,6 +291,7 @@ class _FakeRepository implements ReferralRepository {
 
   final bool replayed;
   final ReferralRepositoryFailure? createFailure;
+  final ReferralRepositoryFailure? bindFailure;
   final ReferralRepositoryFailure? conversionFailure;
   int conversionFailuresRemaining;
   final Completer<void>? processGate;
@@ -302,6 +321,10 @@ class _FakeRepository implements ReferralRepository {
   Future<void> bindCurrentUserReferralOnboardingClaim(String claimToken) async {
     bindCalls++;
     boundClaims.add(claimToken);
+    final failure = bindFailure;
+    if (failure != null) {
+      throw ReferralRepositoryException('test failure', failure);
+    }
   }
 
   @override

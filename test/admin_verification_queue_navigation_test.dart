@@ -28,8 +28,9 @@ void main() {
 
   test('dashboard maps the queue consistently in desktop and mobile navigation',
       () {
-    final dashboard =
-        File('lib/screens/admin_dashboard.dart').readAsStringSync();
+    final dashboard = File('lib/screens/admin_dashboard.dart')
+        .readAsStringSync()
+        .replaceAll('\r\n', '\n');
 
     expect(dashboard, contains("_buildDrawerItem(1, t('verification_queue')"));
     expect(dashboard, contains("_buildSidebarItem(1, t('verification_queue')"));

@@ -24,6 +24,7 @@ class ReferralRepositoryException implements Exception {
   bool get isTerminal => switch (reason) {
         ReferralRepositoryFailure.invalidCode ||
         ReferralRepositoryFailure.invalidClaim ||
+        ReferralRepositoryFailure.expiredClaim ||
         ReferralRepositoryFailure.accountPredatesClaim ||
         ReferralRepositoryFailure.claimAccountConflict ||
         ReferralRepositoryFailure.claimConsumptionConflict ||
@@ -44,6 +45,7 @@ class ReferralRepositoryException implements Exception {
 enum ReferralRepositoryFailure {
   invalidCode,
   invalidClaim,
+  expiredClaim,
   accountPredatesClaim,
   claimAccountConflict,
   claimConsumptionConflict,

@@ -128,6 +128,7 @@ void main() {
     for (final errorCase in <(String, ReferralRepositoryFailure)>[
       ('referral_code_invalid', ReferralRepositoryFailure.invalidCode),
       ('referral_claim_invalid', ReferralRepositoryFailure.invalidClaim),
+      ('referral_claim_expired', ReferralRepositoryFailure.expiredClaim),
       (
         'referral_claim_account_predates_capture',
         ReferralRepositoryFailure.accountPredatesClaim,

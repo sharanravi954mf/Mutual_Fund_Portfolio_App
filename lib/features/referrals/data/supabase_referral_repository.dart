@@ -162,6 +162,7 @@ class SupabaseReferralRepository implements ReferralRepository {
       'referral_claim_invalid' ||
       'referral_claim_required' =>
         ReferralRepositoryFailure.invalidClaim,
+      'referral_claim_expired' => ReferralRepositoryFailure.expiredClaim,
       'referral_claim_account_predates_capture' =>
         ReferralRepositoryFailure.accountPredatesClaim,
       'referral_claim_account_conflict' =>
