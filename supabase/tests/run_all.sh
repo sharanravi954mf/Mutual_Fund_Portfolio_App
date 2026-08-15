@@ -13,3 +13,5 @@ for sql_file in supabase/tests/*.sql; do
   docker cp "$sql_file" "$db_container:$container_file"
   docker exec "$db_container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f "$container_file"
 done
+
+sh supabase/tests/issue_40_referral_conversion_concurrency_test.sh
