@@ -13,16 +13,12 @@ void main() {
   test('bounds oversized PNG while retaining aspect ratio and alpha', () async {
     const optimizer = OverlayImageOptimizer();
     final optimized = await optimizer.optimizePngBase64(_wideTransparentPng);
-    final buffer = await ui.ImmutableBuffer.fromUint8List(
-      base64Decode(optimized),
-    );
-    final descriptor = await ui.ImageDescriptor.encoded(buffer);
-    final codec = await descriptor.instantiateCodec();
+    final codec = await ui.instantiateImageCodec(base64Decode(optimized));
     final frame = await codec.getNextFrame();
 
     try {
-      expect(descriptor.width, 512);
-      expect(descriptor.height, 85);
+      expect(frame.image.width, 512);
+      expect(frame.image.height, 85);
       final rgba = await frame.image.toByteData(
         format: ui.ImageByteFormat.rawRgba,
       );
@@ -31,8 +27,26 @@ void main() {
     } finally {
       frame.image.dispose();
       codec.dispose();
-      descriptor.dispose();
-      buffer.dispose();
     }
+  });
+
+  test('keeps a bounded PNG unchanged when supplied as a data URL', () async {
+    const optimizer = OverlayImageOptimizer();
+    final bounded = await optimizer.optimizePngBase64(_wideTransparentPng);
+
+    final unchanged = await optimizer.optimizePngBase64(
+      'data:image/png;base64,$bounded',
+    );
+
+    expect(unchanged, bounded);
+  });
+
+  test('rejects invalid PNG bytes before codec work', () async {
+    const optimizer = OverlayImageOptimizer();
+
+    await expectLater(
+      optimizer.optimizePngBase64(base64Encode(List<int>.filled(24, 0))),
+      throwsA(isA<FormatException>()),
+    );
   });
 }

@@ -17,51 +17,78 @@ class OverlayImageOptimizer {
         ? encodedPng.substring(encodedPng.indexOf(',') + 1)
         : encodedPng;
     final bytes = base64Decode(normalized);
-    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    final dimensions = _readPngDimensions(bytes);
+    final largestDimension = dimensions.width > dimensions.height
+        ? dimensions.width
+        : dimensions.height;
+    if (largestDimension <= maxRasterDimension) return normalized;
 
+    final scale = maxRasterDimension / largestDimension;
+    final targetWidth = (dimensions.width * scale).round().clamp(1, 1 << 30);
+    final targetHeight = (dimensions.height * scale).round().clamp(1, 1 << 30);
+    final codec = await ui.instantiateImageCodec(
+      bytes,
+      targetWidth: targetWidth,
+      targetHeight: targetHeight,
+      allowUpscaling: false,
+    );
     try {
-      final largestDimension = descriptor.width > descriptor.height
-          ? descriptor.width
-          : descriptor.height;
-      if (largestDimension <= maxRasterDimension) return normalized;
-
-      final scale = maxRasterDimension / largestDimension;
-      final targetWidth = (descriptor.width * scale).round().clamp(1, 1 << 30);
-      final targetHeight =
-          (descriptor.height * scale).round().clamp(1, 1 << 30);
-      final codec = await descriptor.instantiateCodec(
-        targetWidth: targetWidth,
-        targetHeight: targetHeight,
-      );
+      final frame = await codec.getNextFrame();
       try {
-        final frame = await codec.getNextFrame();
-        try {
-          final pngData = await frame.image.toByteData(
-            format: ui.ImageByteFormat.png,
-          );
-          if (pngData == null) {
-            throw StateError('Unable to encode optimized PNG overlay.');
-          }
-          final optimized = pngData.buffer.asUint8List(
-            pngData.offsetInBytes,
-            pngData.lengthInBytes,
-          );
-          debugPrint(
-            'Invoice Signer: optimized PNG overlay '
-            '${descriptor.width}x${descriptor.height} -> '
-            '${targetWidth}x$targetHeight.',
-          );
-          return base64Encode(optimized);
-        } finally {
-          frame.image.dispose();
+        final pngData = await frame.image.toByteData(
+          format: ui.ImageByteFormat.png,
+        );
+        if (pngData == null) {
+          throw StateError('Unable to encode optimized PNG overlay.');
         }
+        final optimized = pngData.buffer.asUint8List(
+          pngData.offsetInBytes,
+          pngData.lengthInBytes,
+        );
+        debugPrint(
+          'Invoice Signer: optimized PNG overlay '
+          '${dimensions.width}x${dimensions.height} -> '
+          '${targetWidth}x$targetHeight.',
+        );
+        return base64Encode(optimized);
       } finally {
-        codec.dispose();
+        frame.image.dispose();
       }
     } finally {
-      descriptor.dispose();
-      buffer.dispose();
+      codec.dispose();
     }
   }
+
+  _PngDimensions _readPngDimensions(Uint8List bytes) {
+    const signature = <int>[137, 80, 78, 71, 13, 10, 26, 10];
+    if (bytes.length < 24) {
+      throw const FormatException('Invoice Signer overlay must be a PNG.');
+    }
+    for (var index = 0; index < signature.length; index++) {
+      if (bytes[index] != signature[index]) {
+        throw const FormatException('Invoice Signer overlay must be a PNG.');
+      }
+    }
+    if (bytes[12] != 73 ||
+        bytes[13] != 72 ||
+        bytes[14] != 68 ||
+        bytes[15] != 82) {
+      throw const FormatException('Invoice Signer overlay must be a PNG.');
+    }
+
+    final data = ByteData.sublistView(bytes);
+    final width = data.getUint32(16, Endian.big);
+    final height = data.getUint32(20, Endian.big);
+    if (width == 0 || height == 0) {
+      throw const FormatException('Invoice Signer overlay PNG is invalid.');
+    }
+    return _PngDimensions(width, height);
+  }
+}
+
+class _PngDimensions {
+  const _PngDimensions(this.width, this.height);
+
+  final int width;
+  final int height;
 }
