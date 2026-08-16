@@ -25,6 +25,7 @@ import '../features/invoice_signer/models/registrar_detection_result.dart';
 import '../features/invoice_signer/processors/registrar_processor.dart';
 import '../features/invoice_signer/services/registrar_detection_service.dart';
 import '../features/invoice_signer/services/invoice_pdf_discovery_service.dart';
+import '../features/invoice_signer/widgets/invoice_signer_responsive_layout.dart';
 import '../features/investor_verification/presentation/advisor_verification_queue_screen.dart';
 import 'dart:typed_data';
 import 'dart:convert';
@@ -136,6 +137,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Uint8List? _pdfPreviewBytes;
   bool _loadingPreview = false;
   String? _previewError;
+  final ScrollController _invoiceControlsScrollController = ScrollController();
   final InvoicePdfDiscoveryService _pdfDiscoveryService =
       const InvoicePdfDiscoveryService();
 
@@ -751,6 +753,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _factsheetTopHoldingsController.dispose();
     _factsheetMonthController.dispose();
     _fundSearchController.dispose();
+    _invoiceControlsScrollController.dispose();
     _debounceTimer?.cancel();
     super.dispose();
   }
@@ -2439,61 +2442,57 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildInvoiceSignerContent() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final horizontalPadding = constraints.maxWidth < 600 ? 16.0 : 24.0;
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            24,
+            horizontalPadding,
+            24,
+          ),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "Distributor Invoice Signer & Excel Auto-Updater",
-                style: GoogleFonts.outfit(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: Colors.grey.shade400,
-                ),
-              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Distributor Invoice Signer & Excel Auto-Updater",
+                    style: GoogleFonts.outfit(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Upload your invoices ZIP/PDF, Excel tracker, transparent signature, and company stamp. The system will automatically overlay the signature/stamp on the final page of the PDFs, parse the invoice details to populate your Excel tracker columns (Invoice No, Date, and Filename), and start the download for both updated files in one go!",
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: Colors.grey.shade400,
+                    ),
+                  ),
+                ],
+              ).premiumReveal(index: 0),
+              const SizedBox(height: 24),
+              _buildUploadPanel(),
+              const SizedBox(height: 24),
+              InvoiceSignerWorkspace(
+                preview: _buildPdfPreviewPanel(),
+                controls: _buildControlPanel(),
+              ).premiumReveal(index: 1),
             ],
-          ).premiumReveal(index: 0),
-          const SizedBox(height: 24),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isDesktop = constraints.maxWidth > 800;
-              return isDesktop
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: _buildUploadPanel()),
-                        const SizedBox(width: 24),
-                        Expanded(child: _buildControlPanel()),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        _buildUploadPanel(),
-                        const SizedBox(height: 24),
-                        _buildControlPanel(),
-                      ],
-                    );
-            },
-          ).premiumReveal(index: 1),
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 
   Widget _buildUploadPanel() {
-    return Column(
+    return InvoiceSignerUploadGrid(
       children: [
         _buildUploadCard(
           title: _selectedInvoicePdf != null &&
@@ -2519,7 +2518,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             }
           },
         ),
-        const SizedBox(height: 16),
         _buildUploadCard(
           title: "Excel Invoice Tracker (.xlsx, .xls, .csv)",
           subtitle: _selectedExcelFile != null
@@ -2537,7 +2535,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             }
           },
         ),
-        const SizedBox(height: 16),
         _buildUploadCard(
           title: "Transparent Signature PNG",
           subtitle: _selectedSignaturePng != null
@@ -2554,7 +2551,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             }
           },
         ),
-        const SizedBox(height: 16),
         _buildUploadCard(
           title: "Transparent Company Stamp PNG",
           subtitle: _selectedStampPng != null
@@ -2650,13 +2646,51 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildPdfPreviewWidget() {
-    final previewHeight = 400.0;
-    final previewWidth = previewHeight * (595.0 / 842.0);
+  Widget _buildPdfPreviewPanel() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final hasBoundedHeight = constraints.hasBoundedHeight;
 
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF151030),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: LayoutBuilder(
+            builder: (context, innerConstraints) {
+              const pageAspectRatio = 595.0 / 842.0;
+              final availableHeight = hasBoundedHeight
+                  ? math.max(240.0, innerConstraints.maxHeight - 96)
+                  : 760.0;
+              final previewWidth = math.min(
+                innerConstraints.maxWidth,
+                availableHeight * pageAspectRatio,
+              );
+              final previewHeight = previewWidth / pageAspectRatio;
+
+              return Center(
+                child: _buildPdfPreviewWidget(
+                  previewWidth: previewWidth,
+                  previewHeight: previewHeight,
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPdfPreviewWidget({
+    required double previewWidth,
+    required double previewHeight,
+  }) {
     if (_selectedInvoicePdf == null) {
       return Container(
-        height: 200,
+        width: previewWidth,
+        height: previewHeight,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.02),
           borderRadius: BorderRadius.circular(12),
@@ -2683,7 +2717,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     if (_loadingPreview) {
       return Container(
-        height: 200,
+        width: previewWidth,
+        height: previewHeight,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.02),
           borderRadius: BorderRadius.circular(12),
@@ -2710,7 +2745,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     if (_pdfPreviewBytes == null) {
       return Container(
-        height: 200,
+        width: previewWidth,
+        height: previewHeight,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.02),
           borderRadius: BorderRadius.circular(12),
@@ -2888,227 +2924,245 @@ class _AdminDashboardState extends State<AdminDashboard> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white10),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Coordinate Offsets Customizer",
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Fine-tune the overlays positioning relative to the bottom-left point boundary of the page space (A4 Point bounds).",
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              color: Colors.grey.shade500,
-            ),
-          ),
-          const SizedBox(height: 20),
-          _buildPdfPreviewWidget(),
-          const SizedBox(height: 24),
-          Text(
-            "Overlay Location Preset",
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              color: Colors.grey.shade400,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _selectedPreset,
-                dropdownColor: const Color(0xFF151030),
-                style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
-                icon: const Icon(Icons.arrow_drop_down, color: Colors.white54),
-                isExpanded: true,
-                items: [
-                  "CAMS Distributor (Default)",
-                  "KFintech / Karvy Distributor",
-                  "Bottom Right Corner",
-                  "Bottom Left Corner",
-                  "Custom Placement",
-                ].map((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  if (newValue != null && newValue != "Custom Placement") {
-                    _applyCoordinatePreset(newValue);
-                  } else if (newValue == "Custom Placement") {
-                    setState(() {
-                      _selectedPreset = newValue!;
-                    });
-                  }
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _buildCoordinateSlider(
-            label: "Company Stamp X (Horizontal)",
-            value: _stampX,
-            min: 0,
-            max: 600,
-            onChanged: (val) {
-              setState(() {
-                _stampX = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          _buildCoordinateSlider(
-            label: "Company Stamp Y (Vertical)",
-            value: _stampY,
-            min: 0,
-            max: 800,
-            onChanged: (val) {
-              setState(() {
-                _stampY = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          _buildCoordinateSlider(
-            label: "Company Stamp Width",
-            value: _stampW,
-            min: 30,
-            max: 300,
-            onChanged: (val) {
-              setState(() {
-                _stampW = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          _buildCoordinateSlider(
-            label: "Company Stamp Height",
-            value: _stampH,
-            min: 30,
-            max: 300,
-            onChanged: (val) {
-              setState(() {
-                _stampH = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          const Divider(color: Colors.white10, height: 32),
-          _buildCoordinateSlider(
-            label: "Distributor Signature X (Horizontal)",
-            value: _sigX,
-            min: 0,
-            max: 600,
-            onChanged: (val) {
-              setState(() {
-                _sigX = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          _buildCoordinateSlider(
-            label: "Distributor Signature Y (Vertical)",
-            value: _sigY,
-            min: 0,
-            max: 800,
-            onChanged: (val) {
-              setState(() {
-                _sigY = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          _buildCoordinateSlider(
-            label: "Distributor Signature Width",
-            value: _sigW,
-            min: 30,
-            max: 300,
-            onChanged: (val) {
-              setState(() {
-                _sigW = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          _buildCoordinateSlider(
-            label: "Distributor Signature Height",
-            value: _sigH,
-            min: 15,
-            max: 200,
-            onChanged: (val) {
-              setState(() {
-                _sigH = val;
-                _selectedPreset = "Custom Placement";
-              });
-            },
-          ),
-          if (_lastProcessingReport != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _lastProcessingReport!.errors.isNotEmpty
-                  ? 'Invoice source could not be confirmed.'
-                  : 'Invoice source: ${_lastProcessingReport!.invoiceSourceLabel} • ${_lastProcessingReport!.detection.invoicesFound} invoices found',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: _lastProcessingReport!.errors.isNotEmpty
-                    ? Colors.redAccent
-                    : Colors.greenAccent,
-              ),
-            ),
-          ],
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              onPressed: _selectedInvoicePdf == null ||
-                      _selectedSignaturePng == null ||
-                      _selectedStampPng == null ||
-                      _processingAll
-                  ? null
-                  : _processAllInvoices,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFE94057),
-                disabledBackgroundColor: Colors.white10,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final content = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Coordinate Offsets Customizer",
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: Colors.white,
                 ),
               ),
-              child: _processingAll
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : Text(
-                      _selectedExcelFile != null
-                          ? "Sign, Stamp & Update Tracker"
-                          : "Sign & Stamp Invoices",
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Colors.white,
-                      ),
+              const SizedBox(height: 8),
+              Text(
+                "Fine-tune the overlays positioning relative to the bottom-left point boundary of the page space (A4 Point bounds).",
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: Colors.grey.shade500,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                "Overlay Location Preset",
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedPreset,
+                    dropdownColor: const Color(0xFF151030),
+                    style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                    icon: const Icon(Icons.arrow_drop_down,
+                        color: Colors.white54),
+                    isExpanded: true,
+                    items: [
+                      "CAMS Distributor (Default)",
+                      "KFintech / Karvy Distributor",
+                      "Bottom Right Corner",
+                      "Bottom Left Corner",
+                      "Custom Placement",
+                    ].map((String value) {
+                      return DropdownMenuItem<String>(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null && newValue != "Custom Placement") {
+                        _applyCoordinatePreset(newValue);
+                      } else if (newValue == "Custom Placement") {
+                        setState(() {
+                          _selectedPreset = newValue!;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              _buildCoordinateSlider(
+                label: "Company Stamp X (Horizontal)",
+                value: _stampX,
+                min: 0,
+                max: 600,
+                onChanged: (val) {
+                  setState(() {
+                    _stampX = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              _buildCoordinateSlider(
+                label: "Company Stamp Y (Vertical)",
+                value: _stampY,
+                min: 0,
+                max: 800,
+                onChanged: (val) {
+                  setState(() {
+                    _stampY = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              _buildCoordinateSlider(
+                label: "Company Stamp Width",
+                value: _stampW,
+                min: 30,
+                max: 300,
+                onChanged: (val) {
+                  setState(() {
+                    _stampW = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              _buildCoordinateSlider(
+                label: "Company Stamp Height",
+                value: _stampH,
+                min: 30,
+                max: 300,
+                onChanged: (val) {
+                  setState(() {
+                    _stampH = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              const Divider(color: Colors.white10, height: 32),
+              _buildCoordinateSlider(
+                label: "Distributor Signature X (Horizontal)",
+                value: _sigX,
+                min: 0,
+                max: 600,
+                onChanged: (val) {
+                  setState(() {
+                    _sigX = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              _buildCoordinateSlider(
+                label: "Distributor Signature Y (Vertical)",
+                value: _sigY,
+                min: 0,
+                max: 800,
+                onChanged: (val) {
+                  setState(() {
+                    _sigY = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              _buildCoordinateSlider(
+                label: "Distributor Signature Width",
+                value: _sigW,
+                min: 30,
+                max: 300,
+                onChanged: (val) {
+                  setState(() {
+                    _sigW = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              _buildCoordinateSlider(
+                label: "Distributor Signature Height",
+                value: _sigH,
+                min: 15,
+                max: 200,
+                onChanged: (val) {
+                  setState(() {
+                    _sigH = val;
+                    _selectedPreset = "Custom Placement";
+                  });
+                },
+              ),
+              if (_lastProcessingReport != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _lastProcessingReport!.errors.isNotEmpty
+                      ? 'Invoice source could not be confirmed.'
+                      : 'Invoice source: ${_lastProcessingReport!.invoiceSourceLabel} • ${_lastProcessingReport!.detection.invoicesFound} invoices found',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: _lastProcessingReport!.errors.isNotEmpty
+                        ? Colors.redAccent
+                        : Colors.greenAccent,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _selectedInvoicePdf == null ||
+                          _selectedSignaturePng == null ||
+                          _selectedStampPng == null ||
+                          _processingAll
+                      ? null
+                      : _processAllInvoices,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE94057),
+                    disabledBackgroundColor: Colors.white10,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                  ),
+                  child: _processingAll
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Text(
+                          _selectedExcelFile != null
+                              ? "Sign, Stamp & Update Tracker"
+                              : "Sign & Stamp Invoices",
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.white,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          );
+
+          if (!constraints.hasBoundedHeight) {
+            return content;
+          }
+
+          return Scrollbar(
+            controller: _invoiceControlsScrollController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _invoiceControlsScrollController,
+              primary: false,
+              child: content,
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -3126,13 +3180,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                color: Colors.grey.shade400,
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: Colors.grey.shade400,
+                ),
               ),
             ),
+            const SizedBox(width: 8),
             Text(
               value.round().toString(),
               style: GoogleFonts.inter(
