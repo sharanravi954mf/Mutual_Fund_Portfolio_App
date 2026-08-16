@@ -3194,8 +3194,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           result.isZip
               ? SnackBar(
                   content: Text(
-                      'Batch signing complete! Signed ${result.signedCount} of ${result.documents.length} PDFs. Download started.'),
-                  backgroundColor: Colors.green,
+                    result.hasFailures
+                        ? 'Batch signing completed with errors. Signed '
+                            '${result.signedCount} of ${result.documents.length} '
+                            'PDFs. ${result.failureSummary}'
+                        : 'Batch signing complete! Signed '
+                            '${result.signedCount} of ${result.documents.length} '
+                            'PDFs. Download started.',
+                  ),
+                  backgroundColor:
+                      result.hasFailures ? Colors.orange : Colors.green,
                 )
               : const SnackBar(
                   content:
@@ -3297,9 +3305,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               0,
               detection.invoicesFound - trackerUpdate.updatedCount,
             ),
-            warnings: signing.signedCount < signing.documents.length
-                ? const ['Some invoices could not be signed.']
-                : const [],
+            warnings:
+                signing.failures.map((failure) => failure.diagnostic).toList(),
           ),
         );
       }

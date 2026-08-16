@@ -2,7 +2,8 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { PDFDocument } from "npm:pdf-lib@1.17.1";
 import * as zip from "npm:@zip.js/zip.js";
 import { encode as base64Encode } from "https://deno.land/std@0.177.0/encoding/base64.ts";
-import { requireAdvisor, requireAuthenticated } from "../_shared/authorization.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+import { requireAuthenticated } from "../_shared/authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,6 +26,57 @@ function isAllowedFundApiUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function invoiceSignerAuthorizationFailure(
+  req: Request,
+): Promise<Response | null> {
+  const authentication = await requireAuthenticated(req);
+  if ("failure" in authentication) {
+    return new Response(
+      JSON.stringify({ error: authentication.failure.message }),
+      {
+        status: authentication.failure.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const authorizationHeader = req.headers.get("authorization");
+  if (authorizationHeader == null) {
+    return new Response(
+      JSON.stringify({ error: "Authentication is required." }),
+      {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const callerClient = createClient(
+    Deno.env.get("SUPABASE_URL") || "",
+    Deno.env.get("SUPABASE_ANON_KEY") || "",
+    {
+      global: { headers: { Authorization: authorizationHeader } },
+      auth: { autoRefreshToken: false, persistSession: false },
+    },
+  );
+  const { data: hasAdvisorAccess, error } = await callerClient.rpc("is_admin");
+  if (error != null || hasAdvisorAccess !== true) {
+    console.error(
+      "Invoice Signer authorization check failed:",
+      error?.message ?? "advisor access denied",
+    );
+    return new Response(
+      JSON.stringify({ error: "Advisor access is required." }),
+      {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  return null;
 }
 
 async function signSinglePdf(
@@ -131,16 +183,8 @@ serve(async (req) => {
       });
     }
 
-    const authorization = await requireAdvisor(req);
-    if ("failure" in authorization) {
-      return new Response(
-        JSON.stringify({ error: authorization.failure.message }),
-        {
-          status: authorization.failure.status,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
+    const authorizationFailure = await invoiceSignerAuthorizationFailure(req);
+    if (authorizationFailure != null) return authorizationFailure;
 
     const fileBase64 = invoiceFile || invoicePdf;
 

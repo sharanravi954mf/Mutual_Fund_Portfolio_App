@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import '../../services/supabase_service.dart';
 import 'models/invoice_document.dart';
@@ -57,6 +58,7 @@ class InvoiceSignerJobController {
     final outputDocuments = <InvoiceDocument>[];
     final signedNames = <String>{};
     final signedIndexes = <int>{};
+    final failures = <InvoiceSigningFailure>[];
 
     for (var index = 0; index < originalDocuments.length; index++) {
       final document = originalDocuments[index];
@@ -70,8 +72,21 @@ class InvoiceSignerJobController {
         outputDocuments.add(signed);
         signedNames.add(document.sourceFileName);
         signedIndexes.add(index);
-      } catch (_) {
-        if (!isZip) rethrow;
+      } catch (error) {
+        final reason = _failureReason(error);
+        debugPrint(
+          'Invoice Signer: failed to sign "${document.sourceFileName}": '
+          '$reason',
+        );
+        failures.add(InvoiceSigningFailure(
+          sourceFileName: document.sourceFileName,
+          reason: reason,
+        ));
+        if (!isZip) {
+          throw Exception(
+            'Failed to sign ${document.sourceFileName}: $reason',
+          );
+        }
         outputDocuments.add(document);
       }
     }
@@ -100,6 +115,7 @@ class InvoiceSignerJobController {
         isZip: true,
         signedCount: signedNames.length,
         documents: originalDocuments,
+        failures: failures,
       );
     }
 
@@ -111,7 +127,13 @@ class InvoiceSignerJobController {
       isZip: false,
       signedCount: 1,
       documents: originalDocuments,
+      failures: failures,
     );
+  }
+
+  static String _failureReason(Object error) {
+    final reason = error.toString().replaceFirst('Exception: ', '').trim();
+    return reason.isEmpty ? 'Unknown signing error.' : reason;
   }
 
   Future<ExcelUpdateResult> updateCamsTracker({
