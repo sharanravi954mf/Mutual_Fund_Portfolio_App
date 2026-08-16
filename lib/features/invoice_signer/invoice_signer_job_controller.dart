@@ -1,12 +1,13 @@
 import 'dart:convert';
-
-import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
 
 import '../../services/supabase_service.dart';
 import 'models/invoice_document.dart';
 import 'models/invoice_job.dart';
+import 'processors/batch_signing_executor.dart';
 import 'processors/cams_processor.dart';
 import 'processors/kfintech_processor.dart';
+import 'processors/overlay_image_optimizer.dart';
 import 'processors/registrar_processor.dart';
 import 'processors/signature_engine.dart';
 import 'processors/zip_processor.dart';
@@ -17,6 +18,7 @@ class InvoiceSignerJobController {
   final ZipProcessor _zipProcessor;
   final CamsProcessor _camsProcessor;
   final KfintechProcessor _kfintechProcessor;
+  final OverlayImageOptimizer _overlayImageOptimizer;
   final InvoicePdfDiscoveryService _pdfDiscoveryService;
 
   InvoiceSignerJobController(SupabaseService supabaseService)
@@ -24,6 +26,7 @@ class InvoiceSignerJobController {
         _zipProcessor = ZipProcessor(supabaseService),
         _camsProcessor = CamsProcessor(),
         _kfintechProcessor = KfintechProcessor(),
+        _overlayImageOptimizer = const OverlayImageOptimizer(),
         _pdfDiscoveryService = const InvoicePdfDiscoveryService();
 
   Future<SigningJobResult> sign({
@@ -55,41 +58,24 @@ class InvoiceSignerJobController {
     if (originalDocuments.isEmpty) {
       throw Exception('No eligible PDF invoices found.');
     }
-    final outputDocuments = <InvoiceDocument>[];
-    final signedNames = <String>{};
-    final signedIndexes = <int>{};
-    final failures = <InvoiceSigningFailure>[];
-
-    for (var index = 0; index < originalDocuments.length; index++) {
-      final document = originalDocuments[index];
-      try {
-        final signed = await _signatureEngine.sign(
-          document: document,
-          signatureBase64: signatureBase64,
-          stampBase64: stampBase64,
-          placement: placement,
-        );
-        outputDocuments.add(signed);
-        signedNames.add(document.sourceFileName);
-        signedIndexes.add(index);
-      } catch (error) {
-        final reason = _failureReason(error);
-        debugPrint(
-          'Invoice Signer: failed to sign "${document.sourceFileName}": '
-          '$reason',
-        );
-        failures.add(InvoiceSigningFailure(
-          sourceFileName: document.sourceFileName,
-          reason: reason,
-        ));
-        if (!isZip) {
-          throw Exception(
-            'Failed to sign ${document.sourceFileName}: $reason',
-          );
-        }
-        outputDocuments.add(document);
-      }
-    }
+    // Large transparent uploads can exhaust the Edge worker while pdf-lib
+    // decodes them for every invoice. Resize them once per batch; their PDF
+    // draw sizes and placement coordinates remain unchanged.
+    final optimizedSignature =
+        await _overlayImageOptimizer.optimizePngBase64(signatureBase64);
+    final optimizedStamp =
+        await _overlayImageOptimizer.optimizePngBase64(stampBase64);
+    final batch = await BatchSigningExecutor(_signatureEngine).signSequentially(
+      documents: originalDocuments,
+      signatureBase64: optimizedSignature,
+      stampBase64: optimizedStamp,
+      placement: placement,
+      isZip: isZip,
+    );
+    final outputDocuments = batch.outputDocuments;
+    final signedNames = batch.signedNames;
+    final signedIndexes = batch.signedIndexes;
+    final failures = batch.failures;
 
     if (isZip) {
       final outputBytes = registrar == RegistrarType.kfintech
@@ -110,8 +96,10 @@ class InvoiceSignerJobController {
                 );
       return SigningJobResult(
         outputBytes: outputBytes,
-        outputFileName:
-            '${sourceFileName.substring(0, sourceFileName.length - 4)}_SIGNED.zip',
+        outputFileName: BatchSigningExecutor.outputArchiveFileName(
+          sourceFileName,
+          hasFailures: failures.isNotEmpty,
+        ),
         isZip: true,
         signedCount: signedNames.length,
         documents: originalDocuments,
@@ -129,11 +117,6 @@ class InvoiceSignerJobController {
       documents: originalDocuments,
       failures: failures,
     );
-  }
-
-  static String _failureReason(Object error) {
-    final reason = error.toString().replaceFirst('Exception: ', '').trim();
-    return reason.isEmpty ? 'Unknown signing error.' : reason;
   }
 
   Future<ExcelUpdateResult> updateCamsTracker({

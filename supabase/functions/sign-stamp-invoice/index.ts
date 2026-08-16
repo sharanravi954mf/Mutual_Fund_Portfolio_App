@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { PDFDocument } from "npm:pdf-lib@1.17.1";
+import { PDFDocument, ParseSpeeds } from "npm:pdf-lib@1.17.1";
 import * as zip from "npm:@zip.js/zip.js";
 import { encode as base64Encode } from "https://deno.land/std@0.177.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
@@ -92,13 +92,20 @@ async function signSinglePdf(
   sigW: number,
   sigH: number
 ): Promise<Uint8Array> {
-  const pdfDoc = await PDFDocument.load(pdfBytes);
-  const pages = pdfDoc.getPages();
-  if (pages.length === 0) {
+  // These options keep the same document/overlay semantics while avoiding
+  // pdf-lib's deliberately slow, event-loop-friendly defaults. Edge Runtime
+  // CPU is metered per request, so the extra parser/writer ticks can terminate
+  // otherwise small invoice PDFs with WORKER_RESOURCE_LIMIT.
+  const pdfDoc = await PDFDocument.load(pdfBytes, {
+    parseSpeed: ParseSpeeds.Fastest,
+    updateMetadata: false,
+  });
+  const pageCount = pdfDoc.getPageCount();
+  if (pageCount === 0) {
     throw new Error("PDF document has 0 pages.");
   }
-  
-  const lastPage = pages[pages.length - 1];
+
+  const lastPage = pdfDoc.getPage(pageCount - 1);
   
   const signatureImage = await pdfDoc.embedPng(signaturePngBytes);
   const stampImage = await pdfDoc.embedPng(stampPngBytes);
@@ -117,7 +124,12 @@ async function signSinglePdf(
     height: Number(sigH),
   });
 
-  return await pdfDoc.save();
+  return pdfDoc.save({
+    addDefaultPage: false,
+    objectsPerTick: Infinity,
+    updateFieldAppearances: false,
+    useObjectStreams: true,
+  });
 }
 
 serve(async (req) => {
