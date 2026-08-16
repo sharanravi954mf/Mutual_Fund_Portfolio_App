@@ -30,6 +30,7 @@ class SigningJobResult {
   final bool isZip;
   final int signedCount;
   final List<InvoiceDocument> documents;
+  final List<InvoiceSigningFailure> failures;
 
   const SigningJobResult({
     required this.outputBytes,
@@ -37,7 +38,25 @@ class SigningJobResult {
     required this.isZip,
     required this.signedCount,
     required this.documents,
+    this.failures = const [],
   });
+
+  bool get hasFailures => failures.isNotEmpty;
+
+  String get failureSummary =>
+      failures.map((failure) => failure.diagnostic).join('; ');
+}
+
+class InvoiceSigningFailure {
+  final String sourceFileName;
+  final String reason;
+
+  const InvoiceSigningFailure({
+    required this.sourceFileName,
+    required this.reason,
+  });
+
+  String get diagnostic => '$sourceFileName: $reason';
 }
 
 class ExcelUpdateResult {

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../../services/supabase_service.dart';
 import '../models/invoice_document.dart';
 import '../models/invoice_job.dart';
@@ -15,22 +17,33 @@ class SignatureEngine {
     required String stampBase64,
     required SignaturePlacement placement,
   }) async {
-    final response = await _supabaseService.client.functions.invoke(
-      'sign-stamp-invoice',
-      body: {
-        'invoiceFile': base64Encode(document.pdfBytes),
-        'signaturePng': signatureBase64,
-        'stampPng': stampBase64,
-        'stampX': placement.stampX.round(),
-        'stampY': placement.stampY.round(),
-        'sigX': placement.signatureX.round(),
-        'sigY': placement.signatureY.round(),
-        'stampW': placement.stampWidth.round(),
-        'stampH': placement.stampHeight.round(),
-        'sigW': placement.signatureWidth.round(),
-        'sigH': placement.signatureHeight.round(),
-      },
-    );
+    late final FunctionResponse response;
+    try {
+      response = await _supabaseService.client.functions.invoke(
+        'sign-stamp-invoice',
+        body: {
+          'invoiceFile': base64Encode(document.pdfBytes),
+          'signaturePng': signatureBase64,
+          'stampPng': stampBase64,
+          'stampX': placement.stampX.round(),
+          'stampY': placement.stampY.round(),
+          'sigX': placement.signatureX.round(),
+          'sigY': placement.signatureY.round(),
+          'stampW': placement.stampWidth.round(),
+          'stampH': placement.stampHeight.round(),
+          'sigW': placement.signatureWidth.round(),
+          'sigH': placement.signatureHeight.round(),
+        },
+      );
+    } on FunctionException catch (error) {
+      final details = error.details;
+      final reason = details is Map && details['error'] != null
+          ? details['error'].toString()
+          : details?.toString() ?? error.reasonPhrase ?? 'Request failed.';
+      throw Exception(
+        'Invoice signing service failed (${error.status}): $reason',
+      );
+    }
 
     if (response.status != 200 || response.data == null) {
       throw Exception(response.data?['error'] ??
