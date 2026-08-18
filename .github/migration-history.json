@@ -1,0 +1,32 @@
+{
+  "boundary": "20260801000000",
+  "migrations": {
+    "20260717000000_init_schema.sql": "6f05f4b7f69d95f5724f69506aec3f129f47a2fc",
+    "20260717000001_ingestion_system.sql": "7357891e41558da7f6378034bf0e7bf34cff4c2f",
+    "20260718000000_add_factsheets_schema.sql": "db9691025cb87a93a5a4c20898a42993f01c8a12",
+    "20260718000001_unregistered_clients.sql": "8a0b6f9809cf8f0fbeed9033ae8142caef973cd3",
+    "20260718000002_cams_statements_schema.sql": "d9355f9d50d406f3526845eaa730db325641d234",
+    "20260718000003_reset_data.sql": "26fd52fd8127a925527249471c38c63fdabbb053",
+    "20260718000004_profiles_id_default.sql": "fd305870aaec84c071c91d61eb1b9c2079547426",
+    "20260718000005_batch_ingestion.sql": "ab4578882d980f0428b0a7d551fc5e4740c28990",
+    "20260722000000_security_foundation.sql": "cf6c386fffde7cad72e4b113a4394ae718af129e",
+    "20260722000001_identity_foundation.sql": "f302393e57543ffeb9170588bb2d2a34a6cec595",
+    "20260722000002_authentication_onboarding.sql": "f7bf87de43f55b64441b2c5cadbeb79481d6fa89",
+    "20260723000000_portfolio_ownership.sql": "cc69928f6a561ec8adb1bb11c37e19a133b18687",
+    "20260724000000_verification_foundation.sql": "7bb418bb5113ea613599b05d6ae32146f33e9e7c",
+    "20260725000000_verification_review_state.sql": "489d914fca5fe1cef6515c0e3352ecd813951d91",
+    "20260725000001_advisor_verification_review.sql": "b1e20cfdefcc8aef30d442cb50571949fb634db8",
+    "20260726000000_verification_approval_vault_fix.sql": "e43c3fd801eaed06c47ab1cf54dcf0e32c855435",
+    "20260727000000_pan_verification.sql": "3c9d3ea4f39ccb65ee6df85bba74e97f7eeed85c",
+    "20260727000001_pan_release_blockers.sql": "28e64d60b0008fdd56d8ae59df25a74453c5017e",
+    "20260728000000_folio_verification_foundation.sql": "4ff59d9f9d2fa20047262303d8c500683ce0dbbd",
+    "20260728000001_folio_repository_contracts.sql": "17066f572446f1e4656cce17e16c656192bc72fb",
+    "20260728000002_investor_folio_request_list.sql": "e63823a83857e9613819b7b3714b06f35b3b8a6e",
+    "20260729000000_advisor_folio_authorization.sql": "6e0b5644890cd3ce8de5826e111444b07d3ab00b",
+    "20260729000001_close_legacy_folio_authorization_bypasses.sql": "73d5991304946a6d3df5a197d89bb802293072e6",
+    "20260729000002_qualify_folio_lifecycle_updates.sql": "e43a07ca4c3ad8071cf165d1c05a6683b7fdf186",
+    "20260730000000_core_auth_rbac.sql": "0b8cc8e0a912158ed632a1e21729214773e6bce0",
+    "20260730000001_user_management_workspace.sql": "ba3a6a93dc607514f150b3a5c4badd55c99abed8",
+    "20260801000000_brd_v1_2_1_execution_subscriptions_referrals.sql": "e57d7efdc4953647b9d0b69a5eea7a5fe46bd00e"
+  }
+}

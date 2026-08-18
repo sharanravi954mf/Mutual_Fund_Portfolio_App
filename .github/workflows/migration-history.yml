@@ -1,0 +1,42 @@
+name: Migration History Validation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - ".github/migration-history.json"
+      - ".github/scripts/validate_migration_history.py"
+      - ".github/workflows/migration-history.yml"
+      - "supabase/migrations/**"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - ".github/migration-history.json"
+      - ".github/scripts/validate_migration_history.py"
+      - ".github/workflows/migration-history.yml"
+      - "supabase/migrations/**"
+
+jobs:
+  validate-migration-history:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prevent production manifest rewrites after bootstrap
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git cat-file -e "${BASE_SHA}:.github/migration-history.json" 2>/dev/null; then
+            git diff --exit-code "${BASE_SHA}" -- .github/migration-history.json
+          fi
+
+      - name: Validate frozen production migrations
+        run: python .github/scripts/validate_migration_history.py
