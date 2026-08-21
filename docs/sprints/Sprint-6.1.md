@@ -6,10 +6,12 @@ This sprint implements the core order execution engine (Buy/Sell/Switch transact
 
 ### Target Migration Files
 * `supabase/migrations/20260801000000_brd_v1_2_1_execution_subscriptions_referrals.sql`
-* `supabase/migrations/20260801000001_sprint_6_1_canonical_hardening.sql`
-* `supabase/migrations/20260801000002_sprint_6_1_final_hardening.sql`
+* `supabase/migrations/20260801000001_restore_develop_schema_prerequisites.sql`
+* `supabase/migrations/20260801000002_sprint_6_1_canonical_hardening.sql`
+* `supabase/migrations/20260801000003_sprint_6_1_final_hardening.sql`
 
 ## Task Checklist & Tracking
+- [x] **fix(database): restore the immutable production migration, add a forward-only compatibility bridge for fresh environments, and freeze applied migration blobs with CI validation; no hosted database changes performed** (#105)
 - [x] **feat(database): create order_status ENUM and cancel_order SECURITY DEFINER RPC — implementation completed and PR raised [BRD-FR-005, BRD-BR-005, Section 6.A, Section 6.E, Section 17.F]** (#28)
 - [x] **feat(database): create order_requests and immutable workspace_audit_logs tables — corrective schema hardening implemented with caller-bound initiation/review metadata, API-role inserts restricted to pending_qualification with null reviewer metadata, RPC-only lifecycle updates, canonical reviewer backfill/preflight, separated initiation/auto-evaluation/qualification/outcome audit events, same-profile MFD initiation and review support, Issue #28 cancellation compatibility, and focused SQL regression coverage [BRD-FR-005, BRD-FR-006, BRD-BR-005, BRD-NFR-005, Section 5, Section 6.A, Section 17.F]** (#29)
 - [x] **feat(database): implement workspace isolation RLS policy on order_requests — implemented with profile-resolved row-workspace SELECT and INSERT helpers, active investor and authorised MFD-side relationship checks, Platform Admin and Family Guest denial for broad order access/initiation, forged JWT workspace-claim resistance, no direct UPDATE/DELETE policy, and focused SQL regression coverage [BRD-BR-003, Section 6.A]** (#30)
