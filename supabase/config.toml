@@ -177,16 +177,16 @@ inspector_port = 8083
 verify_jwt = false
 
 [functions.daily-nav-updater]
-verify_jwt = true
+verify_jwt = false
 
 [functions.order-auto-approval-worker]
 verify_jwt = false
 
 [functions.platform-admin-override]
-verify_jwt = true
+verify_jwt = false
 
 [functions.sign-stamp-invoice]
-verify_jwt = true
+verify_jwt = false
 
 # `update-excel-metadata` is intentionally not deployed. The current Flutter
 # application replaced it with client-side processing to avoid Edge Runtime

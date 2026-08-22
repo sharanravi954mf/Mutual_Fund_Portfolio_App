@@ -63,16 +63,28 @@ they must not be linked to or manually deploy to hosted Dev or Production.
 | Function | Deploy to Dev | `verify_jwt` | Application and authorization evidence |
 | :--- | :---: | :---: | :--- |
 | `cams-kfintech-ingestion` | Yes | `false` | Current ingestion architecture and admin workflow. The gateway `Authorization` bearer is `MONEYBOWL_INTERNAL_INGESTION_TOKEN`; the initiating user JWT is independently validated from `x-user-authorization` before active advisor/admin workspace membership is checked. |
-| `daily-nav-updater` | Yes | `true` | Invoked from the current admin dashboard. Shared authorization validates the caller JWT and requires the application profile role `admin`. Uses service-role database access and the external `api.mfapi.in` feed. |
+| `daily-nav-updater` | Yes | `false` | Invoked from the current admin dashboard. Shared authorization validates the caller JWT with Supabase Auth and requires the application profile role `admin`. Uses service-role database access and the external `api.mfapi.in` feed. |
 | `order-auto-approval-worker` | Yes | `false` | Current event-outbox worker. It requires `ORDER_AUTO_APPROVAL_WORKER_TOKEN` and then uses service-role RPCs to claim events and apply or record decisions. |
-| `platform-admin-override` | Yes | `true` | Current Sprint 6.1 audited override endpoint. It validates the caller JWT, executes the attempt RPC as that user, and restricts privileged action/finalization RPCs to the service-role client. |
-| `sign-stamp-invoice` | Yes | `true` | Invoked by the current invoice and fund-search workflows. Proxy requests require an authenticated user; signing/decryption also requires the `is_admin` RPC authorization check. |
-| `update-excel-metadata` | No | N/A | Obsolete deployment artifact. Commit `5aa14f8` replaced its Edge invocation with `lib/utils/excel_updater.dart` client-side processing to avoid serverless resource limits, and current application code has no invocation. If restored, its handler uses `requireAdvisor` and must use `verify_jwt = true`. |
+| `platform-admin-override` | Yes | `false` | Current Sprint 6.1 audited override endpoint. It validates the caller JWT, executes the attempt RPC as that user, and restricts privileged action/finalization RPCs to the service-role client. |
+| `sign-stamp-invoice` | Yes | `false` | Invoked by the current invoice and fund-search workflows. Proxy requests require a JWT validated through Supabase Auth; signing/decryption also requires the `is_admin` RPC authorization check. |
+| `update-excel-metadata` | No | N/A | Obsolete deployment artifact. Commit `5aa14f8` replaced its Edge invocation with `lib/utils/excel_updater.dart` client-side processing to avoid serverless resource limits, and current application code has no invocation. If restored, its handler must retain its `requireAdvisor` application-code authorization. |
+
+All deployed functions intentionally disable the platform-level `verify_jwt`
+check, but they are not unauthenticated or public. Authentication remains
+fail-closed in application code: the ingestion and worker endpoints require
+custom internal bearer tokens, while the three user-facing endpoints validate
+the caller JWT through Supabase Auth and then enforce their application or
+audited database authorization. This avoids coupling deployment to Supabase's
+legacy JWT gateway verification model and remains compatible with a future move
+to publishable and secret API keys.
+
+Migrating `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` consumers to
+`SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` is a separate future
+follow-up. Issue #107 does not change the function clients or key model.
 
 The historical `deploy_ingestion.sh` manual deployment helper is not the
-canonical Dev deployment path. In particular, its JWT override for
-`daily-nav-updater` conflicts with the current authenticated handler and must
-not be used to infer hosted configuration.
+canonical Dev deployment path and must not be used to infer hosted
+configuration; the audited per-function settings above are authoritative.
 
 ### Edge Function environment inventory
 
