@@ -7,6 +7,27 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## Unreleased
+
+### Added
+- **External Ingestion Support Stack (#109)**: Added a provider-host-agnostic
+  FastAPI and ClamAV Docker Compose stack implementing the unchanged mailbox
+  OAuth, attachment fetch, deterministic CAMS/KFintech PDF extraction, and
+  malware scanning contracts expected by `cams-kfintech-ingestion`.
+- **Ingestion Contract and Threat Tests**: Added mocked Gmail provider tests,
+  strict bearer/size/redirect/timeout tests, synthetic registrar PDF fixtures,
+  actual Edge parser compatibility tests, ClamAV `INSTREAM` protocol tests, and
+  clean/EICAR/unavailable behavior coverage.
+
+### Security
+- **Zero-Disk External Processing**: Statement bytes stay in bounded memory,
+  service tokens are capability-specific and constant-time compared, provider
+  origins and Host headers are constrained, ClamAV remains private, and error
+  responses/logging exclude document content and credentials.
+- **Legacy Deployment Helper Retired**: `deploy_ingestion.sh` now exits without
+  deploying or requesting direct IMAP credentials. Hosted Dev continues to
+  deploy from `develop`; no hosted environment is changed by Issue #109.
+
 ## Architecture and Documentation Baselines
 
 ### [v2.1.0 / v1.3.0] — 2026-07-28

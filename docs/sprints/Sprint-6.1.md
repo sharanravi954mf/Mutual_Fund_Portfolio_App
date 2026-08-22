@@ -51,5 +51,6 @@ Sprint 6.1 closed on 6 August 2026. Issues that remained open at sprint closure 
 Carried over issues: #39, #40, #49.
 
 - [x] **chore(dev): align hosted Supabase Dev backend deployment with `develop` by declaring every current Edge Function with its audited per-function JWT policy, preserving migration-managed private ingestion Storage, and documenting custom secret names plus Auth and scheduling gaps; obsolete `update-excel-metadata` remains intentionally undeployed** (#107)
+- [ ] **feat(ingestion): implement the provider-host-agnostic external support-service stack expected by `cams-kfintech-ingestion`, including Gmail OAuth mailbox adapter routes, deterministic CAMS/KFintech PDF extraction, private ClamAV INSTREAM scanning, separate bearer boundaries, Docker Compose, contract/security tests, and local-only validation; hosted Dev/Production deployment remains a post-merge operation** (#109)
 
 - **Issue #95** — security follow-up discovered on 8 August 2026 after Sprint 6.1 closure. The Buy/Sell/Switch order workflow was found to directly access protected folio mapping/reference tables. The issue is tracked for implementation in Sprint 8.1 and is not counted as incomplete original Sprint 6.1 scope. Related: Issue #34 / PR #88, Issue #89 / PR #90, PR #94.

@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+cache_dir = "/tmp/moneybowl-pytest-cache"
+markers = [
+  "integration: requires the Docker Compose stack",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
