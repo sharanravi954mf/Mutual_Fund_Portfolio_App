@@ -82,9 +82,63 @@ Migrating `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` consumers to
 `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` is a separate future
 follow-up. Issue #107 does not change the function clients or key model.
 
-The historical `deploy_ingestion.sh` manual deployment helper is not the
-canonical Dev deployment path and must not be used to infer hosted
-configuration; the audited per-function settings above are authoritative.
+The historical `deploy_ingestion.sh` manual deployment helper is retired and
+now exits without changing anything. It is not the canonical Dev deployment
+path and must not be used to infer hosted configuration; the audited
+per-function settings above are authoritative. Direct IMAP credentials and
+manual function deployment are intentionally unsupported.
+
+### External ingestion support service (Issue #109)
+
+`services/ingestion-support/` implements the external runtime expected by the
+unchanged `cams-kfintech-ingestion` Edge Function as one provider-host-agnostic
+Docker Compose stack:
+
+- `MAILBOX_CONNECTOR_URL` is a base URL. The worker appends authenticated
+  `POST /oauth/refresh`, `POST /poll`, and `POST /attachments/fetch` routes.
+  The initial provider uses Gmail OAuth/Gmail API behind an adapter; it does not
+  accept direct IMAP usernames, passwords, or app passwords. Polling filters for
+  PDF/DBF attachments without guessing sender addresses, follows bounded Gmail
+  pagination (default 4 pages/100 inspected candidates), rejects malformed or
+  repeated page tokens, and page-fairly returns at most 25 messages. The Edge
+  worker continues to enforce the canonical sender allowlist.
+- `PDF_TEXT_EXTRACTOR_URL` is the full authenticated
+  `POST /pdf/extract` URL. It provides bounded, zero-disk PDF extraction
+  infrastructure plus a deterministic synthetic/characterization contract,
+  without OCR or an external AI/document service. No sanitized representative
+  CAMS/KFintech CAS statement PDF exists in the repository, so no live registrar
+  PDF layout is enabled. DBF parsing remains in the existing Edge parser. Issue
+  #111 tracks sanitized live-layout characterization and support.
+- `MALWARE_SCANNER_URL` is the full authenticated
+  `POST /malware/scan` URL. It verifies `X-Content-SHA256` and streams the same
+  raw bytes to a private ClamAV daemon using `INSTREAM`; clean, infected, and
+  unavailable results remain distinct.
+
+The three capabilities require separate service bearer tokens and do not log
+tokens, attachment content, investor data, or provider responses. Health and
+readiness return status only, and readiness fails when ClamAV/signatures are
+unavailable. The API is bound to localhost in the local Compose configuration;
+hosted Dev requires an HTTPS ingress, an explicit host allowlist, and secrets
+stored outside Git.
+
+The unchanged Edge poll request supplies its OAuth access token, whereas the
+attachment-fetch request supplies only provider identities. The initial stack
+therefore uses a bounded five-minute, process-local token bridge scoped to the
+connector reference, globally unique mailbox connection ID, and registrar. It
+runs one API worker/replica. Horizontal scaling requires a future reviewed Edge
+contract change; OAuth tokens must not be placed in URLs or persisted by this
+service. Process restart, TTL expiry, LRU eviction, or cache miss fails closed
+with `mailbox_oauth_context_required` and requires another poll. Concurrent
+mailboxes and different registrar values have isolated cache entries. Issue
+#112 tracks removal of the process-local dependency.
+
+Issue #109 performs local implementation and validation only. It does not
+deploy the stack, configure hosted Dev/Production values, link Supabase, change
+database migrations, or copy real mailbox/document data. Gmail authorization,
+HTTPS host provisioning, Dev-only Edge secret configuration, and a synthetic
+hosted smoke test remain post-merge operational steps. See
+`services/ingestion-support/README.md` and `THREAT_REVIEW.md` for the exact
+runtime, tests, limitations, and minimum 4 GB host guidance.
 
 ### Edge Function environment inventory
 

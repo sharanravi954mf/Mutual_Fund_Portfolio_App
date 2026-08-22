@@ -1,0 +1,84 @@
+name: moneybowl-ingestion-support
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    environment:
+      MAILBOX_CONNECTOR_SERVICE_TOKEN: ${MAILBOX_CONNECTOR_SERVICE_TOKEN:?set in an ignored .env}
+      PDF_TEXT_EXTRACTOR_SERVICE_TOKEN: ${PDF_TEXT_EXTRACTOR_SERVICE_TOKEN:?set in an ignored .env}
+      MALWARE_SCANNER_SERVICE_TOKEN: ${MALWARE_SCANNER_SERVICE_TOKEN:?set in an ignored .env}
+      GMAIL_OAUTH_CLIENT_ID: ${GMAIL_OAUTH_CLIENT_ID:?set in an ignored .env}
+      GMAIL_OAUTH_CLIENT_SECRET: ${GMAIL_OAUTH_CLIENT_SECRET:?set in an ignored .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,ingestion-support}
+      GMAIL_OAUTH_TOKEN_URL: ${GMAIL_OAUTH_TOKEN_URL:-https://oauth2.googleapis.com/token}
+      GMAIL_API_BASE_URL: ${GMAIL_API_BASE_URL:-https://gmail.googleapis.com/gmail/v1}
+      PROVIDER_TIMEOUT_SECONDS: ${PROVIDER_TIMEOUT_SECONDS:-5}
+      REQUEST_BODY_TIMEOUT_SECONDS: ${REQUEST_BODY_TIMEOUT_SECONDS:-10}
+      PDF_TIMEOUT_SECONDS: ${PDF_TIMEOUT_SECONDS:-10}
+      MAX_JSON_BODY_BYTES: ${MAX_JSON_BODY_BYTES:-65536}
+      MAX_PROVIDER_RESPONSE_BYTES: ${MAX_PROVIDER_RESPONSE_BYTES:-1048576}
+      MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-20971519}
+      MAX_PDF_BYTES: ${MAX_PDF_BYTES:-20971519}
+      MAX_PDF_RESPONSE_BYTES: ${MAX_PDF_RESPONSE_BYTES:-1048576}
+      MAX_PDF_ROWS: ${MAX_PDF_ROWS:-5000}
+      MAX_MAILBOX_MESSAGES: ${MAX_MAILBOX_MESSAGES:-25}
+      MAX_MAILBOX_PAGES_PER_POLL: ${MAX_MAILBOX_PAGES_PER_POLL:-4}
+      MAX_MAILBOX_CANDIDATES_PER_POLL: ${MAX_MAILBOX_CANDIDATES_PER_POLL:-100}
+      MAX_ATTACHMENTS_PER_MESSAGE: ${MAX_ATTACHMENTS_PER_MESSAGE:-5}
+      MAILBOX_TOKEN_CACHE_TTL_SECONDS: ${MAILBOX_TOKEN_CACHE_TTL_SECONDS:-300}
+      MAILBOX_TOKEN_CACHE_MAX_ENTRIES: ${MAILBOX_TOKEN_CACHE_MAX_ENTRIES:-256}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT_SECONDS: ${CLAMAV_TIMEOUT_SECONDS:-5}
+    ports:
+      - "127.0.0.1:${INGESTION_SUPPORT_PORT:-8080}:8080"
+    depends_on:
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=3).read()"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    cap_drop:
+      - ALL
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    networks:
+      - ingestion_internal
+
+  clamav:
+    image: clamav/clamav:1.5.4@sha256:15167977085b01d083812d42aa70d390c2e3fcaaf647dfe82a47328fa6d48c9c
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    volumes:
+      - clamav_db:/var/lib/clamav
+    networks:
+      - ingestion_internal
+
+networks:
+  ingestion_internal:
+    driver: bridge
+
+volumes:
+  clamav_db:
