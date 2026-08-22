@@ -13,7 +13,7 @@ Target Repository Path: docs/PROJECT_STATE.md
 - **Application Implementation**: In Progress
 - **Current Release Target**: v1.2.0-alpha
 - **Current released application version**: v1.1.0-alpha
-- **Last Updated**: 2026-07-28
+- **Last Updated**: 2026-08-22
 
 ---
 
@@ -49,3 +49,132 @@ All other Markdown files are stale and must not be used for project status or ar
 - **`feature/*`**: Standalone feature branches (e.g. `feature/analytics`). Merged to `develop` via PRs after CI verification.
 - **`bugfix/*`**: Non-critical bug remediation.
 - **`hotfix/*`**: Emergency production fixes. Direct merges to `main` and `develop` after architect approvals.
+
+---
+
+## Hosted Supabase Dev Backend Contract (Issue #107)
+
+The hosted Supabase Dev project is deployed from `develop` through the
+GitHub integration. Feature branches validate against local Supabase only;
+they must not be linked to or manually deploy to hosted Dev or Production.
+
+### Edge Function deployment and authorization
+
+| Function | Deploy to Dev | `verify_jwt` | Application and authorization evidence |
+| :--- | :---: | :---: | :--- |
+| `cams-kfintech-ingestion` | Yes | `false` | Current ingestion architecture and admin workflow. The gateway `Authorization` bearer is `MONEYBOWL_INTERNAL_INGESTION_TOKEN`; the initiating user JWT is independently validated from `x-user-authorization` before active advisor/admin workspace membership is checked. |
+| `daily-nav-updater` | Yes | `false` | Invoked from the current admin dashboard. Shared authorization validates the caller JWT with Supabase Auth and requires the application profile role `admin`. Uses service-role database access and the external `api.mfapi.in` feed. |
+| `order-auto-approval-worker` | Yes | `false` | Current event-outbox worker. It requires `ORDER_AUTO_APPROVAL_WORKER_TOKEN` and then uses service-role RPCs to claim events and apply or record decisions. |
+| `platform-admin-override` | Yes | `false` | Current Sprint 6.1 audited override endpoint. It validates the caller JWT, executes the attempt RPC as that user, and restricts privileged action/finalization RPCs to the service-role client. |
+| `sign-stamp-invoice` | Yes | `false` | Invoked by the current invoice and fund-search workflows. Proxy requests require a JWT validated through Supabase Auth; signing/decryption also requires the `is_admin` RPC authorization check. |
+| `update-excel-metadata` | No | N/A | Obsolete deployment artifact. Commit `5aa14f8` replaced its Edge invocation with `lib/utils/excel_updater.dart` client-side processing to avoid serverless resource limits, and current application code has no invocation. If restored, its handler must retain its `requireAdvisor` application-code authorization. |
+
+All deployed functions intentionally disable the platform-level `verify_jwt`
+check, but they are not unauthenticated or public. Authentication remains
+fail-closed in application code: the ingestion and worker endpoints require
+custom internal bearer tokens, while the three user-facing endpoints validate
+the caller JWT through Supabase Auth and then enforce their application or
+audited database authorization. This avoids coupling deployment to Supabase's
+legacy JWT gateway verification model and remains compatible with a future move
+to publishable and secret API keys.
+
+Migrating `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` consumers to
+`SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` is a separate future
+follow-up. Issue #107 does not change the function clients or key model.
+
+The historical `deploy_ingestion.sh` manual deployment helper is not the
+canonical Dev deployment path and must not be used to infer hosted
+configuration; the audited per-function settings above are authoritative.
+
+### Edge Function environment inventory
+
+Supabase supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and
+`SUPABASE_SERVICE_ROLE_KEY` to hosted Edge Functions. They are platform values,
+not custom application secrets, and the service-role key must never be exposed
+to a client.
+
+`cams-kfintech-ingestion` custom values:
+
+- Required: `MONEYBOWL_INTERNAL_INGESTION_TOKEN`,
+  `MAILBOX_OAUTH_AES256_GCM_KEY_B64`, `MAILBOX_CONNECTOR_URL`,
+  `MAILBOX_CONNECTOR_SERVICE_TOKEN`, `PDF_TEXT_EXTRACTOR_URL`,
+  `PDF_TEXT_EXTRACTOR_SERVICE_TOKEN`, `MALWARE_SCANNER_URL`, and
+  `MALWARE_SCANNER_SERVICE_TOKEN`.
+- Optional/defaulted: `MAILBOX_CONNECTOR_TIMEOUT_MS`,
+  `MAILBOX_CONNECTOR_MAX_RESPONSE_BYTES`,
+  `MAILBOX_ATTACHMENT_DOWNLOAD_TIMEOUT_MS`, `PDF_TEXT_EXTRACTOR_TIMEOUT_MS`,
+  `PDF_TEXT_EXTRACTOR_MAX_RESPONSE_BYTES`, `MALWARE_SCANNER_TIMEOUT_MS`, and
+  `MALWARE_SCANNER_MAX_RESPONSE_BYTES`.
+- Optional, defaulting to secure behavior: `ALLOW_INSECURE_CONNECTOR_URL`,
+  `ALLOW_INSECURE_PDF_TEXT_EXTRACTOR_URL`, and
+  `ALLOW_INSECURE_MALWARE_SCANNER_URL`. These must remain unset or `false` in
+  hosted Dev; `true` is accepted only for explicit localhost testing.
+
+`order-auto-approval-worker` custom values:
+
+- Required: `ORDER_AUTO_APPROVAL_WORKER_TOKEN`.
+- Optional/defaulted: `ORDER_AUTO_APPROVAL_MAX_ATTEMPTS` and
+  `ORDER_AUTO_APPROVAL_LEASE_SECONDS`.
+
+`sign-stamp-invoice` custom values:
+
+- Operationally required for a secure Dev deployment, but defaulted by the
+  implementation: `RTA_DECRYPTION_PASSWORD`. When it is absent, the current
+  handler uses an insecure hard-coded fallback; this issue records but does not
+  redesign that unrelated behavior.
+
+`daily-nav-updater` and `platform-admin-override` use no custom environment
+variables beyond Supabase-provided project values. The intentionally omitted
+`update-excel-metadata` function also declares no custom environment variable,
+but contains a separate hard-coded archive-password fallback that remains
+outside Issue #107.
+
+Only secret names belong in source control. Dev values must be configured in
+the hosted project's Edge Function secret store after review; Production values
+must not be copied.
+
+### Storage provisioning
+
+`ingested-documents` remains migration-managed by
+`20260802000001_issue_32_cams_kfintech_ingestion.sql`. That migration
+idempotently enforces a private bucket, a 20 MiB-minus-one-byte object limit,
+and the approved PDF/DBF MIME allowlist. The Issue #32 database tests also
+assert the private bucket contract and absence of browser-facing object
+policies. Declaring the same bucket in `config.toml` would create a competing
+provisioning path, so Issue #107 intentionally leaves Storage configuration
+unchanged. No hosted documents or Production data are copied.
+
+### Hosted Dev Auth configuration
+
+The repository `config.toml` captures local Auth defaults only. The GitHub
+integration deploys migrations, declared Edge Functions, and declared Storage
+buckets; hosted API and Auth settings are not applied by default. Before Dev
+application testing, separately review and configure:
+
+- the Dev site URL and exact redirect allowlist;
+- email/password signup, confirmation, recovery, template, rate-limit, and SMTP
+  behavior;
+- phone/password signup and an SMS provider if phone authentication is enabled;
+- OAuth providers and callback URLs (none are enabled by current repository
+  configuration or used by current application code);
+- CAPTCHA/bot protection (not declared in the repository); and
+- JWT/session policy consistency with the application.
+
+The current Flutter client signs in with a password using either email or phone.
+No hosted Auth credential belongs in Git.
+
+### Scheduling and background triggers
+
+- No migration enables `pg_cron`, and the only `cron.schedule`/`net.http_post`
+  example is commented out in the historical ingestion migration.
+- No GitHub Actions workflow has a `schedule` trigger, and no database webhook
+  or active Edge Function scheduler is defined.
+- `daily-nav-updater` is currently invoked manually from the admin dashboard;
+  automated daily scheduling remains unimplemented.
+- `cams-kfintech-ingestion` has a manual admin-dashboard invocation, but that
+  call does not supply the hardened internal-token, user-token, workspace,
+  mailbox, registrar, and correlation contract. It is not a functional
+  production scheduler and remains a follow-up outside this parity change.
+- Order creation writes `order.created` rows to `event_outbox`, but no repository
+  dispatcher currently invokes `order-auto-approval-worker`; the worker polls
+  and claims an event only when invoked.
