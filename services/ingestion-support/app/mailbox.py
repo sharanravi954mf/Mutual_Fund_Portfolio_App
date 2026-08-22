@@ -22,6 +22,7 @@ from .errors import ServiceError
 Registrar = Literal["CAMS", "KFINTECH"]
 CONNECTOR_REF_RE = re.compile(r"^gmail:(me|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)$")
 PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
+GMAIL_ATTACHMENT_QUERY = "has:attachment {filename:pdf filename:dbf}"
 
 
 class StrictModel(BaseModel):
@@ -225,31 +226,96 @@ class GmailProvider:
     async def poll(self, request: PollRequest, access_token: str) -> list[Message]:
         user_id = quote(self._user_id(request.connector_ref), safe="")
         auth = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
-        listing = await self._json_request(
-            "GET",
-            f"{self.settings.gmail_api_base_url}/users/{user_id}/messages",
-            headers=auth,
-            params={"maxResults": self.settings.max_mailbox_messages, "q": "has:attachment"},
-        )
-        raw_messages = listing.get("messages", [])
-        if not isinstance(raw_messages, list) or len(raw_messages) > self.settings.max_mailbox_messages:
-            raise ServiceError(502, "provider_response_invalid")
+        message_pages: list[list[Message]] = []
+        seen_message_ids: set[str] = set()
+        seen_page_tokens: set[str] = set()
+        page_token: str | None = None
+        candidate_count = 0
 
-        messages: list[Message] = []
-        for listed in raw_messages:
-            if not isinstance(listed, dict) or not isinstance(listed.get("id"), str):
-                raise ServiceError(502, "provider_response_invalid")
-            message_id = listed["id"]
-            if PROVIDER_ID_RE.fullmatch(message_id) is None:
-                raise ServiceError(502, "provider_response_invalid")
-            raw = await self._json_request(
-                "GET",
-                f"{self.settings.gmail_api_base_url}/users/{user_id}/messages/{quote(message_id, safe='')}",
-                headers=auth,
-                params={"format": "full"},
+        for _page_number in range(self.settings.max_mailbox_pages_per_poll):
+            remaining_candidates = (
+                self.settings.max_mailbox_candidates_per_poll - candidate_count
             )
-            messages.append(self._message_from_gmail(raw))
-        return messages
+            if remaining_candidates <= 0:
+                break
+            page_size = min(self.settings.max_mailbox_messages, remaining_candidates)
+            params: dict[str, str | int] = {
+                "maxResults": page_size,
+                "q": GMAIL_ATTACHMENT_QUERY,
+            }
+            if page_token is not None:
+                params["pageToken"] = page_token
+
+            listing = await self._json_request(
+                "GET",
+                f"{self.settings.gmail_api_base_url}/users/{user_id}/messages",
+                headers=auth,
+                params=params,
+            )
+            raw_messages = listing.get("messages", [])
+            if not isinstance(raw_messages, list) or len(raw_messages) > page_size:
+                raise ServiceError(502, "provider_response_invalid")
+
+            page_messages: list[Message] = []
+            for listed in raw_messages:
+                if not isinstance(listed, dict) or not isinstance(listed.get("id"), str):
+                    raise ServiceError(502, "provider_response_invalid")
+                message_id = listed["id"]
+                if (
+                    PROVIDER_ID_RE.fullmatch(message_id) is None
+                    or message_id in seen_message_ids
+                ):
+                    raise ServiceError(502, "provider_response_invalid")
+                seen_message_ids.add(message_id)
+                candidate_count += 1
+                raw = await self._json_request(
+                    "GET",
+                    f"{self.settings.gmail_api_base_url}/users/{user_id}/messages/"
+                    f"{quote(message_id, safe='')}",
+                    headers=auth,
+                    params={"format": "full"},
+                )
+                message = self._message_from_gmail(raw)
+                if message.attachments:
+                    page_messages.append(message)
+            message_pages.append(page_messages)
+
+            next_page_token = listing.get("nextPageToken")
+            if next_page_token is None:
+                break
+            if not self._valid_page_token(next_page_token) or next_page_token in seen_page_tokens:
+                raise ServiceError(502, "provider_response_invalid")
+            seen_page_tokens.add(next_page_token)
+            page_token = next_page_token
+
+        return self._page_fair_messages(message_pages)
+
+    @staticmethod
+    def _valid_page_token(value: Any) -> bool:
+        return (
+            isinstance(value, str)
+            and 1 <= len(value) <= 2048
+            and value.isascii()
+            and all(33 <= ord(character) <= 126 for character in value)
+        )
+
+    def _page_fair_messages(self, pages: list[list[Message]]) -> list[Message]:
+        """Bound the response while ensuring each inspected Gmail page gets a turn."""
+
+        selected: list[Message] = []
+        offset = 0
+        while len(selected) < self.settings.max_mailbox_messages:
+            added = False
+            for page in pages:
+                if offset < len(page):
+                    selected.append(page[offset])
+                    added = True
+                    if len(selected) == self.settings.max_mailbox_messages:
+                        break
+            if not added:
+                break
+            offset += 1
+        return selected
 
     def _message_from_gmail(self, raw: dict[str, Any]) -> Message:
         message_id = raw.get("id")

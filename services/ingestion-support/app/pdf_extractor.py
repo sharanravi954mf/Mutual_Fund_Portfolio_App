@@ -60,10 +60,11 @@ LAYOUTS: dict[Registrar, Layout] = {
 
 
 class RegistrarPdfExtractor:
-    """Deterministic parser for the explicitly supported registrar text layouts.
+    """Deterministic parser for synthetic registrar characterization layouts.
 
-    This deliberately does not guess fields or use OCR. Unsupported or malformed
-    layouts fail closed so a changed registrar statement cannot be mis-normalized.
+    This contract proves the Edge/service boundary; it is not evidence of live
+    registrar statement support. It deliberately does not guess fields or use OCR.
+    Unsupported or malformed layouts fail closed.
     """
 
     def __init__(self, max_rows: int, max_response_bytes: int, max_pages: int = 100) -> None:

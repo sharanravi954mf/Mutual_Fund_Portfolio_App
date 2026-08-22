@@ -12,11 +12,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ### Added
 - **External Ingestion Support Stack (#109)**: Added a provider-host-agnostic
   FastAPI and ClamAV Docker Compose stack implementing the unchanged mailbox
-  OAuth, attachment fetch, deterministic CAMS/KFintech PDF extraction, and
-  malware scanning contracts expected by `cams-kfintech-ingestion`.
+  OAuth, attachment fetch, PDF extraction infrastructure with deterministic
+  synthetic characterization layouts, and malware scanning contracts expected
+  by `cams-kfintech-ingestion`. Live registrar PDF layouts are not yet enabled.
 - **Ingestion Contract and Threat Tests**: Added mocked Gmail provider tests,
-  strict bearer/size/redirect/timeout tests, synthetic registrar PDF fixtures,
-  actual Edge parser compatibility tests, ClamAV `INSTREAM` protocol tests, and
+  bounded pagination/backlog and OAuth-cache failure tests, strict
+  bearer/size/redirect/timeout tests, synthetic registrar PDF fixtures, actual
+  Edge parser compatibility tests, ClamAV `INSTREAM` protocol tests, and
   clean/EICAR/unavailable behavior coverage.
 
 ### Security

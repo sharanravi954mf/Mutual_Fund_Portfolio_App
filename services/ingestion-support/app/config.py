@@ -94,6 +94,18 @@ class Settings(BaseSettings):
     max_mailbox_messages: int = Field(
         default=25, ge=1, le=100, validation_alias="MAX_MAILBOX_MESSAGES"
     )
+    max_mailbox_pages_per_poll: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        validation_alias="MAX_MAILBOX_PAGES_PER_POLL",
+    )
+    max_mailbox_candidates_per_poll: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        validation_alias="MAX_MAILBOX_CANDIDATES_PER_POLL",
+    )
     max_attachments_per_message: int = Field(
         default=5, ge=1, le=20, validation_alias="MAX_ATTACHMENTS_PER_MESSAGE"
     )

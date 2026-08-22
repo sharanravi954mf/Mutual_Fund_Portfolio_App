@@ -7,7 +7,8 @@ separate capabilities from one small deployment:
 
 - Gmail OAuth mailbox connector (`/oauth/refresh`, `/poll`, and
   `/attachments/fetch`);
-- deterministic in-memory CAMS/KFintech PDF text extraction (`/pdf/extract`);
+- PDF extraction infrastructure plus a deterministic synthetic/characterization
+  contract (`/pdf/extract`);
 - in-memory ClamAV `INSTREAM` scanning (`/malware/scan`).
 
 Python/FastAPI is used because its mature PDF and streaming HTTP libraries keep
@@ -99,20 +100,37 @@ No `IMAP_USER`, `IMAP_PASSWORD`, Google app password, Supabase service-role key,
 or `RTA_DECRYPTION_PASSWORD` belongs in this service. The first authorization
 grant is a manual administrative step; automated tests use mocks only.
 
+Mailbox polling uses the Gmail query
+`has:attachment {filename:pdf filename:dbf}` to reduce unrelated attachment
+traffic without guessing registrar sender addresses. Each poll inspects at most
+`MAX_MAILBOX_PAGES_PER_POLL` pages (default `4`) and
+`MAX_MAILBOX_CANDIDATES_PER_POLL` message candidates (default `100`). Gmail
+page tokens must be non-empty, bounded printable ASCII and must not repeat.
+Messages with actual attachments are selected page-fairly across the inspected
+pages, up to the existing `MAX_MAILBOX_MESSAGES` output limit (default `25`).
+The Edge worker remains the authority for the configured sender allowlist.
+
 ## PDF layouts and limitations
 
-PDF extraction is deterministic and performs no OCR or heuristic field
-guessing. The initial supported synthetic/normalized layouts start with
+This PR establishes PDF extraction infrastructure and a deterministic
+synthetic/characterization contract. It performs no OCR or heuristic field
+guessing. The only enabled layouts are generated synthetic/normalized fixtures
+that start with
 `MONEYBOWL_CAMS_CAS_V1` or `MONEYBOWL_KFINTECH_CAS_V1`, followed by a
 pipe-delimited header and rows whose field names are aliases already accepted
 by the Edge parser. Encrypted, malformed, excessive-page, excessive-row,
 unknown-layout, and oversized PDFs fail closed.
 
-This implementation proves the end-to-end contract but is not a claim that
-every live registrar PDF layout is supported. Sanitized characterization
-fixtures for each approved live layout must be added before that layout is
-enabled in hosted Dev. Password-protected statements, OCR/image-only pages,
-and layout drift remain explicit failures.
+No sanitized representative CAMS/KFintech CAS statement PDF fixture exists in
+the repository. The existing CAMS PDF under `test/fixtures/cams/` is an Invoice
+Signer fixture, not a registrar statement parser fixture. Therefore this
+service does not claim support for arbitrary or live registrar PDF layouts.
+Each actual layout and version requires sanitized, non-production
+characterization material plus deterministic parser tests before enablement.
+DBF parsing remains implemented in the existing Edge parser.
+Password-protected/encrypted statements, image-only/OCR documents, and layout
+drift remain explicit failures. Follow-up Issue #111 tracks real layout
+characterization and support.
 
 The unchanged Edge contract sends the OAuth access token on `/poll` but not on
 `/attachments/fetch`. To preserve that contract, the API keeps a bounded,
@@ -120,7 +138,14 @@ five-minute, process-local token cache scoped to connector reference, globally
 unique mailbox connection ID, and registrar. The Compose API therefore runs
 one worker and should remain a single replica. Horizontal scaling requires a
 future Edge contract change that securely supplies a per-fetch OAuth context;
-tokens must not be placed in URLs or a shared persistent cache.
+tokens must not be placed in URLs or a shared persistent cache. Follow-up Issue
+#112 tracks that contract correction.
+
+A process restart, TTL expiry, LRU eviction, or any other cache miss between
+poll and fetch fails closed with `mailbox_oauth_context_required`; the Edge
+worker must poll again before fetching. Concurrent mailbox connections use
+independent cache keys. The same mailbox connection with different registrar
+values also uses independent entries. Cache state is never persisted or shared.
 
 ## Tests
 
@@ -141,9 +166,11 @@ deno test --allow-env --allow-net=127.0.0.1:8080 \
   tests/edge_contract_test.ts
 ```
 
-The Python suite covers mailbox refresh/poll/fetch schemas, identity-scoped
-OAuth caching, redirects, provider failures, timeouts, malformed/oversized
-responses, both PDF layouts, malformed/oversized PDFs, bearer boundaries,
+The Python suite covers mailbox refresh/poll/fetch schemas, bounded Gmail
+pagination and page-fair backlog selection, identity-scoped OAuth cache
+restart/expiry/eviction behavior, redirects, provider failures, timeouts,
+malformed/oversized responses, both synthetic PDF layouts,
+malformed/oversized PDFs, bearer boundaries,
 digest mismatches, ClamAV protocol behavior, clean/infected/unavailable states,
 Host-header validation, and non-sensitive readiness. The live Deno test uses
 the actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and

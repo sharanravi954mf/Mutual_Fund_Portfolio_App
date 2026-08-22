@@ -6,10 +6,35 @@ import logging
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from app.errors import ServiceError
-from app.mailbox import FetchRequest, GmailProvider, PollRequest, RefreshRequest
-from conftest import FakeMailboxProvider, mailbox_headers, poll_body
+from app.mailbox import (
+    AccessTokenCache,
+    FetchRequest,
+    GmailProvider,
+    PollRequest,
+    RefreshRequest,
+)
+from app.main import create_app
+from conftest import FakeMailboxProvider, FakeMalwareScanner, mailbox_headers, poll_body
+
+
+def gmail_message(message_id: str, sender: str = "statements@example.test") -> dict[str, object]:
+    return {
+        "id": message_id,
+        "internalDate": "1787392800000",
+        "payload": {
+            "headers": [{"name": "From", "value": f"Statements <{sender}>"}],
+            "parts": [
+                {
+                    "filename": f"synthetic-{message_id}.pdf",
+                    "mimeType": "application/pdf",
+                    "body": {"attachmentId": f"attachment-{message_id}"},
+                }
+            ],
+        },
+    }
 
 
 def test_refresh_poll_and_fetch_match_edge_contract(client, settings, fake_mailbox) -> None:
@@ -182,25 +207,12 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "gmail-access", "expires_in": 3600})
         if path.endswith("/messages"):
+            assert request.url.params["q"] == "has:attachment {filename:pdf filename:dbf}"
             return httpx.Response(200, json={"messages": [{"id": "gmailMessage1"}]})
         if path.endswith("/messages/gmailMessage1"):
-            return httpx.Response(
-                200,
-                json={
-                    "id": "gmailMessage1",
-                    "internalDate": "1787392800000",
-                    "payload": {
-                        "headers": [{"name": "From", "value": "Statements <statements@example.test>"}],
-                        "parts": [
-                            {
-                                "filename": "synthetic.pdf",
-                                "mimeType": "application/pdf",
-                                "body": {"attachmentId": "gmailAttachment1"},
-                            }
-                        ],
-                    },
-                },
-            )
+            payload = gmail_message("gmailMessage1")
+            payload["payload"]["parts"][0]["body"]["attachmentId"] = "gmailAttachment1"
+            return httpx.Response(200, json=payload)
         if path.endswith("/attachments/gmailAttachment1"):
             return httpx.Response(200, json={"data": "Ynl0ZXM", "size": 5})
         return httpx.Response(404)
@@ -238,6 +250,225 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
     await provider.close()
 
 
+@pytest.mark.asyncio
+async def test_gmail_poll_page_fairly_includes_target_after_full_first_page(settings) -> None:
+    limited = settings.model_copy(
+        update={
+            "max_mailbox_messages": 2,
+            "max_mailbox_pages_per_poll": 2,
+            "max_mailbox_candidates_per_poll": 4,
+        }
+    )
+    listing_tokens: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            page_token = request.url.params.get("pageToken")
+            listing_tokens.append(page_token)
+            assert request.url.params["q"] == "has:attachment {filename:pdf filename:dbf}"
+            if page_token is None:
+                return httpx.Response(
+                    200,
+                    json={
+                        "messages": [{"id": "newer1"}, {"id": "newer2"}],
+                        "nextPageToken": "page-2",
+                    },
+                )
+            assert page_token == "page-2"
+            return httpx.Response(
+                200,
+                json={"messages": [{"id": "camsTarget"}, {"id": "older2"}]},
+            )
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=gmail_message(message_id))
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+        ),
+        "pagination-oauth-token",
+    )
+    await provider.close()
+
+    assert listing_tokens == [None, "page-2"]
+    assert [message.message_id for message in messages] == ["newer1", "camsTarget"]
+
+
+@pytest.mark.asyncio
+async def test_gmail_poll_stops_at_maximum_page_bound(settings) -> None:
+    limited = settings.model_copy(
+        update={
+            "max_mailbox_messages": 4,
+            "max_mailbox_pages_per_poll": 2,
+            "max_mailbox_candidates_per_poll": 20,
+        }
+    )
+    list_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal list_calls
+        if request.url.path.endswith("/messages"):
+            list_calls += 1
+            return httpx.Response(
+                200,
+                json={
+                    "messages": [{"id": f"page{list_calls}Message"}],
+                    "nextPageToken": f"page-{list_calls + 1}",
+                },
+            )
+        return httpx.Response(200, json=gmail_message(request.url.path.rsplit("/", 1)[-1]))
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+        ),
+        "bounded-oauth-token",
+    )
+    await provider.close()
+
+    assert list_calls == 2
+    assert [message.message_id for message in messages] == ["page1Message", "page2Message"]
+
+
+@pytest.mark.asyncio
+async def test_gmail_poll_stops_at_candidate_bound(settings) -> None:
+    limited = settings.model_copy(
+        update={
+            "max_mailbox_messages": 2,
+            "max_mailbox_pages_per_poll": 4,
+            "max_mailbox_candidates_per_poll": 3,
+        }
+    )
+    list_max_results: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            list_max_results.append(int(request.url.params["maxResults"]))
+            if len(list_max_results) == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "messages": [{"id": "candidate1"}, {"id": "candidate2"}],
+                        "nextPageToken": "candidate-page-2",
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "messages": [{"id": "candidate3"}],
+                    "nextPageToken": "candidate-page-3",
+                },
+            )
+        return httpx.Response(200, json=gmail_message(request.url.path.rsplit("/", 1)[-1]))
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+        ),
+        "candidate-oauth-token",
+    )
+    await provider.close()
+
+    assert list_max_results == [2, 1]
+    assert [message.message_id for message in messages] == ["candidate1", "candidate3"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_token", [123, "", "bad page token"])
+async def test_gmail_poll_rejects_malformed_next_page_token(settings, bad_token) -> None:
+    provider = GmailProvider(
+        settings,
+        httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"messages": [], "nextPageToken": bad_token},
+            )
+        ),
+    )
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "malformed-page-token-oauth",
+        )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_gmail_poll_rejects_repeated_page_token_without_looping(settings) -> None:
+    list_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal list_calls
+        list_calls += 1
+        return httpx.Response(200, json={"messages": [], "nextPageToken": "repeated"})
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "repeated-page-token-oauth",
+        )
+    await provider.close()
+    assert list_calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("later_failure", "expected_code"),
+    [("timeout", "provider_unavailable"), ("error", "provider_request_failed")],
+)
+async def test_gmail_poll_later_page_failure_is_closed_and_tokens_are_not_logged(
+    settings, caplog, later_failure: str, expected_code: str
+) -> None:
+    caplog.set_level(logging.INFO, logger="moneybowl.ingestion_support")
+    oauth_token = "later-page-oauth-token-that-must-not-be-logged"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            if request.url.params.get("pageToken") is None:
+                return httpx.Response(
+                    200,
+                    json={
+                        "messages": [{"id": "firstPageMessage"}],
+                        "nextPageToken": "later-page",
+                    },
+                )
+            if later_failure == "timeout":
+                raise httpx.ReadTimeout("synthetic timeout", request=request)
+            return httpx.Response(503)
+        return httpx.Response(200, json=gmail_message("firstPageMessage"))
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match=expected_code):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            oauth_token,
+        )
+    await provider.close()
+    assert oauth_token not in caplog.text
+
+
 def test_attachment_fetch_response_is_bounded(client, settings, fake_mailbox) -> None:
     fake_mailbox.attachment_content = b"x" * (settings.max_attachment_bytes + 1)
     headers = mailbox_headers(settings)
@@ -270,3 +501,73 @@ def test_mailbox_provider_tokens_are_not_logged(client, settings, caplog) -> Non
     )
     assert secret_oauth not in caplog.text
     assert settings.mailbox_connector_service_token not in caplog.text
+
+
+def test_process_restart_between_poll_and_fetch_requires_new_oauth_context(settings) -> None:
+    first_app = create_app(settings, FakeMailboxProvider(), FakeMalwareScanner())
+    with TestClient(first_app) as first_client:
+        response = first_client.post(
+            "/poll",
+            headers={
+                **mailbox_headers(settings),
+                "X-Mailbox-OAuth-Token": "restart-fixture-oauth-token",
+            },
+            json=poll_body(),
+        )
+        assert response.status_code == 200
+
+    restarted_app = create_app(settings, FakeMailboxProvider(), FakeMalwareScanner())
+    with TestClient(restarted_app) as restarted_client:
+        response = restarted_client.post(
+            "/attachments/fetch",
+            headers=mailbox_headers(settings),
+            json={
+                **poll_body(),
+                "message_id": "gmail-message-1",
+                "attachment_id": "gmail-attachment-1",
+            },
+        )
+    assert response.status_code == 409
+    assert response.json() == {"error": {"code": "mailbox_oauth_context_required"}}
+
+
+@pytest.mark.asyncio
+async def test_oauth_cache_expiry_and_lru_eviction_fail_closed(monkeypatch) -> None:
+    now = 100.0
+    monkeypatch.setattr("app.mailbox.time.monotonic", lambda: now)
+    cache = AccessTokenCache(ttl_seconds=5, max_entries=2)
+    first = ("gmail:me", "mailbox-1", "CAMS")
+    second = ("gmail:me", "mailbox-2", "CAMS")
+    third = ("gmail:me", "mailbox-3", "CAMS")
+
+    await cache.put(first, "oauth-first")
+    await cache.put(second, "oauth-second")
+    assert await cache.get(first) == "oauth-first"
+    await cache.put(third, "oauth-third")
+    with pytest.raises(ServiceError, match="mailbox_oauth_context_required"):
+        await cache.get(second)
+
+    now = 106.0
+    for key in (first, third):
+        with pytest.raises(ServiceError, match="mailbox_oauth_context_required"):
+            await cache.get(key)
+
+
+@pytest.mark.asyncio
+async def test_oauth_cache_isolates_concurrent_mailboxes_and_registrars() -> None:
+    cache = AccessTokenCache(ttl_seconds=300, max_entries=8)
+    cams_mailbox = ("gmail:me", "mailbox-shared", "CAMS")
+    kfintech_mailbox = ("gmail:me", "mailbox-shared", "KFINTECH")
+    other_mailbox = ("gmail:me", "mailbox-other", "CAMS")
+
+    await asyncio.gather(
+        cache.put(cams_mailbox, "cams-oauth"),
+        cache.put(kfintech_mailbox, "kfintech-oauth"),
+        cache.put(other_mailbox, "other-oauth"),
+    )
+    tokens = await asyncio.gather(
+        cache.get(cams_mailbox),
+        cache.get(kfintech_mailbox),
+        cache.get(other_mailbox),
+    )
+    assert tokens == ["cams-oauth", "kfintech-oauth", "other-oauth"]

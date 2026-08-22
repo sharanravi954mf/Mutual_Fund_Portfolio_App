@@ -83,7 +83,9 @@ Money Bowl is engineered as a modular, event-driven B2B2C microservices-on-serve
 
 ### C. Serverless Execution & Edge Layer (Deno Edge Functions)
 * **Mailbag & Feed Ingestion Worker**:
-  * Receives CAMS/KFintech WBR2 & WBR22 DBF feeds and CAS PDF files.
+  * Receives CAMS/KFintech WBR2 & WBR22 DBF feeds. The PDF service/Edge contract
+    is established with synthetic characterization layouts; live registrar CAS
+    PDF layouts require sanitized fixtures and deterministic tests before enablement.
   * Processes files using in-memory RAM stream decoding (zero disk persistence for zero-trust security).
 * **Order Auto-Approval Engine**:
   * Deno serverless worker evaluating submitted client orders against rules to execute automated status transitions.
@@ -501,10 +503,11 @@ Platform Admin actions bypass standard table-level workspace restrictions under 
 ```text
 [IMAP/OAuth Connector] ➔ [Poll Mailbox] ➔ [Validate Sender & Attachment Hash] ➔ [MIME/Magic-Byte Check] ➔ [Malware Scan] ➔ [Encrypted Object Storage] ➔ [Memory Stream Parser] ➔ [Immutable Ingestion Log]
 ```
-To guarantee zero-trust compliance, the parser reads DBF feeds and CAS PDFs directly from the secure encrypted object storage vault into memory buffers. It extracts transaction arrays and updates folio balances without saving temporary files to local disk.
+To guarantee zero-trust compliance, parser inputs are read from the secure encrypted object storage vault into memory buffers without local-disk persistence. DBF normalization is implemented in the Edge parser. The current PDF path validates only the synthetic characterization contract; live registrar statement normalization remains disabled pending sanitized fixtures and deterministic tests.
 * **External Support Stack**: `services/ingestion-support/` supplies one containerized API plus an internal-only ClamAV daemon. The unchanged Edge worker calls separate authenticated mailbox, PDF extraction, and malware endpoints. Mailbox configuration is a base URL; PDF and malware configuration use full endpoint URLs.
 * **Security & Credentials**: Mailbox credentials (OAuth tokens) are encrypted separately at rest. The support stack requires three distinct service bearer tokens, fixed HTTPS provider origins, bounded requests/responses/timeouts, a host allowlist, and sanitized errors. It accepts no direct IMAP password and logs no statement content or credentials.
-* **PDF Extraction**: Explicit CAMS and KFintech layout adapters extract bounded rows in memory with no OCR or third-party AI. Unknown, encrypted, malformed, or excessive layouts fail closed and the returned aliases are validated by the existing Edge parsers.
+* **Mailbox Backlog Bounds**: Gmail polling filters for PDF/DBF attachments, follows at most 4 pages and inspects at most 100 candidates by default, rejects malformed/repeated page tokens, and page-fairly returns at most 25 messages. Sender allowlist validation remains in the Edge worker.
+* **PDF Extraction**: The service provides bounded in-memory extraction infrastructure plus deterministic CAMS/KFintech synthetic characterization layouts. These prove the Edge/service contract but do not enable live registrar CAS statement layouts. Each actual layout requires a sanitized non-production fixture and deterministic tests. Unknown, encrypted, image-only/OCR, malformed, or excessive layouts fail closed. DBF parsing remains in the Edge parser.
 * **Malware Boundary**: The support API verifies the Edge-supplied SHA-256 before sending raw bytes to ClamAV with `INSTREAM`. The daemon port is not publicly exposed and readiness fails if the daemon/signature database is unavailable.
 * **Deployment Boundary**: Local HTTP is restricted to loopback. Any hosted Dev deployment must use HTTPS and external secret management. Issue #109 makes no hosted Dev or Production changes.
 * **Vaulting Controls**: The encrypted object storage vault enforces file-size limits (<20MB), MIME validation (PDF/DBF), malware screening, SHA-256 content-hash deduplication, and single-use signed URLs expiring in 15 minutes.
