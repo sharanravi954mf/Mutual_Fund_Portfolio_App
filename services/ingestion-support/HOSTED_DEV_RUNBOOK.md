@@ -73,8 +73,9 @@ part of Issue #113.
 1. Resolve the approved hostname and verify its DNS points only to the Dev host.
 2. Check out the reviewed commit under a root-owned service directory. Create
    `.env` from `.env.hosted.example`, substitute secrets through the approved
-   secret mechanism, set `ALLOWED_HOSTS` to the exact Dev hostname, and restrict
-   the file to the service administrator.
+   secret mechanism, set `ALLOWED_HOSTS` to the exact Dev hostname plus
+   `localhost,127.0.0.1` for internal health and readiness requests (never
+   `*`), and restrict the file to the service administrator.
 3. Validate the merged Compose model before starting anything:
 
    ```sh
