@@ -7,8 +7,9 @@ host, creating a Production deployment, or copying Production data.
 Issue #113 prepared these artifacts without an available host, DNS name, or
 host credentials. The deployment and Hosted Dev smoke sections below therefore
 remain unexecuted. Initial Gmail consent and encrypted credential provisioning
-are separately blocked by Issue #114; do not bypass that issue with a plaintext
-token, query-string token, app password, or direct database write.
+are implemented in software but remain unreviewed/unmerged and untested against
+Hosted Dev; do not bypass the flow with a plaintext token, query-string token,
+app password, or direct database write.
 
 ## Required external resources
 
@@ -30,8 +31,8 @@ token, query-string token, app password, or direct database write.
 
 Google's web-server OAuth guidance requires an exact registered HTTPS redirect
 URI, a securely generated and verified `state`, server-side authorization-code
-exchange, and `access_type=offline` when a refresh token is required. Issue
-#114 must implement that first-time flow and the encrypted first-write path.
+exchange, and `access_type=offline` when a refresh token is required. The
+implemented flow enforces those controls and requests only Gmail read-only.
 
 ## Secret boundaries
 
@@ -43,6 +44,7 @@ provider secret mechanism or a root-owned mode `0600` `.env` file:
 - `MALWARE_SCANNER_SERVICE_TOKEN`
 - `GMAIL_OAUTH_CLIENT_ID`
 - `GMAIL_OAUTH_CLIENT_SECRET`
+- `GMAIL_OAUTH_REDIRECT_URI` (not secret, but exact and environment-specific)
 
 Generate the three service bearer tokens independently with at least 32 random
 characters. Never print them, place them on a command line, or reuse one token
@@ -57,6 +59,7 @@ Store the following separately as Supabase **Hosted Dev Edge Function secrets**:
 - `PDF_TEXT_EXTRACTOR_SERVICE_TOKEN`
 - `MALWARE_SCANNER_URL` (`https://<approved-dev-host>/malware/scan`)
 - `MALWARE_SCANNER_SERVICE_TOKEN`
+- `GMAIL_OAUTH_REDIRECT_URI` (the exact same callback registered with Google)
 
 The matching token at the host and in Hosted Dev must be the same for each
 capability. Do not read, rotate, remove, or replace existing values such as
@@ -132,15 +135,15 @@ ClamAV verdicts. EICAR is test data, not malware.
 
 ## Configure Hosted Dev and run E2E
 
-Only after the host verification succeeds, add the six support URL/token names
-listed above to the Hosted Dev Edge Function secret settings. The repository's
+Only after the host verification succeeds, add the support URL/token names and
+exact Gmail callback listed above to the Hosted Dev Edge Function settings. The repository's
 GitHub-integrated deployment remains authoritative; do not manually deploy the
 Edge Function, relink Supabase, run `supabase db push`, or use the retired
 `deploy_ingestion.sh`.
 
-Do not start the end-to-end test until Issue #114 provides the reviewed Google
-consent/callback flow and encrypted first-write path. Provision only a
-development/test mailbox and test workspace through that authorized flow.
+Do not start the end-to-end test until this OAuth implementation is reviewed and
+merged. Provision only a development/test mailbox and test workspace through
+the authorized `/oauth/start` flow; never inject credentials manually.
 
 For the controlled test:
 
@@ -149,7 +152,9 @@ For the controlled test:
 2. Send one generated synthetic statement attachment containing synthetic PAN,
    folio, scheme, and transaction values. Never use a real investor identifier
    or document.
-3. Invoke the smallest existing authenticated
+3. As an authorized advisor/admin, start Gmail consent through the Edge OAuth
+   route and verify the safe connected response contains no token. Then invoke
+   the smallest existing authenticated
    `cams-kfintech-ingestion` request path using a valid initiating Dev user and
    the existing internal gateway token. Do not weaken its user/workspace
    authorization and do not add scheduling.
@@ -164,8 +169,8 @@ Issue #109 and #113 remain open unless this entire Hosted Dev flow succeeds.
 
 ## Rollback and cleanup
 
-To disable the Dev integration, first remove only the six support-service
-URL/token settings added to Hosted Dev, then stop the external stack:
+To disable the Dev integration, first remove only the support-service URL/token
+and Gmail callback settings added to Hosted Dev, then stop the external stack:
 
 ```sh
 docker compose --env-file .env \

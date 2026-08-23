@@ -25,7 +25,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   enforcement, placeholder-only host configuration, an HTTPS-safe endpoint
   smoke test, and a deployment/rollback runbook. No host or Hosted Dev setting
   was changed because approved host/DNS credentials were unavailable; initial
-  encrypted Gmail OAuth provisioning remains tracked by #114.
+  encrypted Gmail OAuth provisioning is included in the same draft PR.
+- **Secure Gmail OAuth Provisioning (#114)**: Added the web-server
+  authorization-code flow with exact redirect validation, Gmail read-only
+  offline consent, expiring hashed single-use state, server-side exchange,
+  AES-256-GCM first-write/reauthorization using the existing mailbox AAD, and
+  nonce-fenced server-side revocation. No Hosted Dev or Production deployment
+  was performed.
 
 ### Security
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,
@@ -39,6 +45,10 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   publishes only Caddy on 80/443, retains private persistent ClamAV signatures,
   disables request access logging, and preserves one API worker/replica until
   #112 removes the process-local OAuth bridge.
+- **OAuth Credential Boundary**: Authorization codes and tokens are never
+  logged or persisted by the support service. The database stores no plaintext
+  state or token fields; only state digests and existing encrypted credential
+  envelopes are persisted behind least-privilege RPCs.
 
 ## Architecture and Documentation Baselines
 

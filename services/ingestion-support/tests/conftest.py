@@ -13,16 +13,25 @@ os.environ.setdefault("PDF_TEXT_EXTRACTOR_SERVICE_TOKEN", "pdf-test-token-000000
 os.environ.setdefault("MALWARE_SCANNER_SERVICE_TOKEN", "malware-test-token-000000000000003")
 os.environ.setdefault("GMAIL_OAUTH_CLIENT_ID", "gmail-test-client-id")
 os.environ.setdefault("GMAIL_OAUTH_CLIENT_SECRET", "gmail-test-client-secret")
+os.environ.setdefault(
+    "GMAIL_OAUTH_REDIRECT_URI",
+    "https://dev.example.test/functions/v1/cams-kfintech-ingestion/oauth/callback",
+)
 
 from app.config import Settings  # noqa: E402
 from app.errors import ServiceError  # noqa: E402
 from app.mailbox import (  # noqa: E402
     Attachment,
+    AuthorizationUrlRequest,
+    AuthorizationUrlResult,
+    ExchangeRequest,
+    ExchangeResult,
     FetchRequest,
     Message,
     PollRequest,
     RefreshRequest,
     RefreshResult,
+    RevokeRequest,
 )
 from app.main import create_app  # noqa: E402
 
@@ -109,6 +118,21 @@ class FakeMailboxProvider:
         self.access_tokens: list[str] = []
         self.failure: ServiceError | None = None
         self.attachment_content = b"synthetic attachment"
+
+    def authorization_url(self, request: AuthorizationUrlRequest) -> AuthorizationUrlResult:
+        return AuthorizationUrlResult(
+            authorization_url=f"https://accounts.example.test/auth?state={request.state}"
+        )
+
+    async def exchange(self, request: ExchangeRequest) -> ExchangeResult:
+        return ExchangeResult(
+            access_token="provisioned-access-token",
+            refresh_token="provisioned-refresh-token",
+            expires_at="2026-08-22T12:00:00Z",
+        )
+
+    async def revoke(self, request: RevokeRequest) -> None:
+        del request
 
     async def refresh(self, request: RefreshRequest) -> RefreshResult:
         if self.failure:

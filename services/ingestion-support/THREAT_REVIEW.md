@@ -20,7 +20,8 @@
 | Cross-mailbox attachment fetch | Fetch requires a fresh token cached for the exact connector/mailbox/registrar identity tuple; concurrent mailboxes and registrar values remain isolated | Cache state is intentionally process-local and disappears on restart |
 | Response cache leakage | `no-store`, minimal malware/health schemas, no content in errors | Reverse proxy must respect no-store and avoid body logging |
 | Public ingress or TLS downgrade | Hosted override removes the API host port and exposes only pinned Caddy on 80/443 with automatic HTTPS, HSTS, a strict Host allowlist, and no access-log directive | DNS, certificate issuance/renewal, firewalling, and external monitoring remain host duties |
-| First-time OAuth credential injection | No manual plaintext path is documented or accepted; secure consent/callback and encrypted initial provisioning are tracked in Issue #114 | Hosted end-to-end mailbox smoke testing remains blocked until Issue #114 is implemented |
+| OAuth state, callback, and credential injection | 256-bit random state is stored only as a SHA-256 digest, expires in ten minutes, is atomically single-use, and binds workspace/mailbox/actor/exact redirect; code exchange is server-side and first write uses the existing AES-256-GCM AAD envelope | Browser navigation necessarily carries state and the one-time authorization code; application and proxy logs must remain body/header/query sanitized |
+| Reauthorization and revocation races | Reauthorization uses the same consumed-state encrypted upsert; revocation calls Google before a nonce-fenced authorized delete and moves the mailbox to `reauthorization_required` | A provider outage fails closed and retains the encrypted credential for retry |
 
 ClamAV TCP is unauthenticated by design and is therefore isolated on an
 unpublished Docker network. Only the API may reach it. Hosted HTTP is forbidden;

@@ -1,16 +1,20 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import {
   ConnectorCredentialRefresher,
+  ConnectorGmailOAuthClient,
   ConnectorMailboxClient,
+  CredentialEnvelopeCrypto,
   HttpMalwareScanner,
   RemotePdfTextExtractor,
   supabaseClient,
   SupabaseConfigRepository,
   SupabaseEncryptedStorage,
   SupabasePersistence,
+  SupabaseOAuthStateRepository,
   SupabaseWorkspaceAuthorizer,
 } from "./adapters.ts";
 import { createCamsKfintechIngestionHandler } from "./handler.ts";
+import { createGmailOAuthHandler } from "./oauth.ts";
 import { CamsParser, KfintechParser, ParserRegistry } from "./parser.ts";
 
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -36,21 +40,24 @@ const mailboxConnectorMaxResponseBytes = Number(
 const mailboxAttachmentDownloadTimeoutMs = Number(
   Deno.env.get("MAILBOX_ATTACHMENT_DOWNLOAD_TIMEOUT_MS") || "10000",
 );
-
-serve(createCamsKfintechIngestionHandler({
-  internalToken: Deno.env.get("MONEYBOWL_INTERNAL_INGESTION_TOKEN") || "",
-  workspaceAuthorizer: new SupabaseWorkspaceAuthorizer(client),
-  configRepository: new SupabaseConfigRepository(
-    client,
-    Deno.env.get("MAILBOX_OAUTH_AES256_GCM_KEY_B64") || "",
-    new ConnectorCredentialRefresher(
-      mailboxConnectorUrl,
-      mailboxConnectorToken,
-      allowInsecureConnector,
-      mailboxConnectorTimeoutMs,
-      mailboxConnectorMaxResponseBytes,
-    ),
+const credentialKey = Deno.env.get("MAILBOX_OAUTH_AES256_GCM_KEY_B64") || "";
+const workspaceAuthorizer = new SupabaseWorkspaceAuthorizer(client);
+const configRepository = new SupabaseConfigRepository(
+  client,
+  credentialKey,
+  new ConnectorCredentialRefresher(
+    mailboxConnectorUrl,
+    mailboxConnectorToken,
+    allowInsecureConnector,
+    mailboxConnectorTimeoutMs,
+    mailboxConnectorMaxResponseBytes,
   ),
+);
+
+const ingestionHandler = createCamsKfintechIngestionHandler({
+  internalToken: Deno.env.get("MONEYBOWL_INTERNAL_INGESTION_TOKEN") || "",
+  workspaceAuthorizer,
+  configRepository,
   mailboxClient: new ConnectorMailboxClient(
     mailboxConnectorUrl,
     mailboxConnectorToken,
@@ -72,4 +79,36 @@ serve(createCamsKfintechIngestionHandler({
     new KfintechParser(pdfExtractor),
   ]),
   persistence: new SupabasePersistence(client),
-}));
+});
+
+const oauthHandler = createGmailOAuthHandler({
+  redirectUri: Deno.env.get("GMAIL_OAUTH_REDIRECT_URI") || "",
+  workspaceAuthorizer,
+  stateRepository: new SupabaseOAuthStateRepository(client),
+  credentials: {
+    encrypt: (bundle, workspaceId, mailboxConnectionId) =>
+      new CredentialEnvelopeCrypto(credentialKey).encrypt(
+        bundle,
+        workspaceId,
+        mailboxConnectionId,
+      ),
+    loadForRevocation: (workspaceId, mailboxConnectionId) =>
+      configRepository.loadForRevocation(workspaceId, mailboxConnectionId),
+  },
+  connector: new ConnectorGmailOAuthClient(
+    mailboxConnectorUrl,
+    mailboxConnectorToken,
+    allowInsecureConnector,
+    mailboxConnectorTimeoutMs,
+    mailboxConnectorMaxResponseBytes,
+  ),
+});
+
+serve((req: Request) => {
+  const path = new URL(req.url).pathname;
+  if (
+    path.endsWith("/oauth/start") || path.endsWith("/oauth/callback") ||
+    path.endsWith("/oauth/revoke")
+  ) return oauthHandler(req);
+  return ingestionHandler(req);
+});

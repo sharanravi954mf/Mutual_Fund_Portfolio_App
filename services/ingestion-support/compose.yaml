@@ -13,8 +13,11 @@ services:
       MALWARE_SCANNER_SERVICE_TOKEN: ${MALWARE_SCANNER_SERVICE_TOKEN:?set in an ignored .env}
       GMAIL_OAUTH_CLIENT_ID: ${GMAIL_OAUTH_CLIENT_ID:?set in an ignored .env}
       GMAIL_OAUTH_CLIENT_SECRET: ${GMAIL_OAUTH_CLIENT_SECRET:?set in an ignored .env}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:?set to the exact Edge callback URI}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,ingestion-support}
       GMAIL_OAUTH_TOKEN_URL: ${GMAIL_OAUTH_TOKEN_URL:-https://oauth2.googleapis.com/token}
+      GMAIL_OAUTH_AUTHORIZATION_URL: ${GMAIL_OAUTH_AUTHORIZATION_URL:-https://accounts.google.com/o/oauth2/v2/auth}
+      GMAIL_OAUTH_REVOCATION_URL: ${GMAIL_OAUTH_REVOCATION_URL:-https://oauth2.googleapis.com/revoke}
       GMAIL_API_BASE_URL: ${GMAIL_API_BASE_URL:-https://gmail.googleapis.com/gmail/v1}
       PROVIDER_TIMEOUT_SECONDS: ${PROVIDER_TIMEOUT_SECONDS:-5}
       REQUEST_BODY_TIMEOUT_SECONDS: ${REQUEST_BODY_TIMEOUT_SECONDS:-10}

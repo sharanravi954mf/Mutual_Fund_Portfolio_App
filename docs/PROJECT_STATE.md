@@ -95,7 +95,8 @@ unchanged `cams-kfintech-ingestion` Edge Function as one provider-host-agnostic
 Docker Compose stack:
 
 - `MAILBOX_CONNECTOR_URL` is a base URL. The worker appends authenticated
-  `POST /oauth/refresh`, `POST /poll`, and `POST /attachments/fetch` routes.
+  server-to-server OAuth provisioning/refresh routes plus `POST /poll` and
+  `POST /attachments/fetch`.
   The initial provider uses Gmail OAuth/Gmail API behind an adapter; it does not
   accept direct IMAP usernames, passwords, or app passwords. Polling filters for
   PDF/DBF attachments without guessing sender addresses, follows bounded Gmail
@@ -133,10 +134,11 @@ mailboxes and different registrar values have isolated cache entries. Issue
 #112 tracks removal of the process-local dependency.
 
 Issue #109 performs local implementation and validation only. It does not
-deploy the stack, configure hosted Dev/Production values, link Supabase, change
-database migrations, or copy real mailbox/document data. Gmail authorization,
-HTTPS host provisioning, Dev-only Edge secret configuration, and a synthetic
-hosted smoke test remain post-merge operational steps. See
+deploy the stack, configure hosted Dev/Production values, link Supabase, or copy
+real mailbox/document data. Secure Gmail authorization software is implemented;
+HTTPS host provisioning, Google Dev-client registration, Dev-only Edge secret
+configuration, and a synthetic hosted smoke test remain post-merge operational
+steps. See
 `services/ingestion-support/README.md` and `THREAT_REVIEW.md` for the exact
 runtime, tests, limitations, and minimum 4 GB host guidance.
 
@@ -154,12 +156,16 @@ in the current implementation environment. Consequently the service is not
 live, the six Hosted Dev support URL/token values have not been configured, and
 no Hosted Dev E2E smoke test has been claimed. Production remains untouched.
 
-The architecture can refresh and replace an existing encrypted Gmail OAuth
-credential but cannot securely obtain and write the first refresh token: the
-consent redirect, callback/state validation, authorization-code exchange, and
-authorized encrypted first-write path are absent. Issue #114 tracks that
-separate blocker. It must request only Gmail read-only offline access and must
-not use plaintext tokens, passwords, app passwords, or manual database writes.
+The software now implements Gmail's web-server authorization-code flow through
+`/oauth/start`, `/oauth/callback`, and `/oauth/revoke`. Start requires an
+authenticated advisor/admin; it creates 256-bit random state and persists only
+the SHA-256 digest with actor/workspace/mailbox/exact-redirect binding and a
+ten-minute expiry. Callback atomically consumes state, exchanges the code only
+through the fixed-origin support service, requires a refresh token, and writes
+only the existing AES-256-GCM credential envelope with workspace/mailbox/key
+version AAD. Reauthorization uses the same fenced upsert. Revocation is
+server-side, nonce-fenced, audited, and leaves the mailbox
+`reauthorization_required`. No Hosted Dev E2E success is claimed.
 See `services/ingestion-support/HOSTED_DEV_RUNBOOK.md` for the exact prerequisite,
 secret-boundary, verification, rollback, and synthetic cleanup procedure.
 
@@ -173,7 +179,8 @@ to a client.
 `cams-kfintech-ingestion` custom values:
 
 - Required: `MONEYBOWL_INTERNAL_INGESTION_TOKEN`,
-  `MAILBOX_OAUTH_AES256_GCM_KEY_B64`, `MAILBOX_CONNECTOR_URL`,
+  `MAILBOX_OAUTH_AES256_GCM_KEY_B64`, `GMAIL_OAUTH_REDIRECT_URI`,
+  `MAILBOX_CONNECTOR_URL`,
   `MAILBOX_CONNECTOR_SERVICE_TOKEN`, `PDF_TEXT_EXTRACTOR_URL`,
   `PDF_TEXT_EXTRACTOR_SERVICE_TOKEN`, `MALWARE_SCANNER_URL`, and
   `MALWARE_SCANNER_SERVICE_TOKEN`.
@@ -232,8 +239,8 @@ application testing, separately review and configure:
 - email/password signup, confirmation, recovery, template, rate-limit, and SMTP
   behavior;
 - phone/password signup and an SMS provider if phone authentication is enabled;
-- OAuth providers and callback URLs (none are enabled by current repository
-  configuration or used by current application code);
+- Supabase Auth OAuth providers and callback URLs (distinct from the Gmail
+  mailbox connector callback implemented by `cams-kfintech-ingestion`);
 - CAPTCHA/bot protection (not declared in the repository); and
 - JWT/session policy consistency with the application.
 

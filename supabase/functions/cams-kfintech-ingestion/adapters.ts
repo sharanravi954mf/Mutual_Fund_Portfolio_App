@@ -28,7 +28,10 @@ import {
 } from "./types.ts";
 
 const knownFailureCodes: Set<string> = new Set([
+  "authorization_required",
+  "not_authorized",
   "mailbox_connection_not_found",
+  "oauth_credentials_unavailable",
   "attachment_hash_mismatch",
   "duplicate_attachment",
   "correlation_conflict",
@@ -53,6 +56,16 @@ const knownFailureCodes: Set<string> = new Set([
   "parse_failed",
   "persistence_conflict",
   "persistence_failed",
+  "oauth_request_invalid",
+  "oauth_state_invalid",
+  "oauth_state_expired",
+  "oauth_state_replayed",
+  "oauth_redirect_uri_mismatch",
+  "oauth_code_required",
+  "oauth_provider_error",
+  "oauth_refresh_token_required",
+  "oauth_exchange_failed",
+  "oauth_revocation_failed",
 ]);
 
 function errorCodeFromRpc(error: { message?: string } | null): FailureCode {
@@ -371,6 +384,17 @@ export function supabaseClient(serviceRoleKey: string): SupabaseClient {
   });
 }
 
+function userSupabaseClient(userToken: string): SupabaseClient {
+  return createClient(
+    Deno.env.get("SUPABASE_URL") || "",
+    Deno.env.get("SUPABASE_ANON_KEY") || "",
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${userToken}` } },
+    },
+  );
+}
+
 export class SupabaseWorkspaceAuthorizer {
   constructor(private readonly client: SupabaseClient) {}
 
@@ -614,6 +638,223 @@ export class SupabaseConfigRepository {
     }
 
     return credentials;
+  }
+
+  async loadForRevocation(
+    workspaceId: string,
+    mailboxConnectionId: string,
+  ): Promise<{ bundle: CredentialBundle; credentialNonce: string }> {
+    const { data, error } = await this.client.rpc(
+      "load_mailbox_oauth_credential_envelope",
+      {
+        p_workspace_id: workspaceId,
+        p_mailbox_connection_id: mailboxConnectionId,
+      },
+    );
+    if (error != null || data == null) {
+      throw new IngestionError("oauth_credentials_unavailable");
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as CredentialEnvelopeRow;
+    const bundle = await this.crypto.decrypt(
+      {
+        credentialCiphertext: row.credential_ciphertext,
+        credentialNonce: row.credential_nonce,
+        keyVersion: row.key_version,
+      },
+      workspaceId,
+      mailboxConnectionId,
+    );
+    return { bundle, credentialNonce: row.credential_nonce };
+  }
+}
+
+type OAuthStateRow = {
+  authorization_id: string;
+  workspace_id: string;
+  mailbox_connection_id: string;
+  flow_kind: "first_time" | "reauthorization";
+};
+
+export class SupabaseOAuthStateRepository {
+  constructor(private readonly serviceClient: SupabaseClient) {}
+
+  async begin(input: {
+    userToken: string;
+    workspaceId: string;
+    mailboxConnectionId: string;
+    stateHash: string;
+    redirectUri: string;
+    expiresAt: string;
+  }): Promise<{ flowKind: "first_time" | "reauthorization" }> {
+    const client = userSupabaseClient(input.userToken);
+    const { data, error } = await client.rpc("begin_mailbox_oauth_authorization", {
+      p_workspace_id: input.workspaceId,
+      p_mailbox_connection_id: input.mailboxConnectionId,
+      p_state_hash: input.stateHash,
+      p_redirect_uri: input.redirectUri,
+      p_expires_at: input.expiresAt,
+    });
+    if (error != null || data == null) throw new IngestionError(errorCodeFromRpc(error));
+    const row = (Array.isArray(data) ? data[0] : data) as OAuthStateRow;
+    return { flowKind: row.flow_kind };
+  }
+
+  async consume(stateHash: string, redirectUri: string): Promise<{
+    authorizationId: string;
+    workspaceId: string;
+    mailboxConnectionId: string;
+    flowKind: "first_time" | "reauthorization";
+  }> {
+    const { data, error } = await this.serviceClient.rpc(
+      "consume_mailbox_oauth_authorization",
+      { p_state_hash: stateHash, p_redirect_uri: redirectUri },
+    );
+    if (error != null || data == null) throw new IngestionError(errorCodeFromRpc(error));
+    const row = (Array.isArray(data) ? data[0] : data) as OAuthStateRow;
+    return {
+      authorizationId: row.authorization_id,
+      workspaceId: row.workspace_id,
+      mailboxConnectionId: row.mailbox_connection_id,
+      flowKind: row.flow_kind,
+    };
+  }
+
+  async fail(authorizationId: string, code: FailureCode): Promise<void> {
+    const { error } = await this.serviceClient.rpc("fail_mailbox_oauth_authorization", {
+      p_authorization_id: authorizationId,
+      p_failure_code: code,
+    });
+    if (error != null) throw new IngestionError(errorCodeFromRpc(error));
+  }
+
+  async complete(input: {
+    authorizationId: string;
+    envelope: EncryptedCredentialEnvelope;
+    expiresAt: string;
+  }): Promise<"first_time" | "reauthorization"> {
+    const { data, error } = await this.serviceClient.rpc(
+      "complete_mailbox_oauth_authorization",
+      {
+        p_authorization_id: input.authorizationId,
+        p_credential_ciphertext: input.envelope.credentialCiphertext,
+        p_credential_nonce: input.envelope.credentialNonce,
+        p_key_version: input.envelope.keyVersion,
+        p_expires_at: input.expiresAt,
+      },
+    );
+    if (error != null || (data !== "first_time" && data !== "reauthorization")) {
+      throw new IngestionError(errorCodeFromRpc(error));
+    }
+    return data;
+  }
+
+  async revoke(input: {
+    userToken: string;
+    workspaceId: string;
+    mailboxConnectionId: string;
+    expectedCredentialNonce: string;
+  }): Promise<void> {
+    const client = userSupabaseClient(input.userToken);
+    const { error } = await client.rpc("revoke_mailbox_oauth_credential", {
+      p_workspace_id: input.workspaceId,
+      p_mailbox_connection_id: input.mailboxConnectionId,
+      p_expected_credential_nonce: input.expectedCredentialNonce,
+    });
+    if (error != null) throw new IngestionError(errorCodeFromRpc(error));
+  }
+}
+
+export class ConnectorGmailOAuthClient {
+  private readonly baseUrl: URL;
+
+  constructor(
+    connectorUrl: string,
+    private readonly connectorServiceToken: string,
+    allowInsecureConnector = false,
+    private readonly timeoutMs = 5000,
+    private readonly maxResponseBytes = 65536,
+  ) {
+    if (connectorServiceToken.trim() === "") throw new IngestionError("connector_untrusted_origin");
+    this.timeoutMs = requirePositive(timeoutMs, "connector_untrusted_origin");
+    this.maxResponseBytes = requirePositive(
+      maxResponseBytes,
+      "connector_untrusted_origin",
+    );
+    this.baseUrl = parseTrustedConnectorUrl(connectorUrl, allowInsecureConnector);
+  }
+
+  private async post(path: string, body: Record<string, unknown>): Promise<Response> {
+    const deadline = timeoutController(this.timeoutMs);
+    try {
+      const result = await fetch(endpoint(this.baseUrl, path), {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.connectorServiceToken}`,
+        },
+        body: JSON.stringify(body),
+        signal: deadline.signal,
+      });
+      if (result.status >= 300 && result.status < 400) {
+        throw new IngestionError("connector_untrusted_origin");
+      }
+      if (result.url !== "") assertSameOrigin(new URL(result.url), this.baseUrl.origin);
+      return result;
+    } catch (error) {
+      if (error instanceof IngestionError) throw error;
+      throw new IngestionError("oauth_exchange_failed");
+    } finally {
+      deadline.cancel();
+    }
+  }
+
+  async authorizationUrl(state: string, redirectUri: string): Promise<string> {
+    const result = await this.post("/oauth/authorization-url", {
+      state,
+      redirect_uri: redirectUri,
+    });
+    if (!result.ok) throw new IngestionError("oauth_exchange_failed");
+    const payload = await readJsonResponse(result, this.maxResponseBytes, "oauth_exchange_failed");
+    if (typeof payload.authorization_url !== "string") {
+      throw new IngestionError("oauth_exchange_failed");
+    }
+    return payload.authorization_url;
+  }
+
+  async exchange(code: string, redirectUri: string): Promise<CredentialBundle> {
+    const result = await this.post("/oauth/exchange", { code, redirect_uri: redirectUri });
+    if (!result.ok) {
+      let providerCode = "";
+      try {
+        const payload = await readJsonResponse(result, this.maxResponseBytes, "oauth_exchange_failed");
+        const error = recordFromUnknown(payload.error, "oauth_exchange_failed");
+        providerCode = typeof error.code === "string" ? error.code : "";
+      } catch (_error) {
+        // Provider details are deliberately reduced to a stable local failure code.
+      }
+      throw new IngestionError(
+        providerCode === "oauth_refresh_token_required"
+          ? "oauth_refresh_token_required"
+          : "oauth_exchange_failed",
+      );
+    }
+    const payload = await readJsonResponse(result, this.maxResponseBytes, "oauth_exchange_failed");
+    if (
+      typeof payload.access_token !== "string" || payload.access_token === "" ||
+      typeof payload.refresh_token !== "string" || payload.refresh_token === "" ||
+      typeof payload.expires_at !== "string"
+    ) throw new IngestionError("oauth_refresh_token_required");
+    return {
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token,
+      expiresAt: payload.expires_at,
+    };
+  }
+
+  async revoke(token: string): Promise<void> {
+    const result = await this.post("/oauth/revoke", { token });
+    if (result.status !== 204) throw new IngestionError("oauth_revocation_failed");
   }
 }
 
