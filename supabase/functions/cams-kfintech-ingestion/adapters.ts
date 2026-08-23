@@ -396,7 +396,11 @@ function userSupabaseClient(userToken: string): SupabaseClient {
 }
 
 export class SupabaseWorkspaceAuthorizer {
-  constructor(private readonly client: SupabaseClient) {}
+  constructor(
+    private readonly serviceClient: SupabaseClient,
+    private readonly userClientFactory: (userToken: string) => SupabaseClient =
+      userSupabaseClient,
+  ) {}
 
   async authorize(
     req: Request,
@@ -411,44 +415,20 @@ export class SupabaseWorkspaceAuthorizer {
       throw new IngestionError("authorization_required");
     }
 
-    const userResult = await this.client.auth.getUser(userToken);
+    const userResult = await this.serviceClient.auth.getUser(userToken);
     const userId = userResult.data.user?.id;
     if (userResult.error != null || userId == null) {
       throw new IngestionError("not_authorized");
     }
 
-    const workspaceResult = await this.client
-      .from("workspaces")
-      .select("id")
-      .eq("id", input.workspaceId)
-      .eq("workspace_status", "active")
-      .limit(2);
-    const workspaces = workspaceResult.data ?? [];
-    if (workspaceResult.error != null || workspaces.length !== 1) {
-      throw new IngestionError("not_authorized");
-    }
-
-    const profileResult = await this.client
-      .from("profiles")
-      .select("id")
-      .eq("user_id", userId)
-      .limit(2);
-    const profiles = profileResult.data ?? [];
-    if (profileResult.error != null || profiles.length !== 1) {
-      throw new IngestionError("not_authorized");
-    }
-
-    const membershipResult = await this.client
-      .from("workspace_memberships")
-      .select("profile_id")
-      .eq("workspace_id", input.workspaceId)
-      .eq("profile_id", profiles[0].id)
-      .eq("status", "active")
-      .is("ended_at", null)
-      .in("role", ["advisor", "admin"])
-      .limit(2);
-    const memberships = membershipResult.data ?? [];
-    if (membershipResult.error != null || memberships.length !== 1) {
+    const userClient = this.userClientFactory(userToken);
+    const authorizationResult = await userClient.rpc(
+      "authorize_cams_kfintech_workspace",
+      { p_workspace_id: input.workspaceId },
+    );
+    if (
+      authorizationResult.error != null || authorizationResult.data !== true
+    ) {
       throw new IngestionError("not_authorized");
     }
   }

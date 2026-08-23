@@ -68,66 +68,48 @@ function delayedFetch(signal?: AbortSignal): Promise<Response> {
   });
 }
 
-class FakeQuery {
-  constructor(
-    private readonly rows: Record<string, unknown>[],
-    private readonly error: Error | null = null,
-  ) {}
-
-  select(): FakeQuery {
-    return this;
-  }
-
-  eq(): FakeQuery {
-    return this;
-  }
-
-  is(): FakeQuery {
-    return this;
-  }
-
-  in(): FakeQuery {
-    return this;
-  }
-
-  limit(): Promise<{ data: Record<string, unknown>[]; error: Error | null }> {
-    return Promise.resolve({ data: this.rows, error: this.error });
-  }
-}
-
-function authorizerClient(options: {
+function authorizerClients(options: {
   userId?: string | null;
-  workspaceRows?: Record<string, unknown>[];
-  profileRows?: Record<string, unknown>[];
-  membershipRows?: Record<string, unknown>[];
+  userError?: Error | null;
+  rpcData?: unknown;
+  rpcError?: Error | null;
 } = {}) {
-  return {
+  const calls: {
+    getUserTokens: string[];
+    userClientTokens: string[];
+    rpcCalls: { name: string; args: Record<string, unknown> }[];
+  } = { getUserTokens: [], userClientTokens: [], rpcCalls: [] };
+  const serviceClient = {
     auth: {
-      getUser: () =>
-        Promise.resolve({
+      getUser: (token: string) => {
+        calls.getUserTokens.push(token);
+        return Promise.resolve({
           data: {
             user: options.userId === null
               ? null
               : { id: options.userId ?? "user-id" },
           },
-          error: null,
-        }),
+          error: options.userError ?? null,
+        });
+      },
     },
     from: (table: string) => {
-      if (table === "workspaces") {
-        return new FakeQuery(options.workspaceRows ?? [{ id: "workspace-id" }]);
-      }
-      if (table === "profiles") {
-        return new FakeQuery(options.profileRows ?? [{ id: "profile-id" }]);
-      }
-      if (table === "workspace_memberships") {
-        return new FakeQuery(
-          options.membershipRows ?? [{ profile_id: "profile-id" }],
-        );
-      }
-      return new FakeQuery([]);
+      throw new Error(`unexpected direct authorization table read: ${table}`);
     },
   };
+  const userClientFactory = (token: string) => {
+    calls.userClientTokens.push(token);
+    return {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls.rpcCalls.push({ name, args });
+        return Promise.resolve({
+          data: options.rpcData === undefined ? true : options.rpcData,
+          error: options.rpcError ?? null,
+        });
+      },
+    };
+  };
+  return { calls, serviceClient, userClientFactory };
 }
 
 function authorizedRequest(token: string | null = "user-token"): Request {
@@ -238,19 +220,30 @@ Deno.test("credential envelope rejects invalid key nonce and wrong AAD", async (
   );
 });
 
-Deno.test("workspace authorizer accepts exactly one active advisor/admin membership", async () => {
+Deno.test("workspace authorizer validates the JWT then calls the authenticated RPC", async () => {
+  const clients = authorizerClients();
   const authorizer = new SupabaseWorkspaceAuthorizer(
-    authorizerClient() as never,
+    clients.serviceClient as never,
+    clients.userClientFactory as never,
   );
 
   await authorizer.authorize(authorizedRequest(), {
     workspaceId: "workspace-id",
   });
+
+  assertEquals(clients.calls.getUserTokens, ["user-token"]);
+  assertEquals(clients.calls.userClientTokens, ["user-token"]);
+  assertEquals(clients.calls.rpcCalls, [{
+    name: "authorize_cams_kfintech_workspace",
+    args: { p_workspace_id: "workspace-id" },
+  }]);
 });
 
 Deno.test("workspace authorizer rejects missing authenticated user token", async () => {
+  const clients = authorizerClients();
   const authorizer = new SupabaseWorkspaceAuthorizer(
-    authorizerClient() as never,
+    clients.serviceClient as never,
+    clients.userClientFactory as never,
   );
 
   await assertRejects(
@@ -261,48 +254,60 @@ Deno.test("workspace authorizer rejects missing authenticated user token", async
     IngestionError,
     "authorization_required",
   );
+  assertEquals(clients.calls.getUserTokens, []);
+  assertEquals(clients.calls.rpcCalls, []);
 });
 
-Deno.test("workspace authorizer rejects inactive workspaces before membership trust", async () => {
+Deno.test("workspace authorizer rejects a missing or invalid JWT identity", async () => {
+  const clients = authorizerClients({
+    userId: null,
+    userError: new Error("invalid JWT"),
+  });
   const authorizer = new SupabaseWorkspaceAuthorizer(
-    authorizerClient({ workspaceRows: [] }) as never,
+    clients.serviceClient as never,
+    clients.userClientFactory as never,
   );
 
   await assertRejects(
     () =>
       authorizer.authorize(authorizedRequest(), {
-        workspaceId: "inactive-workspace",
+        workspaceId: "workspace-id",
+      }),
+    IngestionError,
+    "not_authorized",
+  );
+  assertEquals(clients.calls.rpcCalls, []);
+});
+
+Deno.test("workspace authorizer fails closed when the authenticated RPC denies access", async () => {
+  const clients = authorizerClients({ rpcData: false });
+  const authorizer = new SupabaseWorkspaceAuthorizer(
+    clients.serviceClient as never,
+    clients.userClientFactory as never,
+  );
+
+  await assertRejects(
+    () =>
+      authorizer.authorize(authorizedRequest(), {
+        workspaceId: "workspace-id",
       }),
     IngestionError,
     "not_authorized",
   );
 });
 
-Deno.test("workspace authorizer fails closed for cross-workspace and non-advisor users", async () => {
+Deno.test("workspace authorizer hides authenticated RPC errors behind not_authorized", async () => {
+  const clients = authorizerClients({
+    rpcError: new Error("permission denied for table workspaces"),
+  });
   const authorizer = new SupabaseWorkspaceAuthorizer(
-    authorizerClient({ membershipRows: [] }) as never,
+    clients.serviceClient as never,
+    clients.userClientFactory as never,
   );
 
   await assertRejects(
     () =>
       authorizer.authorize(authorizedRequest(), {
-        workspaceId: "other-workspace",
-      }),
-    IngestionError,
-    "not_authorized",
-  );
-});
-
-Deno.test("workspace authorizer rejects ambiguous caller profile", async () => {
-  const ambiguousProfile = new SupabaseWorkspaceAuthorizer(
-    authorizerClient({
-      profileRows: [{ id: "profile-1" }, { id: "profile-2" }],
-    }) as never,
-  );
-
-  await assertRejects(
-    () =>
-      ambiguousProfile.authorize(authorizedRequest(), {
         workspaceId: "workspace-id",
       }),
     IngestionError,

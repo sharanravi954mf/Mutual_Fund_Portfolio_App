@@ -49,6 +49,11 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   logged or persisted by the support service. The database stores no plaintext
   state or token fields; only state digests and existing encrypted credential
   envelopes are persisted behind least-privilege RPCs.
+- **Ingestion Workspace Authorization (#114)**: Corrected the Hosted Dev
+  ingestion/OAuth authorizer to validate the caller JWT and invoke a narrowly
+  scoped authenticated `SECURITY DEFINER` RPC. The RPC returns only an
+  authorization result, fails closed, and preserves the hardened business-table
+  grants instead of requiring service-role `SELECT` access.
 
 ## Architecture and Documentation Baselines
 
