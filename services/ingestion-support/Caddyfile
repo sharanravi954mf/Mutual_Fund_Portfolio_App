@@ -1,0 +1,26 @@
+{
+	admin off
+	email {$ACME_EMAIL}
+}
+
+{$INGESTION_SUPPORT_HOSTNAME} {
+	request_body {
+		max_size 21MB
+	}
+
+	header {
+		Cache-Control "no-store"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy api:8080 {
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+		}
+	}
+}

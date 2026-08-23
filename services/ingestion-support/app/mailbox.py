@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from email.utils import parseaddr
 from typing import Any, Literal, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -23,6 +23,8 @@ Registrar = Literal["CAMS", "KFINTECH"]
 CONNECTOR_REF_RE = re.compile(r"^gmail:(me|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)$")
 PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
 GMAIL_ATTACHMENT_QUERY = "has:attachment {filename:pdf filename:dbf}"
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+OAUTH_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
 class StrictModel(BaseModel):
@@ -35,6 +37,20 @@ class RefreshRequest(StrictModel):
     connector_ref: str = Field(min_length=1, max_length=320)
     registrar: Registrar
     refresh_token: str = Field(min_length=1, max_length=8192)
+
+
+class AuthorizationUrlRequest(StrictModel):
+    state: str = Field(min_length=43, max_length=43)
+    redirect_uri: str = Field(min_length=12, max_length=2048)
+
+
+class ExchangeRequest(StrictModel):
+    code: str = Field(min_length=1, max_length=8192)
+    redirect_uri: str = Field(min_length=12, max_length=2048)
+
+
+class RevokeRequest(StrictModel):
+    token: str = Field(min_length=1, max_length=8192)
 
 
 class PollRequest(StrictModel):
@@ -69,7 +85,23 @@ class RefreshResult(StrictModel):
     expires_at: str | None = None
 
 
+class AuthorizationUrlResult(StrictModel):
+    authorization_url: str
+
+
+class ExchangeResult(StrictModel):
+    access_token: str
+    refresh_token: str
+    expires_at: str
+
+
 class MailboxProvider(Protocol):
+    def authorization_url(self, request: AuthorizationUrlRequest) -> AuthorizationUrlResult: ...
+
+    async def exchange(self, request: ExchangeRequest) -> ExchangeResult: ...
+
+    async def revoke(self, request: RevokeRequest) -> None: ...
+
     async def refresh(self, request: RefreshRequest) -> RefreshResult: ...
 
     async def poll(self, request: PollRequest, access_token: str) -> list[Message]: ...
@@ -143,6 +175,80 @@ class GmailProvider:
 
     async def close(self) -> None:
         await self.client.aclose()
+
+    def _require_redirect_uri(self, redirect_uri: str) -> None:
+        if redirect_uri != self.settings.gmail_oauth_redirect_uri:
+            raise ServiceError(400, "oauth_redirect_uri_mismatch")
+
+    def authorization_url(self, request: AuthorizationUrlRequest) -> AuthorizationUrlResult:
+        self._require_redirect_uri(request.redirect_uri)
+        if OAUTH_STATE_RE.fullmatch(request.state) is None:
+            raise ServiceError(400, "invalid_request")
+        query = urlencode(
+            {
+                "client_id": self.settings.gmail_oauth_client_id,
+                "redirect_uri": request.redirect_uri,
+                "response_type": "code",
+                "scope": GMAIL_READONLY_SCOPE,
+                "access_type": "offline",
+                "prompt": "consent",
+                "state": request.state,
+            }
+        )
+        return AuthorizationUrlResult(
+            authorization_url=f"{self.settings.gmail_oauth_authorization_url}?{query}"
+        )
+
+    async def exchange(self, request: ExchangeRequest) -> ExchangeResult:
+        self._require_redirect_uri(request.redirect_uri)
+        payload = await self._json_request(
+            "POST",
+            self.settings.gmail_oauth_token_url,
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": self.settings.gmail_oauth_client_id,
+                "client_secret": self.settings.gmail_oauth_client_secret,
+                "code": request.code,
+                "grant_type": "authorization_code",
+                "redirect_uri": request.redirect_uri,
+            },
+        )
+        access_token = payload.get("access_token")
+        refresh_token = payload.get("refresh_token")
+        expires_in = payload.get("expires_in")
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or len(access_token) > 8192
+            or not isinstance(refresh_token, str)
+            or not refresh_token
+            or len(refresh_token) > 8192
+        ):
+            raise ServiceError(502, "oauth_refresh_token_required")
+        if not isinstance(expires_in, (int, float)) or expires_in <= 0 or expires_in > 86400:
+            raise ServiceError(502, "provider_response_invalid")
+        expires_at = (datetime.now(UTC) + timedelta(seconds=int(expires_in))).isoformat().replace(
+            "+00:00", "Z"
+        )
+        return ExchangeResult(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+        )
+
+    async def revoke(self, request: RevokeRequest) -> None:
+        try:
+            response = await self.client.post(
+                self.settings.gmail_oauth_revocation_url,
+                headers={"Accept": "application/json"},
+                data={"token": request.token},
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as error:
+            raise ServiceError(503, "provider_unavailable") from error
+        if 300 <= response.status_code < 400:
+            raise ServiceError(502, "provider_redirect_rejected")
+        if response.status_code < 200 or response.status_code >= 300:
+            raise ServiceError(502, "provider_request_failed")
 
     async def _json_request(
         self,

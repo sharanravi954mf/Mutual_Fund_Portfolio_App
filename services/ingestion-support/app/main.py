@@ -19,12 +19,17 @@ from .config import Settings, get_settings
 from .errors import ServiceError, service_error_handler
 from .mailbox import (
     AccessTokenCache,
+    AuthorizationUrlRequest,
+    AuthorizationUrlResult,
+    ExchangeRequest,
+    ExchangeResult,
     FetchRequest,
     GmailProvider,
     MailboxProvider,
     PollRequest,
     RefreshRequest,
     RefreshResult,
+    RevokeRequest,
     cache_key,
     validate_model,
 )
@@ -46,6 +51,9 @@ KNOWN_PATHS = frozenset(
         "/health",
         "/ready",
         "/oauth/refresh",
+        "/oauth/authorization-url",
+        "/oauth/exchange",
+        "/oauth/revoke",
         "/poll",
         "/attachments/fetch",
         "/pdf/extract",
@@ -158,6 +166,33 @@ def create_app(
         return _bounded_json_response(
             result.model_dump(exclude_none=True), config.max_provider_response_bytes
         )
+
+    @app.post("/oauth/authorization-url")
+    async def oauth_authorization_url(request: Request) -> JSONResponse:
+        require_bearer(request, config.mailbox_connector_service_token)
+        async with asyncio.timeout(config.request_body_timeout_seconds):
+            payload = await read_json_object(request, config.max_json_body_bytes)
+        parsed = validate_model(AuthorizationUrlRequest, payload)
+        result: AuthorizationUrlResult = provider.authorization_url(parsed)
+        return _bounded_json_response(result.model_dump(), 4096)
+
+    @app.post("/oauth/exchange")
+    async def oauth_exchange(request: Request) -> JSONResponse:
+        require_bearer(request, config.mailbox_connector_service_token)
+        async with asyncio.timeout(config.request_body_timeout_seconds):
+            payload = await read_json_object(request, config.max_json_body_bytes)
+        parsed = validate_model(ExchangeRequest, payload)
+        result: ExchangeResult = await provider.exchange(parsed)
+        return _bounded_json_response(result.model_dump(), config.max_provider_response_bytes)
+
+    @app.post("/oauth/revoke", status_code=204)
+    async def oauth_revoke(request: Request) -> Response:
+        require_bearer(request, config.mailbox_connector_service_token)
+        async with asyncio.timeout(config.request_body_timeout_seconds):
+            payload = await read_json_object(request, config.max_json_body_bytes)
+        parsed = validate_model(RevokeRequest, payload)
+        await provider.revoke(parsed)
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @app.post("/poll")
     async def poll(request: Request) -> JSONResponse:

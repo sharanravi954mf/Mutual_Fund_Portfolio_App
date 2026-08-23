@@ -5,8 +5,8 @@ the existing `cams-kfintech-ingestion` Edge Function. It keeps the Edge worker,
 database, Storage, and Auth contracts unchanged while providing three logically
 separate capabilities from one small deployment:
 
-- Gmail OAuth mailbox connector (`/oauth/refresh`, `/poll`, and
-  `/attachments/fetch`);
+- Gmail OAuth mailbox connector (`/oauth/authorization-url`, `/oauth/exchange`,
+  `/oauth/revoke`, `/oauth/refresh`, `/poll`, and `/attachments/fetch`);
 - PDF extraction infrastructure plus a deterministic synthetic/characterization
   contract (`/pdf/extract`);
 - in-memory ClamAV `INSTREAM` scanning (`/malware/scan`).
@@ -28,14 +28,15 @@ Supabase Edge Function over HTTPS
 
 The API runs as a non-root, read-only container with no Linux capabilities.
 `clamd` is reachable only on the private Compose network; port 3310 is never
-published. The API port is bound to `127.0.0.1` for local development. A future
-host must terminate HTTPS in front of it and must not expose plain HTTP.
+published. The API port is bound to `127.0.0.1` for local development. The
+hosted override removes that port mapping and adds a pinned Caddy reverse proxy
+that is the only public ingress on ports 80/443. See `HOSTED_DEV_RUNBOOK.md`.
 
 ## Edge-owned endpoint contract
 
 | Edge setting | Value shape | Support endpoint |
 | :--- | :--- | :--- |
-| `MAILBOX_CONNECTOR_URL` | Base URL, for example `https://ingestion.example.test` | Worker appends `/oauth/refresh`, `/poll`, `/attachments/fetch` |
+| `MAILBOX_CONNECTOR_URL` | Base URL, for example `https://ingestion.example.test` | Worker appends OAuth provisioning/refresh plus mailbox poll/fetch paths |
 | `PDF_TEXT_EXTRACTOR_URL` | Full URL | `https://ingestion.example.test/pdf/extract` |
 | `MALWARE_SCANNER_URL` | Full URL | `https://ingestion.example.test/malware/scan` |
 
@@ -59,7 +60,8 @@ TypeScript classes in
 
 1. Copy `.env.example` to the ignored `.env` file.
 2. Generate three distinct random service tokens of at least 32 characters.
-3. Add a Google OAuth client ID and secret for a development-only Gmail account.
+3. Add a Google OAuth client ID/secret and the exact Edge callback URI for a
+   development-only Gmail account.
 4. Start the stack:
 
    ```sh
@@ -82,23 +84,33 @@ ClamAV 1.5.4; signature updates remain in the `clamav_db` volume.
 
 ## Gmail OAuth setup
 
-The initial provider is Gmail behind the `MailboxProvider` interface. Manual
-hosted setup is deliberately deferred until after review and merge:
+The initial provider is Gmail behind the `MailboxProvider` interface. Hosted
+setup remains deferred until after review and merge:
 
 1. Create a Google Cloud project for the Dev integration and enable Gmail API.
 2. Configure an OAuth consent screen and a server-side OAuth client.
-3. Request only the Gmail read-only scope required by the connector.
-4. Obtain offline consent for a synthetic/non-production mailbox so Money Bowl
-   receives a refresh token.
-5. Store the Google client secret only in the support-service host and store the
-   mailbox OAuth credential only through the existing encrypted Money Bowl
-   mailbox-credential flow.
+3. Register `GMAIL_OAUTH_REDIRECT_URI` exactly in Google and set the identical
+   value in the support service and Edge Function environment.
+4. An authorized advisor/admin calls `/oauth/start`; the Edge Function creates
+   a 256-bit random, single-use, ten-minute state and stores only its SHA-256
+   digest. Google consent requests only Gmail read-only scope, offline access,
+   and explicit consent.
+5. Google returns to `/oauth/callback`. The Edge Function validates the exact
+   redirect and atomically consumes the state before the support service
+   exchanges the code server-side. A missing first-time refresh token fails
+   closed.
+6. The Edge Function writes access/refresh/expiry only as the existing
+   AES-256-GCM envelope with workspace/mailbox/key-version AAD. Reauthorization
+   uses the same fenced upsert. `/oauth/revoke` revokes server-side, deletes the
+   envelope through an authorized RPC, and marks the mailbox
+   `reauthorization_required`.
 6. Use connector reference `gmail:me` (or `gmail:<mailbox-address>`). Provider
    origins are fixed configuration, never request-controlled URLs.
 
 No `IMAP_USER`, `IMAP_PASSWORD`, Google app password, Supabase service-role key,
-or `RTA_DECRYPTION_PASSWORD` belongs in this service. The first authorization
-grant is a manual administrative step; automated tests use mocks only.
+or `RTA_DECRYPTION_PASSWORD` belongs in this service. OAuth tokens and codes
+are never logged, placed in client storage, or persisted by the support service;
+automated provider tests use mocks only.
 
 Mailbox polling uses the Gmail query
 `has:attachment {filename:pdf filename:dbf}` to reduce unrelated attachment
@@ -156,9 +168,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -m "not integration"
 ```
 
-With Compose running and the same local tokens exported, run live tests:
+With Compose running and the same local tokens exported, run live tests. Plain
+HTTP is accepted only for an explicitly opted-in loopback target:
 
 ```sh
+ALLOW_INSECURE_LOCAL_SMOKE_URL=true \
 INGESTION_SUPPORT_BASE_URL=http://127.0.0.1:8080 \
 python -m pytest -m integration
 
@@ -176,14 +190,16 @@ Host-header validation, and non-sensitive readiness. The live Deno test uses
 the actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and
 `KfintechParser` classes. EICAR appears only in test code.
 
-## Hosted Dev follow-up (not performed by Issue #109)
+## Hosted Dev operation (Issue #113)
 
-After merge, provision a small HTTPS-capable VPS/container host with Docker,
-4 GB or more RAM, persistent space for signature databases, restricted inbound
-firewall rules, monitoring, backups for configuration only, and TLS renewal.
-Create host-only values for the three support-service bearer tokens and Gmail
-OAuth client credentials. Then configure the corresponding Dev-only Edge
-Function URL/token values outside Git and perform a controlled smoke test with
-synthetic data. Do not copy Production mail, documents, OAuth credentials, or
-secrets. Production deployment and Production configuration require a separate
-reviewed change.
+`compose.hosted.yaml`, `Caddyfile`, `.env.hosted.example`, and the integration
+test provide the provider-agnostic Hosted Dev deployment and smoke-test
+contract. `HOSTED_DEV_RUNBOOK.md` contains deployment, secret placement,
+verification, rollback, and synthetic-data cleanup instructions.
+
+The current environment has no approved Dev host, DNS name, or host credentials,
+so Issue #113 does not claim a live deployment. The software implements initial
+Gmail consent/callback and encrypted first-write, but it has not been exercised
+against Hosted Dev. Do not manually insert plaintext tokens as a workaround.
+Production deployment and Production configuration require a separate reviewed
+change.

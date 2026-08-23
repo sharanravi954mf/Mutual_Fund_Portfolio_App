@@ -249,6 +249,11 @@ export function errorStatus(code: FailureCode): number {
       return 401;
     case "not_authorized":
       return 403;
+    case "oauth_state_replayed":
+      return 409;
+    case "oauth_exchange_failed":
+    case "oauth_revocation_failed":
+      return 502;
     case "malware_detected":
     case "sender_not_allowed":
     case "duplicate_attachment":

@@ -39,10 +39,21 @@ class Settings(BaseSettings):
     gmail_oauth_client_secret: str = Field(
         min_length=8, validation_alias="GMAIL_OAUTH_CLIENT_SECRET"
     )
+    gmail_oauth_redirect_uri: str = Field(
+        min_length=12, validation_alias="GMAIL_OAUTH_REDIRECT_URI"
+    )
 
+    gmail_oauth_authorization_url: str = Field(
+        default="https://accounts.google.com/o/oauth2/v2/auth",
+        validation_alias="GMAIL_OAUTH_AUTHORIZATION_URL",
+    )
     gmail_oauth_token_url: str = Field(
         default="https://oauth2.googleapis.com/token",
         validation_alias="GMAIL_OAUTH_TOKEN_URL",
+    )
+    gmail_oauth_revocation_url: str = Field(
+        default="https://oauth2.googleapis.com/revoke",
+        validation_alias="GMAIL_OAUTH_REVOCATION_URL",
     )
     gmail_api_base_url: str = Field(
         default="https://gmail.googleapis.com/gmail/v1",
@@ -122,10 +133,31 @@ class Settings(BaseSettings):
         validation_alias="MAILBOX_TOKEN_CACHE_MAX_ENTRIES",
     )
 
-    @field_validator("gmail_oauth_token_url", "gmail_api_base_url")
+    @field_validator(
+        "gmail_oauth_authorization_url",
+        "gmail_oauth_token_url",
+        "gmail_oauth_revocation_url",
+        "gmail_api_base_url",
+    )
     @classmethod
     def validate_provider_url(cls, value: str) -> str:
         return _trusted_provider_url(value)
+
+    @field_validator("gmail_oauth_redirect_uri")
+    @classmethod
+    def validate_redirect_uri(cls, value: str) -> str:
+        parsed = urlparse(value)
+        is_local = parsed.hostname in {"localhost", "127.0.0.1"}
+        if (
+            not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or (parsed.scheme != "https" and not (parsed.scheme == "http" and is_local))
+        ):
+            raise ValueError("GMAIL_OAUTH_REDIRECT_URI must be an exact HTTPS callback URI")
+        return value
 
     @model_validator(mode="after")
     def validate_separate_tokens(self) -> "Settings":
