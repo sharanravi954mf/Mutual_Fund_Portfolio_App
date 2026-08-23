@@ -140,6 +140,29 @@ hosted smoke test remain post-merge operational steps. See
 `services/ingestion-support/README.md` and `THREAT_REVIEW.md` for the exact
 runtime, tests, limitations, and minimum 4 GB host guidance.
 
+### Hosted Dev ingestion-support operations (Issue #113)
+
+The repository now includes a provider-neutral Hosted Dev Compose override,
+pinned Caddy TLS ingress, placeholder-only host environment template, HTTPS-safe
+endpoint smoke test, and an operational deployment/rollback runbook. The
+override removes the API port mapping, publishes only Caddy on 80/443, preserves
+the private persistent ClamAV signature volume, and fixes the API at one Uvicorn
+worker and one Compose replica until Issue #112 changes the Edge contract.
+
+No approved Dev host, DNS name, host credentials, or host secrets are available
+in the current implementation environment. Consequently the service is not
+live, the six Hosted Dev support URL/token values have not been configured, and
+no Hosted Dev E2E smoke test has been claimed. Production remains untouched.
+
+The architecture can refresh and replace an existing encrypted Gmail OAuth
+credential but cannot securely obtain and write the first refresh token: the
+consent redirect, callback/state validation, authorization-code exchange, and
+authorized encrypted first-write path are absent. Issue #114 tracks that
+separate blocker. It must request only Gmail read-only offline access and must
+not use plaintext tokens, passwords, app passwords, or manual database writes.
+See `services/ingestion-support/HOSTED_DEV_RUNBOOK.md` for the exact prerequisite,
+secret-boundary, verification, rollback, and synthetic cleanup procedure.
+
 ### Edge Function environment inventory
 
 Supabase supplies `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and

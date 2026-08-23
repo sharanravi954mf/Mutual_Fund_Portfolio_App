@@ -1,0 +1,43 @@
+services:
+  api:
+    # The attachment-fetch OAuth bridge is process-local until Issue #112.
+    # Keep both the process count and Compose replica count at exactly one.
+    ports: !reset []
+    scale: 1
+    deploy:
+      replicas: 1
+
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set in the host secret or ignored env configuration}
+      INGESTION_SUPPORT_HOSTNAME: ${INGESTION_SUPPORT_HOSTNAME:?set to the approved Dev hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    networks:
+      - ingestion_internal
+
+volumes:
+  caddy_data:
+  caddy_config:

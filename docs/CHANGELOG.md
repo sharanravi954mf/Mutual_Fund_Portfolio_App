@@ -20,6 +20,12 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   bearer/size/redirect/timeout tests, synthetic registrar PDF fixtures, actual
   Edge parser compatibility tests, ClamAV `INSTREAM` protocol tests, and
   clean/EICAR/unavailable behavior coverage.
+- **Hosted Dev Ingestion Operations (#113)**: Added a provider-agnostic Docker
+  Compose override with pinned Caddy HTTPS ingress, exact single-replica
+  enforcement, placeholder-only host configuration, an HTTPS-safe endpoint
+  smoke test, and a deployment/rollback runbook. No host or Hosted Dev setting
+  was changed because approved host/DNS credentials were unavailable; initial
+  encrypted Gmail OAuth provisioning remains tracked by #114.
 
 ### Security
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,
@@ -29,6 +35,10 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 - **Legacy Deployment Helper Retired**: `deploy_ingestion.sh` now exits without
   deploying or requesting direct IMAP credentials. Hosted Dev continues to
   deploy from `develop`; no hosted environment is changed by Issue #109.
+- **Hosted Ingress Boundary**: Hosted Compose removes direct API exposure,
+  publishes only Caddy on 80/443, retains private persistent ClamAV signatures,
+  disables request access logging, and preserves one API worker/replica until
+  #112 removes the process-local OAuth bridge.
 
 ## Architecture and Documentation Baselines
 

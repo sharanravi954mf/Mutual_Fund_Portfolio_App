@@ -28,8 +28,9 @@ Supabase Edge Function over HTTPS
 
 The API runs as a non-root, read-only container with no Linux capabilities.
 `clamd` is reachable only on the private Compose network; port 3310 is never
-published. The API port is bound to `127.0.0.1` for local development. A future
-host must terminate HTTPS in front of it and must not expose plain HTTP.
+published. The API port is bound to `127.0.0.1` for local development. The
+hosted override removes that port mapping and adds a pinned Caddy reverse proxy
+that is the only public ingress on ports 80/443. See `HOSTED_DEV_RUNBOOK.md`.
 
 ## Edge-owned endpoint contract
 
@@ -156,9 +157,11 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -m "not integration"
 ```
 
-With Compose running and the same local tokens exported, run live tests:
+With Compose running and the same local tokens exported, run live tests. Plain
+HTTP is accepted only for an explicitly opted-in loopback target:
 
 ```sh
+ALLOW_INSECURE_LOCAL_SMOKE_URL=true \
 INGESTION_SUPPORT_BASE_URL=http://127.0.0.1:8080 \
 python -m pytest -m integration
 
@@ -176,14 +179,16 @@ Host-header validation, and non-sensitive readiness. The live Deno test uses
 the actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and
 `KfintechParser` classes. EICAR appears only in test code.
 
-## Hosted Dev follow-up (not performed by Issue #109)
+## Hosted Dev operation (Issue #113)
 
-After merge, provision a small HTTPS-capable VPS/container host with Docker,
-4 GB or more RAM, persistent space for signature databases, restricted inbound
-firewall rules, monitoring, backups for configuration only, and TLS renewal.
-Create host-only values for the three support-service bearer tokens and Gmail
-OAuth client credentials. Then configure the corresponding Dev-only Edge
-Function URL/token values outside Git and perform a controlled smoke test with
-synthetic data. Do not copy Production mail, documents, OAuth credentials, or
-secrets. Production deployment and Production configuration require a separate
-reviewed change.
+`compose.hosted.yaml`, `Caddyfile`, `.env.hosted.example`, and the integration
+test provide the provider-agnostic Hosted Dev deployment and smoke-test
+contract. `HOSTED_DEV_RUNBOOK.md` contains deployment, secret placement,
+verification, rollback, and synthetic-data cleanup instructions.
+
+The current environment has no approved Dev host, DNS name, or host credentials,
+so Issue #113 does not claim a live deployment. Initial Gmail authorization is
+also blocked by the missing consent/callback and encrypted first-write flow
+tracked in Issue #114. Do not manually insert plaintext tokens as a workaround.
+Production deployment and Production configuration require a separate reviewed
+change.
