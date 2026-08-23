@@ -62,7 +62,7 @@ they must not be linked to or manually deploy to hosted Dev or Production.
 
 | Function | Deploy to Dev | `verify_jwt` | Application and authorization evidence |
 | :--- | :---: | :---: | :--- |
-| `cams-kfintech-ingestion` | Yes | `false` | Current ingestion architecture and admin workflow. The gateway `Authorization` bearer is `MONEYBOWL_INTERNAL_INGESTION_TOKEN`; the initiating user JWT is independently validated from `x-user-authorization` before active advisor/admin workspace membership is checked. |
+| `cams-kfintech-ingestion` | Yes | `false` | Current ingestion architecture and admin workflow. The gateway `Authorization` bearer is `MONEYBOWL_INTERNAL_INGESTION_TOKEN`; the initiating user JWT is independently validated from `x-user-authorization`, then an authenticated caller-scoped RPC checks the active advisor/admin workspace membership without granting service-role access to protected business tables. |
 | `daily-nav-updater` | Yes | `false` | Invoked from the current admin dashboard. Shared authorization validates the caller JWT with Supabase Auth and requires the application profile role `admin`. Uses service-role database access and the external `api.mfapi.in` feed. |
 | `order-auto-approval-worker` | Yes | `false` | Current event-outbox worker. It requires `ORDER_AUTO_APPROVAL_WORKER_TOKEN` and then uses service-role RPCs to claim events and apply or record decisions. |
 | `platform-admin-override` | Yes | `false` | Current Sprint 6.1 audited override endpoint. It validates the caller JWT, executes the attempt RPC as that user, and restricts privileged action/finalization RPCs to the service-role client. |
