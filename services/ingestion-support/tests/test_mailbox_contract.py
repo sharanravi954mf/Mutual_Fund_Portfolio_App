@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import logging
 
 import httpx
 import pytest
@@ -897,9 +896,8 @@ async def test_gmail_poll_rejects_repeated_page_token_without_looping(settings) 
     [("timeout", "provider_unavailable"), ("error", "provider_request_failed")],
 )
 async def test_gmail_poll_later_page_failure_is_closed_and_tokens_are_not_logged(
-    settings, caplog, later_failure: str, expected_code: str
+    settings, diagnostic_stream, later_failure: str, expected_code: str
 ) -> None:
-    caplog.set_level(logging.INFO, logger="moneybowl.ingestion_support")
     oauth_token = "later-page-oauth-token-that-must-not-be-logged"
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -928,7 +926,7 @@ async def test_gmail_poll_later_page_failure_is_closed_and_tokens_are_not_logged
             oauth_token,
         )
     await provider.close()
-    assert oauth_token not in caplog.text
+    assert oauth_token not in diagnostic_stream.getvalue()
 
 
 def test_attachment_fetch_response_is_bounded(client, settings, fake_mailbox) -> None:
@@ -953,16 +951,15 @@ def test_attachment_fetch_response_is_bounded(client, settings, fake_mailbox) ->
     assert fetched.json() == {"error": {"code": "provider_response_invalid"}}
 
 
-def test_mailbox_provider_tokens_are_not_logged(client, settings, caplog) -> None:
-    caplog.set_level(logging.INFO, logger="moneybowl.ingestion_support")
+def test_mailbox_provider_tokens_are_not_logged(client, settings, diagnostic_stream) -> None:
     secret_oauth = "oauth-value-that-must-never-be-logged"
     client.post(
         "/poll",
         headers={**mailbox_headers(settings), "X-Mailbox-OAuth-Token": secret_oauth},
         json=poll_body(),
     )
-    assert secret_oauth not in caplog.text
-    assert settings.mailbox_connector_service_token not in caplog.text
+    assert secret_oauth not in diagnostic_stream.getvalue()
+    assert settings.mailbox_connector_service_token not in diagnostic_stream.getvalue()
 
 
 def test_process_restart_between_poll_and_fetch_requires_new_oauth_context(settings) -> None:

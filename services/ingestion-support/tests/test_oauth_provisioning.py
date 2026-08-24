@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
-import logging
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+from conftest import FakeMalwareScanner, mailbox_headers
 from fastapi.testclient import TestClient
 
-from app.mailbox import GmailProvider, GMAIL_READONLY_SCOPE
+from app.mailbox import GMAIL_READONLY_SCOPE, GmailProvider
 from app.main import create_app
-from conftest import FakeMalwareScanner, mailbox_headers
-
 
 STATE = "A" * 43
 
@@ -32,7 +30,9 @@ def test_oauth_authorization_url_is_exact_minimal_offline_flow(settings) -> None
     assert response.status_code == 200
     parsed = urlparse(response.json()["authorization_url"])
     query = parse_qs(parsed.query)
-    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == settings.gmail_oauth_authorization_url
+    assert (
+        f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == settings.gmail_oauth_authorization_url
+    )
     assert query == {
         "client_id": [settings.gmail_oauth_client_id],
         "redirect_uri": [settings.gmail_oauth_redirect_uri],
@@ -52,7 +52,11 @@ def test_oauth_exchange_is_server_side_and_requires_refresh_token(settings) -> N
         seen.update(parse_qs(request.content.decode()))
         return httpx.Response(
             200,
-            json={"access_token": "access-secret", "refresh_token": "refresh-secret", "expires_in": 3600},
+            json={
+                "access_token": "access-secret",
+                "refresh_token": "refresh-secret",
+                "expires_in": 3600,
+            },
         )
 
     with _client(settings, handler) as client:
@@ -88,7 +92,9 @@ def test_oauth_exchange_rejects_missing_refresh_token(settings) -> None:
 
 def test_oauth_redirect_mismatch_and_google_error_are_sanitized(settings) -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(400, json={"error": "invalid_grant", "error_description": "secret detail"})
+        return httpx.Response(
+            400, json={"error": "invalid_grant", "error_description": "secret detail"}
+        )
 
     with _client(settings, handler) as client:
         mismatch = client.post(
@@ -108,14 +114,13 @@ def test_oauth_redirect_mismatch_and_google_error_are_sanitized(settings) -> Non
     assert "secret detail" not in failed.text
 
 
-def test_oauth_revocation_uses_post_body_and_sanitized_logs(settings, caplog) -> None:
+def test_oauth_revocation_uses_post_body_and_sanitized_logs(settings, diagnostic_stream) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(200)
 
-    caplog.set_level(logging.INFO, logger="moneybowl.ingestion_support")
     with _client(settings, handler) as client:
         response = client.post(
             "/oauth/revoke?access_token=must-not-be-logged",
@@ -125,7 +130,7 @@ def test_oauth_revocation_uses_post_body_and_sanitized_logs(settings, caplog) ->
     assert response.status_code == 204
     assert requests[0].url.query == b""
     assert parse_qs(requests[0].content.decode()) == {"token": ["refresh-secret"]}
-    logs = "\n".join(record.getMessage() for record in caplog.records)
+    logs = diagnostic_stream.getvalue()
     assert "must-not-be-logged" not in logs
     assert "refresh-secret" not in logs
-    assert json.loads(caplog.records[-1].getMessage())["route"] == "/oauth/revoke"
+    assert json.loads(logs.splitlines()[-1])["route"] == "/oauth/revoke"
