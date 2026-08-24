@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 
 import httpx
 import pytest
+from conftest import FakeMailboxProvider, FakeMalwareScanner, mailbox_headers, poll_body
 from fastapi.testclient import TestClient
 
 from app.errors import ServiceError
@@ -13,11 +15,11 @@ from app.mailbox import (
     AccessTokenCache,
     FetchRequest,
     GmailProvider,
+    InlineAttachmentCache,
     PollRequest,
     RefreshRequest,
 )
 from app.main import create_app
-from conftest import FakeMailboxProvider, FakeMalwareScanner, mailbox_headers, poll_body
 
 
 def gmail_message(message_id: str, sender: str = "statements@example.test") -> dict[str, object]:
@@ -32,6 +34,39 @@ def gmail_message(message_id: str, sender: str = "statements@example.test") -> d
                     "mimeType": "application/pdf",
                     "body": {"attachmentId": f"attachment-{message_id}"},
                 }
+            ],
+        },
+    }
+
+
+def gmail_inline_message(
+    message_id: str,
+    content: bytes,
+    *,
+    encoded: str | None = None,
+) -> dict[str, object]:
+    inline_data = encoded or base64.urlsafe_b64encode(content).decode().rstrip("=")
+    return {
+        "id": message_id,
+        "internalDate": "1787392800000",
+        "payload": {
+            "headers": [
+                {
+                    "name": "From",
+                    "value": "Statements <statements@example.test>",
+                }
+            ],
+            "parts": [
+                {
+                    "filename": "",
+                    "mimeType": "text/plain",
+                    "body": {"data": "c3ludGhldGljIGJvZHk", "size": 14},
+                },
+                {
+                    "filename": "synthetic-cams.dbf",
+                    "mimeType": "application/octet-stream",
+                    "body": {"data": inline_data, "size": len(content)},
+                },
             ],
         },
     }
@@ -149,7 +184,9 @@ async def test_gmail_provider_rejects_redirects_and_oversized_responses(settings
 
     redirect_provider = GmailProvider(
         settings,
-        httpx.MockTransport(lambda _request: httpx.Response(302, headers={"Location": "https://evil.test"})),
+        httpx.MockTransport(
+            lambda _request: httpx.Response(302, headers={"Location": "https://evil.test"})
+        ),
     )
     with pytest.raises(ServiceError, match="provider_redirect_rejected"):
         await redirect_provider.refresh(request)
@@ -247,6 +284,140 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
         1024,
     )
     assert content == b"bytes"
+    await provider.close()
+
+
+def test_inline_gmail_dbf_poll_metadata_and_fetch_contract(settings) -> None:
+    inline_content = b"\x03" + b"\x00" * 617
+    encoded_inline = base64.urlsafe_b64encode(inline_content).decode().rstrip("=")
+    oauth_token = "inline-worker-oauth-token"
+    message_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal message_requests
+        assert request.headers["Authorization"] == f"Bearer {oauth_token}"
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "inlineDbfMessage"}]})
+        if request.url.path.endswith("/messages/inlineDbfMessage"):
+            message_requests += 1
+            assert request.url.params["format"] == "full"
+            return httpx.Response(
+                200,
+                json=gmail_inline_message("inlineDbfMessage", inline_content),
+            )
+        return httpx.Response(404)
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    app = create_app(settings, provider, FakeMalwareScanner())
+    headers = mailbox_headers(settings)
+    with TestClient(app) as client:
+        poll = client.post(
+            "/poll",
+            headers={**headers, "X-Mailbox-OAuth-Token": oauth_token},
+            json=poll_body(),
+        )
+        assert poll.status_code == 200
+        response_body = poll.json()
+        attachments = response_body["messages"][0]["attachments"]
+        assert len(attachments) == 1
+        assert attachments[0]["filename"] == "synthetic-cams.dbf"
+        assert attachments[0]["declared_mime"] == "application/octet-stream"
+        inline_attachment_id = attachments[0]["attachment_id"]
+        assert inline_attachment_id.startswith("inline:")
+        assert len(inline_attachment_id) == 71
+        assert encoded_inline not in poll.text
+        assert oauth_token not in poll.text
+
+        repeated_poll = client.post(
+            "/poll",
+            headers={**headers, "X-Mailbox-OAuth-Token": oauth_token},
+            json=poll_body(),
+        )
+        assert repeated_poll.status_code == 200
+        assert (
+            repeated_poll.json()["messages"][0]["attachments"][0]["attachment_id"]
+            == inline_attachment_id
+        )
+
+        unissued = client.post(
+            "/attachments/fetch",
+            headers=headers,
+            json={
+                **poll_body(),
+                "message_id": "inlineDbfMessage",
+                "attachment_id": "inline:" + "0" * 64,
+            },
+        )
+        assert unissued.status_code == 409
+        assert unissued.json() == {"error": {"code": "inline_attachment_context_required"}}
+
+        fetched = client.post(
+            "/attachments/fetch",
+            headers=headers,
+            json={
+                **poll_body(),
+                "message_id": "inlineDbfMessage",
+                "attachment_id": inline_attachment_id,
+            },
+        )
+        assert fetched.status_code == 200
+        assert fetched.content == inline_content
+        assert fetched.headers["content-type"] == "application/octet-stream"
+
+    assert message_requests == 3
+
+
+@pytest.mark.parametrize("malformed", ["not+gmail/base64url", "c3ludGhldGlj="])
+@pytest.mark.asyncio
+async def test_gmail_poll_rejects_malformed_inline_base64url(settings, malformed) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "malformedInline"}]})
+        return httpx.Response(
+            200,
+            json=gmail_inline_message(
+                "malformedInline",
+                b"synthetic",
+                encoded=malformed,
+            ),
+        )
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "malformed-inline-oauth-token",
+        )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_gmail_poll_rejects_oversized_inline_content(settings) -> None:
+    limited = settings.model_copy(update={"max_attachment_bytes": 1024})
+    oversized = b"x" * 1025
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "oversizedInline"}]})
+        return httpx.Response(
+            200,
+            json=gmail_inline_message("oversizedInline", oversized),
+        )
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_response_too_large"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "oversized-inline-oauth-token",
+        )
     await provider.close()
 
 
@@ -571,3 +742,28 @@ async def test_oauth_cache_isolates_concurrent_mailboxes_and_registrars() -> Non
         cache.get(other_mailbox),
     )
     assert tokens == ["cams-oauth", "kfintech-oauth", "other-oauth"]
+
+
+@pytest.mark.asyncio
+async def test_inline_attachment_cache_expiry_and_lru_eviction_fail_closed(
+    monkeypatch,
+) -> None:
+    now = 100.0
+    monkeypatch.setattr("app.mailbox.time.monotonic", lambda: now)
+    cache = InlineAttachmentCache(ttl_seconds=5, max_entries=2)
+    first = ("gmail:me", "mailbox-1", "CAMS", "message-1", "inline:" + "1" * 64)
+    second = ("gmail:me", "mailbox-2", "CAMS", "message-2", "inline:" + "2" * 64)
+    third = ("gmail:me", "mailbox-3", "CAMS", "message-3", "inline:" + "3" * 64)
+
+    await cache.put_many([(first, 1), (second, 2)])
+    assert await cache.get(first) == 1
+    await cache.put_many([(third, 3)])
+
+    with pytest.raises(ServiceError, match="inline_attachment_context_required"):
+        await cache.get(second)
+    assert await cache.get(first) == 1
+    assert await cache.get(third) == 3
+
+    now = 106.0
+    with pytest.raises(ServiceError, match="inline_attachment_context_required"):
+        await cache.get(first)

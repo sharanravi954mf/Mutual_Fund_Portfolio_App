@@ -121,6 +121,11 @@ page tokens must be non-empty, bounded printable ASCII and must not repeat.
 Messages with actual attachments are selected page-fairly across the inspected
 pages, up to the existing `MAX_MAILBOX_MESSAGES` output limit (default `25`).
 The Edge worker remains the authority for the configured sender allowlist.
+Gmail attachment parts may carry either a provider `attachmentId` or small
+base64url content in `body.data`. Poll responses expose metadata only. Inline
+parts receive a bounded `inline:<sha256>` identity that is disjoint from Gmail
+provider IDs; attachment bytes are decoded only for validation and are not
+included in the poll response.
 
 ## PDF layouts and limitations
 
@@ -158,6 +163,14 @@ poll and fetch fails closed with `mailbox_oauth_context_required`; the Edge
 worker must poll again before fetching. Concurrent mailbox connections use
 independent cache keys. The same mailbox connection with different registrar
 values also uses independent entries. Cache state is never persisted or shared.
+
+Inline attachment identities use a second bounded process-local cache with the
+same five-minute TTL. Its keys include connector, mailbox, registrar, message,
+and attachment identity, and its values contain only the MIME-part ordinal.
+Fetch re-reads the full Gmail message, verifies the issued identity and part,
+and then returns the validated bytes. An expired, evicted, restarted, or forged
+inline context fails closed and requires another poll. Inline bytes are not
+stored in either cache, on disk, or in the database.
 
 ## Tests
 
@@ -197,9 +210,8 @@ test provide the provider-agnostic Hosted Dev deployment and smoke-test
 contract. `HOSTED_DEV_RUNBOOK.md` contains deployment, secret placement,
 verification, rollback, and synthetic-data cleanup instructions.
 
-The current environment has no approved Dev host, DNS name, or host credentials,
-so Issue #113 does not claim a live deployment. The software implements initial
-Gmail consent/callback and encrypted first-write, but it has not been exercised
-against Hosted Dev. Do not manually insert plaintext tokens as a workaround.
-Production deployment and Production configuration require a separate reviewed
-change.
+Hosted Dev runs the support API at one worker/replica. Its controlled E2E has
+completed Gmail consent, credential refresh, and attachment search; final
+synthetic ingestion awaits deployment of the inline Gmail attachment fix. Do
+not manually insert plaintext tokens as a workaround. Production deployment
+and Production configuration require a separate reviewed change.
