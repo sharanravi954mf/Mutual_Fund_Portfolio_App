@@ -109,7 +109,13 @@ Docker Compose stack:
   Gmail page listing remains sequential, while details within a page use a
   fixed worker pool configured by `GMAIL_DETAIL_FETCH_CONCURRENCY` (default 5,
   range 1–10). Results retain listing order; a failed detail cancels and awaits
-  sibling workers before the poll fails closed.
+  sibling workers before the poll fails closed. Message-detail requests use a
+  Gmail partial-response selector that omits unused top-level message metadata
+  while retaining the complete recursive MIME `parts` subtree required for
+  normal and inline attachments. Small OAuth/list responses keep the generic
+  1 MiB bound; detail responses have a separate validated 4 MiB maximum, which
+  bounds default five-worker raw buffering at 20 MiB without changing the
+  attachment-byte limit.
 - `PDF_TEXT_EXTRACTOR_URL` is the full authenticated
   `POST /pdf/extract` URL. It provides bounded, zero-disk PDF extraction
   infrastructure plus a deterministic synthetic/characterization contract,
@@ -174,10 +180,12 @@ intact. Controlled E2E testing has completed Gmail consent, credential refresh,
 attachment search, inline `body.data` support, and bounded detail concurrency.
 Poll duration fell from roughly 25–28 seconds to about 9.1 seconds against the
 unchanged 30-second Edge connector timeout, but the Edge still reports
-`mailbox_poll_failed` with zero observed attachments. Sanitized poll-count and
-ServiceError diagnostics now distinguish successful empty polls from support
-HTTP/provider failure without exposing mailbox metadata. Production remains
-untouched.
+`mailbox_poll_failed` with zero observed attachments. Sanitized diagnostics
+confirmed a support-service 502 `provider_response_too_large` while reading a
+Gmail message detail through the generic 1 MiB provider ceiling. The repository
+now narrows detail responses with Gmail `fields` and gives only that endpoint a
+separate conservative 4 MiB bound; Hosted Dev verification of this correction
+is pending. Production remains untouched.
 
 The software now implements Gmail's web-server authorization-code flow through
 `/oauth/start`, `/oauth/callback`, and `/oauth/revoke`. Start requires an

@@ -86,6 +86,12 @@ class Settings(BaseSettings):
         le=4_194_304,
         validation_alias="MAX_PROVIDER_RESPONSE_BYTES",
     )
+    max_gmail_message_detail_response_bytes: int = Field(
+        default=4_194_304,
+        ge=1_048_576,
+        le=4_194_304,
+        validation_alias="MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES",
+    )
     max_attachment_bytes: int = Field(
         default=20_971_519,
         ge=1024,
@@ -174,6 +180,15 @@ class Settings(BaseSettings):
         }
         if len(tokens) != 3:
             raise ValueError("service bearer tokens must be distinct")
+        return self
+
+    @model_validator(mode="after")
+    def validate_provider_response_limits(self) -> Settings:
+        if self.max_gmail_message_detail_response_bytes < self.max_provider_response_bytes:
+            raise ValueError(
+                "MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES must be greater than or equal to "
+                "MAX_PROVIDER_RESPONSE_BYTES"
+            )
         return self
 
     @property

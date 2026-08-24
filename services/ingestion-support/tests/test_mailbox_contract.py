@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.errors import ServiceError
 from app.mailbox import (
+    GMAIL_MESSAGE_DETAIL_FIELDS,
     AccessTokenCache,
     FetchRequest,
     GmailProvider,
@@ -73,6 +74,47 @@ def gmail_inline_message(
     }
 
 
+def gmail_nested_message(message_id: str) -> dict[str, object]:
+    return {
+        "id": message_id,
+        "internalDate": "1787392800000",
+        "payload": {
+            "headers": [
+                {
+                    "name": "From",
+                    "value": "Statements <statements@example.test>",
+                }
+            ],
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {
+                    "mimeType": "multipart/alternative",
+                    "parts": [
+                        {
+                            "filename": "",
+                            "mimeType": "text/plain",
+                            "body": {"data": "c3ludGhldGljIGJvZHk", "size": 14},
+                        }
+                    ],
+                },
+                {
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        {
+                            "filename": "nested-cams.dbf",
+                            "mimeType": "application/octet-stream",
+                            "body": {
+                                "attachmentId": f"nested-attachment-{message_id}",
+                                "size": 618,
+                            },
+                        }
+                    ],
+                },
+            ],
+        },
+    }
+
+
 async def controlled_delayed_gmail_poll(
     settings,
     concurrency: int,
@@ -100,6 +142,7 @@ async def controlled_delayed_gmail_poll(
             return httpx.Response(200, json={"messages": [{"id": item} for item in message_ids]})
 
         message_id = request.url.path.rsplit("/", 1)[-1]
+        assert request.url.params["fields"] == GMAIL_MESSAGE_DETAIL_FIELDS
         gate = current_gate
         active += 1
         max_active = max(max_active, active)
@@ -325,6 +368,8 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
             assert request.url.params["q"] == "has:attachment {filename:pdf filename:dbf}"
             return httpx.Response(200, json={"messages": [{"id": "gmailMessage1"}]})
         if path.endswith("/messages/gmailMessage1"):
+            assert request.url.params["format"] == "full"
+            assert request.url.params["fields"] == GMAIL_MESSAGE_DETAIL_FIELDS
             payload = gmail_message("gmailMessage1")
             payload["payload"]["parts"][0]["body"]["attachmentId"] = "gmailAttachment1"
             return httpx.Response(200, json=payload)
@@ -363,6 +408,75 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
     )
     assert content == b"bytes"
     await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_gmail_detail_partial_response_omits_large_unneeded_message_data(settings) -> None:
+    generic_limit = settings.max_provider_response_bytes
+    limited = settings.model_copy(update={"max_gmail_message_detail_response_bytes": generic_limit})
+    full_response = {
+        **gmail_message("partialMessage"),
+        "threadId": "unused-thread-id",
+        "labelIds": ["UNUSED"],
+        "snippet": "irrelevant-provider-content-" + "x" * generic_limit,
+        "historyId": "123456789",
+        "sizeEstimate": generic_limit * 2,
+        "classificationLabelValues": [{"id": "unused-classification"}],
+    }
+    assert len(json.dumps(full_response).encode()) > generic_limit
+    returned_lengths: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "partialMessage"}]})
+        assert request.url.params["format"] == "full"
+        assert request.url.params["fields"] == GMAIL_MESSAGE_DETAIL_FIELDS
+        assert "snippet" not in request.url.params["fields"]
+        assert "labelIds" not in request.url.params["fields"]
+        partial_response = gmail_message("partialMessage")
+        encoded = json.dumps(partial_response).encode()
+        returned_lengths.append(len(encoded))
+        return httpx.Response(200, content=encoded, headers={"Content-Type": "application/json"})
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+        ),
+        "partial-response-oauth-token",
+    )
+    await provider.close()
+
+    assert returned_lengths and returned_lengths[0] < generic_limit
+    assert [message.message_id for message in messages] == ["partialMessage"]
+
+
+@pytest.mark.asyncio
+async def test_gmail_detail_partial_response_preserves_nested_mime_parts(settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "nestedMessage"}]})
+        assert request.url.params["fields"] == GMAIL_MESSAGE_DETAIL_FIELDS
+        return httpx.Response(200, json=gmail_nested_message("nestedMessage"))
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+        ),
+        "nested-message-oauth-token",
+    )
+    await provider.close()
+
+    assert len(messages) == 1
+    assert messages[0].sender_address == "statements@example.test"
+    assert len(messages[0].attachments) == 1
+    assert messages[0].attachments[0].attachment_id == "nested-attachment-nestedMessage"
+    assert messages[0].attachments[0].filename == "nested-cams.dbf"
 
 
 @pytest.mark.asyncio
@@ -577,6 +691,96 @@ def test_gmail_detail_fetch_concurrency_configuration_is_bounded(
         Settings()
 
 
+@pytest.mark.parametrize("invalid_limit", ["1048575", "4194305"])
+def test_gmail_message_detail_response_limit_configuration_is_bounded(
+    monkeypatch,
+    invalid_limit: str,
+) -> None:
+    monkeypatch.setenv("MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES", invalid_limit)
+    with pytest.raises(ValidationError, match="MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES"):
+        Settings()
+
+
+def test_gmail_message_detail_limit_cannot_be_below_generic_provider_limit(monkeypatch) -> None:
+    monkeypatch.setenv("MAX_PROVIDER_RESPONSE_BYTES", "2097152")
+    monkeypatch.setenv("MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES", "1048576")
+    with pytest.raises(
+        ValidationError,
+        match="MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES must be greater than or equal to",
+    ):
+        Settings()
+
+
+def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_content(
+    settings,
+    diagnostic_stream,
+) -> None:
+    detail_limit = 1_048_576
+    limited = settings.model_copy(update={"max_gmail_message_detail_response_bytes": detail_limit})
+    oauth_token = "oversized-detail-oauth-token"
+    message_id = "oversizedProviderMessage"
+    filename = "provider-filename-must-not-be-logged.dbf"
+    content_marker = "required-provider-content-marker"
+    required_data = content_marker + "A" * detail_limit
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Bearer {oauth_token}"
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": message_id}]})
+        assert request.url.params["fields"] == GMAIL_MESSAGE_DETAIL_FIELDS
+        return httpx.Response(
+            200,
+            json={
+                "id": message_id,
+                "internalDate": "1787392800000",
+                "payload": {
+                    "headers": [
+                        {
+                            "name": "From",
+                            "value": "private-sender@example.test",
+                        }
+                    ],
+                    "parts": [
+                        {
+                            "filename": filename,
+                            "mimeType": "application/octet-stream",
+                            "body": {
+                                "data": required_data,
+                                "size": 786_432,
+                            },
+                        }
+                    ],
+                },
+            },
+        )
+
+    app = create_app(
+        limited, GmailProvider(limited, httpx.MockTransport(handler)), FakeMalwareScanner()
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/poll",
+            headers={
+                **mailbox_headers(limited),
+                "X-Mailbox-OAuth-Token": oauth_token,
+            },
+            json=poll_body(),
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {"error": {"code": "provider_response_too_large"}}
+    logs = diagnostic_stream.getvalue()
+    assert '"error_code":"provider_response_too_large"' in logs
+    for forbidden in (
+        oauth_token,
+        message_id,
+        filename,
+        content_marker,
+        "private-sender@example.test",
+    ):
+        assert forbidden not in logs
+
+
 def test_inline_gmail_dbf_poll_metadata_and_fetch_contract(settings) -> None:
     inline_content = b"\x03" + b"\x00" * 617
     encoded_inline = base64.urlsafe_b64encode(inline_content).decode().rstrip("=")
@@ -591,6 +795,7 @@ def test_inline_gmail_dbf_poll_metadata_and_fetch_contract(settings) -> None:
         if request.url.path.endswith("/messages/inlineDbfMessage"):
             message_requests += 1
             assert request.url.params["format"] == "full"
+            assert request.url.params["fields"] == GMAIL_MESSAGE_DETAIL_FIELDS
             return httpx.Response(
                 200,
                 json=gmail_inline_message("inlineDbfMessage", inline_content),
