@@ -39,6 +39,11 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   `attachmentId` parts. Poll remains metadata-only; a bounded, scoped,
   expiring internal locator lets fetch re-read and validate the MIME part
   without caching or persisting attachment bytes.
+- **Bounded Gmail Detail Polling (#113)**: Gmail page listing remains
+  sequential, while a configurable fixed worker pool fetches per-page message
+  details concurrently and restores listing order. Failures cancel and await
+  sibling workers; existing timeout, page, candidate, response, and attachment
+  bounds remain unchanged.
 
 ### Security
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,

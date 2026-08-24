@@ -106,6 +106,10 @@ Docker Compose stack:
   attachment representations are supported: provider `attachmentId` values
   and small inline `body.data` parts. Poll returns metadata only; inline parts
   use a bounded `inline:<sha256>` identity and are re-read from Gmail on fetch.
+  Gmail page listing remains sequential, while details within a page use a
+  fixed worker pool configured by `GMAIL_DETAIL_FETCH_CONCURRENCY` (default 5,
+  range 1–10). Results retain listing order; a failed detail cancels and awaits
+  sibling workers before the poll fails closed.
 - `PDF_TEXT_EXTRACTOR_URL` is the full authenticated
   `POST /pdf/extract` URL. It provides bounded, zero-disk PDF extraction
   infrastructure plus a deterministic synthetic/characterization contract,
@@ -160,9 +164,11 @@ worker and one Compose replica until Issue #112 changes the Edge contract.
 
 The support service is deployed to Hosted Dev with the single-worker boundary
 intact. Controlled E2E testing has completed Gmail consent, credential refresh,
-and attachment search. The synthetic CAMS message exposed Gmail's small inline
-`body.data` representation; final ingestion verification awaits deployment of
-this connector correction. Production remains untouched.
+attachment search, and deployment of inline `body.data` support. With up to
+100 candidates, the remaining sequential message-detail loop consumed roughly
+25–28 seconds against the unchanged 30-second Edge connector timeout. The
+bounded per-page detail worker pool addresses that bottleneck without raising
+the timeout or page/candidate limits. Production remains untouched.
 
 The software now implements Gmail's web-server authorization-code flow through
 `/oauth/start`, `/oauth/callback`, and `/oauth/revoke`. Start requires an

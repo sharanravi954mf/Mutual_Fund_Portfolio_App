@@ -429,7 +429,7 @@ class GmailProvider:
             if not isinstance(raw_messages, list) or len(raw_messages) > page_size:
                 raise ServiceError(502, "provider_response_invalid")
 
-            page_messages: list[Message] = []
+            page_message_ids: list[str] = []
             for listed in raw_messages:
                 if not isinstance(listed, dict) or not isinstance(listed.get("id"), str):
                     raise ServiceError(502, "provider_response_invalid")
@@ -438,14 +438,11 @@ class GmailProvider:
                     raise ServiceError(502, "provider_response_invalid")
                 seen_message_ids.add(message_id)
                 candidate_count += 1
-                raw = await self._json_request(
-                    "GET",
-                    f"{self.settings.gmail_api_base_url}/users/{user_id}/messages/"
-                    f"{quote(message_id, safe='')}",
-                    headers=auth,
-                    params={"format": "full"},
-                )
-                message, inline_parts = self._message_from_gmail(raw)
+                page_message_ids.append(message_id)
+
+            page_messages: list[Message] = []
+            details = await self._fetch_page_message_details(page_message_ids, user_id, auth)
+            for message, inline_parts in details:
                 if message.attachments:
                     page_messages.append(message)
                     inline_parts_by_message[message.message_id] = inline_parts
@@ -475,6 +472,52 @@ class GmailProvider:
                 )
         await self.inline_attachment_cache.put_many(cache_entries)
         return selected
+
+    async def _fetch_page_message_details(
+        self,
+        message_ids: list[str],
+        user_id: str,
+        auth: dict[str, str],
+    ) -> list[tuple[Message, list[InlineAttachmentPart]]]:
+        """Fetch one Gmail listing page with a fixed worker pool and stable ordering."""
+
+        if not message_ids:
+            return []
+
+        results: dict[int, tuple[Message, list[InlineAttachmentPart]]] = {}
+        next_index = 0
+
+        async def worker() -> None:
+            nonlocal next_index
+            while next_index < len(message_ids):
+                index = next_index
+                next_index += 1
+                message_id = message_ids[index]
+                raw = await self._json_request(
+                    "GET",
+                    f"{self.settings.gmail_api_base_url}/users/{user_id}/messages/"
+                    f"{quote(message_id, safe='')}",
+                    headers=auth,
+                    params={"format": "full"},
+                )
+                message, inline_parts = self._message_from_gmail(raw)
+                if message.message_id != message_id:
+                    raise ServiceError(502, "provider_response_invalid")
+                results[index] = (message, inline_parts)
+
+        worker_count = min(self.settings.gmail_detail_fetch_concurrency, len(message_ids))
+        workers = [asyncio.create_task(worker()) for _worker in range(worker_count)]
+        try:
+            await asyncio.gather(*workers)
+        except BaseException:
+            for task in workers:
+                task.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            raise
+
+        if len(results) != len(message_ids):
+            raise ServiceError(502, "provider_response_invalid")
+        return [results[index] for index in range(len(message_ids))]
 
     @staticmethod
     def _valid_page_token(value: Any) -> bool:

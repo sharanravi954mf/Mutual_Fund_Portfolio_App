@@ -117,6 +117,12 @@ class Settings(BaseSettings):
         le=1000,
         validation_alias="MAX_MAILBOX_CANDIDATES_PER_POLL",
     )
+    gmail_detail_fetch_concurrency: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        validation_alias="GMAIL_DETAIL_FETCH_CONCURRENCY",
+    )
     max_attachments_per_message: int = Field(
         default=5, ge=1, le=20, validation_alias="MAX_ATTACHMENTS_PER_MESSAGE"
     )
@@ -160,7 +166,7 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_separate_tokens(self) -> "Settings":
+    def validate_separate_tokens(self) -> Settings:
         tokens = {
             self.mailbox_connector_service_token,
             self.pdf_text_extractor_service_token,
