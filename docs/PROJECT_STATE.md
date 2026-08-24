@@ -163,7 +163,12 @@ the SHA-256 digest with actor/workspace/mailbox/exact-redirect binding and a
 ten-minute expiry. Callback atomically consumes state, exchanges the code only
 through the fixed-origin support service, requires a refresh token, and writes
 only the existing AES-256-GCM credential envelope with workspace/mailbox/key
-version AAD. Reauthorization uses the same fenced upsert. Revocation is
+version AAD. Because Hosted Edge requests pass through the Supabase gateway,
+callback acceptance compares the runtime request pathname with the pathname of
+the configured external redirect URI; it does not compare proxy-facing origins
+or trust caller-controlled Host/forwarding headers. The exact configured URI
+remains bound to state and is used for authorization and code exchange.
+Reauthorization uses the same fenced upsert. Revocation is
 server-side, nonce-fenced, audited, and leaves the mailbox
 `reauthorization_required`. No Hosted Dev E2E success is claimed.
 See `services/ingestion-support/HOSTED_DEV_RUNBOOK.md` for the exact prerequisite,

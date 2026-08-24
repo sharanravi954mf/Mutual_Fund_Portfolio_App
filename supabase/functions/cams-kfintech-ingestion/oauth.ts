@@ -111,10 +111,6 @@ function onlyQueryValue(url: URL, name: string): string | null {
   return values[0] ?? null;
 }
 
-function requestCallbackUri(url: URL): string {
-  return `${url.origin}${url.pathname}`;
-}
-
 async function parseObject(req: Request): Promise<Record<string, unknown>> {
   try {
     const parsed: unknown = await req.json();
@@ -140,7 +136,7 @@ async function markFailed(
   throw new IngestionError(code);
 }
 
-function validateRedirectConfiguration(redirectUri: string): void {
+function validateRedirectConfiguration(redirectUri: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(redirectUri);
@@ -156,12 +152,14 @@ function validateRedirectConfiguration(redirectUri: string): void {
   ) {
     throw new IngestionError("oauth_redirect_uri_mismatch");
   }
+  return parsed;
 }
 
 export function createGmailOAuthHandler(
   deps: GmailOAuthDependencies,
 ): (req: Request) => Promise<Response> {
-  validateRedirectConfiguration(deps.redirectUri);
+  const callbackPathname = validateRedirectConfiguration(deps.redirectUri)
+    .pathname;
   const now = deps.now ?? (() => new Date());
   const generateState = deps.generateState ?? randomState;
 
@@ -212,7 +210,7 @@ export function createGmailOAuthHandler(
         if (req.method !== "GET") {
           return response({ error: { code: "not_authorized" } }, 405);
         }
-        if (requestCallbackUri(url) !== deps.redirectUri) {
+        if (url.pathname !== callbackPathname) {
           throw new IngestionError("oauth_redirect_uri_mismatch");
         }
         const state = onlyQueryValue(url, "state");

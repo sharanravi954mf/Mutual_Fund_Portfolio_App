@@ -54,6 +54,12 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   scoped authenticated `SECURITY DEFINER` RPC. The RPC returns only an
   authorization result, fails closed, and preserves the hardened business-table
   grants instead of requiring service-role `SELECT` access.
+- **Hosted Edge OAuth Callback Boundary (#119)**: Callback routing now validates
+  the exact configured external redirect pathname while tolerating the
+  gateway's different runtime-facing origin. The configured URI remains bound
+  to hashed single-use state and is used unchanged for Google authorization
+  and code exchange; caller-controlled host and forwarding headers are not
+  trusted.
 
 ## Architecture and Documentation Baselines
 
