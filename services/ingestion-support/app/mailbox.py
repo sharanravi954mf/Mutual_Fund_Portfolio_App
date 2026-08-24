@@ -26,6 +26,10 @@ PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
 INLINE_ATTACHMENT_ID_RE = re.compile(r"^inline:[0-9a-f]{64}$")
 GMAIL_BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
 GMAIL_ATTACHMENT_QUERY = "has:attachment {filename:pdf filename:dbf}"
+GMAIL_MESSAGE_DETAIL_FIELDS = (
+    "id,internalDate,"
+    "payload(headers(name,value),filename,mimeType,body(attachmentId,size,data),parts)"
+)
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 OAUTH_STATE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
@@ -321,7 +325,9 @@ class GmailProvider:
         headers: dict[str, str] | None = None,
         data: dict[str, str] | None = None,
         params: dict[str, str | int] | None = None,
+        max_response_bytes: int | None = None,
     ) -> dict[str, Any]:
+        response_limit = max_response_bytes or self.settings.max_provider_response_bytes
         try:
             async with self.client.stream(
                 method, url, headers=headers, data=data, params=params
@@ -331,15 +337,12 @@ class GmailProvider:
                 if response.status_code < 200 or response.status_code >= 300:
                     raise ServiceError(502, "provider_request_failed")
                 declared = response.headers.get("content-length")
-                if (
-                    declared is not None
-                    and int(declared) > self.settings.max_provider_response_bytes
-                ):
+                if declared is not None and int(declared) > response_limit:
                     raise ServiceError(502, "provider_response_too_large")
                 raw = bytearray()
                 async for chunk in response.aiter_bytes():
                     raw.extend(chunk)
-                    if len(raw) > self.settings.max_provider_response_bytes:
+                    if len(raw) > response_limit:
                         raise ServiceError(502, "provider_response_too_large")
         except ServiceError:
             raise
@@ -498,7 +501,8 @@ class GmailProvider:
                     f"{self.settings.gmail_api_base_url}/users/{user_id}/messages/"
                     f"{quote(message_id, safe='')}",
                     headers=auth,
-                    params={"format": "full"},
+                    params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
+                    max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
                 )
                 message, inline_parts = self._message_from_gmail(raw)
                 if message.message_id != message_id:
@@ -750,7 +754,8 @@ class GmailProvider:
             f"{self.settings.gmail_api_base_url}/users/{user_id}/messages/"
             f"{quote(request.message_id, safe='')}",
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
-            params={"format": "full"},
+            params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
+            max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
         )
         message, inline_parts = self._message_from_gmail(raw)
         if message.message_id != request.message_id:

@@ -25,7 +25,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   enforcement, placeholder-only host configuration, an HTTPS-safe endpoint
   smoke test, and a deployment/rollback runbook. Hosted Dev deployment and
   encrypted Gmail OAuth smoke testing now reach attachment search; final
-  synthetic ingestion awaits the inline attachment correction below.
+  synthetic ingestion remains pending under Issue #113.
 - **Secure Gmail OAuth Provisioning (#114)**: Added the web-server
   authorization-code flow with exact redirect validation, Gmail read-only
   offline consent, expiring hashed single-use state, server-side exchange,
@@ -50,6 +50,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   code/status. Uvicorn access logs remain disabled, duplicate handlers are
   prevented, and no body, provider identity, mailbox metadata, or credential is
   logged.
+- **Bounded Gmail Message Details (#113)**: Gmail `format=full` detail calls now
+  request only connector-required top-level fields plus the complete recursive
+  MIME subtree needed for normal and inline attachments. A separate validated
+  4 MiB detail ceiling leaves OAuth/list responses at 1 MiB and bounds the
+  default five concurrent raw detail buffers at 20 MiB. Oversized required MIME
+  data still fails closed; attachment, timeout, page, candidate, and concurrency
+  limits are unchanged.
 
 ### Security
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,

@@ -132,7 +132,25 @@ Page listing remains sequential. Within each page, a fixed worker pool fetches
 message details with `GMAIL_DETAIL_FETCH_CONCURRENCY` concurrent requests
 (default `5`, allowed range `1..10`). Results are restored to Gmail listing
 order before attachment filtering, and any failed detail request cancels and
-awaits its sibling workers before the poll fails closed.
+awaits its sibling workers before the poll fails closed. Detail requests keep
+Gmail `format=full` because attachment discovery and small inline attachments
+require the parsed MIME body, but use a partial-response `fields` selector for
+only `id`, `internalDate`, the root headers, and the MIME fields consumed by the
+connector. Gmail field masks cannot conditionally include `body.data` only for
+filename-bearing parts while also expressing an arbitrary recursive `parts`
+tree, so the selector deliberately retains the complete recursive `parts`
+subtree and omits unrelated top-level message fields such as snippet, labels,
+thread/history metadata, size estimates, and classification labels.
+
+OAuth, list, and other small provider JSON responses remain bounded by
+`MAX_PROVIDER_RESPONSE_BYTES` (default 1 MiB). Message-detail poll and inline
+fetch responses use the separate
+`MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES` ceiling (default and maximum 4 MiB,
+minimum 1 MiB, and never below the generic provider limit). This does not reuse
+or raise `MAX_ATTACHMENT_BYTES`. At the default detail concurrency of five,
+at most 20 MiB of raw detail response buffers can be active; the allowed
+concurrency maximum of ten caps that raw-buffer total at 40 MiB. Oversized or
+malformed required MIME data still fails closed.
 Messages with actual attachments are selected page-fairly across the inspected
 pages, up to the existing `MAX_MAILBOX_MESSAGES` output limit (default `25`).
 The Edge worker remains the authority for the configured sender allowlist.
@@ -231,7 +249,10 @@ completed Gmail consent, credential refresh, attachment search, inline Gmail
 attachment support, and bounded detail concurrency. Poll time fell from roughly
 25–28 seconds to about 9.1 seconds, but the Edge still reports
 `mailbox_poll_failed` with zero observed attachments. Sanitized INFO diagnostics
-now distinguish support-service failure from a successful poll containing zero
-messages or attachments without exposing mailbox metadata. Timeout and
-page/candidate limits remain unchanged. Production deployment and Production
-configuration require a separate reviewed change.
+confirmed the support service was rejecting a Gmail message-detail response
+above the generic 1 MiB provider ceiling with `provider_response_too_large`.
+The repository now requests only the required partial response and applies the
+separate conservative message-detail ceiling described above; this correction
+has not been deployed or re-tested on Hosted Dev. Timeout, page/candidate,
+attachment, and concurrency limits remain unchanged. Production deployment and
+Production configuration require a separate reviewed change.

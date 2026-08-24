@@ -76,6 +76,12 @@ part of Issue #113.
    secret mechanism, set `ALLOWED_HOSTS` to the exact Dev hostname plus
    `localhost,127.0.0.1` for internal health and readiness requests (never
    `*`), and restrict the file to the service administrator.
+   Keep `MAX_PROVIDER_RESPONSE_BYTES=1048576` for small OAuth/list provider
+   responses and
+   `MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES=4194304` for partial Gmail message
+   details. The detail ceiling is independent from attachment-byte limits and,
+   with the fixed default concurrency of five, caps simultaneous raw detail
+   buffers at 20 MiB. Do not raise either value during the smoke test.
 3. Validate the merged Compose model before starting anything:
 
    ```sh
