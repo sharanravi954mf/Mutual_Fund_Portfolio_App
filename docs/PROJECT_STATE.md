@@ -164,10 +164,12 @@ ten-minute expiry. Callback atomically consumes state, exchanges the code only
 through the fixed-origin support service, requires a refresh token, and writes
 only the existing AES-256-GCM credential envelope with workspace/mailbox/key
 version AAD. Because Hosted Edge requests pass through the Supabase gateway,
-callback acceptance compares the runtime request pathname with the pathname of
-the configured external redirect URI; it does not compare proxy-facing origins
-or trust caller-controlled Host/forwarding headers. The exact configured URI
-remains bound to state and is used for authorization and code exchange.
+callback acceptance derives exactly two allowed paths from the configured
+external `/functions/v1/<function-name>/oauth/callback` path: that public path
+and the gateway-stripped `/<function-name>/oauth/callback` runtime path. It does
+not compare proxy-facing origins or trust caller-controlled Host/forwarding
+headers. The exact configured URI remains bound to state and is used for
+authorization and code exchange.
 Reauthorization uses the same fenced upsert. Revocation is
 server-side, nonce-fenced, audited, and leaves the mailbox
 `reauthorization_required`. No Hosted Dev E2E success is claimed.

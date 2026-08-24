@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  assertThrows,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
 import { CredentialEnvelopeCrypto } from "./adapters.ts";
 import {
@@ -16,7 +17,7 @@ const STATE = "A".repeat(43);
 const REDIRECT =
   "https://dev.example.test/functions/v1/cams-kfintech-ingestion/oauth/callback";
 const HOSTED_RUNTIME_CALLBACK =
-  "http://edge-runtime.internal/functions/v1/cams-kfintech-ingestion/oauth/callback";
+  "http://edge-runtime.internal/cams-kfintech-ingestion/oauth/callback";
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 
 type Captures = {
@@ -190,6 +191,25 @@ Deno.test("Hosted Edge callback accepts its runtime origin while preserving the 
   assertEquals(captures.exchangeRedirectUri, REDIRECT);
 });
 
+Deno.test("configured callback requires the strict public Supabase function route", () => {
+  for (
+    const redirectUri of [
+      "https://dev.example.test/cams-kfintech-ingestion/oauth/callback",
+      "https://dev.example.test/functions/v1/other/callback",
+      "https://dev.example.test/functions/v1/foo/cams-kfintech-ingestion/oauth/callback",
+      "https://dev.example.test/functions/v1//oauth/callback",
+    ]
+  ) {
+    const { deps } = dependencies();
+    deps.redirectUri = redirectUri;
+    assertThrows(
+      () => createGmailOAuthHandler(deps),
+      IngestionError,
+      "oauth_redirect_uri_mismatch",
+    );
+  }
+});
+
 Deno.test("invalid, expired, and replayed state are rejected deterministically", async () => {
   for (
     const [error, status] of [
@@ -207,7 +227,7 @@ Deno.test("invalid, expired, and replayed state are rejected deterministically",
   }
 });
 
-Deno.test("callback is GET-only and rejects missing or malformed state and a mismatched pathname", async () => {
+Deno.test("callback is GET-only and rejects missing or malformed state", async () => {
   const { deps } = dependencies();
   const handler = createGmailOAuthHandler(deps);
   assertEquals(
@@ -221,20 +241,32 @@ Deno.test("callback is GET-only and rejects missing or malformed state and a mis
     (await malformedState.json()).error.code,
     "oauth_state_invalid",
   );
-  const mismatch = await handler(
-    callback(
-      `state=${STATE}&code=code`,
-      HOSTED_RUNTIME_CALLBACK.replace(
-        "cams-kfintech-ingestion",
-        "other-function",
+});
+
+Deno.test("callback rejects every pathname outside the two configured deterministic forms", async () => {
+  const { deps, captures } = dependencies();
+  const handler = createGmailOAuthHandler(deps);
+  const invalidPathnames = [
+    "/other-function/oauth/callback",
+    "/foo/cams-kfintech-ingestion/oauth/callback",
+    "/cams-kfintech-ingestion/other/callback",
+    "/unrelated",
+  ];
+
+  for (const pathname of invalidPathnames) {
+    const mismatch = await handler(
+      callback(
+        `state=${STATE}&code=code`,
+        `http://edge-runtime.internal${pathname}`,
       ),
-    ),
-  );
-  assertEquals(mismatch.status, 422);
-  assertEquals(
-    (await mismatch.json()).error.code,
-    "oauth_redirect_uri_mismatch",
-  );
+    );
+    assertEquals(mismatch.status, 422);
+    assertEquals(
+      (await mismatch.json()).error.code,
+      "oauth_redirect_uri_mismatch",
+    );
+  }
+  assertEquals(captures.consumeRedirectUri, undefined);
 });
 
 Deno.test("Google error, missing code, exchange error, and missing refresh token consume then fail", async () => {

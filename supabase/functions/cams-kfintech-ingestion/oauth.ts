@@ -18,6 +18,11 @@ type ConsumedAuthorization = {
   flowKind: "first_time" | "reauthorization";
 };
 
+type CallbackPathnames = {
+  external: string;
+  runtime: string;
+};
+
 export type GmailOAuthDependencies = {
   redirectUri: string;
   now?: () => Date;
@@ -136,7 +141,7 @@ async function markFailed(
   throw new IngestionError(code);
 }
 
-function validateRedirectConfiguration(redirectUri: string): URL {
+function validateRedirectConfiguration(redirectUri: string): CallbackPathnames {
   let parsed: URL;
   try {
     parsed = new URL(redirectUri);
@@ -152,14 +157,28 @@ function validateRedirectConfiguration(redirectUri: string): URL {
   ) {
     throw new IngestionError("oauth_redirect_uri_mismatch");
   }
-  return parsed;
+
+  const segments = parsed.pathname.split("/");
+  const functionName = segments[3];
+  if (
+    segments.length !== 6 || segments[0] !== "" ||
+    segments[1] !== "functions" || segments[2] !== "v1" ||
+    functionName == null || !/^[a-z0-9][a-z0-9_-]*$/.test(functionName) ||
+    segments[4] !== "oauth" || segments[5] !== "callback"
+  ) {
+    throw new IngestionError("oauth_redirect_uri_mismatch");
+  }
+
+  return {
+    external: parsed.pathname,
+    runtime: `/${functionName}/oauth/callback`,
+  };
 }
 
 export function createGmailOAuthHandler(
   deps: GmailOAuthDependencies,
 ): (req: Request) => Promise<Response> {
-  const callbackPathname = validateRedirectConfiguration(deps.redirectUri)
-    .pathname;
+  const callbackPathnames = validateRedirectConfiguration(deps.redirectUri);
   const now = deps.now ?? (() => new Date());
   const generateState = deps.generateState ?? randomState;
 
@@ -210,7 +229,10 @@ export function createGmailOAuthHandler(
         if (req.method !== "GET") {
           return response({ error: { code: "not_authorized" } }, 405);
         }
-        if (url.pathname !== callbackPathname) {
+        if (
+          url.pathname !== callbackPathnames.external &&
+          url.pathname !== callbackPathnames.runtime
+        ) {
           throw new IngestionError("oauth_redirect_uri_mismatch");
         }
         const state = onlyQueryValue(url, "state");
@@ -313,6 +335,10 @@ export function createGmailOAuthHandler(
         return response({
           data: { status: "revoked", reauthorization_required: true },
         });
+      }
+
+      if (req.method === "GET") {
+        throw new IngestionError("oauth_redirect_uri_mismatch");
       }
 
       return response({ error: { code: "not_authorized" } }, 404);
