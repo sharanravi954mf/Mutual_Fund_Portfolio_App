@@ -47,6 +47,16 @@ requires `X-Content-SHA256` and `X-File-Name`. `/health` and `/ready` are
 unauthenticated and return status only. Readiness fails while `clamd` or its
 signature database is unavailable.
 
+Application diagnostics are explicit INFO-level JSON lines written to stdout
+for `docker logs`; raw Uvicorn access logging remains disabled. Request events
+contain only event, random request ID, method, allowlisted route, status, and
+duration. A successful mailbox poll also emits message and attachment counts,
+including zero counts for a successful empty poll. `ServiceError` events contain
+only request ID, sanitized internal code, and HTTP status. Bodies, headers,
+provider identities, filenames, senders, document content, and credentials are
+never included. Logger configuration is idempotent and does not propagate, so
+repeated app construction does not add handlers or duplicate lines.
+
 The response versions and snake-case fields intentionally match the current
 TypeScript classes in
 `supabase/functions/cams-kfintech-ingestion/adapters.ts`:
@@ -217,10 +227,11 @@ contract. `HOSTED_DEV_RUNBOOK.md` contains deployment, secret placement,
 verification, rollback, and synthetic-data cleanup instructions.
 
 Hosted Dev runs the support API at one worker/replica. Its controlled E2E has
-completed Gmail consent, credential refresh, attachment search, and deployment
-of inline Gmail attachment support. With a 100-candidate bound, sequential
-message-detail retrieval still consumed roughly 25–28 seconds against the
-unchanged 30-second Edge connector timeout. Bounded per-page concurrency is the
-corrective path; timeout and page/candidate limits remain unchanged. Do not
-manually insert plaintext tokens as a workaround. Production deployment and
-Production configuration require a separate reviewed change.
+completed Gmail consent, credential refresh, attachment search, inline Gmail
+attachment support, and bounded detail concurrency. Poll time fell from roughly
+25–28 seconds to about 9.1 seconds, but the Edge still reports
+`mailbox_poll_failed` with zero observed attachments. Sanitized INFO diagnostics
+now distinguish support-service failure from a successful poll containing zero
+messages or attachments without exposing mailbox metadata. Timeout and
+page/candidate limits remain unchanged. Production deployment and Production
+configuration require a separate reviewed change.

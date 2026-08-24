@@ -44,6 +44,12 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   details concurrently and restores listing order. Failures cancel and await
   sibling workers; existing timeout, page, candidate, response, and attachment
   bounds remain unchanged.
+- **Sanitized Ingestion Diagnostics (#113)**: The support API now emits
+  fixed-schema INFO JSON lines to container stdout for safe request outcomes,
+  successful mailbox message/attachment counts, and sanitized ServiceError
+  code/status. Uvicorn access logs remain disabled, duplicate handlers are
+  prevented, and no body, provider identity, mailbox metadata, or credential is
+  logged.
 
 ### Security
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,

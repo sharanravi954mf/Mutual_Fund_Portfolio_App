@@ -129,6 +129,13 @@ unavailable. The API is bound to localhost in the local Compose configuration;
 hosted Dev requires an HTTPS ingress, an explicit host allowlist, and secrets
 stored outside Git.
 
+The support API configures one non-propagating INFO JSON-lines handler for
+container stdout while retaining disabled Uvicorn access logs. Fixed-schema
+request events contain only request ID, method, allowlisted route, status, and
+duration. Successful polls add message/attachment counts; ServiceError events
+add only sanitized code/status. No mailbox/provider identity, filename, sender,
+body, content, header, token, or credential is logged.
+
 The unchanged Edge poll request supplies its OAuth access token, whereas the
 attachment-fetch request supplies only provider identities. The initial stack
 therefore uses a bounded five-minute, process-local token bridge scoped to the
@@ -164,11 +171,13 @@ worker and one Compose replica until Issue #112 changes the Edge contract.
 
 The support service is deployed to Hosted Dev with the single-worker boundary
 intact. Controlled E2E testing has completed Gmail consent, credential refresh,
-attachment search, and deployment of inline `body.data` support. With up to
-100 candidates, the remaining sequential message-detail loop consumed roughly
-25–28 seconds against the unchanged 30-second Edge connector timeout. The
-bounded per-page detail worker pool addresses that bottleneck without raising
-the timeout or page/candidate limits. Production remains untouched.
+attachment search, inline `body.data` support, and bounded detail concurrency.
+Poll duration fell from roughly 25–28 seconds to about 9.1 seconds against the
+unchanged 30-second Edge connector timeout, but the Edge still reports
+`mailbox_poll_failed` with zero observed attachments. Sanitized poll-count and
+ServiceError diagnostics now distinguish successful empty polls from support
+HTTP/provider failure without exposing mailbox metadata. Production remains
+untouched.
 
 The software now implements Gmail's web-server authorization-code flow through
 `/oauth/start`, `/oauth/callback`, and `/oauth/revoke`. Start requires an

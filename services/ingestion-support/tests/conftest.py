@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Literal
 
 import pytest
@@ -18,9 +18,14 @@ os.environ.setdefault(
     "https://dev.example.test/functions/v1/cams-kfintech-ingestion/oauth/callback",
 )
 
-from app.config import Settings  # noqa: E402
-from app.errors import ServiceError  # noqa: E402
-from app.mailbox import (  # noqa: E402
+from app.config import Settings
+from app.diagnostics import (
+    HANDLER_NAME,
+    LOGGER,
+    configure_application_logging,
+)
+from app.errors import ServiceError
+from app.mailbox import (
     Attachment,
     AuthorizationUrlRequest,
     AuthorizationUrlResult,
@@ -33,8 +38,7 @@ from app.mailbox import (  # noqa: E402
     RefreshResult,
     RevokeRequest,
 )
-from app.main import create_app  # noqa: E402
-
+from app.main import create_app
 
 CAMS_HEADERS = [
     "PAN",
@@ -204,6 +208,19 @@ def fake_mailbox() -> FakeMailboxProvider:
 @pytest.fixture
 def fake_scanner() -> FakeMalwareScanner:
     return FakeMalwareScanner()
+
+
+@pytest.fixture
+def diagnostic_stream():
+    configure_application_logging()
+    handler = next(item for item in LOGGER.handlers if item.get_name() == HANDLER_NAME)
+    stream = StringIO()
+    original_stream = handler.stream
+    handler.setStream(stream)
+    try:
+        yield stream
+    finally:
+        handler.setStream(original_stream)
 
 
 @pytest.fixture

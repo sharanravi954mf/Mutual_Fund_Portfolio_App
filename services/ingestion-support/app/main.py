@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -16,6 +15,11 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .clamav import ClamavScanner, MalwareScanner
 from .config import Settings, get_settings
+from .diagnostics import (
+    configure_application_logging,
+    log_http_request,
+    log_mailbox_poll_outcome,
+)
 from .errors import ServiceError, service_error_handler
 from .mailbox import (
     AccessTokenCache,
@@ -44,8 +48,6 @@ from .security import (
     verify_sha256,
 )
 
-
-LOGGER = logging.getLogger("moneybowl.ingestion_support")
 KNOWN_PATHS = frozenset(
     {
         "/health",
@@ -74,6 +76,7 @@ def create_app(
     mailbox_provider: MailboxProvider | None = None,
     malware_scanner: MalwareScanner | None = None,
 ) -> FastAPI:
+    configure_application_logging()
     config = settings or get_settings()
     provider = mailbox_provider or GmailProvider(config)
     scanner = malware_scanner or ClamavScanner(
@@ -109,6 +112,7 @@ def create_app(
     async def sanitized_request_log(request: Request, call_next):
         started = time.monotonic()
         request_id = uuid.uuid4().hex
+        request.state.request_id = request_id
         route = request.url.path if request.url.path in KNOWN_PATHS else "unknown"
         status = 500
         try:
@@ -117,18 +121,12 @@ def create_app(
             response.headers["X-Request-ID"] = request_id
             return response
         finally:
-            LOGGER.info(
-                json.dumps(
-                    {
-                        "event": "http_request",
-                        "request_id": request_id,
-                        "method": request.method,
-                        "route": route,
-                        "status": status,
-                        "duration_ms": round((time.monotonic() - started) * 1000),
-                    },
-                    separators=(",", ":"),
-                )
+            log_http_request(
+                request_id=request_id,
+                method=request.method,
+                route=route,
+                status=status,
+                duration_ms=round((time.monotonic() - started) * 1000),
             )
 
     @app.exception_handler(RequestValidationError)
@@ -204,6 +202,11 @@ def create_app(
             payload = await read_json_object(request, config.max_json_body_bytes)
         parsed = validate_model(PollRequest, payload)
         messages = await provider.poll(parsed, oauth_token)
+        log_mailbox_poll_outcome(
+            request_id=request.state.request_id,
+            message_count=len(messages),
+            attachment_count=sum(len(message.attachments) for message in messages),
+        )
         await token_cache.put(cache_key(parsed), oauth_token)
         response = {"messages": [message.model_dump(exclude_none=True) for message in messages]}
         return _bounded_json_response(response, config.max_provider_response_bytes)
