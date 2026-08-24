@@ -9,7 +9,9 @@ import httpx
 import pytest
 from conftest import FakeMailboxProvider, FakeMalwareScanner, mailbox_headers, poll_body
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from app.config import Settings
 from app.errors import ServiceError
 from app.mailbox import (
     AccessTokenCache,
@@ -70,6 +72,83 @@ def gmail_inline_message(
             ],
         },
     }
+
+
+async def controlled_delayed_gmail_poll(
+    settings,
+    concurrency: int,
+    message_ids: list[str],
+) -> tuple[int, int, list[str]]:
+    """Run a poll in deterministic delay waves without wall-clock assertions."""
+
+    limited = settings.model_copy(
+        update={
+            "max_mailbox_messages": len(message_ids),
+            "max_mailbox_pages_per_poll": 1,
+            "max_mailbox_candidates_per_poll": len(message_ids),
+            "gmail_detail_fetch_concurrency": concurrency,
+        }
+    )
+    current_gate = asyncio.Event()
+    started: asyncio.Queue[str] = asyncio.Queue()
+    finished: asyncio.Queue[str] = asyncio.Queue()
+    active = 0
+    max_active = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, max_active
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": item} for item in message_ids]})
+
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        gate = current_gate
+        active += 1
+        max_active = max(max_active, active)
+        await started.put(message_id)
+        try:
+            await gate.wait()
+        finally:
+            active -= 1
+        await finished.put(message_id)
+        return httpx.Response(200, json=gmail_message(message_id))
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    poll_task = asyncio.create_task(
+        provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "controlled-delay-oauth-token",
+        )
+    )
+    delay_rounds = 0
+    remaining = len(message_ids)
+    try:
+        while remaining:
+            wave_size = min(concurrency, remaining)
+            for _request in range(wave_size):
+                await started.get()
+
+            next_gate = asyncio.Event()
+            released_gate = current_gate
+            current_gate = next_gate
+            released_gate.set()
+            for _request in range(wave_size):
+                await finished.get()
+
+            delay_rounds += 1
+            remaining -= wave_size
+
+        messages = await poll_task
+        assert active == 0
+        return delay_rounds, max_active, [message.message_id for message in messages]
+    finally:
+        if not poll_task.done():
+            poll_task.cancel()
+            await asyncio.gather(poll_task, return_exceptions=True)
+        await provider.close()
 
 
 def test_refresh_poll_and_fetch_match_edge_contract(client, settings, fake_mailbox) -> None:
@@ -285,6 +364,218 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
     )
     assert content == b"bytes"
     await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_gmail_detail_fetch_is_bounded_ordered_and_faster_than_serial(settings) -> None:
+    message_ids = [f"orderedMessage{index}" for index in range(6)]
+
+    serial_rounds, serial_max_active, serial_order = await controlled_delayed_gmail_poll(
+        settings,
+        1,
+        message_ids,
+    )
+    (
+        concurrent_rounds,
+        concurrent_max_active,
+        concurrent_order,
+    ) = await controlled_delayed_gmail_poll(
+        settings,
+        3,
+        message_ids,
+    )
+
+    assert serial_rounds == 6
+    assert serial_max_active == 1
+    assert concurrent_rounds == 2
+    assert concurrent_max_active == 3
+    assert serial_order == message_ids
+    assert concurrent_order == message_ids
+
+
+@pytest.mark.asyncio
+async def test_gmail_concurrent_details_preserve_listing_order_after_reverse_completion(
+    settings,
+) -> None:
+    message_ids = ["listedFirst", "listedSecond", "listedThird"]
+    release = {message_id: asyncio.Event() for message_id in message_ids}
+    started: asyncio.Queue[str] = asyncio.Queue()
+    completed: asyncio.Queue[str] = asyncio.Queue()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": item} for item in message_ids]})
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        await started.put(message_id)
+        await release[message_id].wait()
+        await completed.put(message_id)
+        return httpx.Response(200, json=gmail_message(message_id))
+
+    limited = settings.model_copy(
+        update={
+            "max_mailbox_messages": 3,
+            "max_mailbox_pages_per_poll": 1,
+            "max_mailbox_candidates_per_poll": 3,
+            "gmail_detail_fetch_concurrency": 3,
+        }
+    )
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    poll_task = asyncio.create_task(
+        provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "reverse-completion-oauth-token",
+        )
+    )
+    try:
+        for _message_id in message_ids:
+            await started.get()
+        completion_order: list[str] = []
+        for message_id in reversed(message_ids):
+            release[message_id].set()
+            completion_order.append(await completed.get())
+
+        messages = await poll_task
+        assert completion_order == list(reversed(message_ids))
+        assert [message.message_id for message in messages] == message_ids
+    finally:
+        if not poll_task.done():
+            poll_task.cancel()
+            await asyncio.gather(poll_task, return_exceptions=True)
+        await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_gmail_detail_failure_cancels_and_awaits_sibling_workers(settings) -> None:
+    limited = settings.model_copy(
+        update={
+            "max_mailbox_messages": 3,
+            "max_mailbox_pages_per_poll": 1,
+            "max_mailbox_candidates_per_poll": 3,
+            "gmail_detail_fetch_concurrency": 3,
+        }
+    )
+    all_started = asyncio.Event()
+    never_release = asyncio.Event()
+    started = 0
+    active = 0
+    cancelled: set[str] = set()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, started
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(
+                200,
+                json={
+                    "messages": [
+                        {"id": "failedDetail"},
+                        {"id": "cancelledDetail1"},
+                        {"id": "cancelledDetail2"},
+                    ]
+                },
+            )
+
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        active += 1
+        started += 1
+        if started == 3:
+            all_started.set()
+        try:
+            await all_started.wait()
+            if message_id == "failedDetail":
+                return httpx.Response(503)
+            try:
+                await never_release.wait()
+            except asyncio.CancelledError:
+                cancelled.add(message_id)
+                raise
+            return httpx.Response(200, json=gmail_message(message_id))
+        finally:
+            active -= 1
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_request_failed"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "failure-cancellation-oauth-token",
+        )
+    await provider.close()
+
+    assert active == 0
+    assert cancelled == {"cancelledDetail1", "cancelledDetail2"}
+
+
+@pytest.mark.asyncio
+async def test_gmail_poll_rejects_duplicate_listing_ids_before_detail_fetch(settings) -> None:
+    detail_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal detail_calls
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(
+                200,
+                json={"messages": [{"id": "duplicateMessage"}, {"id": "duplicateMessage"}]},
+            )
+        detail_calls += 1
+        return httpx.Response(200, json=gmail_message("duplicateMessage"))
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "duplicate-listing-oauth-token",
+        )
+    await provider.close()
+    assert detail_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_gmail_poll_rejects_malformed_concurrent_detail_response(settings) -> None:
+    limited = settings.model_copy(update={"gmail_detail_fetch_concurrency": 2})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(
+                200,
+                json={"messages": [{"id": "validDetail"}, {"id": "malformedDetail"}]},
+            )
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        if message_id == "malformedDetail":
+            return httpx.Response(200, json={"id": message_id})
+        return httpx.Response(200, json=gmail_message(message_id))
+
+    provider = GmailProvider(limited, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+            ),
+            "malformed-detail-oauth-token",
+        )
+    await provider.close()
+
+
+@pytest.mark.parametrize("invalid_concurrency", ["0", "11"])
+def test_gmail_detail_fetch_concurrency_configuration_is_bounded(
+    monkeypatch,
+    invalid_concurrency: str,
+) -> None:
+    monkeypatch.setenv("GMAIL_DETAIL_FETCH_CONCURRENCY", invalid_concurrency)
+    with pytest.raises(ValidationError, match="GMAIL_DETAIL_FETCH_CONCURRENCY"):
+        Settings()
 
 
 def test_inline_gmail_dbf_poll_metadata_and_fetch_contract(settings) -> None:

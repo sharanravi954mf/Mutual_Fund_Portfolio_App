@@ -118,6 +118,11 @@ traffic without guessing registrar sender addresses. Each poll inspects at most
 `MAX_MAILBOX_PAGES_PER_POLL` pages (default `4`) and
 `MAX_MAILBOX_CANDIDATES_PER_POLL` message candidates (default `100`). Gmail
 page tokens must be non-empty, bounded printable ASCII and must not repeat.
+Page listing remains sequential. Within each page, a fixed worker pool fetches
+message details with `GMAIL_DETAIL_FETCH_CONCURRENCY` concurrent requests
+(default `5`, allowed range `1..10`). Results are restored to Gmail listing
+order before attachment filtering, and any failed detail request cancels and
+awaits its sibling workers before the poll fails closed.
 Messages with actual attachments are selected page-fairly across the inspected
 pages, up to the existing `MAX_MAILBOX_MESSAGES` output limit (default `25`).
 The Edge worker remains the authority for the configured sender allowlist.
@@ -194,7 +199,8 @@ deno test --allow-env --allow-net=127.0.0.1:8080 \
 ```
 
 The Python suite covers mailbox refresh/poll/fetch schemas, bounded Gmail
-pagination and page-fair backlog selection, identity-scoped OAuth cache
+pagination, detail-fetch concurrency/cancellation, page-fair backlog selection,
+identity-scoped OAuth cache
 restart/expiry/eviction behavior, redirects, provider failures, timeouts,
 malformed/oversized responses, both synthetic PDF layouts,
 malformed/oversized PDFs, bearer boundaries,
@@ -211,7 +217,10 @@ contract. `HOSTED_DEV_RUNBOOK.md` contains deployment, secret placement,
 verification, rollback, and synthetic-data cleanup instructions.
 
 Hosted Dev runs the support API at one worker/replica. Its controlled E2E has
-completed Gmail consent, credential refresh, and attachment search; final
-synthetic ingestion awaits deployment of the inline Gmail attachment fix. Do
-not manually insert plaintext tokens as a workaround. Production deployment
-and Production configuration require a separate reviewed change.
+completed Gmail consent, credential refresh, attachment search, and deployment
+of inline Gmail attachment support. With a 100-candidate bound, sequential
+message-detail retrieval still consumed roughly 25–28 seconds against the
+unchanged 30-second Edge connector timeout. Bounded per-page concurrency is the
+corrective path; timeout and page/candidate limits remain unchanged. Do not
+manually insert plaintext tokens as a workaround. Production deployment and
+Production configuration require a separate reviewed change.
