@@ -23,15 +23,22 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 - **Hosted Dev Ingestion Operations (#113)**: Added a provider-agnostic Docker
   Compose override with pinned Caddy HTTPS ingress, exact single-replica
   enforcement, placeholder-only host configuration, an HTTPS-safe endpoint
-  smoke test, and a deployment/rollback runbook. No host or Hosted Dev setting
-  was changed because approved host/DNS credentials were unavailable; initial
-  encrypted Gmail OAuth provisioning is included in the same draft PR.
+  smoke test, and a deployment/rollback runbook. Hosted Dev deployment and
+  encrypted Gmail OAuth smoke testing now reach attachment search; final
+  synthetic ingestion awaits the inline attachment correction below.
 - **Secure Gmail OAuth Provisioning (#114)**: Added the web-server
   authorization-code flow with exact redirect validation, Gmail read-only
   offline consent, expiring hashed single-use state, server-side exchange,
   AES-256-GCM first-write/reauthorization using the existing mailbox AAD, and
   nonce-fenced server-side revocation. No Hosted Dev or Production deployment
   was performed.
+
+### Fixed
+- **Inline Gmail Attachments (#113)**: Gmail polling now recognizes small
+  attachment MIME parts returned as base64url `body.data` as well as normal
+  `attachmentId` parts. Poll remains metadata-only; a bounded, scoped,
+  expiring internal locator lets fetch re-read and validate the MIME part
+  without caching or persisting attachment bytes.
 
 ### Security
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,

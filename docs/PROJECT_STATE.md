@@ -102,7 +102,10 @@ Docker Compose stack:
   PDF/DBF attachments without guessing sender addresses, follows bounded Gmail
   pagination (default 4 pages/100 inspected candidates), rejects malformed or
   repeated page tokens, and page-fairly returns at most 25 messages. The Edge
-  worker continues to enforce the canonical sender allowlist.
+  worker continues to enforce the canonical sender allowlist. Both Gmail
+  attachment representations are supported: provider `attachmentId` values
+  and small inline `body.data` parts. Poll returns metadata only; inline parts
+  use a bounded `inline:<sha256>` identity and are re-read from Gmail on fetch.
 - `PDF_TEXT_EXTRACTOR_URL` is the full authenticated
   `POST /pdf/extract` URL. It provides bounded, zero-disk PDF extraction
   infrastructure plus a deterministic synthetic/characterization contract,
@@ -132,6 +135,10 @@ service. Process restart, TTL expiry, LRU eviction, or cache miss fails closed
 with `mailbox_oauth_context_required` and requires another poll. Concurrent
 mailboxes and different registrar values have isolated cache entries. Issue
 #112 tracks removal of the process-local dependency.
+Inline attachment identities use a separate cache with the same TTL and
+bounded LRU behavior, scoped additionally to message and attachment identity.
+It stores only a MIME-part ordinal, never attachment bytes. Missing or forged
+inline context fails closed and requires another poll.
 
 Issue #109 performs local implementation and validation only. It does not
 deploy the stack, configure hosted Dev/Production values, link Supabase, or copy
@@ -151,10 +158,11 @@ override removes the API port mapping, publishes only Caddy on 80/443, preserves
 the private persistent ClamAV signature volume, and fixes the API at one Uvicorn
 worker and one Compose replica until Issue #112 changes the Edge contract.
 
-No approved Dev host, DNS name, host credentials, or host secrets are available
-in the current implementation environment. Consequently the service is not
-live, the six Hosted Dev support URL/token values have not been configured, and
-no Hosted Dev E2E smoke test has been claimed. Production remains untouched.
+The support service is deployed to Hosted Dev with the single-worker boundary
+intact. Controlled E2E testing has completed Gmail consent, credential refresh,
+and attachment search. The synthetic CAMS message exposed Gmail's small inline
+`body.data` representation; final ingestion verification awaits deployment of
+this connector correction. Production remains untouched.
 
 The software now implements Gmail's web-server authorization-code flow through
 `/oauth/start`, `/oauth/callback`, and `/oauth/revoke`. Start requires an
@@ -172,7 +180,8 @@ headers. The exact configured URI remains bound to state and is used for
 authorization and code exchange.
 Reauthorization uses the same fenced upsert. Revocation is
 server-side, nonce-fenced, audited, and leaves the mailbox
-`reauthorization_required`. No Hosted Dev E2E success is claimed.
+`reauthorization_required`. Hosted Dev has verified this OAuth path through
+consent, refresh, and Gmail search; attachment ingestion remains pending.
 See `services/ingestion-support/HOSTED_DEV_RUNBOOK.md` for the exact prerequisite,
 secret-boundary, verification, rollback, and synthetic cleanup procedure.
 
