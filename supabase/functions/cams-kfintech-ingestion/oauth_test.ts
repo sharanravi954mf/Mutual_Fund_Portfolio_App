@@ -15,6 +15,8 @@ const AUTHORIZATION = "33333333-3333-4333-8333-333333333333";
 const STATE = "A".repeat(43);
 const REDIRECT =
   "https://dev.example.test/functions/v1/cams-kfintech-ingestion/oauth/callback";
+const HOSTED_RUNTIME_CALLBACK =
+  "http://edge-runtime.internal/functions/v1/cams-kfintech-ingestion/oauth/callback";
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 
 type Captures = {
@@ -23,6 +25,9 @@ type Captures = {
   failed?: string;
   revoked?: boolean;
   exchangedCode?: string;
+  beginRedirectUri?: string;
+  consumeRedirectUri?: string;
+  exchangeRedirectUri?: string;
 };
 
 function dependencies(options: {
@@ -51,11 +56,13 @@ function dependencies(options: {
       stateRepository: {
         begin: async (input) => {
           captures.stateHash = input.stateHash;
+          captures.beginRedirectUri = input.redirectUri;
           assertEquals(input.redirectUri, REDIRECT);
           assertEquals(input.expiresAt, "2026-08-23T08:10:00.000Z");
           return { flowKind };
         },
-        consume: async () => {
+        consume: async (_stateHash, redirectUri) => {
+          captures.consumeRedirectUri = redirectUri;
           if (options.consumeError) {
             throw new IngestionError(
               options.consumeError as "oauth_state_invalid",
@@ -96,8 +103,9 @@ function dependencies(options: {
           assertEquals(redirect, REDIRECT);
           return `https://accounts.google.test/oauth?state=${state}`;
         },
-        exchange: async (code) => {
+        exchange: async (code, redirectUri) => {
           captures.exchangedCode = code;
+          captures.exchangeRedirectUri = redirectUri;
           if (options.connectorError) {
             throw new IngestionError(
               options.connectorError as "oauth_exchange_failed",
@@ -167,6 +175,21 @@ Deno.test("valid callback encrypts first write with existing workspace/mailbox A
   assert(!body.includes("refresh-secret"));
 });
 
+Deno.test("Hosted Edge callback accepts its runtime origin while preserving the configured external redirect binding", async () => {
+  const { deps, captures } = dependencies();
+  const handler = createGmailOAuthHandler(deps);
+
+  assertEquals((await handler(startRequest())).status, 200);
+  const response = await handler(
+    callback(`state=${STATE}&code=one-time-code`, HOSTED_RUNTIME_CALLBACK),
+  );
+
+  assertEquals(response.status, 200);
+  assertEquals(captures.beginRedirectUri, REDIRECT);
+  assertEquals(captures.consumeRedirectUri, REDIRECT);
+  assertEquals(captures.exchangeRedirectUri, REDIRECT);
+});
+
 Deno.test("invalid, expired, and replayed state are rejected deterministically", async () => {
   for (
     const [error, status] of [
@@ -184,14 +207,27 @@ Deno.test("invalid, expired, and replayed state are rejected deterministically",
   }
 });
 
-Deno.test("callback rejects missing state and exact redirect mismatch", async () => {
+Deno.test("callback is GET-only and rejects missing or malformed state and a mismatched pathname", async () => {
   const { deps } = dependencies();
   const handler = createGmailOAuthHandler(deps);
+  assertEquals(
+    (await handler(new Request(REDIRECT, { method: "POST" }))).status,
+    405,
+  );
   assertEquals((await handler(callback("code=code"))).status, 422);
+  const malformedState = await handler(callback("state=short&code=code"));
+  assertEquals(malformedState.status, 422);
+  assertEquals(
+    (await malformedState.json()).error.code,
+    "oauth_state_invalid",
+  );
   const mismatch = await handler(
     callback(
       `state=${STATE}&code=code`,
-      REDIRECT.replace("dev.example.test", "other.example.test"),
+      HOSTED_RUNTIME_CALLBACK.replace(
+        "cams-kfintech-ingestion",
+        "other-function",
+      ),
     ),
   );
   assertEquals(mismatch.status, 422);
