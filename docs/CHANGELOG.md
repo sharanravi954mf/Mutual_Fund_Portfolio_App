@@ -42,8 +42,12 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   legitimate zero-attempt outcomes. Mixed or unconfirmed statuses fail closed.
   Validated CAMS URLs download bounded
   password-protected ZIPs in memory and route the extracted DBF through the
-  existing Edge integrity, malware, and parser path. Generic attachment and
-  inline attachment flows remain intact; Production was not changed.
+  existing Edge integrity, malware, Storage, and parser path. Generic attachment
+  and inline attachment flows remain intact. Automated tests prove the complete
+  synthetic CAMS contract with mocked provider HTTPS. Hosted Dev uses the
+  generic synthetic DBF attachment smoke for deployed-infrastructure evidence;
+  genuine CAMS URL/encrypted-ZIP characterization remains pending and is not
+  implied by either synthetic layer. Production remains unchanged.
 - **Inline Gmail Attachments (#113)**: Gmail polling now recognizes small
   attachment MIME parts returned as base64url `body.data` as well as normal
   `attachmentId` parts. Poll remains metadata-only; a bounded, scoped,

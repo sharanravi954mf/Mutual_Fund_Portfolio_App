@@ -136,6 +136,15 @@ Docker Compose stack:
   a CAMS-specific host configuration value, not an MFD credential. Extracted
   bytes continue through the existing hash, MIME, malware, Storage-integrity,
   and Edge DBF-parser path.
+- CAMS validation has three separate evidence layers. Automated tests prove the
+  complete synthetic CAMS HTML, validated URL, mocked HTTPS, encrypted ZIP, and
+  DBF contract. The pending Hosted Dev synthetic smoke instead uses the generic
+  Gmail attachment path and existing synthetic DBF fixture to prove deployed
+  Gmail/Oracle, integrity, ClamAV, Storage, parser, and Dev persistence. A real
+  CAMS WBR2/WBR9 URL plus encrypted ZIP remains pending live-provider
+  characterization until an explicitly authorized, appropriately sanitized
+  sample is available. Passing the first two layers does not satisfy the third;
+  Production remains unchanged.
 - `PDF_TEXT_EXTRACTOR_URL` is the full authenticated
   `POST /pdf/extract` URL. It provides bounded, zero-disk PDF extraction
   infrastructure plus a deterministic synthetic/characterization contract,

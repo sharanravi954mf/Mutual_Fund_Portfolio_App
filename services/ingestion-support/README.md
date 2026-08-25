@@ -279,8 +279,10 @@ Host-header validation, and non-sensitive readiness. CAMS fixtures additionally
 cover WBR2/WBR9 HTML mailback parsing, explicit WBR49 rejection, no-data,
 strict URLs, redirects/timeouts/size bounds, encrypted ZIP password failures,
 corruption, traversal, duplicates, entry/expansion bounds, DBF extraction, and
-the synthetic Gmail-to-URL-to-encrypted-ZIP-to-DBF chain. The live Deno test uses
-the actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and
+the synthetic Gmail-to-URL-to-encrypted-ZIP-to-DBF chain. Provider HTTPS is
+mocked for that deterministic contract chain; the synthetic URL is not hosted
+at CAMS and is never used by a deployed service. The live Deno test uses the
+actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and
 `KfintechParser` classes. EICAR appears only in test code.
 
 ## Hosted Dev operation (Issue #113)
@@ -305,6 +307,18 @@ Production configuration require a separate reviewed change.
 
 This Issue #113 change also prepares the secure WBR2/WBR9 CAMS URL-mailback
 path and Dev-only synthetic fixtures/configuration. It has not changed Hosted
-Dev or Production. The controlled Hosted Dev E2E must use only synthetic data
-and prove email to CAMS-style URL to password-protected ZIP to synthetic DBF
-before Issue #113 can be considered complete.
+Dev or Production. Validation is intentionally split into three layers:
+
+- automated tests prove the complete synthetic CAMS HTML-to-validated-URL-to-
+  encrypted-ZIP-to-DBF contract with mocked provider networking;
+- the controlled Hosted Dev smoke uses the generic Gmail attachment path and
+  existing synthetic DBF fixture to prove deployed Gmail/Oracle, attachment,
+  integrity, ClamAV, Storage, parser, and Dev-persistence infrastructure; and
+- a genuine CAMS WBR2/WBR9 `DownloadURL` plus encrypted ZIP remains pending as
+  a separate live-provider characterization until an explicitly authorized,
+  appropriately sanitized sample is available.
+
+Passing the automated contract and Hosted Dev infrastructure smoke does not
+claim that live CAMS characterization has passed. The Dev synthetic sender
+remains configuration-only in Dev, and no synthetic host or environment bypass
+is added to the CAMS runtime allowlist.

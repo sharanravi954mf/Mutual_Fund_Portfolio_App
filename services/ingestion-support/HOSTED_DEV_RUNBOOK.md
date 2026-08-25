@@ -159,35 +159,60 @@ Do not start the end-to-end test until this OAuth implementation is reviewed and
 merged. Provision only a development/test mailbox and test workspace through
 the authorized `/oauth/start` flow; never inject credentials manually.
 
+Keep these validation layers distinct:
+
+1. **Local automated CAMS contract tests** use synthetic CAMS HTML, a validated
+   CAMS-style URL, mocked HTTPS networking, a password-protected synthetic ZIP,
+   and a synthetic DBF. They deterministically prove WBR2/WBR9, No Data, WBR49,
+   URL, password, extraction, and archive-security behavior without contacting
+   CAMS or using investor data.
+2. **Hosted Dev synthetic infrastructure smoke** uses the preserved generic
+   Gmail attachment path with the existing synthetic DBF fixture. It proves the
+   deployed Gmail, Oracle ingestion-support, integrity, ClamAV, Storage, parser,
+   and Dev-persistence infrastructure. It does not exercise or prove a live
+   CAMS `DownloadURL` network leg.
+3. **Real CAMS mailback characterization** remains pending. It must separately
+   verify a genuine WBR2/WBR9 email, real
+   `mailback<number>.camsonline.com` URL, CAMS-encrypted ZIP, and DBF extraction
+   only when an explicitly authorized, appropriately sanitized sample is
+   available. Never automate this with real investor data.
+
+Passing the first two layers does not mean that the third has passed. Do not
+fabricate a CAMS-domain endpoint, add a synthetic hostname to the runtime
+allowlist, or weaken URL, TLS, redirect, ZIP, integrity, or malware controls to
+make the Hosted Dev smoke resemble the live-provider boundary.
+
 For the controlled test:
 
 1. Record the Dev workspace, mailbox connection, synthetic message ID, and a
    unique `SYNTHETIC-ISSUE-113-<timestamp>` marker without recording any token.
-2. Use the checked-in WBR2/WBR9 mailback fixtures as the model for a generated
-   synthetic CAMS HTML email from the configured Dev synthetic sender. It must
-   contain only synthetic values and a CAMS-style HTTPS `DownloadURL` whose
-   controlled response is a password-protected ZIP containing exactly one
-   synthetic DBF. Do not attach the DBF directly, do not use WBR49, and never
-   use a real investor identifier or document. The running service will accept
-   only the reviewed CAMS mailback hostname/path allowlist; do not weaken URL
-   validation for a test server.
+2. From the sender configured only in Hosted Dev through
+   `CAMS_MAILBACK_CANDIDATE_SENDERS`, send a synthetic Gmail message with the
+   existing synthetic DBF fixture as an ordinary attachment. Use only synthetic
+   values and never a real investor identifier or document. Do not include a
+   CAMS `DownloadURL`, impersonate the production sender, or configure the Dev
+   sender in Production.
 3. As an authorized advisor/admin, start Gmail consent through the Edge OAuth
    route and verify the safe connected response contains no token. Then invoke
    the smallest existing authenticated
    `cams-kfintech-ingestion` request path using a valid initiating Dev user and
    the existing internal gateway token. Do not weaken its user/workspace
    authorization and do not add scheduling.
-4. Verify OAuth load/refresh, sender-filtered mailbox poll without an attachment
-   requirement, post-read sender validation, CAMS URL download, encrypted ZIP
-   extraction, SHA validation, clean ClamAV verdict, existing DBF parsing, and
-   Dev persistence. Separately verify the no-data/NA result completes with zero
-   attempts and WBR49 records only `unsupported_report`. Preserve the
-   request/ingestion IDs as non-secret QA evidence.
+4. Verify OAuth load/refresh, generic Gmail attachment discovery and fetch,
+   post-read sender validation, SHA validation, clean ClamAV verdict, Storage,
+   existing DBF parsing, and Dev persistence. Preserve the request/ingestion
+   IDs as non-secret QA evidence. Keep WBR2/WBR9 mailback, no-data/NA, WBR49,
+   URL, and encrypted-ZIP outcomes in the local mocked contract suite; this
+   Hosted Dev smoke makes no claim about them crossing the live CAMS network
+   boundary.
 5. Inspect sanitized service and Edge logs for the marker and outcome. Confirm
    no bearer, OAuth token, sender, DownloadURL, request ID, ZIP password, email
    body, ZIP/DBF bytes, PAN, or folio was logged.
 
-Issue #109 and #113 remain open unless this entire Hosted Dev flow succeeds.
+Issue #109 and #113 remain open unless the required Hosted Dev flow succeeds.
+Even after that smoke passes, record real CAMS mailback characterization as a
+separate pending production-readiness boundary until authorized sanitized
+evidence exists.
 
 ## Rollback and cleanup
 
