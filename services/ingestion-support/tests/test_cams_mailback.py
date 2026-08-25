@@ -25,9 +25,7 @@ from app.mailbox import FetchRequest, GmailProvider, PollRequest
 from app.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
-CAMS_WBR2_URL = (
-    "https://mailback12.camsonline.com/mailback_result/synthetic-wbr2.zip"
-)
+CAMS_WBR2_URL = "https://mailback12.camsonline.com/mailback_result/synthetic-wbr2.zip"
 ENCRYPTED_DBF_ZIP_B64 = (
     "UEsDBBQACQAIADB1GV3Nlnr1CgEAAGoCAAASABwAc3ludGhldGljLXdicjIuZGJmVVQJAANEXI1q"
     "RFyNanV4CwABBPUBAAAEFAAAAEeomJyplYw9e61/7158uHTU7CAT1U6yXpYHm7+xZqT1Ok7yXmso"
@@ -217,9 +215,7 @@ async def test_cams_download_rejects_redirect_and_oversized_response() -> None:
 
     oversized_client = httpx.AsyncClient(
         follow_redirects=False,
-        transport=httpx.MockTransport(
-            lambda _request: httpx.Response(200, content=b"x" * 1025)
-        ),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=b"x" * 1025)),
     )
     with pytest.raises(ServiceError, match="provider_response_too_large"):
         await download_cams_zip(oversized_client, url, max_bytes=1024)
@@ -342,8 +338,10 @@ async def test_gmail_mailback_poll_fetches_password_zip_and_returns_dbf(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/messages"):
             query = request.url.params["q"]
-            assert query.startswith("from:(donotreply@camsonline.com)")
-            assert "WBR OR has:attachment" in query
+            assert query == "from:(donotreply@camsonline.com) WBR"
+            assert "has:attachment" not in query
+            assert "filename:pdf" not in query
+            assert "filename:dbf" not in query
             return httpx.Response(200, json={"messages": [{"id": message_id}]})
         if request.url.host == "gmail.googleapis.com":
             return httpx.Response(
@@ -404,6 +402,7 @@ async def test_gmail_mailback_returns_sanitized_non_attachment_outcomes(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/messages"):
+            assert request.url.params["q"] == "from:(donotreply@camsonline.com) WBR"
             return httpx.Response(200, json={"messages": [{"id": message_id}]})
         return httpx.Response(
             200,
@@ -430,9 +429,7 @@ async def test_gmail_mailback_returns_sanitized_non_attachment_outcomes(
 async def test_dev_synthetic_sender_is_added_only_through_configuration(settings) -> None:
     configured = settings.model_copy(
         update={
-            "cams_mailback_candidate_senders": (
-                "donotreply@camsonline.com,statements@example.test"
-            )
+            "cams_mailback_candidate_senders": ("donotreply@camsonline.com,statements@example.test")
         }
     )
     observed_query = ""
@@ -454,9 +451,10 @@ async def test_dev_synthetic_sender_is_added_only_through_configuration(settings
     await provider.close()
 
     assert messages == []
-    assert observed_query.startswith(
-        "from:(donotreply@camsonline.com OR statements@example.test)"
-    )
+    assert observed_query == ("from:(donotreply@camsonline.com OR statements@example.test) WBR")
+    assert "has:attachment" not in observed_query
+    assert "filename:pdf" not in observed_query
+    assert "filename:dbf" not in observed_query
 
 
 @pytest.mark.parametrize(
@@ -513,9 +511,7 @@ async def test_mailback_wrong_configured_password_fails_closed(settings) -> None
         if request.url.host == "gmail.googleapis.com":
             return httpx.Response(
                 200,
-                json=_gmail_mailback_message(
-                    "wrongPassword", "cams_wbr2_mailback.html", "WBR2"
-                ),
+                json=_gmail_mailback_message("wrongPassword", "cams_wbr2_mailback.html", "WBR2"),
             )
         return httpx.Response(200, content=encrypted)
 
@@ -550,9 +546,7 @@ def test_cams_mailback_fields_and_password_never_reach_logs(
             return httpx.Response(200, json={"messages": [{"id": message_id}]})
         return httpx.Response(
             200,
-            json=_gmail_mailback_message(
-                message_id, "cams_wbr2_mailback.html", "WBR2"
-            ),
+            json=_gmail_mailback_message(message_id, "cams_wbr2_mailback.html", "WBR2"),
         )
 
     provider = GmailProvider(settings, httpx.MockTransport(handler))

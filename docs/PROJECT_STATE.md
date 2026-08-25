@@ -101,8 +101,8 @@ Docker Compose stack:
   accept direct IMAP usernames, passwords, or app passwords. Generic polling
   filters for PDF/DBF attachments. CAMS polling uses configured, validated
   registrar candidates (currently `donotreply@camsonline.com` plus an optional
-  Dev-only synthetic sender) and does not require an attachment for WBR
-  URL-mailbacks. It follows bounded Gmail
+  Dev-only synthetic sender), requires `WBR`, and excludes attachment/filename
+  discovery terms. It follows bounded Gmail
   pagination (default 4 pages/100 inspected candidates), rejects malformed or
   repeated page tokens, and page-fairly returns at most 25 messages. The Edge
   worker continues to enforce the canonical sender allowlist. Both Gmail
