@@ -91,6 +91,9 @@ export type HandlerDependencies = {
   persistence: {
     claimRun(input: IngestionRunClaimInput): Promise<IngestionRunClaimResult>;
     finalizeRun(input: IngestionRunFinalizeInput): Promise<IngestionRunSummary>;
+    finalizeNoDataRun(
+      input: IngestionRunClaimInput,
+    ): Promise<IngestionRunSummary>;
     persist(input: PersistenceInput): Promise<PersistenceResult>;
     recordFailure(input: FailureLineageInput): Promise<void>;
   };
@@ -419,6 +422,12 @@ function validateMessageAndAttachmentLimits(
 
   let totalAttachments = 0;
   for (const message of messages) {
+    if (
+      message.outcome != null &&
+      (message.attachments.length > 0 || context.mailbox.registrar !== "CAMS")
+    ) {
+      throw new IngestionError("mailbox_poll_failed");
+    }
     if (message.attachments.length > maxAttachmentsPerMessage) {
       throw new IngestionError("attachment_limit_exceeded");
     }
@@ -428,9 +437,60 @@ function validateMessageAndAttachmentLimits(
     }
   }
 
-  if (totalAttachments === 0) {
+  if (
+    totalAttachments === 0 &&
+    !messages.every((message) =>
+      message.outcome === "no_data" || message.outcome === "unsupported_report"
+    )
+  ) {
     throw new IngestionError("mailbox_poll_failed");
   }
+}
+
+async function processMailboxOutcomeFailure(
+  deps: HandlerDependencies,
+  context: IngestionRunContext,
+  message: MailMessage,
+  failureCode: "sender_not_allowed" | "unsupported_report",
+): Promise<AttachmentProcessingResult> {
+  const attachment: EmailAttachment = {
+    attachmentId: `mailback-outcome:${failureCode.replaceAll("_", "-")}`,
+    filename: "mailback-outcome",
+    declaredMime: "application/octet-stream",
+    receivedAt: message.receivedAt,
+  };
+  const attemptKey = attachmentAttemptKey({ context, message, attachment });
+  const correlationId = await documentCorrelationId({
+    context,
+    message,
+    attachment,
+  });
+  let lineageWriteFailed = false;
+  try {
+    await recordFailure(deps, {
+      workspaceId: context.workspaceId,
+      mailboxConnectionId: context.mailboxConnectionId,
+      ingestionRunId: context.correlationId,
+      documentCorrelationId: correlationId,
+      providerMessageId: message.messageId,
+      providerAttachmentId: attachment.attachmentId,
+      attachmentAttemptKey: attemptKey,
+      registrar: context.mailbox.registrar,
+      failureCode,
+    });
+  } catch (_error) {
+    lineageWriteFailed = true;
+  }
+  return {
+    ok: false,
+    message_id: message.messageId,
+    attachment_id: attachment.attachmentId,
+    document_correlation_id: correlationId,
+    error: {
+      code: failureCode,
+      lineage_write_failed: lineageWriteFailed || undefined,
+    },
+  };
 }
 
 export function createCamsKfintechIngestionHandler(
@@ -498,12 +558,79 @@ export function createCamsKfintechIngestionHandler(
       const messages = await deps.mailboxClient.poll(context);
       validateMessageAndAttachmentLimits(context, messages);
 
+      const outcomeSenderFailures = new Set<string>();
+      for (const message of messages) {
+        if (message.attachments.length === 0) {
+          stage(deps, "validate_sender");
+          try {
+            validateSender(message.senderAddress, combineAllowlist(context));
+          } catch (error) {
+            if (
+              error instanceof IngestionError &&
+              error.code === "sender_not_allowed"
+            ) {
+              outcomeSenderFailures.add(message.messageId);
+            } else {
+              throw error;
+            }
+          }
+        }
+      }
+
+      const mailboxOutcomes = messages.flatMap((message) =>
+        message.outcome == null ? [] : [message.outcome]
+      );
+      if (
+        outcomeSenderFailures.size === 0 &&
+        messages.every((message) => message.outcome === "no_data")
+      ) {
+        stage(deps, "finalize_ingestion_run");
+        const finalSummary = await deps.persistence.finalizeNoDataRun(
+          runIdentity,
+        );
+        return jsonResponse({
+          data: {
+            ingestion_run_id: correlationId,
+            run_status: finalSummary.status,
+            mailbox_outcome: "no_data",
+            processed_attachments: 0,
+            attempted_attachments: 0,
+            successful_attachments: 0,
+            failed_attachments: 0,
+            duplicate_attachments: 0,
+            stopped_attachments: 0,
+            observed_attachments: 0,
+            durable_attempts: 0,
+            lineage_gap_count: 0,
+            stopped: false,
+            continuation_policy: "legitimate_no_data",
+            results: [],
+          },
+        });
+      }
+
       const results: AttachmentProcessingResult[] = [];
       const counter: RunByteCounter = { consumed: 0 };
       let halted = false;
       let stoppedReason: FailureCode | undefined;
       for (const message of messages) {
         if (halted) break;
+        const outcomeFailure = outcomeSenderFailures.has(message.messageId)
+          ? "sender_not_allowed"
+          : message.outcome === "unsupported_report"
+          ? "unsupported_report"
+          : undefined;
+        if (outcomeFailure != null) {
+          const result = await processMailboxOutcomeFailure(
+            deps,
+            context,
+            message,
+            outcomeFailure,
+          );
+          results.push(result);
+          observedAttachmentCount = results.length;
+          continue;
+        }
         for (const attachment of message.attachments) {
           if (halted) break;
           const result = await processAttachment(
@@ -558,6 +685,9 @@ export function createCamsKfintechIngestionHandler(
           stopped_reason: finalSummary.stopped_reason ?? stoppedReason,
           run_failure_code: finalSummary.run_failure_code ?? undefined,
           continuation_policy: "continue_after_attachment_failure",
+          mailbox_outcomes: mailboxOutcomes.length > 0
+            ? mailboxOutcomes
+            : undefined,
           results,
         },
       });

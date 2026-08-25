@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +42,11 @@ class Settings(BaseSettings):
     )
     gmail_oauth_redirect_uri: str = Field(
         min_length=12, validation_alias="GMAIL_OAUTH_REDIRECT_URI"
+    )
+    cams_mailback_zip_password: SecretStr = Field(
+        min_length=1,
+        max_length=256,
+        validation_alias="CAMS_MAILBACK_ZIP_PASSWORD",
     )
 
     gmail_oauth_authorization_url: str = Field(
@@ -129,6 +135,40 @@ class Settings(BaseSettings):
         le=10,
         validation_alias="GMAIL_DETAIL_FETCH_CONCURRENCY",
     )
+    cams_mailback_candidate_senders: str = Field(
+        default="donotreply@camsonline.com",
+        validation_alias="CAMS_MAILBACK_CANDIDATE_SENDERS",
+    )
+    max_cams_mailback_email_body_bytes: int = Field(
+        default=262_144,
+        ge=1024,
+        le=1_048_576,
+        validation_alias="MAX_CAMS_MAILBACK_EMAIL_BODY_BYTES",
+    )
+    max_cams_mailback_zip_bytes: int = Field(
+        default=20_971_519,
+        ge=1024,
+        le=20_971_519,
+        validation_alias="MAX_CAMS_MAILBACK_ZIP_BYTES",
+    )
+    max_cams_mailback_dbf_bytes: int = Field(
+        default=20_971_519,
+        ge=1024,
+        le=20_971_519,
+        validation_alias="MAX_CAMS_MAILBACK_DBF_BYTES",
+    )
+    max_cams_mailback_zip_entries: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        validation_alias="MAX_CAMS_MAILBACK_ZIP_ENTRIES",
+    )
+    max_cams_mailback_decompression_ratio: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        validation_alias="MAX_CAMS_MAILBACK_DECOMPRESSION_RATIO",
+    )
     max_attachments_per_message: int = Field(
         default=5, ge=1, le=20, validation_alias="MAX_ATTACHMENTS_PER_MESSAGE"
     )
@@ -189,7 +229,28 @@ class Settings(BaseSettings):
                 "MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES must be greater than or equal to "
                 "MAX_PROVIDER_RESPONSE_BYTES"
             )
+        _ = self.cams_candidate_senders
         return self
+
+    @property
+    def cams_candidate_senders(self) -> list[str]:
+        senders = [
+            sender.strip().lower()
+            for sender in self.cams_mailback_candidate_senders.split(",")
+            if sender.strip()
+        ]
+        if not senders or len(senders) > 10:
+            raise ValueError("CAMS_MAILBACK_CANDIDATE_SENDERS must contain 1 to 10 senders")
+        sender_pattern = re.compile(
+            r"^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?"
+            r"@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+            r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$"
+        )
+        if len(set(senders)) != len(senders) or any(
+            sender_pattern.fullmatch(sender) is None for sender in senders
+        ):
+            raise ValueError("CAMS_MAILBACK_CANDIDATE_SENDERS contains an invalid sender")
+        return senders
 
     @property
     def trusted_hosts(self) -> list[str]:

@@ -53,6 +53,7 @@ const knownFailureCodes: Set<string> = new Set([
   "stored_object_size_mismatch",
   "unsupported_registrar",
   "unsupported_statement_format",
+  "unsupported_report",
   "parse_failed",
   "persistence_conflict",
   "persistence_failed",
@@ -1006,10 +1007,26 @@ export class ConnectorMailboxClient {
         ) {
           throw new IngestionError("mailbox_poll_failed");
         }
+        const outcome = message.outcome == null
+          ? undefined
+          : message.outcome === "no_data" ||
+              message.outcome === "unsupported_report"
+          ? message.outcome
+          : (() => {
+            throw new IngestionError("mailbox_poll_failed");
+          })();
+        if (
+          (outcome == null && attachments.length === 0) ||
+          (outcome != null &&
+            (attachments.length > 0 || context.mailbox.registrar !== "CAMS"))
+        ) {
+          throw new IngestionError("mailbox_poll_failed");
+        }
         return {
           senderAddress: String(message.sender_address ?? ""),
           messageId: message.message_id.trim(),
           receivedAt: String(message.received_at ?? new Date().toISOString()),
+          outcome,
           attachments: attachments.map(
             (rawAttachment): MailMessage["attachments"][number] => {
               const attachment = recordFromUnknown(rawAttachment);
@@ -1263,6 +1280,24 @@ export class SupabasePersistence {
         p_stopped_reason: input.stoppedReason ?? null,
         p_failure_code: input.failureCode ?? null,
         p_observed_attachment_count: input.observedAttachmentCount ?? null,
+      },
+    );
+    if (error != null) {
+      throw new IngestionError(errorCodeFromRpc(error));
+    }
+    return (Array.isArray(data) ? data[0] : data) as IngestionRunSummary;
+  }
+
+  async finalizeNoDataRun(
+    input: IngestionRunClaimInput,
+  ): Promise<IngestionRunSummary> {
+    const { data, error } = await this.client.rpc(
+      "finalize_cams_kfintech_no_data_run",
+      {
+        p_workspace_id: input.workspaceId,
+        p_mailbox_connection_id: input.mailboxConnectionId,
+        p_ingestion_run_id: input.ingestionRunId,
+        p_registrar: input.registrar,
       },
     );
     if (error != null) {

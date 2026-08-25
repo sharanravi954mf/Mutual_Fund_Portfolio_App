@@ -117,6 +117,7 @@ function deps(options: {
   registrarConfig?: Partial<RegistrarConfig>;
   claimRun?: HandlerDependencies["persistence"]["claimRun"];
   finalizeRun?: HandlerDependencies["persistence"]["finalizeRun"];
+  finalizeNoDataRun?: HandlerDependencies["persistence"]["finalizeNoDataRun"];
   recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
   authorize?: HandlerDependencies["workspaceAuthorizer"]["authorize"];
 } = {}): HandlerDependencies {
@@ -258,6 +259,22 @@ function deps(options: {
           run_failure_code: input.failureCode ?? null,
         });
       }),
+      finalizeNoDataRun: options.finalizeNoDataRun ??
+        ((input) =>
+          Promise.resolve({
+            ingestion_run_id: input.ingestionRunId,
+            status: "completed",
+            attempted_attachment_count: 0,
+            successful_attachment_count: 0,
+            failed_attachment_count: 0,
+            duplicate_attachment_count: 0,
+            stopped_attachment_count: 0,
+            observed_attachment_count: 0,
+            durable_attempt_count: 0,
+            lineage_gap_count: 0,
+            stopped_reason: null,
+            run_failure_code: null,
+          })),
       persist: options.persist ??
         (() =>
           Promise.resolve({
@@ -310,6 +327,109 @@ Deno.test("trusted internal invocation is allowed", async () => {
 
   assertEquals(response.status, 200);
   assertEquals(body.data.processed_attachments, 1);
+});
+
+Deno.test("CAMS no-data mailback completes without download scan storage or parse", async () => {
+  const stages: string[] = [];
+  const downloadCount = { count: 0 };
+  let noDataFinalizations = 0;
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    downloadCount,
+    messages: [{
+      senderAddress: "reports@camsonline.com",
+      messageId: "no-data-message",
+      receivedAt: "2026-08-25T00:00:00Z",
+      attachments: [],
+      outcome: "no_data",
+    }],
+    finalizeNoDataRun: (input) => {
+      noDataFinalizations += 1;
+      return Promise.resolve({
+        ingestion_run_id: input.ingestionRunId,
+        status: "completed",
+        attempted_attachment_count: 0,
+        successful_attachment_count: 0,
+        failed_attachment_count: 0,
+        duplicate_attachment_count: 0,
+        stopped_attachment_count: 0,
+        observed_attachment_count: 0,
+        durable_attempt_count: 0,
+        lineage_gap_count: 0,
+        stopped_reason: null,
+        run_failure_code: null,
+      });
+    },
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.mailbox_outcome, "no_data");
+  assertEquals(body.data.run_status, "completed");
+  assertEquals(body.data.attempted_attachments, 0);
+  assertEquals(body.data.continuation_policy, "legitimate_no_data");
+  assertEquals(noDataFinalizations, 1);
+  assertEquals(downloadCount.count, 0);
+  assertEquals(stages.includes("malware_scan"), false);
+  assertEquals(stages.includes("encrypted_storage_write"), false);
+  assertEquals(stages.includes("parse"), false);
+});
+
+Deno.test("unsupported CAMS report records sanitized failure without DBF parsing", async () => {
+  const stages: string[] = [];
+  const failureCodes: string[] = [];
+  const downloadCount = { count: 0 };
+  const handler = createCamsKfintechIngestionHandler(deps({
+    stages,
+    failureCodes,
+    downloadCount,
+    messages: [{
+      senderAddress: "reports@camsonline.com",
+      messageId: "unsupported-report-message",
+      receivedAt: "2026-08-25T00:00:00Z",
+      attachments: [],
+      outcome: "unsupported_report",
+    }],
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "unsupported_report");
+  assertEquals(body.data.mailbox_outcomes, ["unsupported_report"]);
+  assertEquals(failureCodes, ["unsupported_report"]);
+  assertEquals(downloadCount.count, 0);
+  assertEquals(stages.includes("parse"), false);
+});
+
+Deno.test("no-data sender still crosses the post-read allowlist boundary", async () => {
+  const failureCodes: string[] = [];
+  let noDataFinalizations = 0;
+  const handler = createCamsKfintechIngestionHandler(deps({
+    failureCodes,
+    messages: [{
+      senderAddress: "attacker@example.test",
+      messageId: "forged-no-data-message",
+      receivedAt: "2026-08-25T00:00:00Z",
+      attachments: [],
+      outcome: "no_data",
+    }],
+    finalizeNoDataRun: () => {
+      noDataFinalizations += 1;
+      throw new Error("must not finalize forged no-data");
+    },
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.data.results[0].error.code, "sender_not_allowed");
+  assertEquals(failureCodes, ["sender_not_allowed"]);
+  assertEquals(noDataFinalizations, 0);
 });
 
 Deno.test("workspace authorization requires authenticated advisor context", async () => {

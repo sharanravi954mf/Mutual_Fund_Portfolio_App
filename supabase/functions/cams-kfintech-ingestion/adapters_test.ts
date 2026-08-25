@@ -347,6 +347,93 @@ Deno.test("connector rejects arbitrary external attachment URL from poll metadat
   }
 });
 
+Deno.test("connector accepts only explicit CAMS mailbox outcomes without attachments", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = () =>
+      Promise.resolve(response({
+        messages: [
+          {
+            sender_address: "reports@camsonline.com",
+            message_id: "no-data-message",
+            received_at: "2026-08-25T00:00:00Z",
+            attachments: [],
+            outcome: "no_data",
+          },
+          {
+            sender_address: "reports@camsonline.com",
+            message_id: "unsupported-message",
+            received_at: "2026-08-25T00:00:00Z",
+            attachments: [],
+            outcome: "unsupported_report",
+          },
+        ],
+      }));
+    const messages = await new ConnectorMailboxClient(
+      "https://connector.example/ingestion",
+      "connector-service-token",
+    ).poll(context());
+
+    assertEquals(messages.map((message) => message.outcome), [
+      "no_data",
+      "unsupported_report",
+    ]);
+    assertEquals(
+      messages.every((message) => message.attachments.length === 0),
+      true,
+    );
+
+    const kfintechContext = context();
+    kfintechContext.mailbox.registrar = "KFINTECH";
+    kfintechContext.registrarConfig.registrar = "KFINTECH";
+    await assertRejects(
+      () =>
+        new ConnectorMailboxClient(
+          "https://connector.example/ingestion",
+          "connector-service-token",
+        ).poll(kfintechContext),
+      IngestionError,
+      "mailbox_poll_failed",
+    );
+
+    for (
+      const invalid of [
+        { attachments: [], outcome: "unknown" },
+        { attachments: [] },
+        {
+          attachments: [{
+            attachment_id: "attachment-1",
+            filename: "a.dbf",
+            declared_mime: "application/octet-stream",
+          }],
+          outcome: "no_data",
+        },
+      ]
+    ) {
+      globalThis.fetch = () =>
+        Promise.resolve(response({
+          messages: [{
+            sender_address: "reports@camsonline.com",
+            message_id: "invalid-outcome",
+            received_at: "2026-08-25T00:00:00Z",
+            ...invalid,
+          }],
+        }));
+      await assertRejects(
+        () =>
+          new ConnectorMailboxClient(
+            "https://connector.example/ingestion",
+            "connector-service-token",
+          ).poll(context()),
+        IngestionError,
+        "mailbox_poll_failed",
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 Deno.test("connector rejects redirects to another origin during attachment retrieval", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () =>

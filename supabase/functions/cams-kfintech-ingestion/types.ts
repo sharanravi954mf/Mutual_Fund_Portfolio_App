@@ -50,6 +50,7 @@ export type FailureCode =
   | "stored_object_size_mismatch"
   | "unsupported_registrar"
   | "unsupported_statement_format"
+  | "unsupported_report"
   | "statement_decryption_failed"
   | "parse_failed"
   | "persistence_conflict"
@@ -120,6 +121,7 @@ export type MailMessage = {
   messageId: string;
   receivedAt: string;
   attachments: EmailAttachment[];
+  outcome?: "no_data" | "unsupported_report";
 };
 
 export type DownloadedAttachment = EmailAttachment & {

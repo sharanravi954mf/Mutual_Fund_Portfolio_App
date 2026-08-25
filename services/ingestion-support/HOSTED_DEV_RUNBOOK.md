@@ -45,6 +45,10 @@ provider secret mechanism or a root-owned mode `0600` `.env` file:
 - `GMAIL_OAUTH_CLIENT_ID`
 - `GMAIL_OAUTH_CLIENT_SECRET`
 - `GMAIL_OAUTH_REDIRECT_URI` (not secret, but exact and environment-specific)
+- `CAMS_MAILBACK_ZIP_PASSWORD` (provider extraction configuration, not an MFD
+  or investor credential)
+- `CAMS_MAILBACK_CANDIDATE_SENDERS` (confirmed CAMS sender plus the Dev-only
+  synthetic sender; not secret, but environment-specific)
 
 Generate the three service bearer tokens independently with at least 32 random
 characters. Never print them, place them on a command line, or reuse one token
@@ -81,7 +85,10 @@ part of Issue #113.
    `MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES=4194304` for partial Gmail message
    details. The detail ceiling is independent from attachment-byte limits and,
    with the fixed default concurrency of five, caps simultaneous raw detail
-   buffers at 20 MiB. Do not raise either value during the smoke test.
+   buffers at 20 MiB. Do not raise either value during the smoke test. Retain
+   the reviewed CAMS mailback ZIP, DBF, entry-count, and decompression-ratio
+   bounds. Do not put the ZIP password in an Edge Function secret: extraction
+   occurs only on this host.
 3. Validate the merged Compose model before starting anything:
 
    ```sh
@@ -156,21 +163,29 @@ For the controlled test:
 
 1. Record the Dev workspace, mailbox connection, synthetic message ID, and a
    unique `SYNTHETIC-ISSUE-113-<timestamp>` marker without recording any token.
-2. Send one generated synthetic statement attachment containing synthetic PAN,
-   folio, scheme, and transaction values. Never use a real investor identifier
-   or document.
+2. Use the checked-in WBR2/WBR9 mailback fixtures as the model for a generated
+   synthetic CAMS HTML email from the configured Dev synthetic sender. It must
+   contain only synthetic values and a CAMS-style HTTPS `DownloadURL` whose
+   controlled response is a password-protected ZIP containing exactly one
+   synthetic DBF. Do not attach the DBF directly, do not use WBR49, and never
+   use a real investor identifier or document. The running service will accept
+   only the reviewed CAMS mailback hostname/path allowlist; do not weaken URL
+   validation for a test server.
 3. As an authorized advisor/admin, start Gmail consent through the Edge OAuth
    route and verify the safe connected response contains no token. Then invoke
    the smallest existing authenticated
    `cams-kfintech-ingestion` request path using a valid initiating Dev user and
    the existing internal gateway token. Do not weaken its user/workspace
    authorization and do not add scheduling.
-4. Verify OAuth load/refresh, mailbox poll, attachment fetch, SHA validation,
-   clean ClamAV verdict, synthetic PDF extraction, Edge parsing, and Dev
-   persistence. Preserve the request/ingestion IDs as non-secret QA evidence.
+4. Verify OAuth load/refresh, sender-filtered mailbox poll without an attachment
+   requirement, post-read sender validation, CAMS URL download, encrypted ZIP
+   extraction, SHA validation, clean ClamAV verdict, existing DBF parsing, and
+   Dev persistence. Separately verify the no-data/NA result completes with zero
+   attempts and WBR49 records only `unsupported_report`. Preserve the
+   request/ingestion IDs as non-secret QA evidence.
 5. Inspect sanitized service and Edge logs for the marker and outcome. Confirm
-   no bearer, OAuth token, email body, attachment bytes, PAN, or folio was
-   logged.
+   no bearer, OAuth token, sender, DownloadURL, request ID, ZIP password, email
+   body, ZIP/DBF bytes, PAN, or folio was logged.
 
 Issue #109 and #113 remain open unless this entire Hosted Dev flow succeeds.
 

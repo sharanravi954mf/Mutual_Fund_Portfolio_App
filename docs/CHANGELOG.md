@@ -34,6 +34,14 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   was performed.
 
 ### Fixed
+- **CAMS WBR2/WBR9 Mailback ZIPs (#113, related #109)**: CAMS Gmail discovery
+  now accepts sender-filtered URL-mailback messages without requiring an
+  attachment, recognizes only WBR2/WBR9 DBF responses, records WBR49/unknown
+  reports as `unsupported_report`, and treats exact No Data/NA responses as
+  legitimate zero-attempt outcomes. Validated CAMS URLs download bounded
+  password-protected ZIPs in memory and route the extracted DBF through the
+  existing Edge integrity, malware, and parser path. Generic attachment and
+  inline attachment flows remain intact; Production was not changed.
 - **Inline Gmail Attachments (#113)**: Gmail polling now recognizes small
   attachment MIME parts returned as base64url `body.data` as well as normal
   `attachmentId` parts. Poll remains metadata-only; a bounded, scoped,
@@ -59,6 +67,11 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   limits are unchanged.
 
 ### Security
+- **CAMS Mailback Boundaries (#113)**: Added exact HTTPS host/path validation,
+  redirect rejection, bounded downloads/timeouts, CAMS-specific secret
+  configuration, and encrypted ZIP entry/size/ratio/traversal/duplicate/nested
+  archive controls. Sender validation remains post-read and precedes download;
+  logs exclude sender, URL, request identity, password, and DBF content.
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,
   service tokens are capability-specific and constant-time compared, provider
   origins and Host headers are constrained, ClamAV remains private, and error

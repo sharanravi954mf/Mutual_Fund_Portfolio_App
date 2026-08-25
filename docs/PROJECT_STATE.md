@@ -98,8 +98,11 @@ Docker Compose stack:
   server-to-server OAuth provisioning/refresh routes plus `POST /poll` and
   `POST /attachments/fetch`.
   The initial provider uses Gmail OAuth/Gmail API behind an adapter; it does not
-  accept direct IMAP usernames, passwords, or app passwords. Polling filters for
-  PDF/DBF attachments without guessing sender addresses, follows bounded Gmail
+  accept direct IMAP usernames, passwords, or app passwords. Generic polling
+  filters for PDF/DBF attachments. CAMS polling uses configured, validated
+  registrar candidates (currently `donotreply@camsonline.com` plus an optional
+  Dev-only synthetic sender) and does not require an attachment for WBR
+  URL-mailbacks. It follows bounded Gmail
   pagination (default 4 pages/100 inspected candidates), rejects malformed or
   repeated page tokens, and page-fairly returns at most 25 messages. The Edge
   worker continues to enforce the canonical sender allowlist. Both Gmail
@@ -116,6 +119,21 @@ Docker Compose stack:
   1 MiB bound; detail responses have a separate validated 4 MiB maximum, which
   bounds default five-worker raw buffering at 20 MiB without changing the
   attachment-byte limit.
+- CAMS mailback messages read only sender/date/subject and the body fields needed
+  for `DownloadURL`, `Request Status`, `Report No`, and `File Type`. WBR2/WBR9
+  DBF responses are supported; WBR49/unknown reports produce an explicit
+  sanitized `unsupported_report`, and exact No Data/NA responses complete as
+  legitimate zero-attempt results. Post-read Edge sender validation remains the
+  trust boundary and runs before any mailback download.
+- CAMS `DownloadURL` accepts only HTTPS on exact
+  `mailback<number>.camsonline.com/mailback_result/<opaque>.zip` URLs, with no
+  credentials, explicit port, query, fragment, encoded path, or redirect.
+  Downloaded encrypted ZIPs and their single DBF payload remain bounded and in
+  memory; traversal, absolute/nested paths, duplicates, excess entries/bytes or
+  expansion ratio, wrong password, and corruption fail closed. The password is
+  a CAMS-specific host configuration value, not an MFD credential. Extracted
+  bytes continue through the existing hash, MIME, malware, Storage-integrity,
+  and Edge DBF-parser path.
 - `PDF_TEXT_EXTRACTOR_URL` is the full authenticated
   `POST /pdf/extract` URL. It provides bounded, zero-disk PDF extraction
   infrastructure plus a deterministic synthetic/characterization contract,
@@ -156,6 +174,8 @@ Inline attachment identities use a separate cache with the same TTL and
 bounded LRU behavior, scoped additionally to message and attachment identity.
 It stores only a MIME-part ordinal, never attachment bytes. Missing or forged
 inline context fails closed and requires another poll.
+CAMS mailback identities use another bounded cache with the same scope and TTL;
+it stores only the validated URL and never stores ZIP/DBF bytes on disk.
 
 Issue #109 performs local implementation and validation only. It does not
 deploy the stack, configure hosted Dev/Production values, link Supabase, or copy
@@ -186,6 +206,13 @@ Gmail message detail through the generic 1 MiB provider ceiling. The repository
 now narrows detail responses with Gmail `fields` and gives only that endpoint a
 separate conservative 4 MiB bound; Hosted Dev verification of this correction
 is pending. Production remains untouched.
+
+The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
+validated URL to password-protected ZIP to existing DBF-parser path. WBR49
+remains out of scope. Synthetic HTML/ZIP/DBF fixtures and Dev-only sender/password
+configuration model the full chain without real investor data. This follow-up
+has not changed Hosted Dev or Production; the controlled Hosted Dev validation
+of this path remains pending under Issue #113.
 
 The software now implements Gmail's web-server authorization-code flow through
 `/oauth/start`, `/oauth/callback`, and `/oauth/revoke`. Start requires an
