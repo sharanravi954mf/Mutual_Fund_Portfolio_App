@@ -168,8 +168,11 @@ The support API configures one non-propagating INFO JSON-lines handler for
 container stdout while retaining disabled Uvicorn access logs. Fixed-schema
 request events contain only request ID, method, allowlisted route, status, and
 duration. Successful polls add message/attachment counts; ServiceError events
-add only sanitized code/status. No mailbox/provider identity, filename, sender,
-body, content, header, token, or credential is logged.
+add sanitized code/status and may add one strict allowlisted Gmail
+list/detail/attachment-count diagnostic reason. The optional reason is log-only
+and never changes the public error response. No mailbox/provider identity,
+filename, sender, subject, URL/query string, body, content, header, token, or
+credential is logged.
 
 The unchanged Edge poll request supplies its OAuth access token, whereas the
 attachment-fetch request supplies only provider identities. The initial stack
@@ -208,15 +211,14 @@ worker and one Compose replica until Issue #112 changes the Edge contract.
 
 The support service is deployed to Hosted Dev with the single-worker boundary
 intact. Controlled E2E testing has completed Gmail consent, credential refresh,
-attachment search, inline `body.data` support, and bounded detail concurrency.
-Poll duration fell from roughly 25–28 seconds to about 9.1 seconds against the
-unchanged 30-second Edge connector timeout, but the Edge still reports
-`mailbox_poll_failed` with zero observed attachments. Sanitized diagnostics
-confirmed a support-service 502 `provider_response_too_large` while reading a
-Gmail message detail through the generic 1 MiB provider ceiling. The repository
-now narrows detail responses with Gmail `fields` and gives only that endpoint a
-separate conservative 4 MiB bound; Hosted Dev verification of this correction
-is pending. Production remains untouched.
+attachment search, inline `body.data` support, bounded detail concurrency, and
+the PR #126 CAMS path. OAuth refresh succeeds, but the current Edge poll still
+reports `mailbox_poll_failed`; the support service returns a fail-closed 502
+`provider_response_too_large`. The repository preserves every existing byte and
+count limit while adding a log-only allowlisted reason that distinguishes Gmail
+list response size, individual message-detail response size, and per-message
+attachment-count overflow. Hosted Dev verification of that diagnostic remains
+pending. Production remains untouched.
 
 The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
 validated URL to password-protected ZIP to existing DBF-parser path. WBR49

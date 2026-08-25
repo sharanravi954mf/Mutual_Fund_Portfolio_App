@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
 from conftest import (
     FakeMailboxProvider,
     FakeMalwareScanner,
@@ -145,3 +146,12 @@ def test_service_error_logs_only_code_status_and_request_id(
     assert body_marker not in logs
     assert "ServiceError" not in logs
     assert "Traceback" not in logs
+
+
+def test_service_error_rejects_non_allowlisted_diagnostic_reason() -> None:
+    with pytest.raises(TypeError, match="diagnostic_reason must be allowlisted"):
+        ServiceError(
+            502,
+            "provider_response_too_large",
+            diagnostic_reason="gmail_arbitrary_context",  # type: ignore[arg-type]
+        )

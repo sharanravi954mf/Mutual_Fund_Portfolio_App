@@ -714,6 +714,56 @@ def test_gmail_message_detail_limit_cannot_be_below_generic_provider_limit(monke
         Settings()
 
 
+def test_oversized_gmail_list_emits_only_sanitized_list_diagnostic(
+    settings,
+    diagnostic_stream,
+) -> None:
+    list_limit = 1024
+    limited = settings.model_copy(update={"max_provider_response_bytes": list_limit})
+    oauth_token = "list-oauth-token-must-not-be-logged"
+    response_marker = "list-response-body-must-not-be-logged"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Bearer {oauth_token}"
+        assert request.url.path.endswith("/messages")
+        return httpx.Response(
+            200,
+            json={"messages": [], "padding": response_marker + "x" * list_limit},
+        )
+
+    app = create_app(
+        limited, GmailProvider(limited, httpx.MockTransport(handler)), FakeMalwareScanner()
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/poll",
+            headers={
+                **mailbox_headers(limited),
+                "X-Mailbox-OAuth-Token": oauth_token,
+            },
+            json=poll_body(),
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {"error": {"code": "provider_response_too_large"}}
+    events = [
+        json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line
+    ]
+    service_error = next(event for event in events if event["event"] == "service_error")
+    assert service_error["diagnostic_reason"] == "gmail_list_response_too_large"
+    assert "diagnostic_reason" not in response.text
+
+    logs = diagnostic_stream.getvalue()
+    for forbidden in (
+        oauth_token,
+        response_marker,
+        str(limited.gmail_api_base_url),
+        "has:attachment",
+        "filename:pdf",
+    ):
+        assert forbidden not in logs
+
+
 def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_content(
     settings,
     diagnostic_stream,
@@ -724,6 +774,7 @@ def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_c
     message_id = "oversizedProviderMessage"
     filename = "provider-filename-must-not-be-logged.dbf"
     content_marker = "required-provider-content-marker"
+    subject = "private-subject-must-not-be-logged"
     required_data = content_marker + "A" * detail_limit
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -741,7 +792,8 @@ def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_c
                         {
                             "name": "From",
                             "value": "private-sender@example.test",
-                        }
+                        },
+                        {"name": "Subject", "value": subject},
                     ],
                     "parts": [
                         {
@@ -772,6 +824,15 @@ def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_c
 
     assert response.status_code == 502
     assert response.json() == {"error": {"code": "provider_response_too_large"}}
+    events = [
+        json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line
+    ]
+    service_error = next(event for event in events if event["event"] == "service_error")
+    assert (
+        service_error["diagnostic_reason"]
+        == "gmail_message_detail_response_too_large"
+    )
+    assert "diagnostic_reason" not in response.text
     logs = diagnostic_stream.getvalue()
     assert '"error_code":"provider_response_too_large"' in logs
     for forbidden in (
@@ -780,6 +841,86 @@ def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_c
         filename,
         content_marker,
         "private-sender@example.test",
+        subject,
+        str(limited.gmail_api_base_url),
+        "format=full",
+    ):
+        assert forbidden not in logs
+
+
+def test_gmail_attachment_count_overflow_emits_only_sanitized_count_diagnostic(
+    settings,
+    diagnostic_stream,
+) -> None:
+    limited = settings.model_copy(update={"max_attachments_per_message": 1})
+    oauth_token = "attachment-count-oauth-token-must-not-be-logged"
+    message_id = "attachmentCountMessageId"
+    sender = "private-count-sender@example.test"
+    subject = "private-count-subject-must-not-be-logged"
+    attachment_ids = ["privateAttachmentIdOne", "privateAttachmentIdTwo"]
+    filenames = ["private-one.dbf", "private-two.dbf"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Bearer {oauth_token}"
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": message_id}]})
+        return httpx.Response(
+            200,
+            json={
+                "id": message_id,
+                "internalDate": "1787392800000",
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": sender},
+                        {"name": "Subject", "value": subject},
+                    ],
+                    "parts": [
+                        {
+                            "filename": filename,
+                            "mimeType": "application/octet-stream",
+                            "body": {"attachmentId": attachment_id, "size": 100},
+                        }
+                        for filename, attachment_id in zip(
+                            filenames, attachment_ids, strict=True
+                        )
+                    ],
+                },
+            },
+        )
+
+    app = create_app(
+        limited, GmailProvider(limited, httpx.MockTransport(handler)), FakeMalwareScanner()
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/poll",
+            headers={
+                **mailbox_headers(limited),
+                "X-Mailbox-OAuth-Token": oauth_token,
+            },
+            json=poll_body(),
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {"error": {"code": "provider_response_too_large"}}
+    events = [
+        json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line
+    ]
+    service_error = next(event for event in events if event["event"] == "service_error")
+    assert service_error["diagnostic_reason"] == "gmail_attachment_count_exceeded"
+    assert "diagnostic_reason" not in response.text
+
+    logs = diagnostic_stream.getvalue()
+    for forbidden in (
+        oauth_token,
+        message_id,
+        sender,
+        subject,
+        *attachment_ids,
+        *filenames,
+        str(limited.gmail_api_base_url),
+        "has:attachment",
+        "filename:dbf",
     ):
         assert forbidden not in logs
 
