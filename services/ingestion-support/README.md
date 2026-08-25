@@ -53,9 +53,13 @@ for `docker logs`; raw Uvicorn access logging remains disabled. Request events
 contain only event, random request ID, method, allowlisted route, status, and
 duration. A successful mailbox poll also emits message and attachment counts,
 including zero counts for a successful empty poll. `ServiceError` events contain
-only request ID, sanitized internal code, and HTTP status. Bodies, headers,
-provider identities, filenames, senders, document content, and credentials are
-never included. Logger configuration is idempotent and does not propagate, so
+only request ID, sanitized internal code, HTTP status, and, for three bounded
+Gmail poll failures, an optional strict allowlisted diagnostic reason. The
+reason distinguishes oversized Gmail list responses, oversized individual
+message-detail responses, and per-message attachment-count overflow; it is
+never returned by the public API. Bodies, headers, provider identities,
+filenames, senders, subjects, URLs/query strings, document content, and
+credentials are never included. Logger configuration is idempotent and does not propagate, so
 repeated app construction does not add handlers or duplicate lines.
 
 The response versions and snake-case fields intentionally match the current
@@ -292,18 +296,17 @@ test provide the provider-agnostic Hosted Dev deployment and smoke-test
 contract. `HOSTED_DEV_RUNBOOK.md` contains deployment, secret placement,
 verification, rollback, and synthetic-data cleanup instructions.
 
-Hosted Dev runs the support API at one worker/replica. Its controlled E2E has
-completed Gmail consent, credential refresh, attachment search, inline Gmail
-attachment support, and bounded detail concurrency. Poll time fell from roughly
-25–28 seconds to about 9.1 seconds, but the Edge still reports
-`mailbox_poll_failed` with zero observed attachments. Sanitized INFO diagnostics
-confirmed the support service was rejecting a Gmail message-detail response
-above the generic 1 MiB provider ceiling with `provider_response_too_large`.
-The repository now requests only the required partial response and applies the
-separate conservative message-detail ceiling described above; this correction
-has not been deployed or re-tested on Hosted Dev. Timeout, page/candidate,
-attachment, and concurrency limits remain unchanged. Production deployment and
-Production configuration require a separate reviewed change.
+Hosted Dev runs the support API at one worker/replica. Gmail consent and refresh
+succeed, and the PR #126 service is deployed, but the current Edge poll still
+returns `mailbox_poll_failed`; the service records a generic
+`provider_response_too_large` while `/poll` fails closed. This change preserves
+the existing generic public response and all byte/count limits while adding one
+of three log-only reasons: `gmail_list_response_too_large`,
+`gmail_message_detail_response_too_large`, or
+`gmail_attachment_count_exceeded`. The next Hosted Dev run can identify which
+bounded poll operation failed without logging provider content or metadata.
+Production deployment and Production configuration require a separate reviewed
+change.
 
 This Issue #113 change also prepares the secure WBR2/WBR9 CAMS URL-mailback
 path and Dev-only synthetic fixtures/configuration. It has not changed Hosted

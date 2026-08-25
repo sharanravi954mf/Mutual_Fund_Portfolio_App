@@ -4,10 +4,19 @@ import json
 import logging
 import re
 import sys
+from enum import StrEnum
 
 LOGGER = logging.getLogger("moneybowl.ingestion_support")
 HANDLER_NAME = "moneybowl.ingestion_support.stdout"
 ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+class DiagnosticReason(StrEnum):
+    GMAIL_LIST_RESPONSE_TOO_LARGE = "gmail_list_response_too_large"
+    GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE = (
+        "gmail_message_detail_response_too_large"
+    )
+    GMAIL_ATTACHMENT_COUNT_EXCEEDED = "gmail_attachment_count_exceeded"
 
 
 def configure_application_logging() -> None:
@@ -70,13 +79,20 @@ def log_mailbox_poll_outcome(
     )
 
 
-def log_service_error(*, request_id: str, error_code: str, status: int) -> None:
+def log_service_error(
+    *,
+    request_id: str,
+    error_code: str,
+    status: int,
+    diagnostic_reason: DiagnosticReason | None = None,
+) -> None:
     safe_code = error_code if ERROR_CODE_RE.fullmatch(error_code) is not None else "internal_error"
-    _emit(
-        {
-            "event": "service_error",
-            "request_id": request_id,
-            "error_code": safe_code,
-            "status": status,
-        }
-    )
+    payload: dict[str, str | int] = {
+        "event": "service_error",
+        "request_id": request_id,
+        "error_code": safe_code,
+        "status": status,
+    }
+    if isinstance(diagnostic_reason, DiagnosticReason):
+        payload["diagnostic_reason"] = diagnostic_reason.value
+    _emit(payload)

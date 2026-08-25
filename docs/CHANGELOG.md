@@ -61,9 +61,11 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 - **Sanitized Ingestion Diagnostics (#113)**: The support API now emits
   fixed-schema INFO JSON lines to container stdout for safe request outcomes,
   successful mailbox message/attachment counts, and sanitized ServiceError
-  code/status. Uvicorn access logs remain disabled, duplicate handlers are
-  prevented, and no body, provider identity, mailbox metadata, or credential is
-  logged.
+  code/status. Gmail poll oversize failures may add one strict allowlisted
+  reason for list response size, individual detail response size, or attachment
+  count. The public error remains unchanged. Uvicorn access logs remain
+  disabled, duplicate handlers are prevented, and no body, provider identity,
+  mailbox metadata, URL/query string, or credential is logged.
 - **Bounded Gmail Message Details (#113)**: Gmail `format=full` detail calls now
   request only connector-required top-level fields plus the complete recursive
   MIME subtree needed for normal and inline attachments. A separate validated

@@ -25,6 +25,7 @@ from .cams_mailback import (
     parse_cams_mailback,
     required_html_text,
 )
+from .diagnostics import DiagnosticReason
 from .errors import ServiceError
 
 Registrar = Literal["CAMS", "KFINTECH"]
@@ -389,6 +390,7 @@ class GmailProvider:
         data: dict[str, str] | None = None,
         params: dict[str, str | int] | None = None,
         max_response_bytes: int | None = None,
+        diagnostic_reason: DiagnosticReason | None = None,
     ) -> dict[str, Any]:
         response_limit = max_response_bytes or self.settings.max_provider_response_bytes
         try:
@@ -401,12 +403,20 @@ class GmailProvider:
                     raise ServiceError(502, "provider_request_failed")
                 declared = response.headers.get("content-length")
                 if declared is not None and int(declared) > response_limit:
-                    raise ServiceError(502, "provider_response_too_large")
+                    raise ServiceError(
+                        502,
+                        "provider_response_too_large",
+                        diagnostic_reason=diagnostic_reason,
+                    )
                 raw = bytearray()
                 async for chunk in response.aiter_bytes():
                     raw.extend(chunk)
                     if len(raw) > response_limit:
-                        raise ServiceError(502, "provider_response_too_large")
+                        raise ServiceError(
+                            502,
+                            "provider_response_too_large",
+                            diagnostic_reason=diagnostic_reason,
+                        )
         except ServiceError:
             raise
         except (httpx.TimeoutException, httpx.NetworkError) as error:
@@ -491,6 +501,7 @@ class GmailProvider:
                 f"{self.settings.gmail_api_base_url}/users/{user_id}/messages",
                 headers=auth,
                 params=params,
+                diagnostic_reason=DiagnosticReason.GMAIL_LIST_RESPONSE_TOO_LARGE,
             )
             raw_messages = listing.get("messages", [])
             if not isinstance(raw_messages, list) or len(raw_messages) > page_size:
@@ -593,6 +604,9 @@ class GmailProvider:
                     headers=auth,
                     params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
                     max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
+                    diagnostic_reason=(
+                        DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE
+                    ),
                 )
                 message, inline_parts, mailback_parts = self._message_from_gmail(
                     raw, registrar
@@ -727,7 +741,11 @@ class GmailProvider:
                 )
             )
             if len(attachments) > self.settings.max_attachments_per_message:
-                raise ServiceError(502, "provider_response_too_large")
+                raise ServiceError(
+                    502,
+                    "provider_response_too_large",
+                    diagnostic_reason=DiagnosticReason.GMAIL_ATTACHMENT_COUNT_EXCEEDED,
+                )
         mailback_parts: list[MailbackAttachmentPart] = []
         outcome: Literal["no_data", "unsupported_report"] | None = None
         if registrar == "CAMS" and not attachments:
@@ -935,6 +953,9 @@ class GmailProvider:
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
             max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
+            diagnostic_reason=(
+                DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE
+            ),
         )
         message, inline_parts, _mailback_parts = self._message_from_gmail(
             raw, request.registrar
