@@ -391,6 +391,7 @@ class GmailProvider:
         params: dict[str, str | int] | None = None,
         max_response_bytes: int | None = None,
         diagnostic_reason: DiagnosticReason | None = None,
+        invalid_diagnostic_reason: DiagnosticReason | None = None,
     ) -> dict[str, Any]:
         response_limit = max_response_bytes or self.settings.max_provider_response_bytes
         try:
@@ -422,14 +423,26 @@ class GmailProvider:
         except (httpx.TimeoutException, httpx.NetworkError) as error:
             raise ServiceError(503, "provider_unavailable") from error
         except (ValueError, httpx.HTTPError) as error:
-            raise ServiceError(502, "provider_response_invalid") from error
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_diagnostic_reason,
+            ) from error
 
         try:
             parsed = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ServiceError(502, "provider_response_invalid") from error
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_diagnostic_reason,
+            ) from error
         if not isinstance(parsed, dict):
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_diagnostic_reason,
+            )
         return parsed
 
     @staticmethod
@@ -502,18 +515,31 @@ class GmailProvider:
                 headers=auth,
                 params=params,
                 diagnostic_reason=DiagnosticReason.GMAIL_LIST_RESPONSE_TOO_LARGE,
+                invalid_diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
             )
             raw_messages = listing.get("messages", [])
             if not isinstance(raw_messages, list) or len(raw_messages) > page_size:
-                raise ServiceError(502, "provider_response_invalid")
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                )
 
             page_message_ids: list[str] = []
             for listed in raw_messages:
                 if not isinstance(listed, dict) or not isinstance(listed.get("id"), str):
-                    raise ServiceError(502, "provider_response_invalid")
+                    raise ServiceError(
+                        502,
+                        "provider_response_invalid",
+                        diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                    )
                 message_id = listed["id"]
                 if PROVIDER_ID_RE.fullmatch(message_id) is None or message_id in seen_message_ids:
-                    raise ServiceError(502, "provider_response_invalid")
+                    raise ServiceError(
+                        502,
+                        "provider_response_invalid",
+                        diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                    )
                 seen_message_ids.add(message_id)
                 candidate_count += 1
                 page_message_ids.append(message_id)
@@ -533,7 +559,11 @@ class GmailProvider:
             if next_page_token is None:
                 break
             if not self._valid_page_token(next_page_token) or next_page_token in seen_page_tokens:
-                raise ServiceError(502, "provider_response_invalid")
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                )
             seen_page_tokens.add(next_page_token)
             page_token = next_page_token
 
@@ -605,10 +635,15 @@ class GmailProvider:
                     params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
                     max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
                     diagnostic_reason=(DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE),
+                    invalid_diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
                 )
                 message, inline_parts, mailback_parts = self._message_from_gmail(raw, registrar)
                 if message.message_id != message_id:
-                    raise ServiceError(502, "provider_response_invalid")
+                    raise ServiceError(
+                        502,
+                        "provider_response_invalid",
+                        diagnostic_reason=DiagnosticReason.GMAIL_DETAIL_ID_MISMATCH,
+                    )
                 results[index] = (message, inline_parts, mailback_parts)
 
         worker_count = min(self.settings.gmail_detail_fetch_concurrency, len(message_ids))
@@ -621,9 +656,23 @@ class GmailProvider:
             await asyncio.gather(*workers, return_exceptions=True)
             raise
 
-        if len(results) != len(message_ids):
-            raise ServiceError(502, "provider_response_invalid")
-        return [results[index] for index in range(len(message_ids))]
+        return self._ordered_detail_results(results, len(message_ids))
+
+    @staticmethod
+    def _ordered_detail_results(
+        results: dict[
+            int,
+            tuple[Message, list[InlineAttachmentPart], list[MailbackAttachmentPart]],
+        ],
+        requested_count: int,
+    ) -> list[tuple[Message, list[InlineAttachmentPart], list[MailbackAttachmentPart]]]:
+        if len(results) != requested_count:
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=DiagnosticReason.GMAIL_DETAIL_RESULT_COUNT_MISMATCH,
+            )
+        return [results[index] for index in range(requested_count)]
 
     @staticmethod
     def _valid_page_token(value: Any) -> bool:
@@ -665,7 +714,11 @@ class GmailProvider:
             or not isinstance(internal_date, str)
             or not internal_date.isdigit()
         ):
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+            )
         try:
             received_at = (
                 datetime.fromtimestamp(int(internal_date) / 1000, UTC)
@@ -673,13 +726,21 @@ class GmailProvider:
                 .replace("+00:00", "Z")
             )
         except (OverflowError, OSError, ValueError) as error:
-            raise ServiceError(502, "provider_response_invalid") from error
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+            ) from error
 
         sender = ""
         subject = ""
         headers = payload.get("headers", [])
         if not isinstance(headers, list):
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+            )
         for header in headers:
             if isinstance(header, dict) and str(header.get("name", "")).lower() == "from":
                 sender = parseaddr(str(header.get("value", "")))[1].strip().lower()
@@ -694,7 +755,11 @@ class GmailProvider:
             has_filename = isinstance(filename, str) and filename.strip() != ""
             if not isinstance(body, dict):
                 if has_filename:
-                    raise ServiceError(502, "provider_response_invalid")
+                    raise ServiceError(
+                        502,
+                        "provider_response_invalid",
+                        diagnostic_reason=DiagnosticReason.GMAIL_MIME_PART_INVALID,
+                    )
                 continue
 
             attachment_id = body.get("attachmentId")
@@ -705,13 +770,22 @@ class GmailProvider:
                     or PROVIDER_ID_RE.fullmatch(attachment_id) is None
                     or encoded not in (None, "")
                 ):
-                    raise ServiceError(502, "provider_response_invalid")
-                self._validated_declared_size(body.get("size"), self.settings.max_attachment_bytes)
+                    raise ServiceError(
+                        502,
+                        "provider_response_invalid",
+                        diagnostic_reason=DiagnosticReason.GMAIL_MIME_PART_INVALID,
+                    )
+                self._validated_declared_size(
+                    body.get("size"),
+                    self.settings.max_attachment_bytes,
+                    invalid_reason=DiagnosticReason.GMAIL_MIME_PART_INVALID,
+                )
             elif encoded is not None and has_filename:
                 content = self._decode_gmail_data(
                     encoded,
                     body.get("size"),
                     self.settings.max_attachment_bytes,
+                    invalid_reason=DiagnosticReason.GMAIL_INLINE_BODY_INVALID,
                 )
                 attachment_id = self._inline_attachment_id(message_id, part_index)
                 inline_parts.append(
@@ -722,7 +796,11 @@ class GmailProvider:
                     )
                 )
             elif has_filename:
-                raise ServiceError(502, "provider_response_invalid")
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MIME_PART_INVALID,
+                )
             else:
                 continue
 
@@ -748,7 +826,11 @@ class GmailProvider:
             mailback = self._parse_cams_mailback_payload(payload, subject)
             if mailback.outcome == "supported":
                 if mailback.download_url is None or mailback.report_type is None:
-                    raise ServiceError(502, "provider_response_invalid")
+                    raise ServiceError(
+                        502,
+                        "provider_response_invalid",
+                        diagnostic_reason=(DiagnosticReason.CAMS_MAILBACK_REQUIRED_FIELDS_INVALID),
+                    )
                 attachment_id = self._mailback_attachment_id(
                     message_id, mailback.report_type, mailback.download_url
                 )
@@ -802,12 +884,21 @@ class GmailProvider:
             remaining = self.settings.max_cams_mailback_email_body_bytes - total_body_bytes
             if remaining <= 0:
                 raise ServiceError(502, "provider_response_too_large")
-            content = self._decode_gmail_data(encoded, body.get("size"), remaining)
+            content = self._decode_gmail_data(
+                encoded,
+                body.get("size"),
+                remaining,
+                invalid_reason=DiagnosticReason.CAMS_MAILBACK_BODY_ENCODING_INVALID,
+            )
             total_body_bytes += len(content)
             try:
                 decoded = content.decode("utf-8")
             except UnicodeDecodeError as error:
-                raise ServiceError(502, "provider_response_invalid") from error
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=(DiagnosticReason.CAMS_MAILBACK_BODY_ENCODING_INVALID),
+                ) from error
             if mime == "text/html":
                 text = required_html_text(decoded)
             else:
@@ -817,7 +908,11 @@ class GmailProvider:
             return parse_cams_mailback(subject=subject, body_text="")
         first = parsed_results[0]
         if any(result != first for result in parsed_results[1:]):
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_MULTIPART_DISAGREEMENT,
+            )
         return first
 
     @staticmethod
@@ -847,22 +942,46 @@ class GmailProvider:
         return (*cache_key(request), message_id, attachment_id)
 
     @staticmethod
-    def _validated_declared_size(value: Any, max_bytes: int) -> int | None:
+    def _validated_declared_size(
+        value: Any,
+        max_bytes: int,
+        *,
+        invalid_reason: DiagnosticReason | None = None,
+    ) -> int | None:
         if value is None:
             return None
         if type(value) is not int or value < 0:
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_reason,
+            )
         if value > max_bytes:
             raise ServiceError(502, "provider_response_too_large")
         return value
 
     @classmethod
-    def _decode_gmail_data(cls, encoded: Any, declared_size: Any, max_bytes: int) -> bytes:
+    def _decode_gmail_data(
+        cls,
+        encoded: Any,
+        declared_size: Any,
+        max_bytes: int,
+        *,
+        invalid_reason: DiagnosticReason | None = None,
+    ) -> bytes:
         if not isinstance(encoded, str) or GMAIL_BASE64URL_RE.fullmatch(encoded) is None:
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_reason,
+            )
         if len(encoded) > ((max_bytes + 2) // 3) * 4:
             raise ServiceError(502, "provider_response_too_large")
-        size = cls._validated_declared_size(declared_size, max_bytes)
+        size = cls._validated_declared_size(
+            declared_size,
+            max_bytes,
+            invalid_reason=invalid_reason,
+        )
         unpadded = encoded.rstrip("=")
         encoded_padding = len(encoded) - len(unpadded)
         expected_padding = (-len(unpadded)) % 4
@@ -871,16 +990,28 @@ class GmailProvider:
             or len(unpadded) % 4 == 1
             or encoded_padding not in (0, expected_padding)
         ):
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_reason,
+            )
         try:
             padded = unpadded + "=" * (-len(unpadded) % 4)
             content = base64.b64decode(padded, altchars=b"-_", validate=True)
         except (ValueError, base64.binascii.Error) as error:
-            raise ServiceError(502, "provider_response_invalid") from error
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_reason,
+            ) from error
         if len(content) > max_bytes:
             raise ServiceError(502, "provider_response_too_large")
         if not content or (size is not None and len(content) != size):
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=invalid_reason,
+            )
         return content
 
     @staticmethod
@@ -899,7 +1030,11 @@ class GmailProvider:
             if not isinstance(children, list) or not all(
                 isinstance(child, dict) for child in children
             ):
-                raise ServiceError(502, "provider_response_invalid")
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MIME_PART_INVALID,
+                )
             pending.extend(reversed(children))
 
     @staticmethod
@@ -948,10 +1083,15 @@ class GmailProvider:
             params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
             max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
             diagnostic_reason=(DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE),
+            invalid_diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
         )
         message, inline_parts, _mailback_parts = self._message_from_gmail(raw, request.registrar)
         if message.message_id != request.message_id:
-            raise ServiceError(502, "provider_response_invalid")
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=DiagnosticReason.GMAIL_DETAIL_ID_MISMATCH,
+            )
         for inline_part in inline_parts:
             if (
                 inline_part.part_index == part_index

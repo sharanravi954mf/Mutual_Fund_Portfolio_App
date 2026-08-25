@@ -13,10 +13,21 @@ ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 class DiagnosticReason(StrEnum):
     GMAIL_LIST_RESPONSE_TOO_LARGE = "gmail_list_response_too_large"
-    GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE = (
-        "gmail_message_detail_response_too_large"
-    )
+    GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE = "gmail_message_detail_response_too_large"
     GMAIL_ATTACHMENT_COUNT_EXCEEDED = "gmail_attachment_count_exceeded"
+    GMAIL_DETAIL_ID_MISMATCH = "gmail_detail_id_mismatch"
+    GMAIL_MESSAGE_SHAPE_INVALID = "gmail_message_shape_invalid"
+    GMAIL_MIME_PART_INVALID = "gmail_mime_part_invalid"
+    GMAIL_INLINE_BODY_INVALID = "gmail_inline_body_invalid"
+    CAMS_MAILBACK_BODY_ENCODING_INVALID = "cams_mailback_body_encoding_invalid"
+    CAMS_MAILBACK_HTML_INVALID = "cams_mailback_html_invalid"
+    CAMS_MAILBACK_REPORT_MISMATCH = "cams_mailback_report_mismatch"
+    CAMS_MAILBACK_REQUIRED_FIELDS_INVALID = "cams_mailback_required_fields_invalid"
+    CAMS_MAILBACK_NO_DATA_SHAPE_INVALID = "cams_mailback_no_data_shape_invalid"
+    CAMS_MAILBACK_STATUS_INVALID = "cams_mailback_status_invalid"
+    CAMS_MAILBACK_DOWNLOAD_URL_MISSING = "cams_mailback_download_url_missing"
+    CAMS_MAILBACK_MULTIPART_DISAGREEMENT = "cams_mailback_multipart_disagreement"
+    GMAIL_DETAIL_RESULT_COUNT_MISMATCH = "gmail_detail_result_count_mismatch"
 
 
 def configure_application_logging() -> None:
