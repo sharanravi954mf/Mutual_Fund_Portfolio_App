@@ -176,11 +176,13 @@ included in the poll response.
 For CAMS messages without attachments, the connector reads only the sender,
 internal date, subject, and filename-less `text/html` or `text/plain` MIME
 parts needed for `DownloadURL`, `Request Status`, `Report No`, and `File Type`.
-Only WBR2 and WBR9 with DBF output are supported. WBR49 and any other report
+Only WBR2 and WBR9 with DBF output are supported. A data response requires the
+confirmed `Request Status = Link` plus a validated CAMS ZIP `DownloadURL`;
+unconfirmed values such as `Completed` fail closed. WBR49 and any other report
 number produce the sanitized `unsupported_report` outcome and are never
 downloaded or parsed as a supported report. `Request Status = No Data` together
 with `DownloadURL = NA` is a completed zero-attempt `no_data` result, not a
-provider failure.
+provider failure. Mixed Link/NA or No Data/URL combinations fail closed.
 
 Supported mailbacks expose only an opaque `mailback:<sha256>` attachment
 identity. The original URL stays in a bounded process-local cache and must be

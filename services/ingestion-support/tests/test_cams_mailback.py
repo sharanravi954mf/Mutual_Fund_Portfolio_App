@@ -25,6 +25,9 @@ from app.mailbox import FetchRequest, GmailProvider, PollRequest
 from app.main import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
+CAMS_WBR2_URL = (
+    "https://mailback12.camsonline.com/mailback_result/synthetic-wbr2.zip"
+)
 ENCRYPTED_DBF_ZIP_B64 = (
     "UEsDBBQACQAIADB1GV3Nlnr1CgEAAGoCAAASABwAc3ludGhldGljLXdicjIuZGJmVVQJAANEXI1q"
     "RFyNanV4CwABBPUBAAAEFAAAAEeomJyplYw9e61/7158uHTU7CAT1U6yXpYHm7+xZqT1Ok7yXmso"
@@ -85,6 +88,7 @@ def _gmail_mailback_message(
         ("cams_wbr2_mailback.html", "WBR2"),
         ("cams_wbr9_mailback.html", "WBR9"),
     ],
+    ids=["wbr2-link-url", "wbr9-link-url"],
 )
 def test_supported_cams_html_mailbacks(fixture: str, report_type: str) -> None:
     text = _mailback_fixture(fixture)
@@ -97,6 +101,7 @@ def test_supported_cams_html_mailbacks(fixture: str, report_type: str) -> None:
     assert result.report_type == report_type
     assert result.download_url is not None
     assert result.download_url.startswith("https://mailback")
+    assert "\nLink\n" in f"\n{text}\n"
 
 
 def test_unrelated_html_link_cannot_replace_download_url() -> None:
@@ -106,9 +111,7 @@ def test_unrelated_html_link_cannot_replace_download_url() -> None:
     )
     result = parse_cams_mailback(subject="CAMS WBR2 mailback", body_text=text)
 
-    assert result.download_url == (
-        "https://mailback12.camsonline.com/mailback_result/synthetic-wbr2.zip"
-    )
+    assert result.download_url == CAMS_WBR2_URL
 
 
 def test_wbr49_is_explicitly_unsupported() -> None:
@@ -134,12 +137,39 @@ def test_no_data_na_is_legitimate_outcome() -> None:
     assert result.download_url is None
 
 
-def test_unknown_request_status_fails_closed() -> None:
+def test_completed_with_url_fails_closed() -> None:
     text = _mailback_fixture("cams_wbr2_mailback.html")
     with pytest.raises(ServiceError, match="provider_response_invalid"):
         parse_cams_mailback(
             subject="CAMS WBR2 mailback",
-            body_text=text.replace("Completed", "Processing"),
+            body_text=text.replace("Link", "Completed", 1),
+        )
+
+
+def test_unknown_request_status_with_url_fails_closed() -> None:
+    text = _mailback_fixture("cams_wbr2_mailback.html")
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        parse_cams_mailback(
+            subject="CAMS WBR2 mailback",
+            body_text=text.replace("Link", "Processing", 1),
+        )
+
+
+def test_link_with_na_fails_closed() -> None:
+    text = _mailback_fixture("cams_wbr2_mailback.html")
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        parse_cams_mailback(
+            subject="CAMS WBR2 mailback",
+            body_text=text.replace(CAMS_WBR2_URL, "NA", 1),
+        )
+
+
+def test_no_data_with_url_fails_closed() -> None:
+    text = _mailback_fixture("cams_wbr2_no_data.html")
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        parse_cams_mailback(
+            subject="CAMS WBR2 mailback",
+            body_text=text.replace("NA", CAMS_WBR2_URL, 1),
         )
 
 

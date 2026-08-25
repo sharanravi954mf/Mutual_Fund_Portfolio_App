@@ -121,10 +121,12 @@ Docker Compose stack:
   attachment-byte limit.
 - CAMS mailback messages read only sender/date/subject and the body fields needed
   for `DownloadURL`, `Request Status`, `Report No`, and `File Type`. WBR2/WBR9
-  DBF responses are supported; WBR49/unknown reports produce an explicit
-  sanitized `unsupported_report`, and exact No Data/NA responses complete as
-  legitimate zero-attempt results. Post-read Edge sender validation remains the
-  trust boundary and runs before any mailback download.
+  DBF responses require the confirmed Link/validated-URL combination;
+  unconfirmed values such as Completed fail closed. WBR49/unknown reports
+  produce an explicit sanitized `unsupported_report`, and exact No Data/NA
+  responses complete as legitimate zero-attempt results. Mixed status/URL
+  combinations fail closed. Post-read Edge sender validation remains the trust
+  boundary and runs before any mailback download.
 - CAMS `DownloadURL` accepts only HTTPS on exact
   `mailback<number>.camsonline.com/mailback_result/<opaque>.zip` URLs, with no
   credentials, explicit port, query, fragment, encoded path, or redirect.

@@ -139,7 +139,7 @@ def parse_cams_mailback(
         if no_data and unavailable_url:
             return CamsMailbackResult("no_data", report_type=report_type)
         raise ServiceError(502, "provider_response_invalid")
-    if normalized_status != "completed":
+    if normalized_status != "link":
         raise ServiceError(502, "provider_response_invalid")
 
     if download_value is None:
