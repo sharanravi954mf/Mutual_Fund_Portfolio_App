@@ -15,15 +15,23 @@ from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlencode
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .config import Settings
+from .cams_mailback import (
+    CamsMailbackResult,
+    download_cams_zip,
+    extract_cams_dbf,
+    parse_cams_mailback,
+    required_html_text,
+)
 from .errors import ServiceError
 
 Registrar = Literal["CAMS", "KFINTECH"]
 CONNECTOR_REF_RE = re.compile(r"^gmail:(me|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)$")
 PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
 INLINE_ATTACHMENT_ID_RE = re.compile(r"^inline:[0-9a-f]{64}$")
+MAILBACK_ATTACHMENT_ID_RE = re.compile(r"^mailback:[0-9a-f]{64}$")
 GMAIL_BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+={0,2}$")
 GMAIL_ATTACHMENT_QUERY = "has:attachment {filename:pdf filename:dbf}"
 GMAIL_MESSAGE_DETAIL_FIELDS = (
@@ -84,6 +92,13 @@ class Message(StrictModel):
     sender_address: str
     received_at: str
     attachments: list[Attachment]
+    outcome: Literal["no_data", "unsupported_report"] | None = None
+
+    @model_validator(mode="after")
+    def validate_outcome_shape(self) -> Message:
+        if self.outcome is not None and self.attachments:
+            raise ValueError("message outcome must not contain attachments")
+        return self
 
 
 class RefreshResult(StrictModel):
@@ -219,6 +234,50 @@ class InlineAttachmentPart:
     content: bytes
 
 
+@dataclass(frozen=True)
+class MailbackAttachmentPart:
+    attachment_id: str
+    download_url: str
+
+
+MailbackCacheKey = tuple[str, str, str, str, str]
+
+
+class MailbackAttachmentCache:
+    """Bounded in-memory CAMS mailback locators issued by a validated poll."""
+
+    def __init__(self, ttl_seconds: int, max_entries: int) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._max_entries = max_entries
+        self._entries: OrderedDict[MailbackCacheKey, tuple[str, float]] = OrderedDict()
+        self._lock = asyncio.Lock()
+
+    async def put_many(self, entries: list[tuple[MailbackCacheKey, str]]) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            self._prune(now)
+            for key, download_url in entries:
+                self._entries.pop(key, None)
+                self._entries[key] = (download_url, now + self._ttl_seconds)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+
+    async def get(self, key: MailbackCacheKey) -> str:
+        async with self._lock:
+            now = time.monotonic()
+            self._prune(now)
+            entry = self._entries.get(key)
+            if entry is None:
+                raise ServiceError(409, "mailback_attachment_context_required")
+            self._entries.move_to_end(key)
+            return entry[0]
+
+    def _prune(self, now: float) -> None:
+        expired = [key for key, (_url, expires) in self._entries.items() if expires <= now]
+        for key in expired:
+            self._entries.pop(key, None)
+
+
 class GmailProvider:
     def __init__(
         self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None
@@ -234,6 +293,10 @@ class GmailProvider:
             settings.max_mailbox_messages * settings.max_attachments_per_message
         )
         self.inline_attachment_cache = InlineAttachmentCache(
+            settings.mailbox_token_cache_ttl_seconds,
+            max(settings.mailbox_token_cache_max_entries, minimum_inline_entries),
+        )
+        self.mailback_attachment_cache = MailbackAttachmentCache(
             settings.mailbox_token_cache_ttl_seconds,
             max(settings.mailbox_token_cache_max_entries, minimum_inline_entries),
         )
@@ -409,6 +472,7 @@ class GmailProvider:
         page_token: str | None = None
         candidate_count = 0
         inline_parts_by_message: dict[str, list[InlineAttachmentPart]] = {}
+        mailback_parts_by_message: dict[str, list[MailbackAttachmentPart]] = {}
 
         for _page_number in range(self.settings.max_mailbox_pages_per_poll):
             remaining_candidates = self.settings.max_mailbox_candidates_per_poll - candidate_count
@@ -417,7 +481,7 @@ class GmailProvider:
             page_size = min(self.settings.max_mailbox_messages, remaining_candidates)
             params: dict[str, str | int] = {
                 "maxResults": page_size,
-                "q": GMAIL_ATTACHMENT_QUERY,
+                "q": self._gmail_query(request.registrar),
             }
             if page_token is not None:
                 params["pageToken"] = page_token
@@ -444,11 +508,14 @@ class GmailProvider:
                 page_message_ids.append(message_id)
 
             page_messages: list[Message] = []
-            details = await self._fetch_page_message_details(page_message_ids, user_id, auth)
-            for message, inline_parts in details:
-                if message.attachments:
+            details = await self._fetch_page_message_details(
+                page_message_ids, user_id, auth, request.registrar
+            )
+            for message, inline_parts, mailback_parts in details:
+                if message.attachments or message.outcome is not None:
                     page_messages.append(message)
                     inline_parts_by_message[message.message_id] = inline_parts
+                    mailback_parts_by_message[message.message_id] = mailback_parts
             message_pages.append(page_messages)
 
             next_page_token = listing.get("nextPageToken")
@@ -461,6 +528,7 @@ class GmailProvider:
 
         selected = self._page_fair_messages(message_pages)
         cache_entries: list[tuple[InlineCacheKey, int]] = []
+        mailback_cache_entries: list[tuple[MailbackCacheKey, str]] = []
         for message in selected:
             for inline_part in inline_parts_by_message.get(message.message_id, []):
                 cache_entries.append(
@@ -473,21 +541,43 @@ class GmailProvider:
                         inline_part.part_index,
                     )
                 )
+            for mailback_part in mailback_parts_by_message.get(message.message_id, []):
+                mailback_cache_entries.append(
+                    (
+                        self._mailback_cache_key(
+                            request,
+                            message.message_id,
+                            mailback_part.attachment_id,
+                        ),
+                        mailback_part.download_url,
+                    )
+                )
         await self.inline_attachment_cache.put_many(cache_entries)
+        await self.mailback_attachment_cache.put_many(mailback_cache_entries)
         return selected
+
+    def _gmail_query(self, registrar: Registrar) -> str:
+        if registrar != "CAMS":
+            return GMAIL_ATTACHMENT_QUERY
+        senders = " OR ".join(self.settings.cams_candidate_senders)
+        return f"from:({senders}) (WBR OR {GMAIL_ATTACHMENT_QUERY})"
 
     async def _fetch_page_message_details(
         self,
         message_ids: list[str],
         user_id: str,
         auth: dict[str, str],
-    ) -> list[tuple[Message, list[InlineAttachmentPart]]]:
+        registrar: Registrar,
+    ) -> list[tuple[Message, list[InlineAttachmentPart], list[MailbackAttachmentPart]]]:
         """Fetch one Gmail listing page with a fixed worker pool and stable ordering."""
 
         if not message_ids:
             return []
 
-        results: dict[int, tuple[Message, list[InlineAttachmentPart]]] = {}
+        results: dict[
+            int,
+            tuple[Message, list[InlineAttachmentPart], list[MailbackAttachmentPart]],
+        ] = {}
         next_index = 0
 
         async def worker() -> None:
@@ -504,10 +594,12 @@ class GmailProvider:
                     params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
                     max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
                 )
-                message, inline_parts = self._message_from_gmail(raw)
+                message, inline_parts, mailback_parts = self._message_from_gmail(
+                    raw, registrar
+                )
                 if message.message_id != message_id:
                     raise ServiceError(502, "provider_response_invalid")
-                results[index] = (message, inline_parts)
+                results[index] = (message, inline_parts, mailback_parts)
 
         worker_count = min(self.settings.gmail_detail_fetch_concurrency, len(message_ids))
         workers = [asyncio.create_task(worker()) for _worker in range(worker_count)]
@@ -551,8 +643,8 @@ class GmailProvider:
         return selected
 
     def _message_from_gmail(
-        self, raw: dict[str, Any]
-    ) -> tuple[Message, list[InlineAttachmentPart]]:
+        self, raw: dict[str, Any], registrar: Registrar
+    ) -> tuple[Message, list[InlineAttachmentPart], list[MailbackAttachmentPart]]:
         message_id = raw.get("id")
         payload = raw.get("payload")
         internal_date = raw.get("internalDate")
@@ -574,13 +666,15 @@ class GmailProvider:
             raise ServiceError(502, "provider_response_invalid") from error
 
         sender = ""
+        subject = ""
         headers = payload.get("headers", [])
         if not isinstance(headers, list):
             raise ServiceError(502, "provider_response_invalid")
         for header in headers:
             if isinstance(header, dict) and str(header.get("name", "")).lower() == "from":
                 sender = parseaddr(str(header.get("value", "")))[1].strip().lower()
-                break
+            elif isinstance(header, dict) and str(header.get("name", "")).lower() == "subject":
+                subject = str(header.get("value", "")).strip()[:998]
 
         attachments: list[Attachment] = []
         inline_parts: list[InlineAttachmentPart] = []
@@ -634,15 +728,83 @@ class GmailProvider:
             )
             if len(attachments) > self.settings.max_attachments_per_message:
                 raise ServiceError(502, "provider_response_too_large")
+        mailback_parts: list[MailbackAttachmentPart] = []
+        outcome: Literal["no_data", "unsupported_report"] | None = None
+        if registrar == "CAMS" and not attachments:
+            mailback = self._parse_cams_mailback_payload(payload, subject)
+            if mailback.outcome == "supported":
+                if mailback.download_url is None or mailback.report_type is None:
+                    raise ServiceError(502, "provider_response_invalid")
+                attachment_id = self._mailback_attachment_id(
+                    message_id, mailback.report_type, mailback.download_url
+                )
+                attachments.append(
+                    Attachment(
+                        attachment_id=attachment_id,
+                        filename=f"cams-{mailback.report_type.lower()}.dbf",
+                        declared_mime="application/octet-stream",
+                        received_at=received_at,
+                    )
+                )
+                mailback_parts.append(
+                    MailbackAttachmentPart(
+                        attachment_id=attachment_id,
+                        download_url=mailback.download_url,
+                    )
+                )
+            else:
+                outcome = mailback.outcome
         return (
             Message(
                 message_id=message_id,
                 sender_address=sender,
                 received_at=received_at,
                 attachments=attachments,
+                outcome=outcome,
             ),
             inline_parts,
+            mailback_parts,
         )
+
+    def _parse_cams_mailback_payload(
+        self,
+        payload: dict[str, Any],
+        subject: str,
+    ) -> CamsMailbackResult:
+        parsed_results: list[CamsMailbackResult] = []
+        total_body_bytes = 0
+        for part in self._walk_parts(payload):
+            if str(part.get("filename", "")).strip() != "":
+                continue
+            mime = str(part.get("mimeType", "")).lower().split(";", 1)[0].strip()
+            if mime not in {"text/html", "text/plain"}:
+                continue
+            body = part.get("body")
+            if not isinstance(body, dict) or body.get("attachmentId") not in (None, ""):
+                continue
+            encoded = body.get("data")
+            if encoded in (None, ""):
+                continue
+            remaining = self.settings.max_cams_mailback_email_body_bytes - total_body_bytes
+            if remaining <= 0:
+                raise ServiceError(502, "provider_response_too_large")
+            content = self._decode_gmail_data(encoded, body.get("size"), remaining)
+            total_body_bytes += len(content)
+            try:
+                decoded = content.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise ServiceError(502, "provider_response_invalid") from error
+            if mime == "text/html":
+                text = required_html_text(decoded)
+            else:
+                text = decoded
+            parsed_results.append(parse_cams_mailback(subject=subject, body_text=text))
+        if not parsed_results:
+            return parse_cams_mailback(subject=subject, body_text="")
+        first = parsed_results[0]
+        if any(result != first for result in parsed_results[1:]):
+            raise ServiceError(502, "provider_response_invalid")
+        return first
 
     @staticmethod
     def _inline_attachment_id(message_id: str, part_index: int) -> str:
@@ -650,11 +812,26 @@ class GmailProvider:
         return f"inline:{digest}"
 
     @staticmethod
+    def _mailback_attachment_id(message_id: str, report_type: str, download_url: str) -> str:
+        digest = hashlib.sha256(
+            f"{message_id}\0{report_type}\0{download_url}".encode()
+        ).hexdigest()
+        return f"mailback:{digest}"
+
+    @staticmethod
     def _inline_cache_key(
         request: PollRequest | FetchRequest,
         message_id: str,
         attachment_id: str,
     ) -> InlineCacheKey:
+        return (*cache_key(request), message_id, attachment_id)
+
+    @staticmethod
+    def _mailback_cache_key(
+        request: PollRequest | FetchRequest,
+        message_id: str,
+        attachment_id: str,
+    ) -> MailbackCacheKey:
         return (*cache_key(request), message_id, attachment_id)
 
     @staticmethod
@@ -728,6 +905,8 @@ class GmailProvider:
             raise ServiceError(400, "invalid_provider_identity")
         if INLINE_ATTACHMENT_ID_RE.fullmatch(request.attachment_id) is not None:
             return await self._fetch_inline_attachment(request, access_token, max_bytes, user_id)
+        if MAILBACK_ATTACHMENT_ID_RE.fullmatch(request.attachment_id) is not None:
+            return await self._fetch_mailback_attachment(request, max_bytes)
         if PROVIDER_ID_RE.fullmatch(request.attachment_id) is None:
             raise ServiceError(400, "invalid_provider_identity")
         payload = await self._json_request(
@@ -757,7 +936,9 @@ class GmailProvider:
             params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
             max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
         )
-        message, inline_parts = self._message_from_gmail(raw)
+        message, inline_parts, _mailback_parts = self._message_from_gmail(
+            raw, request.registrar
+        )
         if message.message_id != request.message_id:
             raise ServiceError(502, "provider_response_invalid")
         for inline_part in inline_parts:
@@ -769,3 +950,26 @@ class GmailProvider:
                     raise ServiceError(502, "provider_response_too_large")
                 return inline_part.content
         raise ServiceError(400, "invalid_provider_identity")
+
+    async def _fetch_mailback_attachment(
+        self,
+        request: FetchRequest,
+        max_bytes: int,
+    ) -> bytes:
+        download_url = await self.mailback_attachment_cache.get(
+            self._mailback_cache_key(request, request.message_id, request.attachment_id)
+        )
+        zip_bytes = await download_cams_zip(
+            self.client,
+            download_url,
+            max_bytes=self.settings.max_cams_mailback_zip_bytes,
+        )
+        return extract_cams_dbf(
+            zip_bytes,
+            password=self.settings.cams_mailback_zip_password.get_secret_value(),
+            max_uncompressed_bytes=min(
+                max_bytes, self.settings.max_cams_mailback_dbf_bytes
+            ),
+            max_entries=self.settings.max_cams_mailback_zip_entries,
+            max_ratio=self.settings.max_cams_mailback_decompression_ratio,
+        )

@@ -34,6 +34,20 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   was performed.
 
 ### Fixed
+- **CAMS WBR2/WBR9 Mailback ZIPs (#113, related #109)**: CAMS Gmail discovery
+  now accepts sender-filtered URL-mailback messages without requiring an
+  attachment, recognizes only WBR2/WBR9 DBF responses, records WBR49/unknown
+  reports as `unsupported_report`, accepts data only for the confirmed
+  Link/validated-URL combination, and treats exact No Data/NA responses as
+  legitimate zero-attempt outcomes. Mixed or unconfirmed statuses fail closed.
+  Validated CAMS URLs download bounded
+  password-protected ZIPs in memory and route the extracted DBF through the
+  existing Edge integrity, malware, Storage, and parser path. Generic attachment
+  and inline attachment flows remain intact. Automated tests prove the complete
+  synthetic CAMS contract with mocked provider HTTPS. Hosted Dev uses the
+  generic synthetic DBF attachment smoke for deployed-infrastructure evidence;
+  genuine CAMS URL/encrypted-ZIP characterization remains pending and is not
+  implied by either synthetic layer. Production remains unchanged.
 - **Inline Gmail Attachments (#113)**: Gmail polling now recognizes small
   attachment MIME parts returned as base64url `body.data` as well as normal
   `attachmentId` parts. Poll remains metadata-only; a bounded, scoped,
@@ -59,6 +73,11 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   limits are unchanged.
 
 ### Security
+- **CAMS Mailback Boundaries (#113)**: Added exact HTTPS host/path validation,
+  redirect rejection, bounded downloads/timeouts, CAMS-specific secret
+  configuration, and encrypted ZIP entry/size/ratio/traversal/duplicate/nested
+  archive controls. Sender validation remains post-read and precedes download;
+  logs exclude sender, URL, request identity, password, and DBF content.
 - **Zero-Disk External Processing**: Statement bytes stay in bounded memory,
   service tokens are capability-specific and constant-time compared, provider
   origins and Host headers are constrained, ClamAV remains private, and error

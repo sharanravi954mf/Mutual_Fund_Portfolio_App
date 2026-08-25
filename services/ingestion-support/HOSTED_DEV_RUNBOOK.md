@@ -45,6 +45,10 @@ provider secret mechanism or a root-owned mode `0600` `.env` file:
 - `GMAIL_OAUTH_CLIENT_ID`
 - `GMAIL_OAUTH_CLIENT_SECRET`
 - `GMAIL_OAUTH_REDIRECT_URI` (not secret, but exact and environment-specific)
+- `CAMS_MAILBACK_ZIP_PASSWORD` (provider extraction configuration, not an MFD
+  or investor credential)
+- `CAMS_MAILBACK_CANDIDATE_SENDERS` (confirmed CAMS sender plus the Dev-only
+  synthetic sender; not secret, but environment-specific)
 
 Generate the three service bearer tokens independently with at least 32 random
 characters. Never print them, place them on a command line, or reuse one token
@@ -81,7 +85,10 @@ part of Issue #113.
    `MAX_GMAIL_MESSAGE_DETAIL_RESPONSE_BYTES=4194304` for partial Gmail message
    details. The detail ceiling is independent from attachment-byte limits and,
    with the fixed default concurrency of five, caps simultaneous raw detail
-   buffers at 20 MiB. Do not raise either value during the smoke test.
+   buffers at 20 MiB. Do not raise either value during the smoke test. Retain
+   the reviewed CAMS mailback ZIP, DBF, entry-count, and decompression-ratio
+   bounds. Do not put the ZIP password in an Edge Function secret: extraction
+   occurs only on this host.
 3. Validate the merged Compose model before starting anything:
 
    ```sh
@@ -152,27 +159,60 @@ Do not start the end-to-end test until this OAuth implementation is reviewed and
 merged. Provision only a development/test mailbox and test workspace through
 the authorized `/oauth/start` flow; never inject credentials manually.
 
+Keep these validation layers distinct:
+
+1. **Local automated CAMS contract tests** use synthetic CAMS HTML, a validated
+   CAMS-style URL, mocked HTTPS networking, a password-protected synthetic ZIP,
+   and a synthetic DBF. They deterministically prove WBR2/WBR9, No Data, WBR49,
+   URL, password, extraction, and archive-security behavior without contacting
+   CAMS or using investor data.
+2. **Hosted Dev synthetic infrastructure smoke** uses the preserved generic
+   Gmail attachment path with the existing synthetic DBF fixture. It proves the
+   deployed Gmail, Oracle ingestion-support, integrity, ClamAV, Storage, parser,
+   and Dev-persistence infrastructure. It does not exercise or prove a live
+   CAMS `DownloadURL` network leg.
+3. **Real CAMS mailback characterization** remains pending. It must separately
+   verify a genuine WBR2/WBR9 email, real
+   `mailback<number>.camsonline.com` URL, CAMS-encrypted ZIP, and DBF extraction
+   only when an explicitly authorized, appropriately sanitized sample is
+   available. Never automate this with real investor data.
+
+Passing the first two layers does not mean that the third has passed. Do not
+fabricate a CAMS-domain endpoint, add a synthetic hostname to the runtime
+allowlist, or weaken URL, TLS, redirect, ZIP, integrity, or malware controls to
+make the Hosted Dev smoke resemble the live-provider boundary.
+
 For the controlled test:
 
 1. Record the Dev workspace, mailbox connection, synthetic message ID, and a
    unique `SYNTHETIC-ISSUE-113-<timestamp>` marker without recording any token.
-2. Send one generated synthetic statement attachment containing synthetic PAN,
-   folio, scheme, and transaction values. Never use a real investor identifier
-   or document.
+2. From the sender configured only in Hosted Dev through
+   `CAMS_MAILBACK_CANDIDATE_SENDERS`, send a synthetic Gmail message with the
+   existing synthetic DBF fixture as an ordinary attachment. Use only synthetic
+   values and never a real investor identifier or document. Do not include a
+   CAMS `DownloadURL`, impersonate the production sender, or configure the Dev
+   sender in Production.
 3. As an authorized advisor/admin, start Gmail consent through the Edge OAuth
    route and verify the safe connected response contains no token. Then invoke
    the smallest existing authenticated
    `cams-kfintech-ingestion` request path using a valid initiating Dev user and
    the existing internal gateway token. Do not weaken its user/workspace
    authorization and do not add scheduling.
-4. Verify OAuth load/refresh, mailbox poll, attachment fetch, SHA validation,
-   clean ClamAV verdict, synthetic PDF extraction, Edge parsing, and Dev
-   persistence. Preserve the request/ingestion IDs as non-secret QA evidence.
+4. Verify OAuth load/refresh, generic Gmail attachment discovery and fetch,
+   post-read sender validation, SHA validation, clean ClamAV verdict, Storage,
+   existing DBF parsing, and Dev persistence. Preserve the request/ingestion
+   IDs as non-secret QA evidence. Keep WBR2/WBR9 mailback, no-data/NA, WBR49,
+   URL, and encrypted-ZIP outcomes in the local mocked contract suite; this
+   Hosted Dev smoke makes no claim about them crossing the live CAMS network
+   boundary.
 5. Inspect sanitized service and Edge logs for the marker and outcome. Confirm
-   no bearer, OAuth token, email body, attachment bytes, PAN, or folio was
-   logged.
+   no bearer, OAuth token, sender, DownloadURL, request ID, ZIP password, email
+   body, ZIP/DBF bytes, PAN, or folio was logged.
 
-Issue #109 and #113 remain open unless this entire Hosted Dev flow succeeds.
+Issue #109 and #113 remain open unless the required Hosted Dev flow succeeds.
+Even after that smoke passes, record real CAMS mailback characterization as a
+separate pending production-readiness boundary until authorized sanitized
+evidence exists.
 
 ## Rollback and cleanup
 

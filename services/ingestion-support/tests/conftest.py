@@ -13,6 +13,7 @@ os.environ.setdefault("PDF_TEXT_EXTRACTOR_SERVICE_TOKEN", "pdf-test-token-000000
 os.environ.setdefault("MALWARE_SCANNER_SERVICE_TOKEN", "malware-test-token-000000000000003")
 os.environ.setdefault("GMAIL_OAUTH_CLIENT_ID", "gmail-test-client-id")
 os.environ.setdefault("GMAIL_OAUTH_CLIENT_SECRET", "gmail-test-client-secret")
+os.environ.setdefault("CAMS_MAILBACK_ZIP_PASSWORD", "cams123")
 os.environ.setdefault(
     "GMAIL_OAUTH_REDIRECT_URI",
     "https://dev.example.test/functions/v1/cams-kfintech-ingestion/oauth/callback",

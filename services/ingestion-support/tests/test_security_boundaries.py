@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
-from conftest import mailbox_headers, poll_body, synthetic_pdf
+from conftest import synthetic_pdf
 from test_malware_contract import malware_headers
 from test_pdf_contract import pdf_headers
 

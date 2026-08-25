@@ -3524,4 +3524,87 @@ END;
 $$;
 RESET ROLE;
 
+-- Issue #113: a confirmed CAMS No Data / NA mailback is a completed mailbox
+-- outcome and must not fabricate an ingestion attempt or provider failure.
+SET ROLE service_role;
+SELECT public.claim_cams_kfintech_ingestion_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000113',
+  'CAMS'
+);
+SELECT public.finalize_cams_kfintech_no_data_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000113',
+  'CAMS'
+);
+-- Exact replay is idempotent.
+SELECT public.finalize_cams_kfintech_no_data_run(
+  '93400000-0000-0000-0000-000000000001',
+  '93700000-0000-0000-0000-000000000001',
+  '93900000-0000-0000-0000-000000000113',
+  'CAMS'
+);
+RESET ROLE;
+
+DO $$
+DECLARE
+  v_run public.cams_kfintech_ingestion_runs;
+BEGIN
+  SELECT run.*
+  INTO v_run
+  FROM public.cams_kfintech_ingestion_runs AS run
+  WHERE run.ingestion_run_id = '93900000-0000-0000-0000-000000000113';
+
+  IF v_run.status <> 'completed'
+     OR v_run.mailbox_outcome <> 'no_data'
+     OR v_run.attempted_attachment_count <> 0
+     OR v_run.observed_attachment_count <> 0
+     OR v_run.run_failure_code IS NOT NULL
+     OR EXISTS (
+       SELECT 1
+       FROM public.cams_kfintech_ingestion_attempts AS attempt
+       WHERE attempt.ingestion_run_id = v_run.ingestion_run_id
+     ) THEN
+    RAISE EXCEPTION 'Issue #113 no-data outcome was not completed without attempts';
+  END IF;
+END;
+$$;
+
+SET ROLE authenticated;
+DO $$
+BEGIN
+  PERFORM public.finalize_cams_kfintech_no_data_run(
+    '93400000-0000-4000-8000-000000000001',
+    '93700000-0000-4000-8000-000000000001',
+    '93900000-0000-4000-8000-000000000113',
+    'CAMS'
+  );
+  RAISE EXCEPTION 'Issue #113 authenticated role finalized no-data run';
+EXCEPTION WHEN insufficient_privilege THEN
+  NULL;
+END;
+$$;
+RESET ROLE;
+
+SET ROLE service_role;
+DO $$
+BEGIN
+  PERFORM public.finalize_cams_kfintech_no_data_run(
+    '93400000-0000-4000-8000-000000000001',
+    '93700000-0000-4000-8000-000000000001',
+    '93900000-0000-4000-8000-000000000113',
+    'KFINTECH'
+  );
+  RAISE EXCEPTION 'Issue #113 finalized a non-CAMS no-data outcome';
+EXCEPTION
+  WHEN others THEN
+    IF SQLERRM NOT LIKE '%unsupported_registrar%' THEN
+      RAISE;
+    END IF;
+END;
+$$;
+RESET ROLE;
+
 ROLLBACK;

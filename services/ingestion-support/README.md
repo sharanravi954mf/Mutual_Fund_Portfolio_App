@@ -22,6 +22,7 @@ or persistent statement files.
 ```text
 Supabase Edge Function over HTTPS
   |-- mailbox bearer --> FastAPI --> fixed Gmail OAuth/Gmail API origins
+  |                                  `-> validated CAMS mailback HTTPS origin
   |-- PDF bearer -----> FastAPI --> bounded pypdf memory extraction
   `-- malware bearer -> FastAPI --> private Docker network --> clamd INSTREAM
 ```
@@ -72,7 +73,10 @@ TypeScript classes in
 2. Generate three distinct random service tokens of at least 32 characters.
 3. Add a Google OAuth client ID/secret and the exact Edge callback URI for a
    development-only Gmail account.
-4. Start the stack:
+4. Set the CAMS mailback ZIP password as provider extraction configuration.
+   The checked-in example value is Dev-only; never reuse an investor/MFD
+   credential or commit a hosted secret.
+5. Start the stack:
 
    ```sh
    docker compose up --build -d
@@ -81,7 +85,7 @@ TypeScript classes in
    curl --fail http://127.0.0.1:8080/ready
    ```
 
-5. Stop it without deleting the ClamAV signature volume:
+6. Stop it without deleting the ClamAV signature volume:
 
    ```sh
    docker compose down
@@ -118,13 +122,22 @@ setup remains deferred until after review and merge:
    origins are fixed configuration, never request-controlled URLs.
 
 No `IMAP_USER`, `IMAP_PASSWORD`, Google app password, Supabase service-role key,
-or `RTA_DECRYPTION_PASSWORD` belongs in this service. OAuth tokens and codes
-are never logged, placed in client storage, or persisted by the support service;
+or `RTA_DECRYPTION_PASSWORD` belongs in this service. The separate
+`CAMS_MAILBACK_ZIP_PASSWORD` is provider extraction configuration and is never
+treated as an MFD credential. OAuth tokens, codes, and the ZIP password are
+never logged, placed in client storage, or persisted by the support service;
 automated provider tests use mocks only.
 
-Mailbox polling uses the Gmail query
-`has:attachment {filename:pdf filename:dbf}` to reduce unrelated attachment
-traffic without guessing registrar sender addresses. Each poll inspects at most
+For KFintech and generic attachment flows, mailbox polling keeps the Gmail query
+`has:attachment {filename:pdf filename:dbf}`. CAMS discovery instead uses the
+configured registrar candidate senders and matches either WBR mailback messages
+or PDF/DBF attachments; it does not require `has:attachment` for URL mailbacks.
+The production candidate currently configured by default is
+`donotreply@camsonline.com`; the Dev synthetic sender is opt-in only through
+`CAMS_MAILBACK_CANDIDATE_SENDERS`. Gmail filtering is candidate reduction, not
+the trust boundary: the Edge worker validates the sender from the fetched
+message before any attachment or mailback bytes are retrieved. Each poll
+inspects at most
 `MAX_MAILBOX_PAGES_PER_POLL` pages (default `4`) and
 `MAX_MAILBOX_CANDIDATES_PER_POLL` message candidates (default `100`). Gmail
 page tokens must be non-empty, bounded printable ASCII and must not repeat.
@@ -160,6 +173,29 @@ parts receive a bounded `inline:<sha256>` identity that is disjoint from Gmail
 provider IDs; attachment bytes are decoded only for validation and are not
 included in the poll response.
 
+For CAMS messages without attachments, the connector reads only the sender,
+internal date, subject, and filename-less `text/html` or `text/plain` MIME
+parts needed for `DownloadURL`, `Request Status`, `Report No`, and `File Type`.
+Only WBR2 and WBR9 with DBF output are supported. A data response requires the
+confirmed `Request Status = Link` plus a validated CAMS ZIP `DownloadURL`;
+unconfirmed values such as `Completed` fail closed. WBR49 and any other report
+number produce the sanitized `unsupported_report` outcome and are never
+downloaded or parsed as a supported report. `Request Status = No Data` together
+with `DownloadURL = NA` is a completed zero-attempt `no_data` result, not a
+provider failure. Mixed Link/NA or No Data/URL combinations fail closed.
+
+Supported mailbacks expose only an opaque `mailback:<sha256>` attachment
+identity. The original URL stays in a bounded process-local cache and must be
+HTTPS on an exact `mailback<number>.camsonline.com` host, have no credentials,
+port, query, or fragment, and use `/mailback_result/<opaque>.zip`. Redirects are
+rejected. Download time and compressed bytes are bounded. The encrypted ZIP is
+opened in memory with `CAMS_MAILBACK_ZIP_PASSWORD`; entry count, compressed and
+uncompressed sizes, decompression ratio, duplicate names, traversal/absolute
+paths, nested archives, encryption, and the exactly-one-DBF shape all fail
+closed. The extracted DBF bytes use the existing Edge hash, MIME, malware,
+Storage-integrity, and DBF-parser path; no second DBF parser or persistent local
+statement file is introduced.
+
 ## PDF layouts and limitations
 
 This PR establishes PDF extraction infrastructure and a deterministic
@@ -178,9 +214,10 @@ service does not claim support for arbitrary or live registrar PDF layouts.
 Each actual layout and version requires sanitized, non-production
 characterization material plus deterministic parser tests before enablement.
 DBF parsing remains implemented in the existing Edge parser.
-Password-protected/encrypted statements, image-only/OCR documents, and layout
-drift remain explicit failures. Follow-up Issue #111 tracks real layout
-characterization and support.
+Password-protected/encrypted PDFs, image-only/OCR documents, and layout drift
+remain explicit failures. This does not limit the separately supported CAMS
+password-protected mailback ZIP path described above. Follow-up Issue #111
+tracks real PDF layout characterization and support.
 
 The unchanged Edge contract sends the OAuth access token on `/poll` but not on
 `/attachments/fetch`. To preserve that contract, the API keeps a bounded,
@@ -204,6 +241,11 @@ Fetch re-reads the full Gmail message, verifies the issued identity and part,
 and then returns the validated bytes. An expired, evicted, restarted, or forged
 inline context fails closed and requires another poll. Inline bytes are not
 stored in either cache, on disk, or in the database.
+
+CAMS mailback identities use another bounded cache with the same scope and TTL.
+It retains only the already-validated download URL. Expiry, eviction, restart,
+or a forged identity fails closed; downloaded ZIP and extracted DBF bytes are
+never cached or written to local disk.
 
 ## Tests
 
@@ -233,8 +275,14 @@ restart/expiry/eviction behavior, redirects, provider failures, timeouts,
 malformed/oversized responses, both synthetic PDF layouts,
 malformed/oversized PDFs, bearer boundaries,
 digest mismatches, ClamAV protocol behavior, clean/infected/unavailable states,
-Host-header validation, and non-sensitive readiness. The live Deno test uses
-the actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and
+Host-header validation, and non-sensitive readiness. CAMS fixtures additionally
+cover WBR2/WBR9 HTML mailback parsing, explicit WBR49 rejection, no-data,
+strict URLs, redirects/timeouts/size bounds, encrypted ZIP password failures,
+corruption, traversal, duplicates, entry/expansion bounds, DBF extraction, and
+the synthetic Gmail-to-URL-to-encrypted-ZIP-to-DBF chain. Provider HTTPS is
+mocked for that deterministic contract chain; the synthetic URL is not hosted
+at CAMS and is never used by a deployed service. The live Deno test uses the
+actual `RemotePdfTextExtractor`, `HttpMalwareScanner`, `CamsParser`, and
 `KfintechParser` classes. EICAR appears only in test code.
 
 ## Hosted Dev operation (Issue #113)
@@ -256,3 +304,21 @@ separate conservative message-detail ceiling described above; this correction
 has not been deployed or re-tested on Hosted Dev. Timeout, page/candidate,
 attachment, and concurrency limits remain unchanged. Production deployment and
 Production configuration require a separate reviewed change.
+
+This Issue #113 change also prepares the secure WBR2/WBR9 CAMS URL-mailback
+path and Dev-only synthetic fixtures/configuration. It has not changed Hosted
+Dev or Production. Validation is intentionally split into three layers:
+
+- automated tests prove the complete synthetic CAMS HTML-to-validated-URL-to-
+  encrypted-ZIP-to-DBF contract with mocked provider networking;
+- the controlled Hosted Dev smoke uses the generic Gmail attachment path and
+  existing synthetic DBF fixture to prove deployed Gmail/Oracle, attachment,
+  integrity, ClamAV, Storage, parser, and Dev-persistence infrastructure; and
+- a genuine CAMS WBR2/WBR9 `DownloadURL` plus encrypted ZIP remains pending as
+  a separate live-provider characterization until an explicitly authorized,
+  appropriately sanitized sample is available.
+
+Passing the automated contract and Hosted Dev infrastructure smoke does not
+claim that live CAMS characterization has passed. The Dev synthetic sender
+remains configuration-only in Dev, and no synthetic host or environment bypass
+is added to the CAMS runtime allowlist.
