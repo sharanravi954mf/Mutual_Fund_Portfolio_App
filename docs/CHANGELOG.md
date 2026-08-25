@@ -35,8 +35,8 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ### Fixed
 - **CAMS WBR2/WBR9 Mailback ZIPs (#113, related #109)**: CAMS Gmail discovery
-  now accepts sender-filtered URL-mailback messages without requiring an
-  attachment, recognizes only WBR2/WBR9 DBF responses, records WBR49/unknown
+  now requires sender-filtered WBR messages and excludes attachment/filename
+  discovery terms, recognizes only WBR2/WBR9 DBF responses, records WBR49/unknown
   reports as `unsupported_report`, accepts data only for the confirmed
   Link/validated-URL combination, and treats exact No Data/NA responses as
   legitimate zero-attempt outcomes. Mixed or unconfirmed statuses fail closed.

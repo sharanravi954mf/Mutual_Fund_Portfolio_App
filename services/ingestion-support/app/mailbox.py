@@ -571,7 +571,7 @@ class GmailProvider:
         if registrar != "CAMS":
             return GMAIL_ATTACHMENT_QUERY
         senders = " OR ".join(self.settings.cams_candidate_senders)
-        return f"from:({senders}) (WBR OR {GMAIL_ATTACHMENT_QUERY})"
+        return f"from:({senders}) WBR"
 
     async def _fetch_page_message_details(
         self,
@@ -604,13 +604,9 @@ class GmailProvider:
                     headers=auth,
                     params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
                     max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
-                    diagnostic_reason=(
-                        DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE
-                    ),
+                    diagnostic_reason=(DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE),
                 )
-                message, inline_parts, mailback_parts = self._message_from_gmail(
-                    raw, registrar
-                )
+                message, inline_parts, mailback_parts = self._message_from_gmail(raw, registrar)
                 if message.message_id != message_id:
                     raise ServiceError(502, "provider_response_invalid")
                 results[index] = (message, inline_parts, mailback_parts)
@@ -831,9 +827,7 @@ class GmailProvider:
 
     @staticmethod
     def _mailback_attachment_id(message_id: str, report_type: str, download_url: str) -> str:
-        digest = hashlib.sha256(
-            f"{message_id}\0{report_type}\0{download_url}".encode()
-        ).hexdigest()
+        digest = hashlib.sha256(f"{message_id}\0{report_type}\0{download_url}".encode()).hexdigest()
         return f"mailback:{digest}"
 
     @staticmethod
@@ -953,13 +947,9 @@ class GmailProvider:
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
             params={"format": "full", "fields": GMAIL_MESSAGE_DETAIL_FIELDS},
             max_response_bytes=self.settings.max_gmail_message_detail_response_bytes,
-            diagnostic_reason=(
-                DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE
-            ),
+            diagnostic_reason=(DiagnosticReason.GMAIL_MESSAGE_DETAIL_RESPONSE_TOO_LARGE),
         )
-        message, inline_parts, _mailback_parts = self._message_from_gmail(
-            raw, request.registrar
-        )
+        message, inline_parts, _mailback_parts = self._message_from_gmail(raw, request.registrar)
         if message.message_id != request.message_id:
             raise ServiceError(502, "provider_response_invalid")
         for inline_part in inline_parts:
@@ -988,9 +978,7 @@ class GmailProvider:
         return extract_cams_dbf(
             zip_bytes,
             password=self.settings.cams_mailback_zip_password.get_secret_value(),
-            max_uncompressed_bytes=min(
-                max_bytes, self.settings.max_cams_mailback_dbf_bytes
-            ),
+            max_uncompressed_bytes=min(max_bytes, self.settings.max_cams_mailback_dbf_bytes),
             max_entries=self.settings.max_cams_mailback_zip_entries,
             max_ratio=self.settings.max_cams_mailback_decompression_ratio,
         )

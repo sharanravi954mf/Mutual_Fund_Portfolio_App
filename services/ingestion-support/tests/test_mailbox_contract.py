@@ -365,10 +365,7 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
         if request.url.host == "oauth2.googleapis.com":
             return httpx.Response(200, json={"access_token": "gmail-access", "expires_in": 3600})
         if path.endswith("/messages"):
-            assert request.url.params["q"] == (
-                "from:(donotreply@camsonline.com) "
-                "(WBR OR has:attachment {filename:pdf filename:dbf})"
-            )
+            assert request.url.params["q"] == "has:attachment {filename:pdf filename:dbf}"
             return httpx.Response(200, json={"messages": [{"id": "gmailMessage1"}]})
         if path.endswith("/messages/gmailMessage1"):
             assert request.url.params["format"] == "full"
@@ -386,7 +383,7 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
             workspace_id="workspace-fixture-1",
             mailbox_connection_id="mailbox-fixture-1",
             connector_ref="gmail:me",
-            registrar="CAMS",
+            registrar="KFINTECH",
             refresh_token="refresh-fixture",
         )
     )
@@ -395,7 +392,7 @@ async def test_gmail_provider_refresh_poll_and_fetch_adapter(settings) -> None:
     poll_request = PollRequest(
         connector_ref="gmail:me",
         mailbox_connection_id="mailbox-fixture-1",
-        registrar="CAMS",
+        registrar="KFINTECH",
     )
     messages = await provider.poll(poll_request, refreshed.access_token)
     assert messages[0].sender_address == "statements@example.test"
@@ -746,9 +743,7 @@ def test_oversized_gmail_list_emits_only_sanitized_list_diagnostic(
 
     assert response.status_code == 502
     assert response.json() == {"error": {"code": "provider_response_too_large"}}
-    events = [
-        json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line
-    ]
+    events = [json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line]
     service_error = next(event for event in events if event["event"] == "service_error")
     assert service_error["diagnostic_reason"] == "gmail_list_response_too_large"
     assert "diagnostic_reason" not in response.text
@@ -824,14 +819,9 @@ def test_oversized_required_gmail_detail_fails_closed_without_logging_provider_c
 
     assert response.status_code == 502
     assert response.json() == {"error": {"code": "provider_response_too_large"}}
-    events = [
-        json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line
-    ]
+    events = [json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line]
     service_error = next(event for event in events if event["event"] == "service_error")
-    assert (
-        service_error["diagnostic_reason"]
-        == "gmail_message_detail_response_too_large"
-    )
+    assert service_error["diagnostic_reason"] == "gmail_message_detail_response_too_large"
     assert "diagnostic_reason" not in response.text
     logs = diagnostic_stream.getvalue()
     assert '"error_code":"provider_response_too_large"' in logs
@@ -880,9 +870,7 @@ def test_gmail_attachment_count_overflow_emits_only_sanitized_count_diagnostic(
                             "mimeType": "application/octet-stream",
                             "body": {"attachmentId": attachment_id, "size": 100},
                         }
-                        for filename, attachment_id in zip(
-                            filenames, attachment_ids, strict=True
-                        )
+                        for filename, attachment_id in zip(filenames, attachment_ids, strict=True)
                     ],
                 },
             },
@@ -903,9 +891,7 @@ def test_gmail_attachment_count_overflow_emits_only_sanitized_count_diagnostic(
 
     assert response.status_code == 502
     assert response.json() == {"error": {"code": "provider_response_too_large"}}
-    events = [
-        json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line
-    ]
+    events = [json.loads(line) for line in diagnostic_stream.getvalue().splitlines() if line]
     service_error = next(event for event in events if event["event"] == "service_error")
     assert service_error["diagnostic_reason"] == "gmail_attachment_count_exceeded"
     assert "diagnostic_reason" not in response.text
@@ -1075,10 +1061,7 @@ async def test_gmail_poll_page_fairly_includes_target_after_full_first_page(sett
         if request.url.path.endswith("/messages"):
             page_token = request.url.params.get("pageToken")
             listing_tokens.append(page_token)
-            assert request.url.params["q"] == (
-                "from:(donotreply@camsonline.com) "
-                "(WBR OR has:attachment {filename:pdf filename:dbf})"
-            )
+            assert request.url.params["q"] == "from:(donotreply@camsonline.com) WBR"
             if page_token is None:
                 return httpx.Response(
                     200,
