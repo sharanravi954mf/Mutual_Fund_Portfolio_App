@@ -214,12 +214,15 @@ intact. Controlled E2E testing has completed Gmail consent, credential refresh,
 inline `body.data` support, bounded detail concurrency, and sender-filtered WBR
 discovery through the PR #126 CAMS path. OAuth refresh succeeds, but the current
 genuine CAMS Edge poll still reports `mailbox_poll_failed`; the support service
-returns a fail-closed 502 `provider_response_invalid`, now isolated to Gmail
-CAMS body transport/integrity validation. The repository preserves every
-existing validation, byte/count limit, query, strict decode behavior, and public
-error while splitting the log-only enum reason among data shape, declared size,
-padding, strict base64 decode, empty content, decoded-size mismatch, and UTF-8
-stages. Hosted Dev verification remains pending. Production remains untouched.
+returns a fail-closed 502 `provider_response_invalid`, now proven to be the
+strict equality assumption between decoded CAMS `body.data` length and Gmail
+`MessagePartBody.size`. For filename-less CAMS `text/html`/`text/plain` bodies,
+the repository now retains size as validated bounded provider metadata while
+independently bounding encoded and decoded bytes; exact equality is not
+required. Data shape, integer/range validation, padding, strict base64, non-empty
+content, strict UTF-8, HTML/WBR parsing, multipart agreement, all byte/count
+limits, public errors, and non-CAMS behavior remain unchanged. Hosted Dev
+verification remains pending. Production remains untouched.
 
 The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
 validated URL to password-protected ZIP to existing DBF-parser path. WBR49

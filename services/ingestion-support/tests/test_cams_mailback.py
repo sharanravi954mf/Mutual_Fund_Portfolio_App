@@ -7,10 +7,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import pytest
+from conftest import FakeMalwareScanner, mailbox_headers, poll_body
 from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
-
-from conftest import FakeMalwareScanner, mailbox_headers, poll_body
 
 from app.cams_mailback import (
     download_cams_zip,
@@ -55,8 +54,16 @@ def _gmail_mailback_message(
     message_id: str,
     fixture: str,
     report_type: str,
+    *,
+    mime_type: str = "text/html",
+    declared_body_size: int | None = None,
 ) -> dict[str, object]:
-    html = (FIXTURES / fixture).read_bytes()
+    fixture_body = (FIXTURES / fixture).read_text(encoding="utf-8")
+    content = (
+        fixture_body.encode()
+        if mime_type == "text/html"
+        else required_html_text(fixture_body).encode()
+    )
     return {
         "id": message_id,
         "internalDate": "1787392800000",
@@ -69,10 +76,10 @@ def _gmail_mailback_message(
             "parts": [
                 {
                     "filename": "",
-                    "mimeType": "text/html",
+                    "mimeType": mime_type,
                     "body": {
-                        "data": base64.urlsafe_b64encode(html).decode().rstrip("="),
-                        "size": len(html),
+                        "data": base64.urlsafe_b64encode(content).decode().rstrip("="),
+                        "size": len(content) if declared_body_size is None else declared_body_size,
                     },
                 }
             ],
@@ -133,6 +140,47 @@ def test_no_data_na_is_legitimate_outcome() -> None:
 
     assert result.outcome == "no_data"
     assert result.download_url is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fixture", "report_type", "mime_type", "expected_outcome"),
+    [
+        ("cams_wbr2_mailback.html", "WBR2", "text/html", None),
+        ("cams_wbr9_mailback.html", "WBR9", "text/plain", None),
+        ("cams_wbr2_no_data.html", "WBR2", "text/html", "no_data"),
+    ],
+    ids=["wbr2-html", "wbr9-plain", "wbr2-no-data"],
+)
+async def test_cams_mailback_accepts_bounded_declared_body_size_mismatch(
+    settings,
+    fixture: str,
+    report_type: str,
+    mime_type: str,
+    expected_outcome: str | None,
+) -> None:
+    provider = GmailProvider(settings)
+    message, inline_parts, mailback_parts = provider._message_from_gmail(
+        _gmail_mailback_message(
+            f"sizeMismatch{report_type}",
+            fixture,
+            report_type,
+            mime_type=mime_type,
+            declared_body_size=1,
+        ),
+        "CAMS",
+    )
+    await provider.close()
+
+    assert inline_parts == []
+    assert message.outcome == expected_outcome
+    if expected_outcome is None:
+        assert len(message.attachments) == 1
+        assert message.attachments[0].filename == f"cams-{report_type.lower()}.dbf"
+        assert len(mailback_parts) == 1
+    else:
+        assert message.attachments == []
+        assert mailback_parts == []
 
 
 def test_completed_with_url_fails_closed() -> None:

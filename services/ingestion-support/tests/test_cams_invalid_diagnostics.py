@@ -249,16 +249,62 @@ async def test_cams_body_decoded_empty_has_exact_diagnostic(settings, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_cams_body_decoded_size_mismatch_has_exact_diagnostic(settings) -> None:
-    provider = GmailProvider(settings)
+async def test_cams_body_declared_size_above_limit_still_fails_closed(settings) -> None:
+    limited = settings.model_copy(update={"max_cams_mailback_email_body_bytes": 16})
+    provider = GmailProvider(limited)
     payload = {
         "headers": [],
-        "parts": [_encoded_part(b"valid UTF-8", "text/plain", declared_size=1)],
+        "parts": [_encoded_part(b"valid UTF-8", "text/plain", declared_size=17)],
     }
 
+    with pytest.raises(ServiceError, match="provider_response_too_large") as caught:
+        provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback")
+    await provider.close()
+
+    assert caught.value.status_code == 502
+    assert caught.value.code == "provider_response_too_large"
+
+
+@pytest.mark.asyncio
+async def test_cams_body_actual_decoded_size_above_limit_still_fails_closed(
+    settings,
+    monkeypatch,
+) -> None:
+    limited = settings.model_copy(update={"max_cams_mailback_email_body_bytes": 16})
+    provider = GmailProvider(limited)
+    payload = {
+        "headers": [],
+        "parts": [_encoded_part(b"valid", "text/plain")],
+    }
+
+    monkeypatch.setattr(base64, "b64decode", lambda *_args, **_kwargs: b"x" * 17)
+
+    with pytest.raises(ServiceError, match="provider_response_too_large") as caught:
+        provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback")
+    await provider.close()
+
+    assert caught.value.status_code == 502
+    assert caught.value.code == "provider_response_too_large"
+
+
+@pytest.mark.asyncio
+async def test_non_cams_inline_body_declared_size_mismatch_remains_strict(settings) -> None:
+    provider = GmailProvider(settings)
+    raw = _gmail_message()
+    raw["payload"]["parts"].append(
+        {
+            "filename": "synthetic-kfintech.dbf",
+            "mimeType": "application/octet-stream",
+            "body": {
+                "data": base64.urlsafe_b64encode(b"strict bytes").decode().rstrip("="),
+                "size": 1,
+            },
+        }
+    )
+
     _assert_invalid_reason(
-        DiagnosticReason.CAMS_MAILBACK_BODY_SIZE_MISMATCH,
-        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+        DiagnosticReason.GMAIL_INLINE_BODY_INVALID,
+        lambda: provider._message_from_gmail(raw, "KFINTECH"),
     )
     await provider.close()
 

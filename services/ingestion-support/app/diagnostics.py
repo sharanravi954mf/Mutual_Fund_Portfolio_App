@@ -24,7 +24,6 @@ class DiagnosticReason(StrEnum):
     CAMS_MAILBACK_BODY_PADDING_INVALID = "cams_mailback_body_padding_invalid"
     CAMS_MAILBACK_BODY_BASE64_DECODE_INVALID = "cams_mailback_body_base64_decode_invalid"
     CAMS_MAILBACK_BODY_EMPTY_INVALID = "cams_mailback_body_empty_invalid"
-    CAMS_MAILBACK_BODY_SIZE_MISMATCH = "cams_mailback_body_size_mismatch"
     CAMS_MAILBACK_TEXT_UTF8_INVALID = "cams_mailback_text_utf8_invalid"
     CAMS_MAILBACK_HTML_INVALID = "cams_mailback_html_invalid"
     CAMS_MAILBACK_REPORT_MISMATCH = "cams_mailback_report_mismatch"

@@ -66,7 +66,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   count. Fail-closed `provider_response_invalid` paths may likewise add only an
   enum-backed reason distinguishing Gmail detail identity/envelope/MIME/inline
   validation from CAMS body data shape, declared size, padding, strict base64
-  decode, empty content, decoded-size mismatch, strict UTF-8,
+  decode, empty content, strict UTF-8,
   HTML/report/field/status/URL/multipart validation and detail-result count
   mismatch. The public error remains
   unchanged. Uvicorn access logs remain
@@ -79,6 +79,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   default five concurrent raw detail buffers at 20 MiB. Oversized required MIME
   data still fails closed; attachment, timeout, page, candidate, and concurrency
   limits are unchanged.
+- **CAMS Gmail Body Size Semantics (#113)**: Filename-less CAMS mailback
+  `text/html` and `text/plain` bodies retain strict base64url, padding, declared
+  integer/range, encoded-size, decoded-size, non-empty, UTF-8, HTML/WBR, and
+  multipart validation, but no longer treat Gmail `MessagePartBody.size` as an
+  exact decoded-length checksum. Genuine Gmail CAMS payloads demonstrate that
+  the bounded provider metadata can differ from decoded `body.data`. Ordinary
+  Gmail inline attachments and KFINTECH remain strict.
 
 ### Security
 - **CAMS Mailback Boundaries (#113)**: Added exact HTTPS host/path validation,
