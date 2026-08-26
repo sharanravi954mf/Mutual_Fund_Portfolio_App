@@ -29,6 +29,8 @@ from .diagnostics import DiagnosticReason
 from .errors import ServiceError
 
 Registrar = Literal["CAMS", "KFINTECH"]
+SmokeMode = Literal["latest_supported_reports"]
+SupportedCamsReport = Literal["WBR2", "WBR9"]
 CONNECTOR_REF_RE = re.compile(r"^gmail:(me|[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+)$")
 PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,1024}$")
 INLINE_ATTACHMENT_ID_RE = re.compile(r"^inline:[0-9a-f]{64}$")
@@ -73,6 +75,13 @@ class PollRequest(StrictModel):
     connector_ref: str = Field(min_length=1, max_length=320)
     mailbox_connection_id: str = Field(min_length=1, max_length=128)
     registrar: Registrar
+    smoke_mode: SmokeMode | None = None
+
+    @model_validator(mode="after")
+    def validate_smoke_mode(self) -> PollRequest:
+        if self.smoke_mode is not None and self.registrar != "CAMS":
+            raise ValueError("smoke mode is only supported for CAMS")
+        return self
 
 
 class FetchRequest(PollRequest):
@@ -239,6 +248,7 @@ class InlineAttachmentPart:
 class MailbackAttachmentPart:
     attachment_id: str
     download_url: str
+    report_type: SupportedCamsReport
 
 
 @dataclass(frozen=True)
@@ -507,6 +517,9 @@ class GmailProvider:
     async def poll(self, request: PollRequest, access_token: str) -> list[Message]:
         user_id = quote(self._user_id(request.connector_ref), safe="")
         auth = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        if request.smoke_mode == "latest_supported_reports":
+            return await self._poll_latest_supported_reports(request, user_id, auth)
+
         message_pages: list[list[Message]] = []
         seen_message_ids: set[str] = set()
         seen_page_tokens: set[str] = set()
@@ -615,10 +628,116 @@ class GmailProvider:
         await self.mailback_attachment_cache.put_many(mailback_cache_entries)
         return selected
 
-    def _gmail_query(self, registrar: Registrar) -> str:
+    async def _poll_latest_supported_reports(
+        self,
+        request: PollRequest,
+        user_id: str,
+        auth: dict[str, str],
+    ) -> list[Message]:
+        """Fetch Gmail's newest WBR2 and WBR9 matches without historical pagination.
+
+        Gmail documents messages.list results as reverse chronological (newest first),
+        and internalDate determines inbox ordering. Each fixed query therefore requests
+        only its first result; the detail parser still validates internalDate, sender,
+        subject/body agreement, MIME structure, and the synthesized mailback identity.
+        """
+
+        candidates: list[tuple[SupportedCamsReport, str]] = []
+        seen_message_ids: set[str] = set()
+        for report_type in ("WBR2", "WBR9"):
+            listing = await self._json_request(
+                "GET",
+                f"{self.settings.gmail_api_base_url}/users/{user_id}/messages",
+                headers=auth,
+                params={
+                    "maxResults": 1,
+                    "q": self._gmail_query("CAMS", report_type),
+                },
+                diagnostic_reason=DiagnosticReason.GMAIL_LIST_RESPONSE_TOO_LARGE,
+                invalid_diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+            )
+            raw_messages = listing.get("messages", [])
+            if not isinstance(raw_messages, list) or len(raw_messages) > 1:
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                )
+            if not raw_messages:
+                continue
+            listed = raw_messages[0]
+            if not isinstance(listed, dict) or not isinstance(listed.get("id"), str):
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                )
+            message_id = listed["id"]
+            if PROVIDER_ID_RE.fullmatch(message_id) is None or message_id in seen_message_ids:
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                )
+            seen_message_ids.add(message_id)
+            candidates.append((report_type, message_id))
+
+        details = await self._fetch_page_message_details(
+            [message_id for _report_type, message_id in candidates],
+            user_id,
+            auth,
+            "CAMS",
+        )
+        selected: list[Message] = []
+        mailback_parts_by_message: dict[str, list[MailbackAttachmentPart]] = {}
+        for (expected_report, _message_id), (message, inline_parts, mailback_parts) in zip(
+            candidates, details, strict=True
+        ):
+            if inline_parts:
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MIME_PART_INVALID,
+                )
+            if message.attachments and (
+                len(message.attachments) != 1
+                or len(mailback_parts) != 1
+                or mailback_parts[0].report_type != expected_report
+            ):
+                raise ServiceError(
+                    502,
+                    "provider_response_invalid",
+                    diagnostic_reason=DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
+                )
+            selected.append(message)
+            mailback_parts_by_message[message.message_id] = mailback_parts
+
+        mailback_cache_entries: list[tuple[MailbackCacheKey, str]] = []
+        for message in selected:
+            for mailback_part in mailback_parts_by_message.get(message.message_id, []):
+                mailback_cache_entries.append(
+                    (
+                        self._mailback_cache_key(
+                            request,
+                            message.message_id,
+                            mailback_part.attachment_id,
+                        ),
+                        mailback_part.download_url,
+                    )
+                )
+        await self.mailback_attachment_cache.put_many(mailback_cache_entries)
+        return selected
+
+    def _gmail_query(
+        self,
+        registrar: Registrar,
+        report_type: SupportedCamsReport | None = None,
+    ) -> str:
         if registrar != "CAMS":
             return GMAIL_ATTACHMENT_QUERY
         senders = " OR ".join(self.settings.cams_candidate_senders)
+        if report_type is not None:
+            return f"from:({senders}) subject:{report_type}"
         return f"from:({senders}) {{subject:WBR2 subject:WBR9}}"
 
     async def _fetch_page_message_details(
@@ -864,6 +983,7 @@ class GmailProvider:
                     MailbackAttachmentPart(
                         attachment_id=attachment_id,
                         download_url=mailback.download_url,
+                        report_type=mailback.report_type,
                     )
                 )
             else:

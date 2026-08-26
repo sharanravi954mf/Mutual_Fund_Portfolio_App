@@ -102,6 +102,16 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   another 4xx, a 5xx, or an otherwise unexpected non-success status. Redirects,
   headers, retries, limits, response handling, and downstream ZIP/DBF behavior
   are unchanged.
+- **CAMS Latest-Report Smoke Mode (#113, related #109)**: Added the explicit
+  CAMS-only request option `smoke_mode: "latest_supported_reports"`. It performs
+  one fixed sender-plus-WBR2 and one fixed sender-plus-WBR9 Gmail search with
+  `maxResults=1`, relying on Gmail's documented newest-first list order and
+  validating each detail's trusted `internalDate`. The mode reads at most two
+  message details and returns at most one mailback attachment per report; empty
+  results complete as a bounded smoke no-data outcome. Invalid/KFINTECH use
+  fails closed. Normal pagination, KFINTECH, all limits, and CAMS HTTP, ZIP,
+  password, AES, and DBF behavior are unchanged. This is Phase A for proving
+  the latest genuine E2E; historical/stale-link backfill remains Phase B.
 
 ### Security
 - **CAMS Mailback Boundaries (#113)**: Added exact HTTPS host/path validation,

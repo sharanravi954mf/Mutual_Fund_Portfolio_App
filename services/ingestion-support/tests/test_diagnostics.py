@@ -88,21 +88,29 @@ def test_poll_emits_safe_outcome_and_request_events(settings, diagnostic_stream)
         assert forbidden not in logs
 
 
-def test_successful_empty_poll_is_distinguishable(settings, diagnostic_stream) -> None:
+def test_successful_smoke_empty_poll_is_distinguishable_and_sanitized(
+    settings, diagnostic_stream
+) -> None:
     class EmptyMailboxProvider(FakeMailboxProvider):
         async def poll(self, request: PollRequest, access_token: str):
+            assert request.smoke_mode == "latest_supported_reports"
             self.access_tokens.append(access_token)
             return []
 
     app = create_app(settings, EmptyMailboxProvider(), FakeMalwareScanner())
+    oauth_marker = "empty-poll-oauth-marker"
+    mailbox_marker = "empty-poll-mailbox-marker"
     with TestClient(app) as client:
         response = client.post(
             "/poll",
             headers={
                 **mailbox_headers(settings),
-                "X-Mailbox-OAuth-Token": "empty-poll-oauth-marker",
+                "X-Mailbox-OAuth-Token": oauth_marker,
             },
-            json=poll_body(),
+            json=poll_body(
+                mailbox_connection_id=mailbox_marker,
+                smoke_mode="latest_supported_reports",
+            ),
         )
 
     assert response.status_code == 200
@@ -112,6 +120,10 @@ def test_successful_empty_poll_is_distinguishable(settings, diagnostic_stream) -
     outcome = events[0]
     assert outcome["message_count"] == 0
     assert outcome["attachment_count"] == 0
+    logs = diagnostic_stream.getvalue()
+    assert oauth_marker not in logs
+    assert mailbox_marker not in logs
+    assert "latest_supported_reports" not in logs
 
 
 def test_service_error_logs_only_code_status_and_request_id(

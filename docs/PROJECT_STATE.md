@@ -233,6 +233,20 @@ unexpected non-success status. No provider status value, URL, headers, body, or
 provider content is logged. Hosted Dev characterization of the fixed response
 class remains pending. Production remains untouched.
 
+Issue #113 now has an explicit CAMS-only latest-report smoke contract:
+`smoke_mode: "latest_supported_reports"`. It performs separate fixed
+sender-candidate plus `subject:WBR2` and `subject:WBR9` Gmail searches with one
+result each. Gmail's documented reverse-chronological list order is based on
+the trusted `internalDate` inbox timestamp, which remains required and
+validated on each selected detail. This bounds Phase A to two list calls, at
+most two detail calls, and at most two synthesized mailback attachments (one
+per supported report); no matching report produces the existing legitimate
+zero-result smoke completion. The ordinary combined-query pagination path and
+KFINTECH remain unchanged when the option is absent. Phase B separately owns
+historical mailbacks, stale/expired links, pagination/backfill or re-request
+policy, and reconciliation; those concerns do not block proving the newest
+genuine WBR2/WBR9 E2E first.
+
 The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
 validated URL to password-protected ZIP to existing DBF-parser path. WBR49
 remains out of scope. Synthetic HTML/ZIP/DBF fixtures and Dev-only sender/password

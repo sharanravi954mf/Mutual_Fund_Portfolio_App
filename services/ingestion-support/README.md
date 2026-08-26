@@ -202,6 +202,21 @@ and all HTML, WBR2/WBR9 field, and multipart agreement checks remain unchanged.
 Ordinary Gmail inline attachments and KFINTECH retain exact declared-size
 matching.
 
+For the Issue #113 genuine Hosted Dev check, the Edge request may explicitly
+set `smoke_mode` to the single accepted value `latest_supported_reports` for a
+CAMS mailbox. The support poll then issues two fixed Gmail searches using the
+configured CAMS sender candidates: one with `subject:WBR2` and one with
+`subject:WBR9`. Each search requests `maxResults=1`; Gmail documents message
+list results as reverse chronological and `internalDate` as the inbox ordering
+timestamp, and the selected detail must still contain a valid `internalDate`.
+Consequently the smoke path performs at most two list requests and two message
+detail requests, returns at most one validated mailback attachment per report
+and two total, and does not page through historical mail. Invalid mode values
+and use with KFINTECH fail closed. Without the field, the existing combined
+query, pagination, candidate limits, page-fair selection, and KFINTECH behavior
+are unchanged. The option selects only this fixed behavior and cannot carry a
+caller-supplied Gmail query.
+
 Supported mailbacks expose only an opaque `mailback:<sha256>` attachment
 identity. The original URL stays in a bounded process-local cache and must be
 HTTPS on an exact `mailback<number>.camsonline.com` host, have no credentials,
@@ -328,18 +343,22 @@ bounded poll operation failed without logging provider content or metadata.
 Production deployment and Production configuration require a separate reviewed
 change.
 
-This Issue #113 change also prepares the secure WBR2/WBR9 CAMS URL-mailback
-path and Dev-only synthetic fixtures/configuration. It has not changed Hosted
-Dev or Production. Validation is intentionally split into three layers:
+This Issue #113 work also prepares the secure WBR2/WBR9 CAMS URL-mailback path
+and Dev-only synthetic fixtures/configuration. It has not changed Hosted Dev or
+Production. Validation is intentionally split into these phases:
 
 - automated tests prove the complete synthetic CAMS HTML-to-validated-URL-to-
   encrypted-ZIP-to-DBF contract with mocked provider networking;
 - the controlled Hosted Dev smoke uses the generic Gmail attachment path and
   existing synthetic DBF fixture to prove deployed Gmail/Oracle, attachment,
   integrity, ClamAV, Storage, parser, and Dev-persistence infrastructure; and
-- a genuine CAMS WBR2/WBR9 `DownloadURL` plus encrypted ZIP remains pending as
-  a separate live-provider characterization until an explicitly authorized,
-  appropriately sanitized sample is available.
+- **Phase A -- genuine latest-report smoke:** explicitly request
+  `latest_supported_reports`, selecting newest WBR2 at most one and newest WBR9
+  at most one, to prove the complete current Gmail-to-persistence path without
+  allowing older links to block the result;
+- **Phase B -- historical/backlog ingestion:** separately characterize older
+  mailbacks, stale or expired link behavior, pagination/backfill or re-request
+  policy, and reconciliation after Phase A is proven.
 
 Passing the automated contract and Hosted Dev infrastructure smoke does not
 claim that live CAMS characterization has passed. The Dev synthetic sender

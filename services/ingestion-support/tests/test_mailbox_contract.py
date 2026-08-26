@@ -282,6 +282,27 @@ def test_mailbox_rejects_missing_oauth_malformed_and_oversized_json(client, sett
     assert oversized.status_code == 413
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        poll_body(smoke_mode="all_messages"),
+        poll_body(registrar="KFINTECH", smoke_mode="latest_supported_reports"),
+    ],
+)
+def test_poll_rejects_invalid_or_non_cams_smoke_mode(client, settings, body) -> None:
+    response = client.post(
+        "/poll",
+        headers={
+            **mailbox_headers(settings),
+            "X-Mailbox-OAuth-Token": "worker-access-token",
+        },
+        json=body,
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": {"code": "invalid_request"}}
+
+
 def test_provider_failure_and_timeout_fail_closed(client, settings, fake_mailbox) -> None:
     fake_mailbox.failure = ServiceError(503, "provider_unavailable")
     response = client.post(

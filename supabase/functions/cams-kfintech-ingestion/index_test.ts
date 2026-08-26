@@ -120,6 +120,7 @@ function deps(options: {
   finalizeNoDataRun?: HandlerDependencies["persistence"]["finalizeNoDataRun"];
   recordFailure?: HandlerDependencies["persistence"]["recordFailure"];
   authorize?: HandlerDependencies["workspaceAuthorizer"]["authorize"];
+  poll?: HandlerDependencies["mailboxClient"]["poll"];
 } = {}): HandlerDependencies {
   const stages = options.stages ?? [];
   const failureCodes = options.failureCodes ?? [];
@@ -178,7 +179,8 @@ function deps(options: {
       },
     },
     mailboxClient: {
-      poll: () => Promise.resolve(options.messages ?? [message()]),
+      poll: options.poll ??
+        (() => Promise.resolve(options.messages ?? [message()])),
       downloadAttachment: (_context, message, attachment) => {
         if (options.downloadCount != null) {
           options.downloadCount.count += 1;
@@ -405,7 +407,48 @@ Deno.test("unsupported CAMS report records sanitized failure without DBF parsing
   assertEquals(stages.includes("parse"), false);
 });
 
-Deno.test("no-data sender still crosses the post-read allowlist boundary", async () => {
+Deno.test("latest supported reports smoke mode is explicitly validated and propagated", async () => {
+  let observedSmokeMode: string | undefined;
+  const handler = createCamsKfintechIngestionHandler(deps({
+    poll: (_context, smokeMode) => {
+      observedSmokeMode = smokeMode;
+      return Promise.resolve([]);
+    },
+  }));
+
+  const response = await handler(request(validBody({
+    smoke_mode: "latest_supported_reports",
+  })));
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(observedSmokeMode, "latest_supported_reports");
+  assertEquals(body.data.mailbox_outcome, "no_data");
+  assertEquals(body.data.attempted_attachments, 0);
+});
+
+Deno.test("invalid or non-CAMS smoke modes fail closed before run claim", async () => {
+  for (
+    const invalidBody of [
+      validBody({ smoke_mode: "all_messages" }),
+      validBody({
+        registrar: "KFINTECH",
+        smoke_mode: "latest_supported_reports",
+      }),
+    ]
+  ) {
+    const claimedRuns: string[] = [];
+    const handler = createCamsKfintechIngestionHandler(deps({ claimedRuns }));
+    const response = await handler(request(invalidBody));
+    const body = await response.json();
+
+    assertEquals(response.status, 403);
+    assertEquals(body.error.code, "not_authorized");
+    assertEquals(claimedRuns, []);
+  }
+});
+
+Deno.test("smoke-mode no-data sender still crosses the post-read allowlist boundary", async () => {
   const failureCodes: string[] = [];
   let noDataFinalizations = 0;
   const handler = createCamsKfintechIngestionHandler(deps({
@@ -423,7 +466,9 @@ Deno.test("no-data sender still crosses the post-read allowlist boundary", async
     },
   }));
 
-  const response = await handler(request(validBody()));
+  const response = await handler(request(validBody({
+    smoke_mode: "latest_supported_reports",
+  })));
   const body = await response.json();
 
   assertEquals(response.status, 200);
