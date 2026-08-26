@@ -131,7 +131,11 @@ async def test_gmail_message_validation_stages_have_exact_diagnostics(
 
 
 @pytest.mark.asyncio
-async def test_malformed_cams_body_data_has_transport_diagnostic(settings) -> None:
+@pytest.mark.parametrize("encoded", [123, "not+base64url"], ids=["non-string", "invalid-char"])
+async def test_cams_body_data_shape_failures_have_exact_diagnostic(
+    settings,
+    encoded: object,
+) -> None:
     provider = GmailProvider(settings)
     payload = {
         "headers": [],
@@ -139,20 +143,113 @@ async def test_malformed_cams_body_data_has_transport_diagnostic(settings) -> No
             {
                 "filename": "",
                 "mimeType": "text/html",
-                "body": {"data": "not+base64url", "size": 10},
+                "body": {"data": encoded, "size": 10},
             }
         ],
     }
 
     _assert_invalid_reason(
-        DiagnosticReason.CAMS_MAILBACK_BODY_TRANSPORT_INVALID,
+        DiagnosticReason.CAMS_MAILBACK_BODY_DATA_SHAPE_INVALID,
         lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
     )
     await provider.close()
 
 
 @pytest.mark.asyncio
-async def test_cams_body_declared_size_mismatch_has_transport_diagnostic(settings) -> None:
+@pytest.mark.parametrize("declared_size", [True, -1], ids=["invalid-type", "negative"])
+async def test_cams_body_declared_size_failures_have_exact_diagnostic(
+    settings,
+    declared_size: object,
+) -> None:
+    provider = GmailProvider(settings)
+    payload = {
+        "headers": [],
+        "parts": [
+            {
+                "filename": "",
+                "mimeType": "text/plain",
+                "body": {
+                    "data": base64.urlsafe_b64encode(b"valid UTF-8").decode().rstrip("="),
+                    "size": declared_size,
+                },
+            }
+        ],
+    }
+
+    _assert_invalid_reason(
+        DiagnosticReason.CAMS_MAILBACK_BODY_DECLARED_SIZE_INVALID,
+        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+    )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoded", ["A", "AA="], ids=["impossible-length", "bad-padding"])
+async def test_cams_body_padding_failures_have_exact_diagnostic(
+    settings,
+    encoded: str,
+) -> None:
+    provider = GmailProvider(settings)
+    payload = {
+        "headers": [],
+        "parts": [
+            {
+                "filename": "",
+                "mimeType": "text/plain",
+                "body": {"data": encoded, "size": 1},
+            }
+        ],
+    }
+
+    _assert_invalid_reason(
+        DiagnosticReason.CAMS_MAILBACK_BODY_PADDING_INVALID,
+        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+    )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_cams_body_strict_base64_failure_has_exact_diagnostic(
+    settings,
+    monkeypatch,
+) -> None:
+    provider = GmailProvider(settings)
+    payload = {
+        "headers": [],
+        "parts": [_encoded_part(b"valid UTF-8", "text/plain")],
+    }
+
+    def reject_decode(*_args, **_kwargs) -> bytes:
+        raise base64.binascii.Error("synthetic strict decode failure")
+
+    monkeypatch.setattr(base64, "b64decode", reject_decode)
+
+    _assert_invalid_reason(
+        DiagnosticReason.CAMS_MAILBACK_BODY_BASE64_DECODE_INVALID,
+        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+    )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_cams_body_decoded_empty_has_exact_diagnostic(settings, monkeypatch) -> None:
+    provider = GmailProvider(settings)
+    payload = {
+        "headers": [],
+        "parts": [_encoded_part(b"valid UTF-8", "text/plain")],
+    }
+
+    monkeypatch.setattr(base64, "b64decode", lambda *_args, **_kwargs: b"")
+
+    _assert_invalid_reason(
+        DiagnosticReason.CAMS_MAILBACK_BODY_EMPTY_INVALID,
+        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+    )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_cams_body_decoded_size_mismatch_has_exact_diagnostic(settings) -> None:
     provider = GmailProvider(settings)
     payload = {
         "headers": [],
@@ -160,7 +257,7 @@ async def test_cams_body_declared_size_mismatch_has_transport_diagnostic(setting
     }
 
     _assert_invalid_reason(
-        DiagnosticReason.CAMS_MAILBACK_BODY_TRANSPORT_INVALID,
+        DiagnosticReason.CAMS_MAILBACK_BODY_SIZE_MISMATCH,
         lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
     )
     await provider.close()
