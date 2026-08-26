@@ -619,7 +619,7 @@ class GmailProvider:
         if registrar != "CAMS":
             return GMAIL_ATTACHMENT_QUERY
         senders = " OR ".join(self.settings.cams_candidate_senders)
-        return f"from:({senders}) WBR"
+        return f"from:({senders}) {{subject:WBR2 subject:WBR9}}"
 
     async def _fetch_page_message_details(
         self,

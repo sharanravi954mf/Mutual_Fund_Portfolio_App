@@ -1061,7 +1061,9 @@ async def test_gmail_poll_page_fairly_includes_target_after_full_first_page(sett
         if request.url.path.endswith("/messages"):
             page_token = request.url.params.get("pageToken")
             listing_tokens.append(page_token)
-            assert request.url.params["q"] == "from:(donotreply@camsonline.com) WBR"
+            assert request.url.params["q"] == (
+                "from:(donotreply@camsonline.com) {subject:WBR2 subject:WBR9}"
+            )
             if page_token is None:
                 return httpx.Response(
                     200,

@@ -212,17 +212,18 @@ worker and one Compose replica until Issue #112 changes the Edge contract.
 The support service is deployed to Hosted Dev with the single-worker boundary
 intact. Controlled E2E testing has completed Gmail consent, credential refresh,
 inline `body.data` support, bounded detail concurrency, and sender-filtered WBR
-discovery through the PR #126 CAMS path. OAuth refresh succeeds, but the current
-genuine CAMS Edge poll still reports `mailbox_poll_failed`; the support service
-returns a fail-closed 502 `provider_response_invalid`, now proven to be the
-strict equality assumption between decoded CAMS `body.data` length and Gmail
-`MessagePartBody.size`. For filename-less CAMS `text/html`/`text/plain` bodies,
-the repository now retains size as validated bounded provider metadata while
-independently bounding encoded and decoded bytes; exact equality is not
-required. Data shape, integer/range validation, padding, strict base64, non-empty
-content, strict UTF-8, HTML/WBR parsing, multipart agreement, all byte/count
-limits, public errors, and non-CAMS behavior remain unchanged. Hosted Dev
-verification remains pending. Production remains untouched.
+discovery through the PR #126 CAMS path. PR #132 then fixed genuine CAMS Gmail
+body-size compatibility: OAuth refresh, support polling, and Edge now return
+HTTP 200 with no support-service errors. The sanitized live outcome contained
+nine `unsupported_report` messages and one `sender_not_allowed` message, proving
+that the remaining bottleneck is broad provider discovery rather than OAuth,
+transport, decoding, or parsing. CAMS discovery now combines the configured
+sender candidates with subject-scoped `{subject:WBR2 subject:WBR9}` alternatives
+so unrelated WBR report traffic does not deliberately consume the bounded
+candidate/result window. Post-read sender authorization, subject/body agreement,
+parser support, every byte/count/concurrency limit, KFINTECH behavior, and public
+errors remain unchanged. Hosted Dev verification of this query refinement is
+pending. Production remains untouched.
 
 The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
 validated URL to password-protected ZIP to existing DBF-parser path. WBR49

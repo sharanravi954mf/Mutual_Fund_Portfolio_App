@@ -134,8 +134,12 @@ automated provider tests use mocks only.
 
 For KFintech and generic attachment flows, mailbox polling keeps the Gmail query
 `has:attachment {filename:pdf filename:dbf}`. CAMS discovery instead uses the
-configured registrar candidate senders and requires `WBR`; it does not include
-`has:attachment`, `filename:pdf`, or `filename:dbf` discovery terms.
+configured registrar candidate senders together with the subject-scoped
+alternative `{subject:WBR2 subject:WBR9}`; it does not include the generic
+standalone `WBR`, `has:attachment`, `filename:pdf`, or `filename:dbf` discovery
+terms. This provider-side filter reduces unsupported report reads within the
+bounded candidate window; the parsed body must still independently identify a
+supported WBR2/WBR9 report and agree with the subject.
 The production candidate currently configured by default is
 `donotreply@camsonline.com`; the Dev synthetic sender is opt-in only through
 `CAMS_MAILBACK_CANDIDATE_SENDERS`. Gmail filtering is candidate reduction, not
