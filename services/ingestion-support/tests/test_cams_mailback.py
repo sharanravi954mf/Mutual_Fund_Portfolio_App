@@ -386,7 +386,7 @@ async def test_gmail_mailback_poll_fetches_password_zip_and_returns_dbf(
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/messages"):
             query = request.url.params["q"]
-            assert query == "from:(donotreply@camsonline.com) WBR"
+            assert query == "from:(donotreply@camsonline.com) {subject:WBR2 subject:WBR9}"
             assert "has:attachment" not in query
             assert "filename:pdf" not in query
             assert "filename:dbf" not in query
@@ -450,7 +450,9 @@ async def test_gmail_mailback_returns_sanitized_non_attachment_outcomes(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/messages"):
-            assert request.url.params["q"] == "from:(donotreply@camsonline.com) WBR"
+            assert request.url.params["q"] == (
+                "from:(donotreply@camsonline.com) {subject:WBR2 subject:WBR9}"
+            )
             return httpx.Response(200, json={"messages": [{"id": message_id}]})
         return httpx.Response(
             200,
@@ -499,10 +501,33 @@ async def test_dev_synthetic_sender_is_added_only_through_configuration(settings
     await provider.close()
 
     assert messages == []
-    assert observed_query == ("from:(donotreply@camsonline.com OR statements@example.test) WBR")
+    assert observed_query == (
+        "from:(donotreply@camsonline.com OR statements@example.test) {subject:WBR2 subject:WBR9}"
+    )
     assert "has:attachment" not in observed_query
     assert "filename:pdf" not in observed_query
     assert "filename:dbf" not in observed_query
+
+
+@pytest.mark.asyncio
+async def test_gmail_queries_target_only_supported_cams_reports(settings) -> None:
+    configured = settings.model_copy(
+        update={
+            "cams_mailback_candidate_senders": ("donotreply@camsonline.com,statements@example.test")
+        }
+    )
+    provider = GmailProvider(configured)
+
+    cams_query = provider._gmail_query("CAMS")
+    kfintech_query = provider._gmail_query("KFINTECH")
+    await provider.close()
+
+    assert cams_query == (
+        "from:(donotreply@camsonline.com OR statements@example.test) {subject:WBR2 subject:WBR9}"
+    )
+    assert "WBR" not in cams_query.replace("subject:WBR2", "").replace("subject:WBR9", "")
+    assert "WBR49" not in cams_query
+    assert kfintech_query == "has:attachment {filename:pdf filename:dbf}"
 
 
 @pytest.mark.parametrize(

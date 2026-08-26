@@ -86,6 +86,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   exact decoded-length checksum. Genuine Gmail CAMS payloads demonstrate that
   the bounded provider metadata can differ from decoded `body.data`. Ordinary
   Gmail inline attachments and KFINTECH remain strict.
+- **Supported CAMS Gmail Discovery (#113)**: Hosted Dev after PR #132 reached a
+  successful support-service poll and Edge response, returning nine sanitized
+  `unsupported_report` outcomes and one `sender_not_allowed` outcome with no
+  support-service error. CAMS discovery now combines configured sender
+  candidates with `{subject:WBR2 subject:WBR9}` so unsupported WBR traffic does
+  not deliberately consume the bounded candidate/result window. Body parsing,
+  post-read sender authorization, all limits, and KFINTECH remain unchanged.
 
 ### Security
 - **CAMS Mailback Boundaries (#113)**: Added exact HTTPS host/path validation,
