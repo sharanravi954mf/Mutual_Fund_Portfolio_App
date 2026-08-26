@@ -14,6 +14,7 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 import httpx
 
+from .diagnostics import DiagnosticReason
 from .errors import ServiceError
 
 SUPPORTED_CAMS_REPORTS = frozenset({"WBR2", "WBR9"})
@@ -58,7 +59,11 @@ def required_html_text(value: str) -> str:
         parser.feed(value)
         parser.close()
     except (ValueError, AssertionError) as error:
-        raise ServiceError(502, "provider_response_invalid") from error
+        raise ServiceError(
+            502,
+            "provider_response_invalid",
+            diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_HTML_INVALID,
+        ) from error
     text = "\n".join(
         line.strip()
         for fragment in parser.fragments
@@ -86,7 +91,11 @@ def _report_type(subject: str, report_value: str | None) -> str | None:
     body_report = body_match.group(0).upper() if body_match is not None else None
     subject_report = subject_match.group(0).upper() if subject_match is not None else None
     if body_report is not None and subject_report is not None and body_report != subject_report:
-        raise ServiceError(502, "provider_response_invalid")
+        raise ServiceError(
+            502,
+            "provider_response_invalid",
+            diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_REPORT_MISMATCH,
+        )
     return body_report or subject_report
 
 
@@ -130,7 +139,11 @@ def parse_cams_mailback(
         return CamsMailbackResult("unsupported_report", report_type=report_type)
 
     if (file_type or "").strip().upper() != "DBF" or not request_status:
-        raise ServiceError(502, "provider_response_invalid")
+        raise ServiceError(
+            502,
+            "provider_response_invalid",
+            diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_REQUIRED_FIELDS_INVALID,
+        )
 
     normalized_status = (request_status or "").strip().casefold()
     no_data = normalized_status == "no data"
@@ -138,12 +151,24 @@ def parse_cams_mailback(
     if no_data or unavailable_url:
         if no_data and unavailable_url:
             return CamsMailbackResult("no_data", report_type=report_type)
-        raise ServiceError(502, "provider_response_invalid")
+        raise ServiceError(
+            502,
+            "provider_response_invalid",
+            diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_NO_DATA_SHAPE_INVALID,
+        )
     if normalized_status != "link":
-        raise ServiceError(502, "provider_response_invalid")
+        raise ServiceError(
+            502,
+            "provider_response_invalid",
+            diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_STATUS_INVALID,
+        )
 
     if download_value is None:
-        raise ServiceError(502, "provider_response_invalid")
+        raise ServiceError(
+            502,
+            "provider_response_invalid",
+            diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_URL_MISSING,
+        )
     download_url = validate_cams_download_url(download_value.strip())
     return CamsMailbackResult(
         "supported",
@@ -260,5 +285,13 @@ def extract_cams_dbf(
             return result
     except ServiceError:
         raise
-    except (BadZipFile, RuntimeError, EOFError, OSError, ValueError, NotImplementedError, zlib.error) as error:
+    except (
+        BadZipFile,
+        RuntimeError,
+        EOFError,
+        OSError,
+        ValueError,
+        NotImplementedError,
+        zlib.error,
+    ) as error:
         raise ServiceError(422, "cams_mailback_zip_invalid") from error

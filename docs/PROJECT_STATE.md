@@ -211,14 +211,15 @@ worker and one Compose replica until Issue #112 changes the Edge contract.
 
 The support service is deployed to Hosted Dev with the single-worker boundary
 intact. Controlled E2E testing has completed Gmail consent, credential refresh,
-attachment search, inline `body.data` support, bounded detail concurrency, and
-the PR #126 CAMS path. OAuth refresh succeeds, but the current Edge poll still
-reports `mailbox_poll_failed`; the support service returns a fail-closed 502
-`provider_response_too_large`. The repository preserves every existing byte and
-count limit while adding a log-only allowlisted reason that distinguishes Gmail
-list response size, individual message-detail response size, and per-message
-attachment-count overflow. Hosted Dev verification of that diagnostic remains
-pending. Production remains untouched.
+inline `body.data` support, bounded detail concurrency, and sender-filtered WBR
+discovery through the PR #126 CAMS path. OAuth refresh succeeds, but the current
+genuine CAMS Edge poll still reports `mailbox_poll_failed`; the support service
+returns a fail-closed 502 `provider_response_invalid`. The repository preserves
+every existing validation, byte/count limit, query, and public error while
+adding log-only enum-backed reasons that distinguish Gmail detail identity,
+envelope, MIME, inline body, and result-count failures from CAMS body encoding,
+HTML, report/field/status/URL, and multipart failures. Hosted Dev verification
+of the resulting diagnostic remains pending. Production remains untouched.
 
 The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
 validated URL to password-protected ZIP to existing DBF-parser path. WBR49
