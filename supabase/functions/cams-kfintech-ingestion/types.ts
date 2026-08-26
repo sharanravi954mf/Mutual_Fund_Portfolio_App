@@ -1,5 +1,6 @@
 export type Registrar = "CAMS" | "KFINTECH";
 export type StatementFileType = "CAS_PDF" | "DBF";
+export type SmokeMode = "latest_supported_reports";
 
 export type FailureCode =
   | "authorization_required"

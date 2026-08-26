@@ -58,6 +58,8 @@ def _gmail_mailback_message(
     *,
     mime_type: str = "text/html",
     declared_body_size: int | None = None,
+    internal_date: str = "1787392800000",
+    sender: str = "CAMS <donotreply@camsonline.com>",
 ) -> dict[str, object]:
     fixture_body = (FIXTURES / fixture).read_text(encoding="utf-8")
     content = (
@@ -67,10 +69,10 @@ def _gmail_mailback_message(
     )
     return {
         "id": message_id,
-        "internalDate": "1787392800000",
+        "internalDate": internal_date,
         "payload": {
             "headers": [
-                {"name": "From", "value": "CAMS <donotreply@camsonline.com>"},
+                {"name": "From", "value": sender},
                 {"name": "Subject", "value": f"CAMS {report_type} mailback"},
             ],
             "mimeType": "multipart/alternative",
@@ -423,7 +425,7 @@ def test_zip_entry_count_limit_fails_closed() -> None:
 
 def test_duplicate_zip_entries_fail_closed() -> None:
     buffer = BytesIO()
-    with pytest.warns(UserWarning, match="Duplicate name"):
+    with pytest.warns(UserWarning, match="Duplicate name"):  # noqa: PT031, SIM117
         with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
             archive.writestr("duplicate.dbf", b"\x03" + b"x" * 64)
             archive.writestr("duplicate.dbf", b"\x03" + b"y" * 64)
@@ -598,6 +600,182 @@ async def test_gmail_queries_target_only_supported_cams_reports(settings) -> Non
     assert "WBR" not in cams_query.replace("subject:WBR2", "").replace("subject:WBR9", "")
     assert "WBR49" not in cams_query
     assert kfintech_query == "has:attachment {filename:pdf filename:dbf}"
+
+
+@pytest.mark.asyncio
+async def test_latest_supported_reports_smoke_selects_one_newest_message_per_report(
+    settings,
+) -> None:
+    listed = {
+        "WBR2": ["newestWbr2", "olderWbr2"],
+        "WBR9": ["newestWbr9", "olderWbr9"],
+    }
+    details = {
+        "newestWbr2": ("cams_wbr2_mailback.html", "WBR2", "1787392803000"),
+        "olderWbr2": ("cams_wbr2_mailback.html", "WBR2", "1787392801000"),
+        "newestWbr9": ("cams_wbr9_mailback.html", "WBR9", "1787392804000"),
+        "olderWbr9": ("cams_wbr9_mailback.html", "WBR9", "1787392802000"),
+    }
+    list_queries: list[str] = []
+    detail_ids: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            query = request.url.params["q"]
+            list_queries.append(query)
+            assert request.url.params["maxResults"] == "1"
+            report_type = "WBR2" if query.endswith("subject:WBR2") else "WBR9"
+            return httpx.Response(
+                200,
+                json={"messages": [{"id": item} for item in listed[report_type][:1]]},
+            )
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        detail_ids.append(message_id)
+        fixture, report_type, internal_date = details[message_id]
+        return httpx.Response(
+            200,
+            json=_gmail_mailback_message(
+                message_id,
+                fixture,
+                report_type,
+                internal_date=internal_date,
+            ),
+        )
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+            smoke_mode="latest_supported_reports",
+        ),
+        "mailback-oauth-token",
+    )
+    await provider.close()
+
+    assert list_queries == [
+        "from:(donotreply@camsonline.com) subject:WBR2",
+        "from:(donotreply@camsonline.com) subject:WBR9",
+    ]
+    assert set(detail_ids) == {"newestWbr2", "newestWbr9"}
+    assert [message.message_id for message in messages] == ["newestWbr2", "newestWbr9"]
+    assert [message.attachments[0].filename for message in messages] == [
+        "cams-wbr2.dbf",
+        "cams-wbr9.dbf",
+    ]
+    assert sum(len(message.attachments) for message in messages) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("available_report", "expected_message_ids"),
+    [
+        ("WBR2", ["onlyWbr2"]),
+        ("WBR9", ["onlyWbr9"]),
+        (None, []),
+    ],
+)
+async def test_latest_supported_reports_smoke_handles_one_or_no_report(
+    settings,
+    available_report: str | None,
+    expected_message_ids: list[str],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            query = request.url.params["q"]
+            report_type = "WBR2" if query.endswith("subject:WBR2") else "WBR9"
+            messages = (
+                [{"id": f"only{report_type.title()}"}] if report_type == available_report else []
+            )
+            return httpx.Response(200, json={"messages": messages})
+        message_id = request.url.path.rsplit("/", 1)[-1]
+        report_type = "WBR2" if message_id == "onlyWbr2" else "WBR9"
+        fixture = "cams_wbr2_mailback.html" if report_type == "WBR2" else "cams_wbr9_mailback.html"
+        return httpx.Response(
+            200,
+            json=_gmail_mailback_message(message_id, fixture, report_type),
+        )
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+            smoke_mode="latest_supported_reports",
+        ),
+        "mailback-oauth-token",
+    )
+    await provider.close()
+
+    assert [message.message_id for message in messages] == expected_message_ids
+    assert sum(len(message.attachments) for message in messages) <= 1
+
+
+@pytest.mark.asyncio
+async def test_latest_supported_reports_smoke_does_not_substitute_wbr49(settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            if request.url.params["q"].endswith("subject:WBR2"):
+                return httpx.Response(200, json={"messages": [{"id": "unsupportedWbr49"}]})
+            return httpx.Response(200, json={"messages": []})
+        return httpx.Response(
+            200,
+            json=_gmail_mailback_message(
+                "unsupportedWbr49",
+                "cams_wbr49_mailback.html",
+                "WBR49",
+            ),
+        )
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    messages = await provider.poll(
+        PollRequest(
+            connector_ref="gmail:me",
+            mailbox_connection_id="mailbox-fixture-1",
+            registrar="CAMS",
+            smoke_mode="latest_supported_reports",
+        ),
+        "mailback-oauth-token",
+    )
+    await provider.close()
+
+    assert len(messages) == 1
+    assert messages[0].attachments == []
+    assert messages[0].outcome == "unsupported_report"
+
+
+@pytest.mark.asyncio
+async def test_latest_supported_reports_smoke_rejects_subject_body_disagreement(
+    settings,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            if request.url.params["q"].endswith("subject:WBR2"):
+                return httpx.Response(200, json={"messages": [{"id": "mismatchWbr2"}]})
+            return httpx.Response(200, json={"messages": []})
+        return httpx.Response(
+            200,
+            json=_gmail_mailback_message(
+                "mismatchWbr2",
+                "cams_wbr9_mailback.html",
+                "WBR2",
+            ),
+        )
+
+    provider = GmailProvider(settings, httpx.MockTransport(handler))
+    with pytest.raises(ServiceError, match="provider_response_invalid"):
+        await provider.poll(
+            PollRequest(
+                connector_ref="gmail:me",
+                mailbox_connection_id="mailbox-fixture-1",
+                registrar="CAMS",
+                smoke_mode="latest_supported_reports",
+            ),
+            "mailback-oauth-token",
+        )
+    await provider.close()
 
 
 @pytest.mark.parametrize(

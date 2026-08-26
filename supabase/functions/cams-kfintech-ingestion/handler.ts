@@ -27,6 +27,7 @@ import {
   type PersistenceInput,
   type PersistenceResult,
   type Registrar,
+  type SmokeMode,
   type StoredObject,
 } from "./types.ts";
 
@@ -64,7 +65,10 @@ export type HandlerDependencies = {
     ): Promise<void>;
   };
   mailboxClient: {
-    poll(context: IngestionRunContext): Promise<MailMessage[]>;
+    poll(
+      context: IngestionRunContext,
+      smokeMode?: SmokeMode,
+    ): Promise<MailMessage[]>;
     downloadAttachment(
       context: IngestionRunContext,
       message: MailMessage,
@@ -105,6 +109,7 @@ type RequestBody = {
   mailbox_connection_id?: unknown;
   correlation_id?: unknown;
   registrar?: unknown;
+  smoke_mode?: unknown;
 };
 
 type RunByteCounter = {
@@ -116,6 +121,17 @@ function requiredString(value: unknown): string {
     throw new IngestionError("not_authorized");
   }
   return value.trim();
+}
+
+function optionalSmokeMode(
+  value: unknown,
+  registrar: Registrar,
+): SmokeMode | undefined {
+  if (value === undefined) return undefined;
+  if (value === "latest_supported_reports" && registrar === "CAMS") {
+    return value;
+  }
+  throw new IngestionError("not_authorized");
 }
 
 function stage(deps: HandlerDependencies, name: string): void {
@@ -403,6 +419,7 @@ function classifyUnknownError(error: unknown): FailureCode {
 function validateMessageAndAttachmentLimits(
   context: IngestionRunContext,
   messages: MailMessage[],
+  smokeMode?: SmokeMode,
 ): void {
   const maxMessages = positiveLimit(
     context.registrarConfig.maxMessagesPerPoll,
@@ -416,7 +433,10 @@ function validateMessageAndAttachmentLimits(
     context.registrarConfig.maxAttachmentsPerRun,
     25,
   );
-  if (messages.length === 0 || messages.length > maxMessages) {
+  if (
+    (messages.length === 0 && smokeMode !== "latest_supported_reports") ||
+    messages.length > maxMessages
+  ) {
     throw new IngestionError("mailbox_poll_failed");
   }
 
@@ -519,6 +539,7 @@ export function createCamsKfintechIngestionHandler(
       assertNoTrustedPlaintextPayload(body as Record<string, unknown>);
 
       const registrar = assertRegistrar(body.registrar);
+      const smokeMode = optionalSmokeMode(body.smoke_mode, registrar);
       const workspaceId = requiredString(body.workspace_id);
       const mailboxConnectionId = requiredString(body.mailbox_connection_id);
       const correlationId = requiredString(body.correlation_id);
@@ -555,8 +576,8 @@ export function createCamsKfintechIngestionHandler(
 
       stage(deps, "imap_oauth_connector");
       stage(deps, "poll_mailbox");
-      const messages = await deps.mailboxClient.poll(context);
-      validateMessageAndAttachmentLimits(context, messages);
+      const messages = await deps.mailboxClient.poll(context, smokeMode);
+      validateMessageAndAttachmentLimits(context, messages, smokeMode);
 
       const outcomeSenderFailures = new Set<string>();
       for (const message of messages) {

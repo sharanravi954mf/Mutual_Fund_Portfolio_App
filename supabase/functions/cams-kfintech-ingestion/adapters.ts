@@ -24,6 +24,7 @@ import {
   type PersistenceInput,
   type PersistenceResult,
   type Registrar,
+  type SmokeMode,
   type StoredObject,
 } from "./types.ts";
 
@@ -957,7 +958,10 @@ export class ConnectorMailboxClient {
     );
   }
 
-  async poll(context: IngestionRunContext): Promise<MailMessage[]> {
+  async poll(
+    context: IngestionRunContext,
+    smokeMode?: SmokeMode,
+  ): Promise<MailMessage[]> {
     const deadline = timeoutController(this.timeoutMs);
     try {
       const response = await fetch(endpoint(this.baseUrl, "/poll"), {
@@ -972,6 +976,7 @@ export class ConnectorMailboxClient {
           connector_ref: context.mailbox.connectorRef,
           mailbox_connection_id: context.mailboxConnectionId,
           registrar: context.mailbox.registrar,
+          ...(smokeMode == null ? {} : { smoke_mode: smokeMode }),
         }),
         signal: deadline.signal,
       });

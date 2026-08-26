@@ -347,6 +347,35 @@ Deno.test("connector rejects arbitrary external attachment URL from poll metadat
   }
 });
 
+Deno.test("connector forwards only the fixed latest-report smoke mode", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: Record<string, unknown>[] = [];
+  try {
+    globalThis.fetch = (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(response({ messages: [] }));
+    };
+    const client = new ConnectorMailboxClient(
+      "https://connector.example/ingestion",
+      "connector-service-token",
+    );
+
+    await client.poll(context());
+    await client.poll(context(), "latest_supported_reports");
+
+    assertEquals(bodies[0].smoke_mode, undefined);
+    assertEquals(bodies[1].smoke_mode, "latest_supported_reports");
+    assertEquals(Object.keys(bodies[1]).sort(), [
+      "connector_ref",
+      "mailbox_connection_id",
+      "registrar",
+      "smoke_mode",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 Deno.test("connector accepts only explicit CAMS mailbox outcomes without attachments", async () => {
   const originalFetch = globalThis.fetch;
   try {
