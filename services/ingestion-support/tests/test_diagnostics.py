@@ -174,7 +174,6 @@ def test_service_error_rejects_non_allowlisted_diagnostic_reason() -> None:
         DiagnosticReason.CAMS_MAILBACK_BODY_PADDING_INVALID,
         DiagnosticReason.CAMS_MAILBACK_BODY_BASE64_DECODE_INVALID,
         DiagnosticReason.CAMS_MAILBACK_BODY_EMPTY_INVALID,
-        DiagnosticReason.CAMS_MAILBACK_BODY_SIZE_MISMATCH,
         DiagnosticReason.CAMS_MAILBACK_TEXT_UTF8_INVALID,
         DiagnosticReason.CAMS_MAILBACK_HTML_INVALID,
         DiagnosticReason.CAMS_MAILBACK_REPORT_MISMATCH,

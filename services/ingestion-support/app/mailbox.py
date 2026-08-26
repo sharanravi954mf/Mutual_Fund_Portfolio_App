@@ -17,7 +17,6 @@ from urllib.parse import quote, urlencode
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from .config import Settings
 from .cams_mailback import (
     CamsMailbackResult,
     download_cams_zip,
@@ -25,6 +24,7 @@ from .cams_mailback import (
     parse_cams_mailback,
     required_html_text,
 )
+from .config import Settings
 from .diagnostics import DiagnosticReason
 from .errors import ServiceError
 
@@ -248,7 +248,6 @@ class _GmailBodyDiagnosticReasons:
     padding: DiagnosticReason
     base64_decode: DiagnosticReason
     empty: DiagnosticReason
-    size_mismatch: DiagnosticReason
 
 
 _CAMS_MAILBACK_BODY_DIAGNOSTICS = _GmailBodyDiagnosticReasons(
@@ -257,7 +256,6 @@ _CAMS_MAILBACK_BODY_DIAGNOSTICS = _GmailBodyDiagnosticReasons(
     padding=DiagnosticReason.CAMS_MAILBACK_BODY_PADDING_INVALID,
     base64_decode=DiagnosticReason.CAMS_MAILBACK_BODY_BASE64_DECODE_INVALID,
     empty=DiagnosticReason.CAMS_MAILBACK_BODY_EMPTY_INVALID,
-    size_mismatch=DiagnosticReason.CAMS_MAILBACK_BODY_SIZE_MISMATCH,
 )
 
 
@@ -909,6 +907,7 @@ class GmailProvider:
                 body.get("size"),
                 remaining,
                 detailed_reasons=_CAMS_MAILBACK_BODY_DIAGNOSTICS,
+                require_declared_size_match=False,
             )
             total_body_bytes += len(content)
             try:
@@ -989,6 +988,7 @@ class GmailProvider:
         *,
         invalid_reason: DiagnosticReason | None = None,
         detailed_reasons: _GmailBodyDiagnosticReasons | None = None,
+        require_declared_size_match: bool = True,
     ) -> bytes:
         if not isinstance(encoded, str) or GMAIL_BASE64URL_RE.fullmatch(encoded) is None:
             raise ServiceError(
@@ -1039,13 +1039,11 @@ class GmailProvider:
                 "provider_response_invalid",
                 diagnostic_reason=(detailed_reasons.empty if detailed_reasons else invalid_reason),
             )
-        if size is not None and len(content) != size:
+        if require_declared_size_match and size is not None and len(content) != size:
             raise ServiceError(
                 502,
                 "provider_response_invalid",
-                diagnostic_reason=(
-                    detailed_reasons.size_mismatch if detailed_reasons else invalid_reason
-                ),
+                diagnostic_reason=invalid_reason,
             )
         return content
 

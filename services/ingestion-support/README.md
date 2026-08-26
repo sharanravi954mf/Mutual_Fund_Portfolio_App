@@ -187,6 +187,16 @@ number produce the sanitized `unsupported_report` outcome and are never
 downloaded or parsed as a supported report. `Request Status = No Data` together
 with `DownloadURL = NA` is a completed zero-attempt `no_data` result, not a
 provider failure. Mixed Link/NA or No Data/URL combinations fail closed.
+For these filename-less CAMS `text/html` and `text/plain` mailback bodies,
+Gmail `MessagePartBody.size` remains required to be an actual non-negative
+integer within the configured body limit when present, but it is treated as
+bounded provider metadata rather than an integrity checksum. Genuine Gmail
+CAMS payloads demonstrate that it can differ from the strictly decoded
+`body.data` length. Encoded input and actual decoded bytes are independently
+bounded, decoded content must be non-empty strict base64url and strict UTF-8,
+and all HTML, WBR2/WBR9 field, and multipart agreement checks remain unchanged.
+Ordinary Gmail inline attachments and KFINTECH retain exact declared-size
+matching.
 
 Supported mailbacks expose only an opaque `mailback:<sha256>` attachment
 identity. The original URL stays in a bounded process-local cache and must be
