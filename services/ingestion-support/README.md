@@ -206,8 +206,14 @@ Supported mailbacks expose only an opaque `mailback:<sha256>` attachment
 identity. The original URL stays in a bounded process-local cache and must be
 HTTPS on an exact `mailback<number>.camsonline.com` host, have no credentials,
 port, query, or fragment, and use `/mailback_result/<opaque>.zip`. Redirects are
-rejected. Download time and compressed bytes are bounded. The encrypted ZIP is
-opened in memory with `CAMS_MAILBACK_ZIP_PASSWORD`; entry count, compressed and
+rejected. Download time and compressed bytes are bounded. Non-success CAMS
+downloads retain public 502 `provider_request_failed`; internal logs may add
+only one fixed enum reason for authentication rejection (401/403), a
+missing/expired link (404/410), rate limiting (429), another 4xx, a 5xx, or an
+otherwise unexpected non-success status. Numeric provider status, URL, headers,
+body, cookies, and provider content are never returned or logged, and redirect
+rejection remains separately unchanged. The encrypted ZIP is opened in memory
+with `CAMS_MAILBACK_ZIP_PASSWORD`; entry count, compressed and
 uncompressed sizes, decompression ratio, duplicate names, traversal/absolute
 paths, nested archives, encryption, and the exactly-one-DBF shape all fail
 closed. The extracted DBF bytes use the existing Edge hash, MIME, malware,

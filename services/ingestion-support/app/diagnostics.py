@@ -31,6 +31,12 @@ class DiagnosticReason(StrEnum):
     CAMS_MAILBACK_NO_DATA_SHAPE_INVALID = "cams_mailback_no_data_shape_invalid"
     CAMS_MAILBACK_STATUS_INVALID = "cams_mailback_status_invalid"
     CAMS_MAILBACK_DOWNLOAD_URL_MISSING = "cams_mailback_download_url_missing"
+    CAMS_MAILBACK_DOWNLOAD_AUTH_REJECTED = "cams_mailback_download_auth_rejected"
+    CAMS_MAILBACK_DOWNLOAD_NOT_FOUND = "cams_mailback_download_not_found"
+    CAMS_MAILBACK_DOWNLOAD_RATE_LIMITED = "cams_mailback_download_rate_limited"
+    CAMS_MAILBACK_DOWNLOAD_CLIENT_ERROR = "cams_mailback_download_client_error"
+    CAMS_MAILBACK_DOWNLOAD_SERVER_ERROR = "cams_mailback_download_server_error"
+    CAMS_MAILBACK_DOWNLOAD_STATUS_INVALID = "cams_mailback_download_status_invalid"
     CAMS_MAILBACK_MULTIPART_DISAGREEMENT = "cams_mailback_multipart_disagreement"
     GMAIL_DETAIL_RESULT_COUNT_MISMATCH = "gmail_detail_result_count_mismatch"
 

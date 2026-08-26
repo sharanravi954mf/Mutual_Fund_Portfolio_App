@@ -19,6 +19,7 @@ from app.cams_mailback import (
     validate_cams_download_url,
 )
 from app.config import Settings
+from app.diagnostics import DiagnosticReason
 from app.errors import ServiceError
 from app.mailbox import FetchRequest, GmailProvider, PollRequest
 from app.main import create_app
@@ -257,9 +258,13 @@ async def test_cams_download_rejects_redirect_and_oversized_response() -> None:
             lambda _request: httpx.Response(302, headers={"Location": url})
         ),
     )
-    with pytest.raises(ServiceError, match="provider_redirect_rejected"):
+    with pytest.raises(ServiceError, match="provider_redirect_rejected") as redirect_error:
         await download_cams_zip(redirect_client, url, max_bytes=1024)
     await redirect_client.aclose()
+
+    assert redirect_error.value.status_code == 502
+    assert redirect_error.value.code == "provider_redirect_rejected"
+    assert redirect_error.value.diagnostic_reason is None
 
     oversized_client = httpx.AsyncClient(
         follow_redirects=False,
@@ -278,6 +283,71 @@ async def test_cams_download_rejects_redirect_and_oversized_response() -> None:
     with pytest.raises(ServiceError, match="provider_unavailable"):
         await download_cams_zip(timeout_client, url, max_bytes=1024)
     await timeout_client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "diagnostic_reason"),
+    [
+        (401, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_AUTH_REJECTED),
+        (403, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_AUTH_REJECTED),
+        (404, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_NOT_FOUND),
+        (410, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_NOT_FOUND),
+        (429, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_RATE_LIMITED),
+        (422, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_CLIENT_ERROR),
+        (503, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_SERVER_ERROR),
+        (199, DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_STATUS_INVALID),
+    ],
+)
+async def test_cams_download_non_success_status_has_fixed_sanitized_diagnostic(
+    status_code: int,
+    diagnostic_reason: DiagnosticReason,
+) -> None:
+    url = "https://mailback1.camsonline.com/mailback_result/private-marker.zip"
+    body_marker = "private-provider-response-body"
+    header_marker = "private-provider-response-header"
+    client = httpx.AsyncClient(
+        follow_redirects=False,
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                status_code,
+                content=body_marker.encode(),
+                headers={"X-Private-Provider-Header": header_marker},
+            )
+        ),
+    )
+
+    with pytest.raises(ServiceError, match="^provider_request_failed$") as caught:
+        await download_cams_zip(client, url, max_bytes=1024)
+    await client.aclose()
+
+    error = caught.value
+    assert error.status_code == 502
+    assert error.code == "provider_request_failed"
+    assert error.diagnostic_reason is diagnostic_reason
+    for forbidden in (url, body_marker, header_marker, str(status_code)):
+        assert forbidden not in str(error)
+
+
+@pytest.mark.asyncio
+async def test_cams_download_successful_response_remains_unchanged() -> None:
+    url = "https://mailback1.camsonline.com/mailback_result/synthetic.zip"
+    expected = b"synthetic-zip-bytes"
+    client = httpx.AsyncClient(
+        follow_redirects=False,
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                content=expected,
+                headers={"Content-Length": str(len(expected))},
+            )
+        ),
+    )
+
+    result = await download_cams_zip(client, url, max_bytes=1024)
+    await client.aclose()
+
+    assert result == expected
 
 
 def test_password_protected_zip_extracts_dbf_with_correct_password() -> None:

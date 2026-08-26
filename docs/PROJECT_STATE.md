@@ -222,8 +222,16 @@ sender candidates with subject-scoped `{subject:WBR2 subject:WBR9}` alternatives
 so unrelated WBR report traffic does not deliberately consume the bounded
 candidate/result window. Post-read sender authorization, subject/body agreement,
 parser support, every byte/count/concurrency limit, KFINTECH behavior, and public
-errors remain unchanged. Hosted Dev verification of this query refinement is
-pending. Production remains untouched.
+errors remain unchanged. Hosted Dev verification of the PR #133 query
+refinement returned 25 messages and 25 mailback attachments. One genuine
+supported attachment reached the validated CAMS network download stage, where
+the request failed with public 502 `provider_request_failed`; ZIP bytes,
+decryption, and DBF extraction were not reached. The repository now preserves
+that public error and adds only a fixed internal enum reason distinguishing auth
+rejection, missing/expired links, rate limiting, another 4xx, a 5xx, or another
+unexpected non-success status. No provider status value, URL, headers, body, or
+provider content is logged. Hosted Dev characterization of the fixed response
+class remains pending. Production remains untouched.
 
 The repository now also implements the smallest secure CAMS WBR2/WBR9 email to
 validated URL to password-protected ZIP to existing DBF-parser path. WBR49
