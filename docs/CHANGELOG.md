@@ -93,6 +93,15 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   candidates with `{subject:WBR2 subject:WBR9}` so unsupported WBR traffic does
   not deliberately consume the bounded candidate/result window. Body parsing,
   post-read sender authorization, all limits, and KFINTECH remain unchanged.
+- **CAMS Download Status Diagnostics (#113)**: Hosted Dev after PR #133 reached
+  support-service `/poll` with 25 messages and 25 mailback attachments, then one
+  genuine supported attachment reached its validated CAMS network download and
+  failed with public 502 `provider_request_failed`. ZIP bytes and extraction
+  were not reached. The unchanged public error may now add only an internal
+  enum-backed reason for auth rejection, missing/expired links, rate limiting,
+  another 4xx, a 5xx, or an otherwise unexpected non-success status. Redirects,
+  headers, retries, limits, response handling, and downstream ZIP/DBF behavior
+  are unchanged.
 
 ### Security
 - **CAMS Mailback Boundaries (#113)**: Added exact HTTPS host/path validation,

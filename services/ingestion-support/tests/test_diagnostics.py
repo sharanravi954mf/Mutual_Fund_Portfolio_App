@@ -165,6 +165,74 @@ def test_service_error_rejects_non_allowlisted_diagnostic_reason() -> None:
 @pytest.mark.parametrize(
     "diagnostic_reason",
     [
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_AUTH_REJECTED,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_NOT_FOUND,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_RATE_LIMITED,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_CLIENT_ERROR,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_SERVER_ERROR,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_STATUS_INVALID,
+    ],
+)
+def test_cams_download_diagnostic_is_log_only_and_sanitized(
+    settings,
+    diagnostic_stream,
+    diagnostic_reason: DiagnosticReason,
+) -> None:
+    provider = FakeMailboxProvider()
+    provider.failure = ServiceError(
+        502,
+        "provider_request_failed",
+        diagnostic_reason=diagnostic_reason,
+    )
+    app = create_app(settings, provider, FakeMalwareScanner())
+    oauth_marker = "oauth-download-marker-must-not-appear"
+    mailbox_marker = "mailbox-download-marker-must-not-appear"
+    forbidden_provider_context = (
+        "https://mailback12.camsonline.com/mailback_result/private.zip",
+        "private-provider-response-body",
+        "private-provider-response-header",
+        "private-provider-cookie",
+        "private-message-id",
+        "private-attachment-id",
+        "private-subject",
+        "private-investor-data",
+    )
+    provider.sensitive_context = forbidden_provider_context
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/poll",
+            headers={**mailbox_headers(settings), "X-Mailbox-OAuth-Token": oauth_marker},
+            json=poll_body(mailbox_connection_id=mailbox_marker),
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {"error": {"code": "provider_request_failed"}}
+    assert diagnostic_reason.value not in response.text
+    service_error = next(
+        event for event in _events(diagnostic_stream) if event["event"] == "service_error"
+    )
+    assert service_error == {
+        "diagnostic_reason": diagnostic_reason.value,
+        "error_code": "provider_request_failed",
+        "event": "service_error",
+        "request_id": response.headers["X-Request-ID"],
+        "status": 502,
+    }
+
+    logs = diagnostic_stream.getvalue()
+    for forbidden in (
+        oauth_marker,
+        mailbox_marker,
+        settings.mailbox_connector_service_token,
+        *forbidden_provider_context,
+    ):
+        assert forbidden not in logs
+
+
+@pytest.mark.parametrize(
+    "diagnostic_reason",
+    [
         DiagnosticReason.GMAIL_DETAIL_ID_MISMATCH,
         DiagnosticReason.GMAIL_MESSAGE_SHAPE_INVALID,
         DiagnosticReason.GMAIL_MIME_PART_INVALID,
@@ -181,6 +249,12 @@ def test_service_error_rejects_non_allowlisted_diagnostic_reason() -> None:
         DiagnosticReason.CAMS_MAILBACK_NO_DATA_SHAPE_INVALID,
         DiagnosticReason.CAMS_MAILBACK_STATUS_INVALID,
         DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_URL_MISSING,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_AUTH_REJECTED,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_NOT_FOUND,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_RATE_LIMITED,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_CLIENT_ERROR,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_SERVER_ERROR,
+        DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_STATUS_INVALID,
         DiagnosticReason.CAMS_MAILBACK_MULTIPART_DISAGREEMENT,
         DiagnosticReason.GMAIL_DETAIL_RESULT_COUNT_MISMATCH,
     ],

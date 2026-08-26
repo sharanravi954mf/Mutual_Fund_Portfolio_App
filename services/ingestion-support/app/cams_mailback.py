@@ -10,7 +10,7 @@ from io import BytesIO
 from pathlib import PurePosixPath
 from typing import Literal
 from urllib.parse import unquote, urlsplit
-from zipfile import BadZipFile, ZIP_DEFLATED, ZIP_STORED, ZipFile
+from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
 
 import httpx
 
@@ -177,6 +177,20 @@ def parse_cams_mailback(
     )
 
 
+def _download_status_diagnostic(status_code: int) -> DiagnosticReason:
+    if status_code in {401, 403}:
+        return DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_AUTH_REJECTED
+    if status_code in {404, 410}:
+        return DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_NOT_FOUND
+    if status_code == 429:
+        return DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_RATE_LIMITED
+    if 400 <= status_code < 500:
+        return DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_CLIENT_ERROR
+    if 500 <= status_code < 600:
+        return DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_SERVER_ERROR
+    return DiagnosticReason.CAMS_MAILBACK_DOWNLOAD_STATUS_INVALID
+
+
 async def download_cams_zip(
     client: httpx.AsyncClient,
     url: str,
@@ -193,7 +207,11 @@ async def download_cams_zip(
             if 300 <= response.status_code < 400:
                 raise ServiceError(502, "provider_redirect_rejected")
             if response.status_code < 200 or response.status_code >= 300:
-                raise ServiceError(502, "provider_request_failed")
+                raise ServiceError(
+                    502,
+                    "provider_request_failed",
+                    diagnostic_reason=_download_status_diagnostic(response.status_code),
+                )
             declared = response.headers.get("content-length")
             if declared is not None:
                 try:
