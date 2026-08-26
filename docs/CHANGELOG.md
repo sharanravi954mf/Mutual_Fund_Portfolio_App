@@ -65,7 +65,8 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   reason for list response size, individual detail response size, or attachment
   count. Fail-closed `provider_response_invalid` paths may likewise add only an
   enum-backed reason distinguishing Gmail detail identity/envelope/MIME/inline
-  validation from CAMS body transport/integrity, strict UTF-8,
+  validation from CAMS body data shape, declared size, padding, strict base64
+  decode, empty content, decoded-size mismatch, strict UTF-8,
   HTML/report/field/status/URL/multipart validation and detail-result count
   mismatch. The public error remains
   unchanged. Uvicorn access logs remain

@@ -241,6 +241,26 @@ class MailbackAttachmentPart:
     download_url: str
 
 
+@dataclass(frozen=True)
+class _GmailBodyDiagnosticReasons:
+    data_shape: DiagnosticReason
+    declared_size: DiagnosticReason
+    padding: DiagnosticReason
+    base64_decode: DiagnosticReason
+    empty: DiagnosticReason
+    size_mismatch: DiagnosticReason
+
+
+_CAMS_MAILBACK_BODY_DIAGNOSTICS = _GmailBodyDiagnosticReasons(
+    data_shape=DiagnosticReason.CAMS_MAILBACK_BODY_DATA_SHAPE_INVALID,
+    declared_size=DiagnosticReason.CAMS_MAILBACK_BODY_DECLARED_SIZE_INVALID,
+    padding=DiagnosticReason.CAMS_MAILBACK_BODY_PADDING_INVALID,
+    base64_decode=DiagnosticReason.CAMS_MAILBACK_BODY_BASE64_DECODE_INVALID,
+    empty=DiagnosticReason.CAMS_MAILBACK_BODY_EMPTY_INVALID,
+    size_mismatch=DiagnosticReason.CAMS_MAILBACK_BODY_SIZE_MISMATCH,
+)
+
+
 MailbackCacheKey = tuple[str, str, str, str, str]
 
 
@@ -888,7 +908,7 @@ class GmailProvider:
                 encoded,
                 body.get("size"),
                 remaining,
-                invalid_reason=DiagnosticReason.CAMS_MAILBACK_BODY_TRANSPORT_INVALID,
+                detailed_reasons=_CAMS_MAILBACK_BODY_DIAGNOSTICS,
             )
             total_body_bytes += len(content)
             try:
@@ -968,19 +988,22 @@ class GmailProvider:
         max_bytes: int,
         *,
         invalid_reason: DiagnosticReason | None = None,
+        detailed_reasons: _GmailBodyDiagnosticReasons | None = None,
     ) -> bytes:
         if not isinstance(encoded, str) or GMAIL_BASE64URL_RE.fullmatch(encoded) is None:
             raise ServiceError(
                 502,
                 "provider_response_invalid",
-                diagnostic_reason=invalid_reason,
+                diagnostic_reason=(
+                    detailed_reasons.data_shape if detailed_reasons else invalid_reason
+                ),
             )
         if len(encoded) > ((max_bytes + 2) // 3) * 4:
             raise ServiceError(502, "provider_response_too_large")
         size = cls._validated_declared_size(
             declared_size,
             max_bytes,
-            invalid_reason=invalid_reason,
+            invalid_reason=(detailed_reasons.declared_size if detailed_reasons else invalid_reason),
         )
         unpadded = encoded.rstrip("=")
         encoded_padding = len(encoded) - len(unpadded)
@@ -993,7 +1016,9 @@ class GmailProvider:
             raise ServiceError(
                 502,
                 "provider_response_invalid",
-                diagnostic_reason=invalid_reason,
+                diagnostic_reason=(
+                    detailed_reasons.padding if detailed_reasons else invalid_reason
+                ),
             )
         try:
             padded = unpadded + "=" * (-len(unpadded) % 4)
@@ -1002,15 +1027,25 @@ class GmailProvider:
             raise ServiceError(
                 502,
                 "provider_response_invalid",
-                diagnostic_reason=invalid_reason,
+                diagnostic_reason=(
+                    detailed_reasons.base64_decode if detailed_reasons else invalid_reason
+                ),
             ) from error
         if len(content) > max_bytes:
             raise ServiceError(502, "provider_response_too_large")
-        if not content or (size is not None and len(content) != size):
+        if not content:
             raise ServiceError(
                 502,
                 "provider_response_invalid",
-                diagnostic_reason=invalid_reason,
+                diagnostic_reason=(detailed_reasons.empty if detailed_reasons else invalid_reason),
+            )
+        if size is not None and len(content) != size:
+            raise ServiceError(
+                502,
+                "provider_response_invalid",
+                diagnostic_reason=(
+                    detailed_reasons.size_mismatch if detailed_reasons else invalid_reason
+                ),
             )
         return content
 
