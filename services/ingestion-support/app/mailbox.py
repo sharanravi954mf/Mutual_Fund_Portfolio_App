@@ -888,7 +888,7 @@ class GmailProvider:
                 encoded,
                 body.get("size"),
                 remaining,
-                invalid_reason=DiagnosticReason.CAMS_MAILBACK_BODY_ENCODING_INVALID,
+                invalid_reason=DiagnosticReason.CAMS_MAILBACK_BODY_TRANSPORT_INVALID,
             )
             total_body_bytes += len(content)
             try:
@@ -897,7 +897,7 @@ class GmailProvider:
                 raise ServiceError(
                     502,
                     "provider_response_invalid",
-                    diagnostic_reason=(DiagnosticReason.CAMS_MAILBACK_BODY_ENCODING_INVALID),
+                    diagnostic_reason=DiagnosticReason.CAMS_MAILBACK_TEXT_UTF8_INVALID,
                 ) from error
             if mime == "text/html":
                 text = required_html_text(decoded)

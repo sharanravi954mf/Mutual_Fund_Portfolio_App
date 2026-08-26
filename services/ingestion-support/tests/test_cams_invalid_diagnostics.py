@@ -28,13 +28,18 @@ def _assert_invalid_reason(
     assert caught.value.diagnostic_reason is expected
 
 
-def _encoded_part(content: bytes, mime_type: str) -> dict[str, object]:
+def _encoded_part(
+    content: bytes,
+    mime_type: str,
+    *,
+    declared_size: int | None = None,
+) -> dict[str, object]:
     return {
         "filename": "",
         "mimeType": mime_type,
         "body": {
             "data": base64.urlsafe_b64encode(content).decode().rstrip("="),
-            "size": len(content),
+            "size": len(content) if declared_size is None else declared_size,
         },
     }
 
@@ -126,7 +131,7 @@ async def test_gmail_message_validation_stages_have_exact_diagnostics(
 
 
 @pytest.mark.asyncio
-async def test_cams_body_encoding_failure_has_exact_diagnostic(settings) -> None:
+async def test_malformed_cams_body_data_has_transport_diagnostic(settings) -> None:
     provider = GmailProvider(settings)
     payload = {
         "headers": [],
@@ -140,7 +145,38 @@ async def test_cams_body_encoding_failure_has_exact_diagnostic(settings) -> None
     }
 
     _assert_invalid_reason(
-        DiagnosticReason.CAMS_MAILBACK_BODY_ENCODING_INVALID,
+        DiagnosticReason.CAMS_MAILBACK_BODY_TRANSPORT_INVALID,
+        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+    )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_cams_body_declared_size_mismatch_has_transport_diagnostic(settings) -> None:
+    provider = GmailProvider(settings)
+    payload = {
+        "headers": [],
+        "parts": [_encoded_part(b"valid UTF-8", "text/plain", declared_size=1)],
+    }
+
+    _assert_invalid_reason(
+        DiagnosticReason.CAMS_MAILBACK_BODY_TRANSPORT_INVALID,
+        lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
+    )
+    await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_valid_base64url_with_invalid_utf8_has_text_diagnostic(settings) -> None:
+    provider = GmailProvider(settings)
+    invalid_utf8 = b"\xff\xfe"
+    payload = {
+        "headers": [],
+        "parts": [_encoded_part(invalid_utf8, "text/plain")],
+    }
+
+    _assert_invalid_reason(
+        DiagnosticReason.CAMS_MAILBACK_TEXT_UTF8_INVALID,
         lambda: provider._parse_cams_mailback_payload(payload, "CAMS WBR2 mailback"),
     )
     await provider.close()
