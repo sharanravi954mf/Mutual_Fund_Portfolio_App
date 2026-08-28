@@ -10,9 +10,8 @@ from io import BytesIO
 from pathlib import PurePosixPath
 from typing import Literal
 from urllib.parse import unquote, urlsplit
-from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
-
 import httpx
+from pyzipper import AESZipFile, ZIP_DEFLATED, ZIP_STORED, BadZipFile
 
 from .diagnostics import DiagnosticReason
 from .errors import ServiceError
@@ -262,7 +261,10 @@ def extract_cams_dbf(
     if not password:
         raise ServiceError(500, "provider_configuration_invalid")
     try:
-        with ZipFile(BytesIO(zip_bytes)) as archive:
+        # CAMS uses WinZip AES archives (ZIP method 99). pyzipper preserves the
+        # ZipFile API while adding authenticated AES decryption; archive bytes
+        # never leave memory.
+        with AESZipFile(BytesIO(zip_bytes)) as archive:
             entries = archive.infolist()
             if not entries or len(entries) > max_entries:
                 raise ServiceError(422, "cams_mailback_zip_invalid")
@@ -305,9 +307,15 @@ def extract_cams_dbf(
             return result
     except ServiceError:
         raise
+    except RuntimeError as error:
+        # Both legacy ZipCrypto and WinZip AES use this failure for a password
+        # mismatch. Do not include the library message: it may contain an
+        # untrusted archive filename.
+        if "password" in str(error).casefold():
+            raise ServiceError(422, "cams_mailback_zip_password_invalid") from error
+        raise ServiceError(422, "cams_mailback_zip_invalid") from error
     except (
         BadZipFile,
-        RuntimeError,
         EOFError,
         OSError,
         ValueError,

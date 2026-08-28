@@ -6,6 +6,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
+import pyzipper
 import pytest
 from conftest import FakeMalwareScanner, mailbox_headers, poll_body
 from fastapi.testclient import TestClient
@@ -45,6 +46,20 @@ ENCRYPTED_ZIP_BOMB_B64 = (
     "kACABLdRldSm9MMIsAAACghgEACAAYAAAAAAAAAAAApIEAAAAAYm9tYi5kYmZVVAUAA3VcjWp1eAsA"
     "AQT1AQAABBQAAABQSwUGAAAAAAEAAQBOAAAA3QAAAAAA"
 )
+SYNTHETIC_AES_DBF = b"\x03Synthetic AES CAMS DBF\x1a" + b"A" * 64
+
+
+def _aes_encrypted_dbf_zip(password: bytes) -> bytes:
+    buffer = BytesIO()
+    with pyzipper.AESZipFile(
+        buffer,
+        "w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
+    ) as archive:
+        archive.setpassword(password)
+        archive.writestr("synthetic-aes.dbf", SYNTHETIC_AES_DBF)
+    return buffer.getvalue()
 
 
 def _mailback_fixture(name: str) -> str:
@@ -373,13 +388,45 @@ def test_password_protected_zip_extracts_dbf_with_correct_password() -> None:
     assert b"SYNTH-FOLIO-1" in result
 
 
-def test_password_protected_zip_wrong_password_and_corruption_fail_closed() -> None:
+def test_aes_password_protected_zip_extracts_dbf_with_correct_password() -> None:
+    encrypted = _aes_encrypted_dbf_zip(b"synthetic-aes-password")
+
+    with ZipFile(BytesIO(encrypted)) as archive:
+        assert archive.infolist()[0].compress_type == 99
+
+    assert (
+        extract_cams_dbf(
+            encrypted,
+            password="synthetic-aes-password",
+            max_uncompressed_bytes=4096,
+            max_entries=4,
+            max_ratio=100,
+        )
+        == SYNTHETIC_AES_DBF
+    )
+
+
+def test_aes_password_protected_zip_wrong_password_fails_closed() -> None:
+    with pytest.raises(ServiceError, match="cams_mailback_zip_password_invalid") as caught:
+        extract_cams_dbf(
+            _aes_encrypted_dbf_zip(b"synthetic-aes-password"),
+            password="wrong",
+            max_uncompressed_bytes=4096,
+            max_entries=4,
+            max_ratio=100,
+        )
+
+    assert caught.value.status_code == 422
+    assert caught.value.code == "cams_mailback_zip_password_invalid"
+
+
+def test_password_protected_zip_corruption_and_malformed_content_fail_closed() -> None:
     encrypted = base64.b64decode(ENCRYPTED_DBF_ZIP_B64)
-    for payload, password in ((encrypted, "wrong"), (encrypted[:-12], "cams123")):
+    for payload in (encrypted[:-12], b"not a zip"):
         with pytest.raises(ServiceError, match="cams_mailback_zip_invalid"):
             extract_cams_dbf(
                 payload,
-                password=password,
+                password="cams123",
                 max_uncompressed_bytes=4096,
                 max_entries=4,
                 max_ratio=100,
@@ -850,7 +897,7 @@ async def test_mailback_wrong_configured_password_fails_closed(settings) -> None
         registrar="CAMS",
     )
     messages = await provider.poll(poll_request, "mailback-oauth-token")
-    with pytest.raises(ServiceError, match="cams_mailback_zip_invalid"):
+    with pytest.raises(ServiceError, match="cams_mailback_zip_password_invalid"):
         await provider.fetch_attachment(
             FetchRequest(
                 **poll_request.model_dump(),
