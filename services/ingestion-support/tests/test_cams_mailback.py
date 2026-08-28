@@ -335,21 +335,28 @@ async def test_cams_download_non_success_status_has_fixed_sanitized_diagnostic(
 async def test_cams_download_successful_response_remains_unchanged() -> None:
     url = "https://mailback1.camsonline.com/mailback_result/synthetic.zip"
     expected = b"synthetic-zip-bytes"
+    accept_headers: list[str] = []
+
+    def successful_zip_response(request: httpx.Request) -> httpx.Response:
+        accept_headers.append(request.headers["Accept"])
+        return httpx.Response(
+            200,
+            content=expected,
+            headers={"Content-Length": str(len(expected))},
+        )
+
     client = httpx.AsyncClient(
         follow_redirects=False,
-        transport=httpx.MockTransport(
-            lambda _request: httpx.Response(
-                200,
-                content=expected,
-                headers={"Content-Length": str(len(expected))},
-            )
-        ),
+        transport=httpx.MockTransport(successful_zip_response),
     )
 
     result = await download_cams_zip(client, url, max_bytes=1024)
     await client.aclose()
 
     assert result == expected
+    assert accept_headers == [
+        "application/zip, application/x-zip-compressed, application/octet-stream"
+    ]
 
 
 def test_password_protected_zip_extracts_dbf_with_correct_password() -> None:

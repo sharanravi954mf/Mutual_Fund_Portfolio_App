@@ -222,16 +222,19 @@ sender candidates with subject-scoped `{subject:WBR2 subject:WBR9}` alternatives
 so unrelated WBR report traffic does not deliberately consume the bounded
 candidate/result window. Post-read sender authorization, subject/body agreement,
 parser support, every byte/count/concurrency limit, KFINTECH behavior, and public
-errors remain unchanged. Hosted Dev verification of the PR #133 query
-refinement returned 25 messages and 25 mailback attachments. One genuine
-supported attachment reached the validated CAMS network download stage, where
-the request failed with public 502 `provider_request_failed`; ZIP bytes,
-decryption, and DBF extraction were not reached. The repository now preserves
-that public error and adds only a fixed internal enum reason distinguishing auth
-rejection, missing/expired links, rate limiting, another 4xx, a 5xx, or another
-unexpected non-success status. No provider status value, URL, headers, body, or
-provider content is logged. Hosted Dev characterization of the fixed response
-class remains pending. Production remains untouched.
+errors remain unchanged. Hosted Dev verification of the PR #133 query refinement returned 25 messages
+and 25 mailback attachments. The latest-report smoke mode then successfully
+selected only the newest supported WBR2/WBR9 candidates. A genuine CAMS
+DownloadURL was manually characterized from the Oracle Dev VM: the current
+restrictive `Accept: application/zip, application/octet-stream` request
+returned HTTP 406, while accepting `application/x-zip-compressed` returned HTTP
+200 with `Content-Type: application/x-zip-compressed`. The implementation fix
+is limited to CAMS ZIP media-type negotiation; browser headers, cookies,
+Referer, redirects, and `*/*` are not required. Public
+`provider_request_failed` handling and its fixed internal diagnostic reasons
+remain unchanged, and no provider URL, headers, body, or other sensitive content
+is logged. ZIP decryption and DBF Hosted Dev E2E remain to be rerun after
+deployment. Production remains untouched.
 
 Issue #113 now has an explicit CAMS-only latest-report smoke contract:
 `smoke_mode: "latest_supported_reports"`. It performs separate fixed

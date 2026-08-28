@@ -102,6 +102,14 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   another 4xx, a 5xx, or an otherwise unexpected non-success status. Redirects,
   headers, retries, limits, response handling, and downstream ZIP/DBF behavior
   are unchanged.
+- **CAMS ZIP Media-Type Negotiation (#113, related #109)**: Latest-report smoke
+  mode successfully selected only the newest supported WBR2/WBR9 candidates.
+  Manual Oracle Dev VM characterization of a genuine CAMS DownloadURL confirmed
+  that the prior restrictive ZIP `Accept` header returned HTTP 406, while
+  accepting `application/x-zip-compressed` returned HTTP 200 with that same
+  response content type. The fix adds only that ZIP media type; browser headers,
+  cookies, Referer, redirects, and `*/*` are not required. ZIP decryption and
+  DBF Hosted Dev E2E remain to be rerun after deployment.
 - **CAMS Latest-Report Smoke Mode (#113, related #109)**: Added the explicit
   CAMS-only request option `smoke_mode: "latest_supported_reports"`. It performs
   one fixed sender-plus-WBR2 and one fixed sender-plus-WBR9 Gmail search with
