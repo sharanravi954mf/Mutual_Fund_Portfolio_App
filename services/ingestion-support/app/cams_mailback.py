@@ -202,7 +202,9 @@ async def download_cams_zip(
         async with client.stream(
             "GET",
             trusted_url,
-            headers={"Accept": "application/zip, application/octet-stream"},
+            headers={
+                "Accept": "application/zip, application/x-zip-compressed, application/octet-stream"
+            },
         ) as response:
             if 300 <= response.status_code < 400:
                 raise ServiceError(502, "provider_redirect_rejected")
