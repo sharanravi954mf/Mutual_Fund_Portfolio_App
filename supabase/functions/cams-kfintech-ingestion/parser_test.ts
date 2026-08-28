@@ -11,6 +11,7 @@ import {
 import {
   camsDbfFixture,
   camsDbfFixtureWithRows,
+  genuineCamsDbfFixture,
   kfintechDbfFixture,
   syntheticCasPdfFixture,
 } from "./fixtures.ts";
@@ -37,6 +38,15 @@ const kfintechAcceptedCodes = [
   ["FULL_REDEMPTION", "SELL", "OUTFLOW", "-5.0000", "-50.00"],
   ["SI", "SWITCH", "INFLOW", "7.0000", "70.00"],
   ["SO", "SWITCH", "OUTFLOW", "-7.0000", "-70.00"],
+] as const;
+
+const genuineCamsAcceptedCodes = [
+  ["Additional Purchase", "BUY", "INFLOW"],
+  ["Additional Purchase Systematic", "BUY", "INFLOW"],
+  ["Fresh Purchase Systematic", "BUY", "INFLOW"],
+  ["NFO FP", "BUY", "INFLOW"],
+  ["Full Redemption", "SELL", "OUTFLOW"],
+  ["Partial Switch Out", "SWITCH", "OUTFLOW"],
 ] as const;
 
 Deno.test("CAMS DBF fixture produces deterministic normalized transaction", async () => {
@@ -153,6 +163,31 @@ for (
   });
 }
 
+for (
+  const [code, expectedType, expectedDirection] of genuineCamsAcceptedCodes
+) {
+  Deno.test(
+    "genuine-style CAMS transaction description " + code + " maps explicitly",
+    async () => {
+      const [row] = await new CamsParser().parse({
+        registrar: "CAMS",
+        fileType: "DBF",
+        filename: "synthetic-genuine-cams.dbf",
+        bytes: genuineCamsDbfFixture({ TRXN_TYPE_: code }),
+      });
+      assertEquals(row.transactionType, expectedType);
+      assertEquals(row.transactionDirection, expectedDirection);
+      assertEquals(
+        row.registrarTransactionCode,
+        code.toUpperCase().replaceAll(" ", "_"),
+      );
+      assertEquals(row.units, 12.5);
+      assertEquals(row.amount, 250);
+      assertEquals(row.date, "2026-07-29");
+    },
+  );
+}
+
 Deno.test("switch legs preserve direction after magnitude normalization", async () => {
   const [camsIn] = await new CamsParser().parse({
     registrar: "CAMS",
@@ -254,6 +289,42 @@ Deno.test("sign semantics are action-specific", async () => {
   assertEquals(redemption.transactionType, "SELL");
   assertEquals(redemption.units, 1);
   assertEquals(redemption.amount, 20);
+});
+
+Deno.test("genuine CAMS outflow descriptions require positive source magnitudes", async () => {
+  for (
+    const [code, expectedType] of [
+      ["Full Redemption", "SELL"],
+      ["Partial Switch Out", "SWITCH"],
+    ] as const
+  ) {
+    const [row] = await new CamsParser().parse({
+      registrar: "CAMS",
+      fileType: "DBF",
+      filename: "synthetic-genuine-cams-outflow.dbf",
+      bytes: genuineCamsDbfFixture({ TRXN_TYPE_: code }),
+    });
+    assertEquals(row.transactionType, expectedType);
+    assertEquals(row.transactionDirection, "OUTFLOW");
+    assertEquals(row.units, 12.5);
+    assertEquals(row.amount, 250);
+
+    await assertRejects(
+      () =>
+        new CamsParser().parse({
+          registrar: "CAMS",
+          fileType: "DBF",
+          filename: "synthetic-genuine-cams-invalid-outflow.dbf",
+          bytes: genuineCamsDbfFixture({
+            TRXN_TYPE_: code,
+            UNITS: "-12.5000",
+            AMOUNT: "-250.00",
+          }),
+        }),
+      Error,
+      "parse_failed",
+    );
+  }
 });
 
 Deno.test("negative units amount and invalid NAV fail where unsupported", async () => {

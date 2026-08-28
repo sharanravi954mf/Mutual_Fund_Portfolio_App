@@ -69,6 +69,33 @@ export function camsDbfFixtureWithRows(
   })));
 }
 
+export function genuineCamsDbfFixture(
+  overrides: Record<string, string> = {},
+): Uint8Array {
+  return createSyntheticDbf([{
+    PAN: "ABCDE1234F",
+    INV_NAME: "Synthetic Investor",
+    FOLIO_NO: "SYNTHFOLIO1",
+    PRODCODE: "SYNTH001",
+    TRXN_TYPE_: "Additional Purchase",
+    UNITS: "12.5000",
+    AMOUNT: "250.00",
+    PURPRICE: "20.0000",
+    POSTDATE: "20260729",
+    ...overrides,
+  }], [
+    { name: "TRXN_TYPE_", type: "C", length: 32 },
+    { name: "UNITS", type: "N", length: 14 },
+    { name: "AMOUNT", type: "N", length: 14 },
+    { name: "PURPRICE", type: "N", length: 12 },
+    { name: "POSTDATE", type: "D", length: 8 },
+    { name: "PAN", type: "C", length: 10 },
+    { name: "FOLIO_NO", type: "C", length: 16 },
+    { name: "PRODCODE", type: "C", length: 12 },
+    { name: "INV_NAME", type: "C", length: 24 },
+  ]);
+}
+
 export function kfintechDbfFixture(
   overrides: Record<string, string> = {},
 ): Uint8Array {

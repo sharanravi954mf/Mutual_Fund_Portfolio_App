@@ -55,7 +55,14 @@ const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 
 const fieldAliases: Record<Registrar, FieldAliases> = {
   CAMS: {
-    transactionCode: ["TRX_TYPE", "TRXN_TYPE", "TRDESC", "TRADESC"],
+    transactionCode: [
+      "TRX_TYPE",
+      "TRXN_TYPE",
+      "TRDESC",
+      "TRADESC",
+      "TRXN_TYPE_",
+      "TRXNTYPE",
+    ],
     units: ["UNITS", "TRXN_UNITS", "UNIT_BAL"],
     amount: ["AMOUNT", "TRXN_AMOUNT", "AMT"],
     nav: ["NAV", "PURPRICE"],
@@ -102,6 +109,32 @@ const transactionCodeRules: Record<
     SWITCH_IN: { type: "SWITCH", sign: "positive", direction: "INFLOW" },
     SWITCHOUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
     SWITCH_OUT: { type: "SWITCH", sign: "negative", direction: "OUTFLOW" },
+    ADDITIONAL_PURCHASE: {
+      type: "BUY",
+      sign: "positive",
+      direction: "INFLOW",
+    },
+    ADDITIONAL_PURCHASE_SYSTEMATIC: {
+      type: "BUY",
+      sign: "positive",
+      direction: "INFLOW",
+    },
+    FRESH_PURCHASE_SYSTEMATIC: {
+      type: "BUY",
+      sign: "positive",
+      direction: "INFLOW",
+    },
+    NFO_FP: { type: "BUY", sign: "positive", direction: "INFLOW" },
+    FULL_REDEMPTION: {
+      type: "SELL",
+      sign: "positive",
+      direction: "OUTFLOW",
+    },
+    PARTIAL_SWITCH_OUT: {
+      type: "SWITCH",
+      sign: "positive",
+      direction: "OUTFLOW",
+    },
   },
   KFINTECH: {
     P: { type: "BUY", sign: "positive", direction: "INFLOW" },
