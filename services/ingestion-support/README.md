@@ -228,7 +228,7 @@ missing/expired link (404/410), rate limiting (429), another 4xx, a 5xx, or an
 otherwise unexpected non-success status. Numeric provider status, URL, headers,
 body, cookies, and provider content are never returned or logged, and redirect
 rejection remains separately unchanged. The encrypted ZIP is opened in memory
-with `CAMS_MAILBACK_ZIP_PASSWORD`; entry count, compressed and
+with AES-capable `pyzipper` and `CAMS_MAILBACK_ZIP_PASSWORD`; entry count, compressed and
 uncompressed sizes, decompression ratio, duplicate names, traversal/absolute
 paths, nested archives, encryption, and the exactly-one-DBF shape all fail
 closed. The extracted DBF bytes use the existing Edge hash, MIME, malware,

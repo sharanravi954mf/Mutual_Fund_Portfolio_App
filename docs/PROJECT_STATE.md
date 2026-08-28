@@ -228,13 +228,14 @@ selected only the newest supported WBR2/WBR9 candidates. A genuine CAMS
 DownloadURL was manually characterized from the Oracle Dev VM: the current
 restrictive `Accept: application/zip, application/octet-stream` request
 returned HTTP 406, while accepting `application/x-zip-compressed` returned HTTP
-200 with `Content-Type: application/x-zip-compressed`. The implementation fix
-is limited to CAMS ZIP media-type negotiation; browser headers, cookies,
-Referer, redirects, and `*/*` are not required. Public
-`provider_request_failed` handling and its fixed internal diagnostic reasons
-remain unchanged, and no provider URL, headers, body, or other sensitive content
-is logged. ZIP decryption and DBF Hosted Dev E2E remain to be rerun after
-deployment. Production remains untouched.
+200 with `Content-Type: application/x-zip-compressed`. The media-type fix needs
+no browser headers, cookies, Referer, redirects, or `*/*`. Subsequent live
+characterization established that CAMS uses WinZip AES (method 99), so in-memory
+extraction now uses `pyzipper` while retaining the one-entry DBF, size, ratio,
+path, duplicate, and encrypted-entry checks. A wrong password returns the
+distinct safe `cams_mailback_zip_password_invalid` error; URLs, headers, bodies,
+and passwords are not logged. ZIP decryption and DBF Hosted Dev E2E remain to
+be rerun after deployment. Production remains untouched.
 
 Issue #113 now has an explicit CAMS-only latest-report smoke contract:
 `smoke_mode: "latest_supported_reports"`. It performs separate fixed

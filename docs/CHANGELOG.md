@@ -34,6 +34,12 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   was performed.
 
 ### Fixed
+- **CAMS AES ZIP Extraction (#113, related #109)**: Genuine CAMS mailback ZIPs
+  use WinZip AES (method 99), which the Python standard-library reader cannot
+  decrypt. In-memory extraction now uses pinned `pyzipper` with the existing
+  one-DBF, encrypted-entry, path, duplicate, size, and expansion-ratio checks.
+  Incorrect passwords return the safe 422 `cams_mailback_zip_password_invalid`
+  code; archive bytes, filenames, and passwords remain excluded from logs.
 - **CAMS WBR2/WBR9 Mailback ZIPs (#113, related #109)**: CAMS Gmail discovery
   now requires sender-filtered WBR messages and excludes attachment/filename
   discovery terms, recognizes only WBR2/WBR9 DBF responses, records WBR49/unknown
