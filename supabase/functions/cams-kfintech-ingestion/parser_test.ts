@@ -4,6 +4,7 @@ import {
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
 import {
   CamsParser,
+  classifyCamsDbfReport,
   createSyntheticDbf,
   KfintechParser,
   ParserRegistry,
@@ -44,6 +45,8 @@ const genuineCamsAcceptedCodes = [
   ["Additional Purchase", "BUY", "INFLOW"],
   ["Additional Purchase Systematic", "BUY", "INFLOW"],
   ["Fresh Purchase Systematic", "BUY", "INFLOW"],
+  ["Fresh Purchase", "BUY", "INFLOW"],
+  ["Partial Redemption", "SELL", "OUTFLOW"],
   ["NFO FP", "BUY", "INFLOW"],
   ["Full Redemption", "SELL", "OUTFLOW"],
   ["Partial Switch Out", "SWITCH", "OUTFLOW"],
@@ -187,6 +190,51 @@ for (
     },
   );
 }
+
+const wbr9HoldingFields = [
+  { name: "FOLIO", type: "C", length: 16 },
+  { name: "PRODUCT", type: "C", length: 16 },
+  { name: "SCHEME", type: "C", length: 32 },
+  { name: "CLOSING_BAL", type: "N", length: 14 },
+  { name: "RUPEE_BAL", type: "N", length: 14 },
+  { name: "BANK", type: "C", length: 16 },
+  { name: "NOMINEE", type: "C", length: 16 },
+  { name: "ADDRESS", type: "C", length: 32 },
+];
+
+Deno.test("WBR9-like CAMS DBF is classified before transaction normalization", async () => {
+  const bytes = createSyntheticDbf([{}], wbr9HoldingFields);
+  assertEquals(classifyCamsDbfReport(bytes), "NON_TRANSACTION_SCHEMA");
+  await assertRejects(
+    () =>
+      new CamsParser().parse({
+        registrar: "CAMS",
+        fileType: "DBF",
+        filename: "synthetic-wbr9.dbf",
+        bytes,
+      }),
+    Error,
+    "unsupported_statement_format",
+  );
+});
+
+Deno.test("negative CAMS additional purchase remains rejected", async () => {
+  await assertRejects(
+    () =>
+      new CamsParser().parse({
+        registrar: "CAMS",
+        fileType: "DBF",
+        filename: "negative-additional-purchase.dbf",
+        bytes: genuineCamsDbfFixture({
+          TRXN_TYPE_: "Additional Purchase",
+          UNITS: "-12.5000",
+          AMOUNT: "-250.00",
+        }),
+      }),
+    Error,
+    "parse_failed",
+  );
+});
 
 Deno.test("switch legs preserve direction after magnitude normalization", async () => {
   const [camsIn] = await new CamsParser().parse({

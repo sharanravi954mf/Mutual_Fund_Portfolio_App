@@ -2,7 +2,12 @@ import {
   assertEquals,
   assertRejects,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
-import { CamsParser, KfintechParser, ParserRegistry } from "./parser.ts";
+import {
+  CamsParser,
+  createSyntheticDbf,
+  KfintechParser,
+  ParserRegistry,
+} from "./parser.ts";
 import {
   createCamsKfintechIngestionHandler,
   type HandlerDependencies,
@@ -808,6 +813,39 @@ Deno.test("storage precedes parsing and parsing failure prevents persistence", a
     stages.indexOf("encrypted_storage_read") < stages.indexOf("parse"),
     true,
   );
+  assertEquals(persisted, false);
+});
+
+Deno.test("WBR9-like CAMS DBF records unsupported format without persistence", async () => {
+  const bytes = createSyntheticDbf([{}], [
+    { name: "FOLIO", type: "C", length: 16 },
+    { name: "PRODUCT", type: "C", length: 16 },
+    { name: "SCHEME", type: "C", length: 32 },
+    { name: "CLOSING_BAL", type: "N", length: 14 },
+    { name: "RUPEE_BAL", type: "N", length: 14 },
+  ]);
+  const failureCodes: string[] = [];
+  let persisted = false;
+  const handler = createCamsKfintechIngestionHandler(deps({
+    messages: [message(bytes)],
+    failureCodes,
+    persist: () => {
+      persisted = true;
+      return Promise.resolve({
+        document_id: "unexpected-document",
+        ingestion_log_id: null,
+        outbox_event_id: null,
+        transaction_count: 0,
+        idempotent: false,
+      });
+    },
+  }));
+
+  const response = await handler(request(validBody()));
+  const body = await response.json();
+
+  assertEquals(body.data.results[0].error.code, "unsupported_statement_format");
+  assertEquals(failureCodes, ["unsupported_statement_format"]);
   assertEquals(persisted, false);
 });
 
