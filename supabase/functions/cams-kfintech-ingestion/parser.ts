@@ -15,6 +15,7 @@ type DbfField = {
 export type CamsDbfDiagnostic = {
   record_count: number;
   structural_decode: "PASS" | "FAIL";
+  schema_classification: "TRANSACTION_CAPABLE" | "NON_TRANSACTION_SCHEMA";
   field_schema: {
     name: string;
     type: string;
@@ -23,6 +24,9 @@ export type CamsDbfDiagnostic = {
   }[];
   alias_resolution: Record<string, "RESOLVED" | "MISSING">;
   transaction_description_labels: Record<string, number>;
+  unmapped_transaction_labels: Record<string, number>;
+  units_sign_failures_by_label: Record<string, number>;
+  amount_sign_failures_by_label: Record<string, number>;
   validation_stages: Record<string, { pass: number; fail: number }>;
   first_failing_validation_category: string | null;
   first_failing_source_row_number: number | null;
@@ -439,6 +443,26 @@ const diagnosticStages = [
   "other parser validation",
 ] as const;
 
+const requiredParserAliases = [
+  "transactionCode",
+  "units",
+  "amount",
+  "nav",
+  "date",
+  "pan",
+  "folioNumber",
+  "schemeCode",
+  "investorName",
+] as const;
+
+const requiredTransactionAliases = [
+  "transactionCode",
+  "units",
+  "amount",
+  "nav",
+  "date",
+] as const;
+
 function emptyStageCounts(): Record<string, { pass: number; fail: number }> {
   return Object.fromEntries(
     diagnosticStages.map((stage) => [stage, { pass: 0, fail: 0 }]),
@@ -449,21 +473,26 @@ function isPopulated(value: unknown): boolean {
   return String(value ?? "").trim() !== "";
 }
 
+function diagnosticTransactionLabel(value: unknown): string {
+  try {
+    return normalizeCode(value);
+  } catch (_error) {
+    return "MISSING";
+  }
+}
+
+function incrementAggregate(
+  aggregates: Record<string, number>,
+  label: string,
+): void {
+  aggregates[label] = (aggregates[label] ?? 0) + 1;
+}
+
 /** Temporary investigation-only aggregate view; decoded source values never escape. */
 export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
   const validationStages = emptyStageCounts();
   const requiredFields = Object.fromEntries(
-    [
-      "transactionCode",
-      "units",
-      "amount",
-      "nav",
-      "date",
-      "pan",
-      "folioNumber",
-      "schemeCode",
-      "investorName",
-    ].map((name) => [name, { populated: 0, blank: 0 }]),
+    requiredParserAliases.map((name) => [name, { populated: 0, blank: 0 }]),
   ) as CamsDbfDiagnostic["required_fields"];
   const aliases = fieldAliases.CAMS;
   let decoded: ReturnType<typeof decodeDbf>;
@@ -474,11 +503,15 @@ export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
     return {
       record_count: 0,
       structural_decode: "FAIL",
+      schema_classification: "NON_TRANSACTION_SCHEMA",
       field_schema: [],
       alias_resolution: Object.fromEntries(
         Object.keys(aliases).map((name) => [name, "MISSING"]),
       ),
       transaction_description_labels: {},
+      unmapped_transaction_labels: {},
+      units_sign_failures_by_label: {},
+      amount_sign_failures_by_label: {},
       validation_stages: validationStages,
       first_failing_validation_category: "structural DBF decode",
       first_failing_source_row_number: null,
@@ -499,12 +532,16 @@ export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
     ]),
   ) as CamsDbfDiagnostic["alias_resolution"];
   const aliasFailures =
-    Object.values(aliasResolution).filter((value) => value === "MISSING")
-      .length;
-  validationStages["alias resolution"].pass =
-    Object.keys(aliasResolution).length - aliasFailures;
+    requiredParserAliases.filter((logicalName) =>
+      aliasResolution[logicalName] === "MISSING"
+    ).length;
+  validationStages["alias resolution"].pass = requiredParserAliases.length -
+    aliasFailures;
   validationStages["alias resolution"].fail = aliasFailures;
   const labels: Record<string, number> = {};
+  const unmappedLabels: Record<string, number> = {};
+  const unitsSignFailuresByLabel: Record<string, number> = {};
+  const amountSignFailuresByLabel: Record<string, number> = {};
   let firstCategory: string | null = aliasFailures > 0
     ? "alias resolution"
     : null;
@@ -535,33 +572,41 @@ export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
     };
     let rule: TransactionCodeRule | undefined;
     const codeValue = getValue(record, aliases.transactionCode);
+    const label = diagnosticTransactionLabel(codeValue);
     check("transaction-code mapping", () => {
       const resolved = lookupTransactionRule("CAMS", codeValue);
       rule = resolved.rule;
-      labels[resolved.code] = (labels[resolved.code] ?? 0) + 1;
+      incrementAggregate(labels, resolved.code);
     });
-    if (rule == null) labels.UNMAPPED = (labels.UNMAPPED ?? 0) + 1;
+    if (rule == null) {
+      incrementAggregate(labels, "UNMAPPED");
+      incrementAggregate(unmappedLabels, label);
+    }
     const fallbackRule: TransactionCodeRule = {
       type: "BUY",
       sign: "positive",
       direction: "INFLOW",
     };
-    check(
-      "units/sign validation",
-      () =>
-        validateSignedMagnitude(
-          parseSignedDecimal(getValue(record, aliases.units)),
-          rule ?? fallbackRule,
-        ),
-    );
-    check(
-      "amount/sign validation",
-      () =>
-        validateSignedMagnitude(
-          parseSignedDecimal(getValue(record, aliases.amount)),
-          rule ?? fallbackRule,
-        ),
-    );
+    if (
+      !check(
+        "units/sign validation",
+        () =>
+          validateSignedMagnitude(
+            parseSignedDecimal(getValue(record, aliases.units)),
+            rule ?? fallbackRule,
+          ),
+      )
+    ) incrementAggregate(unitsSignFailuresByLabel, label);
+    if (
+      !check(
+        "amount/sign validation",
+        () =>
+          validateSignedMagnitude(
+            parseSignedDecimal(getValue(record, aliases.amount)),
+            rule ?? fallbackRule,
+          ),
+      )
+    ) incrementAggregate(amountSignFailuresByLabel, label);
     check("NAV validation", () => parseDecimal(getValue(record, aliases.nav)));
     check("date validation", () => parseDate(getValue(record, aliases.date)));
     check("PAN validation", () => normalizedPan(getValue(record, aliases.pan)));
@@ -584,6 +629,12 @@ export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
   return {
     record_count: decoded.recordCount,
     structural_decode: "PASS",
+    schema_classification:
+      requiredTransactionAliases.every((logicalName) =>
+          aliasResolution[logicalName] === "RESOLVED"
+        )
+        ? "TRANSACTION_CAPABLE"
+        : "NON_TRANSACTION_SCHEMA",
     field_schema: decoded.fields.map((field) => ({
       name: field.name,
       type: field.type,
@@ -592,6 +643,9 @@ export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
     })),
     alias_resolution: aliasResolution,
     transaction_description_labels: labels,
+    unmapped_transaction_labels: unmappedLabels,
+    units_sign_failures_by_label: unitsSignFailuresByLabel,
+    amount_sign_failures_by_label: amountSignFailuresByLabel,
     validation_stages: validationStages,
     first_failing_validation_category: firstCategory,
     first_failing_source_row_number: firstRow,
