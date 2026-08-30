@@ -9,6 +9,24 @@ type DbfField = {
   name: string;
   type: string;
   length: number;
+  decimalCount?: number;
+};
+
+export type CamsDbfDiagnostic = {
+  record_count: number;
+  structural_decode: "PASS" | "FAIL";
+  field_schema: {
+    name: string;
+    type: string;
+    width: number;
+    decimal_count: number;
+  }[];
+  alias_resolution: Record<string, "RESOLVED" | "MISSING">;
+  transaction_description_labels: Record<string, number>;
+  validation_stages: Record<string, { pass: number; fail: number }>;
+  first_failing_validation_category: string | null;
+  first_failing_source_row_number: number | null;
+  required_fields: Record<string, { populated: number; blank: number }>;
 };
 
 export type ParseInput = {
@@ -332,7 +350,13 @@ function normalizeTransaction(
   };
 }
 
-function parseDbf(bytes: Uint8Array): Record<string, unknown>[] {
+function decodeDbf(
+  bytes: Uint8Array,
+): {
+  recordCount: number;
+  fields: DbfField[];
+  records: Record<string, unknown>[];
+} {
   if (bytes.byteLength < 33) {
     throw new IngestionError("unsupported_statement_format");
   }
@@ -360,7 +384,7 @@ function parseDbf(bytes: Uint8Array): Record<string, unknown>[] {
     const type = String.fromCharCode(bytes[offset + 11]);
     const length = bytes[offset + 16];
     if (name !== "" && length > 0) {
-      fields.push({ name, type, length });
+      fields.push({ name, type, length, decimalCount: bytes[offset + 17] });
     }
     offset += 32;
   }
@@ -393,7 +417,186 @@ function parseDbf(bytes: Uint8Array): Record<string, unknown>[] {
     }
     recordOffset += recordLength;
   }
-  return records;
+  return { recordCount, fields, records };
+}
+
+function parseDbf(bytes: Uint8Array): Record<string, unknown>[] {
+  return decodeDbf(bytes).records;
+}
+
+const diagnosticStages = [
+  "structural DBF decode",
+  "alias resolution",
+  "transaction-code mapping",
+  "units/sign validation",
+  "amount/sign validation",
+  "NAV validation",
+  "date validation",
+  "PAN validation",
+  "required folio",
+  "required scheme",
+  "required investor name",
+  "other parser validation",
+] as const;
+
+function emptyStageCounts(): Record<string, { pass: number; fail: number }> {
+  return Object.fromEntries(
+    diagnosticStages.map((stage) => [stage, { pass: 0, fail: 0 }]),
+  );
+}
+
+function isPopulated(value: unknown): boolean {
+  return String(value ?? "").trim() !== "";
+}
+
+/** Temporary investigation-only aggregate view; decoded source values never escape. */
+export function inspectCamsDbf(bytes: Uint8Array): CamsDbfDiagnostic {
+  const validationStages = emptyStageCounts();
+  const requiredFields = Object.fromEntries(
+    [
+      "transactionCode",
+      "units",
+      "amount",
+      "nav",
+      "date",
+      "pan",
+      "folioNumber",
+      "schemeCode",
+      "investorName",
+    ].map((name) => [name, { populated: 0, blank: 0 }]),
+  ) as CamsDbfDiagnostic["required_fields"];
+  const aliases = fieldAliases.CAMS;
+  let decoded: ReturnType<typeof decodeDbf>;
+  try {
+    decoded = decodeDbf(bytes);
+  } catch (_error) {
+    validationStages["structural DBF decode"].fail = 1;
+    return {
+      record_count: 0,
+      structural_decode: "FAIL",
+      field_schema: [],
+      alias_resolution: Object.fromEntries(
+        Object.keys(aliases).map((name) => [name, "MISSING"]),
+      ),
+      transaction_description_labels: {},
+      validation_stages: validationStages,
+      first_failing_validation_category: "structural DBF decode",
+      first_failing_source_row_number: null,
+      required_fields: requiredFields,
+    };
+  }
+  validationStages["structural DBF decode"].pass = 1;
+  const aliasResolution = Object.fromEntries(
+    Object.entries(aliases).map(([logicalName, candidates]) => [
+      logicalName,
+      decoded.fields.some((field) =>
+          candidates.some((candidate) =>
+            candidate.toUpperCase() === field.name.toUpperCase()
+          )
+        )
+        ? "RESOLVED"
+        : "MISSING",
+    ]),
+  ) as CamsDbfDiagnostic["alias_resolution"];
+  const aliasFailures =
+    Object.values(aliasResolution).filter((value) => value === "MISSING")
+      .length;
+  validationStages["alias resolution"].pass =
+    Object.keys(aliasResolution).length - aliasFailures;
+  validationStages["alias resolution"].fail = aliasFailures;
+  const labels: Record<string, number> = {};
+  let firstCategory: string | null = aliasFailures > 0
+    ? "alias resolution"
+    : null;
+  let firstRow: number | null = null;
+  for (const [index, record] of decoded.records.entries()) {
+    const row = index + 1;
+    for (const logicalName of Object.keys(requiredFields)) {
+      const value = getValue(
+        record,
+        aliases[logicalName as keyof FieldAliases],
+      );
+      if (isPopulated(value)) requiredFields[logicalName].populated += 1;
+      else requiredFields[logicalName].blank += 1;
+    }
+    const check = (stage: string, fn: () => void): boolean => {
+      try {
+        fn();
+        validationStages[stage].pass += 1;
+        return true;
+      } catch (_error) {
+        validationStages[stage].fail += 1;
+        if (firstCategory == null) {
+          firstCategory = stage;
+          firstRow = row;
+        }
+        return false;
+      }
+    };
+    let rule: TransactionCodeRule | undefined;
+    const codeValue = getValue(record, aliases.transactionCode);
+    check("transaction-code mapping", () => {
+      const resolved = lookupTransactionRule("CAMS", codeValue);
+      rule = resolved.rule;
+      labels[resolved.code] = (labels[resolved.code] ?? 0) + 1;
+    });
+    if (rule == null) labels.UNMAPPED = (labels.UNMAPPED ?? 0) + 1;
+    const fallbackRule: TransactionCodeRule = {
+      type: "BUY",
+      sign: "positive",
+      direction: "INFLOW",
+    };
+    check(
+      "units/sign validation",
+      () =>
+        validateSignedMagnitude(
+          parseSignedDecimal(getValue(record, aliases.units)),
+          rule ?? fallbackRule,
+        ),
+    );
+    check(
+      "amount/sign validation",
+      () =>
+        validateSignedMagnitude(
+          parseSignedDecimal(getValue(record, aliases.amount)),
+          rule ?? fallbackRule,
+        ),
+    );
+    check("NAV validation", () => parseDecimal(getValue(record, aliases.nav)));
+    check("date validation", () => parseDate(getValue(record, aliases.date)));
+    check("PAN validation", () => normalizedPan(getValue(record, aliases.pan)));
+    check("required folio", () => {
+      if (!isPopulated(getValue(record, aliases.folioNumber))) {
+        throw new IngestionError("parse_failed");
+      }
+    });
+    check("required scheme", () => {
+      if (!isPopulated(getValue(record, aliases.schemeCode))) {
+        throw new IngestionError("parse_failed");
+      }
+    });
+    check("required investor name", () => {
+      if (!isPopulated(getValue(record, aliases.investorName))) {
+        throw new IngestionError("parse_failed");
+      }
+    });
+  }
+  return {
+    record_count: decoded.recordCount,
+    structural_decode: "PASS",
+    field_schema: decoded.fields.map((field) => ({
+      name: field.name,
+      type: field.type,
+      width: field.length,
+      decimal_count: field.decimalCount ?? 0,
+    })),
+    alias_resolution: aliasResolution,
+    transaction_description_labels: labels,
+    validation_stages: validationStages,
+    first_failing_validation_category: firstCategory,
+    first_failing_source_row_number: firstRow,
+    required_fields: requiredFields,
+  };
 }
 
 abstract class BaseRegistrarParser implements StatementParser {
@@ -487,6 +690,7 @@ export function createSyntheticDbf(
     bytes.set(encoder.encode(field.name).subarray(0, 11), offset);
     bytes[offset + 11] = field.type.charCodeAt(0);
     bytes[offset + 16] = field.length;
+    bytes[offset + 17] = field.decimalCount ?? 0;
     offset += 32;
   }
   bytes[offset] = 0x0d;
