@@ -14,7 +14,6 @@ import {
   SupabaseWorkspaceAuthorizer,
 } from "./adapters.ts";
 import { createCamsKfintechIngestionHandler } from "./handler.ts";
-import { createHostedDevCamsDbfDiagnosticHandler } from "./hosted_dev_diagnostic.ts";
 import { createGmailOAuthHandler } from "./oauth.ts";
 import { CamsParser, KfintechParser, ParserRegistry } from "./parser.ts";
 
@@ -105,21 +104,11 @@ const oauthHandler = createGmailOAuthHandler({
   ),
 });
 
-const hostedDevDiagnosticHandler = createHostedDevCamsDbfDiagnosticHandler({
-  internalToken: Deno.env.get("MONEYBOWL_INTERNAL_INGESTION_TOKEN") || "",
-  projectUrl: Deno.env.get("SUPABASE_URL") || "",
-  readOriginal: (object) =>
-    new SupabaseEncryptedStorage(client, object.bucket).readOriginal(object),
-});
-
 serve((req: Request) => {
   const path = new URL(req.url).pathname;
   if (
     path.endsWith("/oauth/start") || path.endsWith("/oauth/callback") ||
     path.endsWith("/oauth/revoke")
   ) return oauthHandler(req);
-  if (path.endsWith("/diagnostics/cams-dbf")) {
-    return hostedDevDiagnosticHandler(req);
-  }
   return ingestionHandler(req);
 });
