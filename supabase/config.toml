@@ -182,6 +182,9 @@ verify_jwt = false
 [functions.order-auto-approval-worker]
 verify_jwt = false
 
+[functions.nse-uat-smoke-test]
+verify_jwt = false
+
 [functions.platform-admin-override]
 verify_jwt = false
 

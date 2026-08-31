@@ -64,6 +64,7 @@ they must not be linked to or manually deploy to hosted Dev or Production.
 | :--- | :---: | :---: | :--- |
 | `cams-kfintech-ingestion` | Yes | `false` | Current ingestion architecture and admin workflow. The gateway `Authorization` bearer is `MONEYBOWL_INTERNAL_INGESTION_TOKEN`; the initiating user JWT is independently validated from `x-user-authorization`, then an authenticated caller-scoped RPC checks the active advisor/admin workspace membership without granting service-role access to protected business tables. |
 | `daily-nav-updater` | Yes | `false` | Invoked from the current admin dashboard. Shared authorization validates the caller JWT with Supabase Auth and requires the application profile role `admin`. Uses service-role database access and the external `api.mfapi.in` feed. |
+| `nse-uat-smoke-test` | Yes | `false` | Development/UAT-only, read-only NSE connectivity probe. It requires the dedicated `X-NSE-Smoke-Token` header matching `NSE_SMOKE_TEST_TOKEN`, generates NSE Basic authentication per request, calls `MASTER_DOWNLOAD` for NAV, and returns bounded sanitized diagnostics without database persistence. It must not be called from Flutter. |
 | `order-auto-approval-worker` | Yes | `false` | Current event-outbox worker. It requires `ORDER_AUTO_APPROVAL_WORKER_TOKEN` and then uses service-role RPCs to claim events and apply or record decisions. |
 | `platform-admin-override` | Yes | `false` | Current Sprint 6.1 audited override endpoint. It validates the caller JWT, executes the attempt RPC as that user, and restricts privileged action/finalization RPCs to the service-role client. |
 | `sign-stamp-invoice` | Yes | `false` | Invoked by the current invoice and fund-search workflows. Proxy requests require a JWT validated through Supabase Auth; signing/decryption also requires the `is_admin` RPC authorization check. |
@@ -309,6 +310,16 @@ to a client.
 - Required: `ORDER_AUTO_APPROVAL_WORKER_TOKEN`.
 - Optional/defaulted: `ORDER_AUTO_APPROVAL_MAX_ATTEMPTS` and
   `ORDER_AUTO_APPROVAL_LEASE_SECONDS`.
+
+`nse-uat-smoke-test` custom values:
+
+- Required: `NSE_URL`, `NSE_LOGIN_USER_ID`, `NSE_API_KEY_MEMBER`,
+  `NSE_API_SECRET_USER`, `NSE_MEMBER_CODE`, and `NSE_SMOKE_TEST_TOKEN`.
+- Optional: `NSE_USER_AGENT`. When absent, it defaults to
+  `Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:108.0) Gecko/20100101 Firefox/108.0`.
+- The function is server-side only, performs no database writes, and returns
+  only bounded sanitized response diagnostics. NSE values belong only in the
+  hosted Edge Function secret store or an uncommitted local environment file.
 
 `sign-stamp-invoice` custom values:
 
