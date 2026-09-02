@@ -16,7 +16,7 @@ const config: NseConfig = {
   userAgent: "MoneyBowl-NSE-UAT/1.0",
 };
 
-Deno.test("NSE client applies fresh authentication and standard JSON headers", async () => {
+Deno.test("NSE client applies fresh authentication without globally forcing Accept", async () => {
   const requests: Request[] = [];
   const client = new NseClient(config, (input, init) => {
     requests.push(new Request(input, init));
@@ -49,6 +49,7 @@ Deno.test("NSE client applies fresh authentication and standard JSON headers", a
   assertEquals(requests[0].headers.get("referer"), "www.google.com");
   assertEquals(requests[0].headers.get("memberid"), "test-member-code");
   assertEquals(requests[0].headers.get("content-type"), "application/json");
+  assertEquals(requests[0].headers.get("accept"), null);
   assertEquals(await requests[0].json(), { file_type: "NAV" });
   assertFalse(
     requests[0].headers.get("authorization")?.includes(
@@ -107,4 +108,112 @@ Deno.test("NSE client maps request timeouts safely", async () => {
   );
   assertEquals(error.code, "nse_request_timeout");
   assertEquals(error.nseStatus, null);
+});
+
+Deno.test("NSE client can return bounded HTTP error evidence only when explicitly requested", async () => {
+  const client = new NseClient(
+    config,
+    () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "synthetic rejection" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+  );
+
+  const response = await client.request({
+    method: "POST",
+    path: "/nsemfdesk/api/v2/registration/CLIENTCOMMON183",
+    jsonBody: { reg_details: [{}] },
+    acceptHttpErrors: true,
+    maxResponseBytes: 1024,
+  });
+
+  assertEquals(response.status, 400);
+  assertEquals(response.headers.get("content-type"), "application/json");
+  assertEquals(
+    new TextDecoder().decode(response.body),
+    JSON.stringify({ error: "synthetic rejection" }),
+  );
+});
+
+Deno.test("safe header audit exposes only allowlisted metadata", async () => {
+  const client = new NseClient(
+    config,
+    () =>
+      Promise.resolve(
+        new Response("{}", {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "synthetic-request",
+            "set-cookie": "must-not-be-audited",
+            "authorization": "must-not-be-audited",
+          },
+        }),
+      ),
+  );
+  const requestMetadata = client.safeRequestHeaderMetadata({
+    jsonBody: {},
+    accept: "application/json",
+  });
+  assertEquals(requestMetadata, {
+    content_type: "application/json",
+    user_agent: config.userAgent,
+    accept: "application/json",
+  });
+  const response = await client.request({
+    method: "POST",
+    path: "/safe",
+    jsonBody: {},
+  });
+  assertEquals(response.safeHeaderMetadata, {
+    content_type: "application/json",
+    x_request_id: "synthetic-request",
+  });
+  assertFalse(JSON.stringify(response.safeHeaderMetadata).includes("cookie"));
+  assertFalse(
+    JSON.stringify(response.safeHeaderMetadata).includes("authorization"),
+  );
+});
+
+Deno.test("NSE client transmits the exact pre-serialized UCC body and audits resolved safe headers", async () => {
+  const serialized = '{"reg_details":[{"client_code":"MBUAT0001"}]}';
+  let transmitted = "";
+  let transmittedHeaders = new Headers();
+  const client = new NseClient(config, async (input, init) => {
+    const request = new Request(input, init);
+    transmitted = await request.text();
+    transmittedHeaders = request.headers;
+    return new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  const options = {
+    method: "POST" as const,
+    path: "/nsemfdesk/api/v2/registration/CLIENTCOMMON183",
+    bodyText: serialized,
+    contentType: "application/json",
+    accept: "application/json",
+  };
+  assertEquals(client.safeRequestHeaderMetadata(options), {
+    content_type: "application/json",
+    user_agent: config.userAgent,
+    accept: "application/json",
+  });
+  await client.request(options);
+  assertEquals(transmitted, serialized);
+  assertEquals(transmittedHeaders.get("accept"), "application/json");
+  assertFalse(
+    JSON.stringify(client.safeRequestHeaderMetadata(options)).includes(
+      "authorization",
+    ),
+  );
+  assertFalse(
+    JSON.stringify(client.safeRequestHeaderMetadata(options)).includes(
+      "cookie",
+    ),
+  );
 });

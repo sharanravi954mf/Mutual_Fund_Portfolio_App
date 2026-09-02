@@ -11,15 +11,28 @@ export type NseRequestOptions = {
   method: string;
   path: string;
   jsonBody?: unknown;
+  bodyText?: string;
+  contentType?: string;
+  accept?: string;
   headers?: HeadersInit;
   timeoutMs?: number;
   maxResponseBytes?: number;
+  acceptHttpErrors?: boolean;
 };
+
+export type SafeIntegrationHeaderMetadata = Readonly<{
+  content_type?: string;
+  user_agent?: string;
+  accept?: string;
+  x_request_id?: string;
+  x_correlation_id?: string;
+}>;
 
 export type NseResponse = {
   status: number;
   headers: Headers;
   body: Uint8Array;
+  safeHeaderMetadata: SafeIntegrationHeaderMetadata;
 };
 
 export type NseFetch = (
