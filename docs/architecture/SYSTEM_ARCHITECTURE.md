@@ -716,3 +716,11 @@ The following areas are explicitly marked as **OUT OF SCOPE** for the Money Bowl
 * Automated portfolio rebalancing or model execution.
 * Tax filing submissions or legal validation filings.
 * Unadvised direct execution options.
+
+---
+
+## 20. Plugin-style integration architecture
+
+MoneyBowl core owns canonical business data, authentication/authorization, orders, transactions, policy, and event_outbox. Integration modules translate that state without making external reference codes canonical business truth. Shared outbound API infrastructure is integration_accounts, integration_operations, integration_api_interactions, and event_outbox. See [Integration Framework](INTEGRATION_FRAMEWORK.md).
+
+NSEInvest UCC registration is the first complete outbound vertical slice: its mapper, immutable encrypted REQUEST/RESULT evidence, retry fencing, ambiguity policy, response distribution, and read-only Client Master post-registration verification/ambiguous-write reconciliation are specified in [NSE UCC Vertical Slice](NSE_UCC_VERTICAL_SLICE.md). CAMS/KFin mailback remains inbound ingestion and is not forced through the outbound API interaction ledger unless it makes external API calls.
