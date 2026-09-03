@@ -341,6 +341,146 @@ const communicationCode: Record<string, string> = {
   mobile: "M",
 };
 
+// NSE MF WebfileStructure business masters used by CLIENTCOMMON183. The NNF
+// remains authoritative for the JSON contract itself.
+export const NSE_UCC_OCCUPATION_CODES = [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
+  "08",
+] as const;
+
+export const NSE_UCC_CONTACT_DECLARATION_CODES = [
+  "SE",
+  "SP",
+  "DC",
+  "DS",
+  "DP",
+  "GD",
+  "PM",
+  "CD",
+  "PO",
+] as const;
+
+export const NSE_UCC_STATE_MASTER = {
+  AN: "ANDAMAN & NICOBAR",
+  AP: "ANDHRA PRADESH",
+  AR: "ARUNACHAL PRADESH",
+  AS: "ASSAM",
+  BH: "BIHAR",
+  CH: "CHANDIGARH",
+  CG: "CHHATTISGARH",
+  DN: "DADRA AND NAGAR HAVELI",
+  DD: "DAMAN AND DIU",
+  GO: "GOA",
+  GU: "GUJARAT",
+  HA: "HARYANA",
+  HP: "HIMACHAL PRADESH",
+  JM: "JAMMU & KASHMIR",
+  JK: "JHARKHAND",
+  KA: "KARNATAKA",
+  KE: "KERALA",
+  LD: "LAKSHADWEEP",
+  MA: "MAHARASHTRA",
+  MP: "MADHYA PRADESH",
+  MN: "MANIPUR",
+  ME: "MEGHALAYA",
+  MI: "MIZORAM",
+  NA: "NAGALAND",
+  ND: "NEW DELHI",
+  OR: "ODISHA",
+  OH: "OTHERS",
+  PO: "PONDICHERRY",
+  PU: "PUNJAB",
+  RA: "RAJASTHAN",
+  SI: "SIKKIM",
+  TN: "TAMIL NADU",
+  TG: "TELANGANA",
+  TR: "TRIPURA",
+  UP: "UTTER PRADESH",
+  UL: "UTTARAKHAND",
+  WB: "WEST BENGAL",
+} as const;
+
+const occupationCodes = new Set<string>(NSE_UCC_OCCUPATION_CODES);
+const declarationCodes = new Set<string>(NSE_UCC_CONTACT_DECLARATION_CODES);
+const canonicalOccupationCode: Readonly<Record<string, string>> = {
+  business: "01",
+  services: "02",
+  professional: "03",
+  agriculture: "04",
+  retired: "05",
+  housewife: "06",
+  student: "07",
+  other: "08",
+  others: "08",
+};
+
+const physicalOnlyBlankFields = [
+  "pms",
+  "default_dp",
+  "cdsl_dpid",
+  "cdslcltid",
+  "cmbp_id",
+  "nsdldpid",
+  "nsdlcltid",
+] as const;
+
+const residentOnlyBlankFields = [
+  "foreign_address_1",
+  "foreign_address_2",
+  "foreign_address_3",
+  "foreign_address_city",
+  "foreign_address_pincode",
+  "foreign_address_state",
+  "foreign_address_country",
+  "foreign_address_resi_phone",
+  "foreign_address_fax",
+  "foreign_address_off_phone",
+  "foreign_address_off_fax",
+] as const;
+
+// These are canonical MoneyBowl names for legacy CLIENTCOMMON state labels.
+// They are aliases for comparison only; the outbound NSE code remains the
+// code selected from NSE_UCC_STATE_MASTER.
+const canonicalStateRegionAliases: Readonly<
+  Partial<Record<keyof typeof NSE_UCC_STATE_MASTER, readonly string[]>>
+> = {
+  ND: ["DELHI"],
+  PO: ["PUDUCHERRY"],
+  UP: ["UTTAR PRADESH"],
+  JM: ["JAMMU AND KASHMIR"],
+};
+
+function normalizeCanonicalStateName(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/&/g, " AND ")
+    .replace(/[.,'’()\-]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function stateCodeMatchesCanonicalRegion(
+  stateCode: keyof typeof NSE_UCC_STATE_MASTER,
+  canonicalRegion: string,
+): boolean {
+  const expectedNames = [
+    NSE_UCC_STATE_MASTER[stateCode],
+    ...(canonicalStateRegionAliases[stateCode] ?? []),
+  ];
+  const normalizedCanonicalRegion = normalizeCanonicalStateName(
+    canonicalRegion,
+  );
+  return expectedNames.some((name) =>
+    normalizeCanonicalStateName(name) === normalizedCanonicalRegion
+  );
+}
+
 function sourceIssue(field: string, code: string): never {
   throw new NseUccValidationError([{ field, code }]);
 }
@@ -418,16 +558,101 @@ export function buildNseUccRequest(
     sourceIssue("onboarding_mode", "unsupported_onboarding_mode");
   }
 
+  const taxStatus = source.nse_codes.tax_status.trim();
+  if (taxStatus !== "01") {
+    sourceIssue(
+      "nse_codes.tax_status",
+      "first_slice_requires_individual_tax_status",
+    );
+  }
+
+  const occupationCode = source.nse_codes.occupation_code.trim();
+  if (!occupationCodes.has(occupationCode)) {
+    sourceIssue("nse_codes.occupation_code", "invalid_nse_occupation_code");
+  }
+  const expectedOccupationCode = canonicalOccupationCode[
+    source.occupation.trim().toLowerCase()
+  ];
+  if (expectedOccupationCode == null) {
+    sourceIssue("occupation", "unsupported_canonical_occupation");
+  }
+  if (occupationCode !== expectedOccupationCode) {
+    sourceIssue(
+      "nse_codes.occupation_code",
+      "occupation_code_does_not_match_canonical_occupation",
+    );
+  }
+
+  const stateCode = source.nse_codes.state.trim().toUpperCase();
+  const stateName = NSE_UCC_STATE_MASTER[
+    stateCode as keyof typeof NSE_UCC_STATE_MASTER
+  ];
+  if (stateName == null) {
+    sourceIssue("nse_codes.state", "invalid_nse_state_code");
+  }
+  if (
+    !stateCodeMatchesCanonicalRegion(
+      stateCode as keyof typeof NSE_UCC_STATE_MASTER,
+      source.address.region,
+    )
+  ) {
+    sourceIssue(
+      "nse_codes.state",
+      "state_code_does_not_match_canonical_region",
+    );
+  }
+
+  const mobileDeclaration = source.nse_codes.mobile_declaration_flag.trim()
+    .toUpperCase();
+  const emailDeclaration = source.nse_codes.email_declaration_flag.trim()
+    .toUpperCase();
+  if (!declarationCodes.has(mobileDeclaration)) {
+    sourceIssue(
+      "nse_codes.mobile_declaration_flag",
+      "invalid_nse_declaration_code",
+    );
+  }
+  if (!declarationCodes.has(emailDeclaration)) {
+    sourceIssue(
+      "nse_codes.email_declaration_flag",
+      "invalid_nse_declaration_code",
+    );
+  }
+  if (source.mobile_owner_relationship.trim().toLowerCase() !== "self") {
+    sourceIssue(
+      "mobile_owner_relationship",
+      "first_slice_requires_self_owned_mobile",
+    );
+  }
+  if (mobileDeclaration !== "SE") {
+    sourceIssue(
+      "nse_codes.mobile_declaration_flag",
+      "declaration_does_not_match_self_owned_mobile",
+    );
+  }
+  if (source.email_owner_relationship.trim().toLowerCase() !== "self") {
+    sourceIssue(
+      "email_owner_relationship",
+      "first_slice_requires_self_owned_email",
+    );
+  }
+  if (emailDeclaration !== "SE") {
+    sourceIssue(
+      "nse_codes.email_declaration_flag",
+      "declaration_does_not_match_self_owned_email",
+    );
+  }
+
   const record = emptyRecord();
   Object.assign(record, {
     client_code: source.external_account_candidate.trim().toUpperCase(),
     primary_holder_first_name: source.legal_first_name.trim(),
     primary_holder_middle_name: source.legal_middle_name.trim(),
     primary_holder_last_name: source.legal_last_name.trim(),
-    tax_status: source.nse_codes.tax_status.trim(),
+    tax_status: taxStatus,
     gender: genderCode[source.gender],
     primary_holder_dob_incorporation: source.date_of_birth,
-    occupation_code: source.nse_codes.occupation_code.trim(),
+    occupation_code: occupationCode,
     holding_nature: "SI",
     primary_holder_pan_exempt: "N",
     primary_holder_pan: source.pan.trim().toUpperCase(),
@@ -443,7 +668,7 @@ export function buildNseUccRequest(
     address_2: source.address.line_2.trim(),
     address_3: source.address.line_3.trim(),
     city: source.address.city.trim(),
-    state: source.nse_codes.state.trim(),
+    state: stateCode,
     pincode: source.address.postal_code.trim(),
     country: source.nse_codes.country.trim(),
     email: source.email.trim(),
@@ -454,8 +679,8 @@ export function buildNseUccRequest(
       ? source.ckyc_number.trim()
       : "",
     paperless_flag: source.onboarding_mode === "paperless" ? "Z" : "P",
-    mobile_declaration_flag: source.nse_codes.mobile_declaration_flag.trim(),
-    email_declaration_flag: source.nse_codes.email_declaration_flag.trim(),
+    mobile_declaration_flag: mobileDeclaration,
+    email_declaration_flag: emailDeclaration,
     nomination_opt: "N",
   });
   const request: NseUccRequest = { reg_details: [record] };
@@ -508,6 +733,24 @@ export function validateNseUccRequest(request: NseUccRequest): void {
   }
   if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value("primary_holder_pan"))) {
     issue(issues, "primary_holder_pan", "valid_non_exempt_pan_required");
+  } else if (
+    value("tax_status") === "01" && value("primary_holder_pan")[3] !== "P"
+  ) {
+    issue(
+      issues,
+      "primary_holder_pan",
+      "individual_pan_category_mismatch",
+    );
+  }
+  if (value("tax_status") !== "01") {
+    issue(
+      issues,
+      "tax_status",
+      "first_slice_requires_individual_tax_status",
+    );
+  }
+  if (!occupationCodes.has(value("occupation_code"))) {
+    issue(issues, "occupation_code", "invalid_allowed_value");
   }
   if (value("primary_holder_pan_exempt") !== "N") {
     issue(
@@ -515,6 +758,16 @@ export function validateNseUccRequest(request: NseUccRequest): void {
       "primary_holder_pan_exempt",
       "first_slice_requires_non_exempt_pan",
     );
+  }
+  for (
+    const field of [
+      "primary_holder_exempt_category",
+      "primary_holder_kra_exempt_ref_no",
+    ]
+  ) {
+    if (value(field) !== "") {
+      issue(issues, field, "must_be_blank_for_non_exempt_pan");
+    }
   }
   if (parseIndianDate(value("primary_holder_dob_incorporation")) == null) {
     issue(issues, "primary_holder_dob_incorporation", "invalid_date_format");
@@ -527,6 +780,11 @@ export function validateNseUccRequest(request: NseUccRequest): void {
   }
   if (value("client_type") !== "P") {
     issue(issues, "client_type", "first_slice_requires_physical");
+  }
+  for (const field of physicalOnlyBlankFields) {
+    if (value(field) !== "") {
+      issue(issues, field, "must_be_blank_for_physical");
+    }
   }
   if (!["SB", "CB", "NE", "NO"].includes(value("account_type_1"))) {
     issue(issues, "account_type_1", "invalid_allowed_value");
@@ -548,6 +806,16 @@ export function validateNseUccRequest(request: NseUccRequest): void {
   }
   if (!/^[0-9]{6}$/.test(value("pincode"))) {
     issue(issues, "pincode", "invalid_format");
+  }
+  if (!(value("state") in NSE_UCC_STATE_MASTER)) {
+    issue(issues, "state", "invalid_allowed_value");
+  }
+  // Country intentionally remains governed by the NNF/Postman API shape.
+  // WebfileStructure's numeric country master conflicts with those examples.
+  for (const field of residentOnlyBlankFields) {
+    if (value(field) !== "") {
+      issue(issues, field, "must_be_blank_for_resident_individual");
+    }
   }
   if (!/^[0-9]{10}$/.test(value("indian_mobile_no"))) {
     issue(issues, "indian_mobile_no", "invalid_format");
@@ -572,11 +840,11 @@ export function validateNseUccRequest(request: NseUccRequest): void {
   if (!["P", "Z"].includes(value("paperless_flag"))) {
     issue(issues, "paperless_flag", "invalid_allowed_value");
   }
-  if (value("mobile_declaration_flag").length !== 2) {
-    issue(issues, "mobile_declaration_flag", "invalid_format");
+  if (!declarationCodes.has(value("mobile_declaration_flag"))) {
+    issue(issues, "mobile_declaration_flag", "invalid_allowed_value");
   }
-  if (value("email_declaration_flag").length !== 2) {
-    issue(issues, "email_declaration_flag", "invalid_format");
+  if (!declarationCodes.has(value("email_declaration_flag"))) {
+    issue(issues, "email_declaration_flag", "invalid_allowed_value");
   }
   if (value("nomination_opt") !== "N") {
     issue(issues, "nomination_opt", "first_slice_requires_nomination_opt_out");

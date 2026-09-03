@@ -25,8 +25,8 @@ FROM unnest(ARRAY['1','2','3','4']) suffix;
 
 INSERT INTO public.profile_pan_records (id,profile_id,pan_ciphertext,pan_lookup_hmac,masked_pan,source,source_system,status,verified_at) VALUES
  ('c0040000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001',
- extensions.pgp_sym_encrypt('ZZZZZ0000Z',public.pan_encryption_key(),'cipher-algo=aes256, compress-algo=0'),
- extensions.hmac('ZZZZZ0000Z',public.pan_lookup_hmac_key(),'sha256'),'******0000','INVESTOR','MANUAL','VERIFIED',now());
+ extensions.pgp_sym_encrypt('ZZZPZ0000Z',public.pan_encryption_key(),'cipher-algo=aes256, compress-algo=0'),
+ extensions.hmac('ZZZPZ0000Z',public.pan_lookup_hmac_key(),'sha256'),'******0000','INVESTOR','MANUAL','VERIFIED',now());
 UPDATE public.profiles SET canonical_pan_record_id='c0040000-0000-4000-8000-000000000001'
 WHERE id='c0020000-0000-4000-8000-000000000001';
 
@@ -36,7 +36,7 @@ INSERT INTO public.investor_registration_profiles (workspace_id,investor_profile
  ('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000002','SYNTHETIC MINOR','SYNTHETIC','MINOR','individual','2015-01-01',NULL,'other','resident_individual','student','single',false,'kra',NULL,'electronic','guardian','guardian','paper',false),
  ('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000003','SYNTHETIC ENTITY',NULL,NULL,'non_individual',NULL,'2000-01-01',NULL,'resident_entity','business','single',false,'kra',NULL,'electronic','authorized_person','authorized_person','paper',false);
 INSERT INTO public.investor_addresses (workspace_id,investor_profile_id,address_type,address_line_1,city,region,postal_code,country,is_current) VALUES
- ('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001','domestic','SYNTHETIC UAT ADDRESS','UATCITY','synthetic_region','000000','synthetic_country',true);
+ ('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001','domestic','SYNTHETIC UAT ADDRESS','UATCITY','KARNATAKA','000000','INDIA',true);
 SELECT 1 FROM public.set_investor_bank_account('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001','savings','TESTACCOUNT01','TEST0000000',NULL,'MONEYBOWL SYNTHETIC','verified',true);
 
 DO $$
@@ -70,7 +70,7 @@ BEGIN
  EXCEPTION WHEN OTHERS THEN IF strpos(SQLERRM,'invalid_integration_metadata')=0 THEN RAISE; END IF; END;
 
  SELECT * INTO v_operation FROM public.prepare_nse_ucc_registration('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001',
- '{"external_account_candidate":"MBUAT0001","ucc_mode":"physical","nse_codes":{"tax_status":"01","occupation_code":"99","state":"ZZ","country":"INDIA","mobile_declaration_flag":"SE","email_declaration_flag":"SE","div_pay_mode":"04"}}');
+ '{"external_account_candidate":"MBUAT0001","ucc_mode":"physical","nse_codes":{"tax_status":"01","occupation_code":"08","state":"KA","country":"INDIA","mobile_declaration_flag":"SE","email_declaration_flag":"SE","div_pay_mode":"04"}}');
  SELECT * INTO v_account FROM public.integration_accounts WHERE id=v_operation.integration_account_id;
  IF v_operation.integration_key<>'NSE_INVEST' OR v_operation.integration_environment<>'UAT' OR v_operation.category<>'CLIENT' OR v_operation.safety_class<>'WRITE_CLIENT' OR v_operation.operation_type<>'UCC_REGISTRATION' OR v_operation.api_key<>'CLIENTCOMMON183' OR v_operation.contract_version<>'NNF_1.9.7' THEN RAISE EXCEPTION 'classification_invalid'; END IF;
  IF v_account.integration_metadata ? 'pan' OR v_account.integration_metadata ? 'bank' THEN RAISE EXCEPTION 'account_duplicates_pii'; END IF;
@@ -113,8 +113,8 @@ BEGIN
  INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000002',v_account2.workspace_id,v_account2.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation2;
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation2.id,'integration_operation') RETURNING * INTO v_event2;
  SELECT * INTO v_claim2 FROM public.claim_nse_ucc_registration_event(v_event2.id,2,120);
- SELECT * INTO v_request FROM public.start_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
- IF (extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::jsonb->'reg_details'->0->>'primary_holder_pan')<>'ZZZZZ0000Z'
+ SELECT * INTO v_request FROM public.start_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_request_headers,v_started);
+ IF (extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::jsonb->'reg_details'->0->>'primary_holder_pan')<>'ZZZPZ0000Z'
     OR (extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::jsonb->'reg_details'->0 ? 'pan') THEN
   RAISE EXCEPTION 'registration_request_contract_shape_invalid';
  END IF;
@@ -129,7 +129,7 @@ BEGIN
 
  -- A successful registration is independently verified without changing NSE-native status.
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation2.id,'POST_REGISTRATION_VERIFICATION');
- IF public.get_nse_ucc_verification_source(v_verification.id)->>'pan'<>'ZZZZZ0000Z' THEN
+ IF public.get_nse_ucc_verification_source(v_verification.id)->>'pan'<>'ZZZPZ0000Z' THEN
   RAISE EXCEPTION 'verification_source_primary_holder_pan_invalid';
  END IF;
  SELECT * INTO v_verification_event FROM public.event_outbox WHERE entity_id=v_verification.id;
@@ -149,7 +149,7 @@ BEGIN
  EXCEPTION WHEN OTHERS THEN IF strpos(SQLERRM,'verification_success_invariant_failed')=0 THEN RAISE; END IF; END;
  PERFORM public.finish_nse_ucc_verification(
   v_verification_event.id,v_verification_claim.claim_token,v_request.call_id,
-  '{"response_status":"S","report_data":[{"client_code":"MBUAT0002","primary_holder_pan":"ZZZZZ0000Z"}]}',
+  '{"response_status":"S","report_data":[{"client_code":"MBUAT0002","primary_holder_pan":"ZZZPZ0000Z"}]}',
   'application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3);
  IF NOT public.nse_ucc_verification_evidence_matches(v_operation2.id,v_verification.id) THEN
   RAISE EXCEPTION 'production_shaped_verification_evidence_did_not_match';
@@ -225,7 +225,7 @@ BEGIN
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000016','{}','application/json',v_response_headers,403,v_completed,1,NULL,NULL,'HTTP_FAILURE','nse_authentication_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id; IF v_operation4.state<>'HTTP_FAILED' THEN RAISE EXCEPTION 'http_403_invariant_invalid'; END IF;
  INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000007',v_account4.workspace_id,v_account4.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation4;
- INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4; SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120); PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{"reg_details":[{"client_code":"MBUAT0004","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
+ INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4; SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120); PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{"reg_details":[{"client_code":"MBUAT0004","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{}','application/json',v_response_headers,500,v_completed,1,NULL,NULL,'AMBIGUOUS','nse_http_ambiguous_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id; IF v_operation4.state<>'RECONCILIATION_REQUIRED' OR NOT v_operation4.reconciliation_required OR v_operation4.retry_allowed THEN RAISE EXCEPTION 'http_500_ambiguity_invalid'; END IF;
  -- A no-match read leaves an ambiguous write unresolved and never resubmits it.
@@ -269,7 +269,7 @@ BEGIN
  VALUES('c0070000-0000-4000-8000-000000000020',v_account.workspace_id,v_account.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation;
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation.id,'integration_operation') RETURNING * INTO v_event;
  SELECT * INTO v_claim FROM public.claim_nse_ucc_registration_event(v_event.id,2,120);
- PERFORM public.start_nse_ucc_submission(v_event.id,v_claim.claim_token,'c0050000-0000-4000-8000-000000000020','{"reg_details":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
+ PERFORM public.start_nse_ucc_submission(v_event.id,v_claim.claim_token,'c0050000-0000-4000-8000-000000000020','{"reg_details":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_submission(v_event.id,v_claim.claim_token,'c0050000-0000-4000-8000-000000000020','{}','application/json',v_response_headers,503,v_completed,5,NULL,NULL,'AMBIGUOUS','nse_http_ambiguous_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation FROM public.integration_operations WHERE id=v_operation.id;
  IF v_operation.state<>'RECONCILIATION_REQUIRED' THEN RAISE EXCEPTION 'reconciliation_fixture_invalid'; END IF;
@@ -291,8 +291,8 @@ BEGIN
   PERFORM public.start_nse_ucc_verification(v_verification_event.id,v_verification_claim.claim_token,'c0050000-0000-4000-8000-000000000021','{"client_code":"OTHER0001","PAN":"","from_date":"","to_date":""}',v_request_headers,v_started);
   RAISE EXCEPTION 'verification_request_conflict_allowed';
  EXCEPTION WHEN OTHERS THEN IF strpos(SQLERRM,'integration_request_idempotency_conflict')=0 THEN RAISE; END IF; END;
- SELECT * INTO v_result FROM public.finish_nse_ucc_verification(v_verification_event.id,v_verification_claim.claim_token,'c0050000-0000-4000-8000-000000000021','{"response_status":"S","report_data":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3);
- IF (public.finish_nse_ucc_verification(v_verification_event.id,v_verification_claim.claim_token,'c0050000-0000-4000-8000-000000000021','{"response_status":"S","report_data":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3)).id<>v_result.id THEN RAISE EXCEPTION 'verification_result_idempotency_failed'; END IF;
+ SELECT * INTO v_result FROM public.finish_nse_ucc_verification(v_verification_event.id,v_verification_claim.claim_token,'c0050000-0000-4000-8000-000000000021','{"response_status":"S","report_data":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3);
+ IF (public.finish_nse_ucc_verification(v_verification_event.id,v_verification_claim.claim_token,'c0050000-0000-4000-8000-000000000021','{"response_status":"S","report_data":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3)).id<>v_result.id THEN RAISE EXCEPTION 'verification_result_idempotency_failed'; END IF;
  BEGIN
   PERFORM public.finish_nse_ucc_verification(v_verification_event.id,v_verification_claim.claim_token,'c0050000-0000-4000-8000-000000000021','{"response_status":"S","report_data":[]}','application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3);
   RAISE EXCEPTION 'verification_result_conflict_allowed';
