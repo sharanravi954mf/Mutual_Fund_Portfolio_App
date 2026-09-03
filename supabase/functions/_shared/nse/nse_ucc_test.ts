@@ -264,7 +264,22 @@ Deno.test("individual tax status requires PAN fourth character P without exposin
   assertEquals(error.message.includes(source.pan), false);
 });
 
-Deno.test("state master code is normalized and must match canonical region", () => {
+Deno.test("state master codes match canonical and legacy region names", () => {
+  for (
+    const [stateCode, region] of [
+      ["KA", "Karnataka"],
+      ["UP", "Uttar Pradesh"],
+      ["PO", "Puducherry"],
+      ["ND", "Delhi"],
+      ["JM", "Jammu and Kashmir"],
+    ]
+  ) {
+    const source = syntheticUccSource();
+    source.nse_codes.state = stateCode;
+    source.address.region = region;
+    assertEquals(buildNseUccRequest(source).reg_details[0].state, stateCode);
+  }
+
   const normalized = syntheticUccSource();
   normalized.nse_codes.state = " ka ";
   normalized.address.region = "  Karnataka  ";

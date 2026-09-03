@@ -444,8 +444,41 @@ const residentOnlyBlankFields = [
   "foreign_address_off_fax",
 ] as const;
 
-function normalizeCanonicalMasterName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toUpperCase();
+// These are canonical MoneyBowl names for legacy CLIENTCOMMON state labels.
+// They are aliases for comparison only; the outbound NSE code remains the
+// code selected from NSE_UCC_STATE_MASTER.
+const canonicalStateRegionAliases: Readonly<
+  Partial<Record<keyof typeof NSE_UCC_STATE_MASTER, readonly string[]>>
+> = {
+  ND: ["DELHI"],
+  PO: ["PUDUCHERRY"],
+  UP: ["UTTAR PRADESH"],
+  JM: ["JAMMU AND KASHMIR"],
+};
+
+function normalizeCanonicalStateName(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/&/g, " AND ")
+    .replace(/[.,'’()\-]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function stateCodeMatchesCanonicalRegion(
+  stateCode: keyof typeof NSE_UCC_STATE_MASTER,
+  canonicalRegion: string,
+): boolean {
+  const expectedNames = [
+    NSE_UCC_STATE_MASTER[stateCode],
+    ...(canonicalStateRegionAliases[stateCode] ?? []),
+  ];
+  const normalizedCanonicalRegion = normalizeCanonicalStateName(
+    canonicalRegion,
+  );
+  return expectedNames.some((name) =>
+    normalizeCanonicalStateName(name) === normalizedCanonicalRegion
+  );
 }
 
 function sourceIssue(field: string, code: string): never {
@@ -558,8 +591,10 @@ export function buildNseUccRequest(
     sourceIssue("nse_codes.state", "invalid_nse_state_code");
   }
   if (
-    normalizeCanonicalMasterName(source.address.region) !==
-      normalizeCanonicalMasterName(stateName)
+    !stateCodeMatchesCanonicalRegion(
+      stateCode as keyof typeof NSE_UCC_STATE_MASTER,
+      source.address.region,
+    )
   ) {
     sourceIssue(
       "nse_codes.state",
