@@ -49,6 +49,21 @@ Deno.test("client master parser requires exact returned client code and secured 
       .exactIdentityMatch,
   );
 });
+Deno.test("client master parser rejects an identity match when response status is not S", () => {
+  const body = JSON.stringify({
+    response_status: "F",
+    report_data: [{
+      client_code: "MBUAT0001",
+      primary_holder_pan: "AAAAA0000A",
+    }],
+  });
+  assertEquals(parseNseClientMasterResponse(body, "MBUAT0001", "AAAAA0000A"), {
+    nativeStatus: "F",
+    nativeRemarkCategory: "ucc_match_not_confirmed",
+    exactIdentityMatch: false,
+    recordCount: 1,
+  });
+});
 Deno.test("client master request validates secured identity even though PAN is not transmitted", () => {
   assertThrows(
     () => buildNseClientMasterRequest({ ...source, pan: "invalid" }),

@@ -1565,7 +1565,7 @@ BEGIN
     public.integration_payload_encryption_key(v_verification_result.payload_encryption_key_reference)
   )::pg_catalog.jsonb;
   v_client_code := pg_catalog.upper(pg_catalog.btrim(v_registration_json->'reg_details'->0->>'client_code'));
-  v_pan := pg_catalog.upper(pg_catalog.btrim(v_registration_json->'reg_details'->0->>'pan'));
+  v_pan := pg_catalog.upper(pg_catalog.btrim(v_registration_json->'reg_details'->0->>'primary_holder_pan'));
   IF v_client_code = '' OR v_pan = ''
      OR pg_catalog.upper(pg_catalog.btrim(v_request_json->>'client_code')) IS DISTINCT FROM v_client_code
      OR COALESCE(v_request_json->>'PAN', '') <> ''
@@ -1664,7 +1664,7 @@ BEGIN
     'correlation_id', v_verification.correlation_id,
     'verification_purpose', v_verification.operation_purpose,
     'intended_client_code', v_request->'reg_details'->0->>'client_code',
-    'pan', v_request->'reg_details'->0->>'pan'
+    'pan', v_request->'reg_details'->0->>'primary_holder_pan'
   );
   IF NULLIF(v_result->>'intended_client_code', '') IS NULL OR NULLIF(v_result->>'pan', '') IS NULL THEN
     RAISE EXCEPTION 'nse_ucc_registration_identity_evidence_missing';
@@ -1946,7 +1946,7 @@ BEGIN
     v_exact_match := v_response_json->>'response_status' = 'S' AND EXISTS (
       SELECT 1 FROM pg_catalog.jsonb_array_elements(COALESCE(v_response_json->'report_data', '[]'::pg_catalog.jsonb)) AS report(record)
       WHERE pg_catalog.upper(pg_catalog.btrim(report.record->>'client_code')) = pg_catalog.upper(pg_catalog.btrim(v_registration_json->'reg_details'->0->>'client_code'))
-        AND pg_catalog.upper(pg_catalog.btrim(COALESCE(report.record->>'primary_holder_pan', report.record->>'primary_pan'))) = pg_catalog.upper(pg_catalog.btrim(v_registration_json->'reg_details'->0->>'pan'))
+        AND pg_catalog.upper(pg_catalog.btrim(COALESCE(report.record->>'primary_holder_pan', report.record->>'primary_pan'))) = pg_catalog.upper(pg_catalog.btrim(v_registration_json->'reg_details'->0->>'primary_holder_pan'))
     );
   END IF;
   IF p_normalized_outcome = 'SUCCESS' AND NOT (p_http_status BETWEEN 200 AND 299 AND v_exact_match AND p_native_status_value = 'S') THEN RAISE EXCEPTION 'verification_success_invariant_failed'; END IF;

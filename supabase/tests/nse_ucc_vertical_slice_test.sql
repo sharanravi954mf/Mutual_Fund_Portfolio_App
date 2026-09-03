@@ -113,7 +113,11 @@ BEGIN
  INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000002',v_account2.workspace_id,v_account2.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation2;
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation2.id,'integration_operation') RETURNING * INTO v_event2;
  SELECT * INTO v_claim2 FROM public.claim_nse_ucc_registration_event(v_event2.id,2,120);
- PERFORM public.start_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
+ SELECT * INTO v_request FROM public.start_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
+ IF (extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::jsonb->'reg_details'->0->>'primary_holder_pan')<>'ZZZZZ0000Z'
+    OR (extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::jsonb->'reg_details'->0 ? 'pan') THEN
+  RAISE EXCEPTION 'registration_request_contract_shape_invalid';
+ END IF;
  PERFORM public.finish_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","reg_id":"SYNTHETIC","reg_status":"REG_SUCCESS","reg_remark":""}]}','application/json',v_response_headers,200,v_completed,20,'REG_SUCCESS','none','SUCCESS',NULL,false,false,'MBUAT0002','SYNTHETIC',2);
  SELECT * INTO v_operation2 FROM public.integration_operations WHERE id=v_operation2.id; SELECT * INTO v_account2 FROM public.integration_accounts WHERE id=v_account2.id;
  IF v_operation2.state<>'SUCCESS' OR v_account2.state<>'REGISTERED' OR v_account2.external_account_id<>'MBUAT0002' THEN RAISE EXCEPTION 'success_distribution_invalid'; END IF;
@@ -125,6 +129,9 @@ BEGIN
 
  -- A successful registration is independently verified without changing NSE-native status.
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation2.id,'POST_REGISTRATION_VERIFICATION');
+ IF public.get_nse_ucc_verification_source(v_verification.id)->>'pan'<>'ZZZZZ0000Z' THEN
+  RAISE EXCEPTION 'verification_source_primary_holder_pan_invalid';
+ END IF;
  SELECT * INTO v_verification_event FROM public.event_outbox WHERE entity_id=v_verification.id;
  SELECT * INTO v_verification_claim FROM public.claim_nse_ucc_verification_event(v_verification_event.id,3,120);
  SELECT * INTO v_request FROM public.start_nse_ucc_verification(
@@ -144,6 +151,9 @@ BEGIN
   v_verification_event.id,v_verification_claim.claim_token,v_request.call_id,
   '{"response_status":"S","report_data":[{"client_code":"MBUAT0002","primary_holder_pan":"ZZZZZ0000Z"}]}',
   'application/json',v_response_headers,200,'S','ucc_match_confirmed','SUCCESS',NULL,false,false,v_completed,9,3);
+ IF NOT public.nse_ucc_verification_evidence_matches(v_operation2.id,v_verification.id) THEN
+  RAISE EXCEPTION 'production_shaped_verification_evidence_did_not_match';
+ END IF;
  PERFORM public.distribute_nse_ucc_verification_result(v_operation2.id,v_verification.id);
  SELECT * INTO v_operation2 FROM public.integration_operations WHERE id=v_operation2.id;
  SELECT * INTO v_account2 FROM public.integration_accounts WHERE id=v_account2.id;
@@ -215,7 +225,7 @@ BEGIN
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000016','{}','application/json',v_response_headers,403,v_completed,1,NULL,NULL,'HTTP_FAILURE','nse_authentication_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id; IF v_operation4.state<>'HTTP_FAILED' THEN RAISE EXCEPTION 'http_403_invariant_invalid'; END IF;
  INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000007',v_account4.workspace_id,v_account4.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation4;
- INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4; SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120); PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{"reg_details":[{"client_code":"MBUAT0004","pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
+ INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4; SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120); PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{"reg_details":[{"client_code":"MBUAT0004","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{}','application/json',v_response_headers,500,v_completed,1,NULL,NULL,'AMBIGUOUS','nse_http_ambiguous_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id; IF v_operation4.state<>'RECONCILIATION_REQUIRED' OR NOT v_operation4.reconciliation_required OR v_operation4.retry_allowed THEN RAISE EXCEPTION 'http_500_ambiguity_invalid'; END IF;
  -- A no-match read leaves an ambiguous write unresolved and never resubmits it.
@@ -228,7 +238,7 @@ BEGIN
   '{"client_code":"MBUAT0004","PAN":"","from_date":"","to_date":""}',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_verification(
   v_verification_event.id,v_verification_claim.claim_token,v_request.call_id,
-  '{"response_status":"S","report_data":[]}','application/json',v_response_headers,200,'S',
+  '{"response_status":"S","report_data":[{"client_code":"MBUAT0004","primary_holder_pan":"WRONG0000X"}]}','application/json',v_response_headers,200,'S',
   'ucc_not_found','BUSINESS_FAILURE',NULL,false,false,v_completed,9,3);
  PERFORM public.distribute_nse_ucc_verification_result(v_operation4.id,v_verification.id);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id;
@@ -259,7 +269,7 @@ BEGIN
  VALUES('c0070000-0000-4000-8000-000000000020',v_account.workspace_id,v_account.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation;
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation.id,'integration_operation') RETURNING * INTO v_event;
  SELECT * INTO v_claim FROM public.claim_nse_ucc_registration_event(v_event.id,2,120);
- PERFORM public.start_nse_ucc_submission(v_event.id,v_claim.claim_token,'c0050000-0000-4000-8000-000000000020','{"reg_details":[{"client_code":"MBUAT0001","pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
+ PERFORM public.start_nse_ucc_submission(v_event.id,v_claim.claim_token,'c0050000-0000-4000-8000-000000000020','{"reg_details":[{"client_code":"MBUAT0001","primary_holder_pan":"ZZZZZ0000Z"}]}','application/json',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_submission(v_event.id,v_claim.claim_token,'c0050000-0000-4000-8000-000000000020','{}','application/json',v_response_headers,503,v_completed,5,NULL,NULL,'AMBIGUOUS','nse_http_ambiguous_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation FROM public.integration_operations WHERE id=v_operation.id;
  IF v_operation.state<>'RECONCILIATION_REQUIRED' THEN RAISE EXCEPTION 'reconciliation_fixture_invalid'; END IF;

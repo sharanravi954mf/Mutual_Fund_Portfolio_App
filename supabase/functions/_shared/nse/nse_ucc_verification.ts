@@ -99,7 +99,7 @@ export function parseNseClientMasterResponse(
     : [];
   const expectedCode = intendedClientCode.trim().toUpperCase();
   const expectedPan = canonicalPan.trim().toUpperCase();
-  const exactIdentityMatch = reportData.some((entry) => {
+  const matchingRecordExists = reportData.some((entry) => {
     if (entry == null || typeof entry !== "object" || Array.isArray(entry)) {
       return false;
     }
@@ -107,6 +107,7 @@ export function parseNseClientMasterResponse(
     return recordString(record, "client_code") === expectedCode &&
       recordString(record, "primary_holder_pan", "primary_pan") === expectedPan;
   });
+  const exactIdentityMatch = nativeStatus === "S" && matchingRecordExists;
   return {
     nativeStatus,
     nativeRemarkCategory: exactIdentityMatch
