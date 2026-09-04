@@ -2,6 +2,7 @@ import {
   assertEquals,
   assertFalse,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
+import { createVerificationPersistence } from "./adapters.ts";
 import { createNseUccReconciliationHandler } from "./handler.ts";
 import type { VerificationPersistence } from "./types.ts";
 
@@ -11,6 +12,14 @@ const OPERATION = "10000000-0000-4000-8000-000000000002";
 const TARGET = "10000000-0000-4000-8000-000000000003";
 const CLAIM = "10000000-0000-4000-8000-000000000004";
 const CALL = "10000000-0000-4000-8000-000000000005";
+function persistenceWithClaimResponse(data: unknown) {
+  return createVerificationPersistence({
+    rpc(name: string) {
+      assertEquals(name, "claim_nse_ucc_verification_event");
+      return Promise.resolve({ data, error: null });
+    },
+  } as never);
+}
 function invocation(body = JSON.stringify({ event_outbox_id: EVENT })) {
   return new Request("http://localhost", {
     method: "POST",
@@ -25,6 +34,7 @@ function setup(
   options: {
     match?: boolean;
     failure?: boolean;
+    noEvent?: boolean;
     purpose?:
       | "POST_REGISTRATION_VERIFICATION"
       | "AMBIGUOUS_WRITE_RECONCILIATION";
@@ -34,6 +44,7 @@ function setup(
   const finishes: Array<Parameters<VerificationPersistence["finish"]>[0]> = [];
   let audited = "";
   let transmitted = "";
+  let loadedOperationId = "";
   const persistence: VerificationPersistence = {
     recoverExpired: () => {
       sequence.push("recover");
@@ -41,6 +52,16 @@ function setup(
     },
     claimEvent: () => {
       sequence.push("claim");
+      if (options.noEvent) {
+        return Promise.resolve({
+          event_outbox_id: null,
+          integration_operation_id: null,
+          correlation_id: null,
+          attempt: 0,
+          claim_state: "no_event" as const,
+          claim_token: null,
+        });
+      }
       return Promise.resolve({
         event_outbox_id: EVENT,
         integration_operation_id: OPERATION,
@@ -50,8 +71,9 @@ function setup(
         claim_token: CLAIM,
       });
     },
-    loadSource: () =>
-      Promise.resolve({
+    loadSource: (operationId) => {
+      loadedOperationId = operationId;
+      return Promise.resolve({
         operation_id: OPERATION,
         target_operation_id: TARGET,
         workspace_id: CALL,
@@ -61,7 +83,8 @@ function setup(
           "POST_REGISTRATION_VERIFICATION",
         intended_client_code: "MBUAT0001",
         pan: "AAAAA0000A",
-      }),
+      });
+    },
     start: (input) => {
       sequence.push("request");
       audited = input.requestPayload;
@@ -129,6 +152,7 @@ function setup(
     finishes,
     audited: () => audited,
     transmitted: () => transmitted,
+    loadedOperationId: () => loadedOperationId,
   };
 }
 Deno.test("verification requires explicit event and recovers before claim", async () => {
@@ -157,6 +181,66 @@ Deno.test("verification sends exact audited body without PAN", async () => {
     "result",
     "distribute",
   ]);
+  assertEquals(c.loadedOperationId(), OPERATION);
+});
+Deno.test("valid claimed event does not become requested_event_not_found", async () => {
+  const c = setup();
+  const response = await c.handler(invocation());
+  assertEquals(response.status, 200);
+  assertEquals((await response.json()).data.outcome, "identity_confirmed");
+  assertEquals(c.loadedOperationId(), OPERATION);
+});
+Deno.test("true no_event does not load source or call the NSE gateway", async () => {
+  const c = setup({ noEvent: true });
+  assertEquals((await c.handler(invocation())).status, 404);
+  assertEquals(c.sequence, ["recover", "claim"]);
+  assertEquals(c.loadedOperationId(), "");
+  assertEquals(c.transmitted(), "");
+});
+Deno.test("verification claim unwraps a table RPC row", async () => {
+  const persistence = persistenceWithClaimResponse([{
+    event_outbox_id: EVENT,
+    integration_operation_id: OPERATION,
+    correlation_id: CALL,
+    attempt: 1,
+    claim_state: "newly_claimed",
+    claim_token: CLAIM,
+  }]);
+  assertEquals(
+    await persistence.claimEvent({
+      eventOutboxId: EVENT,
+      maxAttempts: 3,
+      leaseSeconds: 120,
+    }),
+    {
+      event_outbox_id: EVENT,
+      integration_operation_id: OPERATION,
+      correlation_id: CALL,
+      attempt: 1,
+      claim_state: "newly_claimed",
+      claim_token: CLAIM,
+    },
+  );
+});
+Deno.test("verification claim maps empty table results to no_event", async () => {
+  for (const data of [[], null]) {
+    const persistence = persistenceWithClaimResponse(data);
+    assertEquals(
+      await persistence.claimEvent({
+        eventOutboxId: EVENT,
+        maxAttempts: 3,
+        leaseSeconds: 120,
+      }),
+      {
+        event_outbox_id: null,
+        integration_operation_id: null,
+        correlation_id: null,
+        attempt: 0,
+        claim_state: "no_event",
+        claim_token: null,
+      },
+    );
+  }
 });
 Deno.test("no match is distributed without resolving in worker", async () => {
   const c = setup({ match: false, purpose: "AMBIGUOUS_WRITE_RECONCILIATION" });

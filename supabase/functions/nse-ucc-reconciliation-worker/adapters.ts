@@ -2,7 +2,11 @@ import { NseClient, NseClientError } from "../_shared/nse/nse_client.ts";
 import type { NseConfig } from "../_shared/nse/nse_types.ts";
 import { NSE_CLIENT_MASTER_ENDPOINT } from "../_shared/nse/nse_ucc_verification.ts";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import type { VerificationGateway, VerificationPersistence } from "./types.ts";
+import type {
+  ClaimedVerificationEvent,
+  VerificationGateway,
+  VerificationPersistence,
+} from "./types.ts";
 
 function required<T>(data: T | null, error: unknown): T {
   if (error || data == null) {
@@ -10,6 +14,54 @@ function required<T>(data: T | null, error: unknown): T {
   }
   return data;
 }
+
+function noVerificationEvent(): ClaimedVerificationEvent {
+  return {
+    event_outbox_id: null,
+    integration_operation_id: null,
+    correlation_id: null,
+    attempt: 0,
+    claim_state: "no_event",
+    claim_token: null,
+  };
+}
+
+function unwrapClaimedVerificationEvent(
+  data: unknown,
+): ClaimedVerificationEvent {
+  if (data == null || (Array.isArray(data) && data.length === 0)) {
+    return noVerificationEvent();
+  }
+  if (!Array.isArray(data)) {
+    throw new Error("verification_claim_response_invalid");
+  }
+  const row = data[0];
+  if (row == null || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("verification_claim_response_invalid");
+  }
+  const claim = row as Partial<ClaimedVerificationEvent>;
+  if (claim.claim_state === "no_event") return noVerificationEvent();
+  if (
+    (claim.claim_state !== "newly_claimed" &&
+      claim.claim_state !== "safe_retry_claimed") ||
+    typeof claim.event_outbox_id !== "string" ||
+    typeof claim.integration_operation_id !== "string" ||
+    typeof claim.correlation_id !== "string" ||
+    typeof claim.claim_token !== "string" ||
+    typeof claim.attempt !== "number"
+  ) {
+    throw new Error("verification_claim_response_invalid");
+  }
+  return {
+    event_outbox_id: claim.event_outbox_id,
+    integration_operation_id: claim.integration_operation_id,
+    correlation_id: claim.correlation_id,
+    attempt: claim.attempt,
+    claim_state: claim.claim_state,
+    claim_token: claim.claim_token,
+  };
+}
+
 export function createVerificationPersistence(
   client: SupabaseClient,
 ): VerificationPersistence {
@@ -33,7 +85,10 @@ export function createVerificationPersistence(
           p_lease_seconds: input.leaseSeconds,
         },
       );
-      return required(data, error);
+      if (error != null) {
+        throw new Error("verification_persistence_unavailable");
+      }
+      return unwrapClaimedVerificationEvent(data);
     },
     async loadSource(operationId) {
       const { data, error } = await client.rpc(
