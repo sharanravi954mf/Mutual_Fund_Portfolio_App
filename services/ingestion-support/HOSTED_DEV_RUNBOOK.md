@@ -234,3 +234,93 @@ application flow if it is no longer needed. Synthetic database or Storage
 records must be cleaned only through an approved application/data-retention
 path that preserves immutable audit lineage—never by ad hoc destructive SQL.
 Record any retained synthetic IDs in the issue so later cleanup is explicit.
+
+
+---
+
+## Generic outbox dispatcher
+
+The Oracle-hosted generic dispatcher is intentionally separate from the public
+ingestion API. It exposes no port and is not part of the default Compose
+profile.
+
+The initial routing table enables only the existing NSE UCC registration and
+Client Master verification workers. Adding a future API requires a reviewed
+route; the dispatcher itself must not contain NSE business rules.
+
+### Host secrets
+
+Add these values only to the existing root-owned mode `0600` Hosted Dev
+`.env` file:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NSE_UCC_WORKER_TOKEN`
+- `NSE_UCC_RECONCILIATION_WORKER_TOKEN`
+
+The two worker-token values must match their Hosted Dev Edge Function secrets.
+Never print any of these values or place them on a command line.
+
+Keep these safe defaults until live dispatch is explicitly approved:
+
+- `OUTBOX_DISPATCH_DRY_RUN=true`
+- `OUTBOX_POLL_INTERVAL_SECONDS=5`
+- `OUTBOX_RETRY_DELAY_SECONDS=30`
+- `OUTBOX_BATCH_SIZE=10`
+- `OUTBOX_HTTP_TIMEOUT_SECONDS=45`
+
+### Build and validate without dispatching NSE work
+
+The service is behind the `outbox-dispatch` profile. Normal Hosted Dev stack
+startup does not start it.
+
+Build its runtime image:
+
+```sh
+docker compose --env-file .env \
+  -f compose.yaml -f compose.hosted.yaml \
+  --profile outbox-dispatch build --pull outbox-dispatcher
+```
+
+Validate configuration without starting the polling loop:
+
+```sh
+docker compose --env-file .env \
+  -f compose.yaml -f compose.hosted.yaml \
+  --profile outbox-dispatch run --rm outbox-dispatcher \
+  python -c "from dispatcher import Settings,load_routes; s=Settings.from_env(); load_routes(s.routes_file); print('dispatcher-config-ok')"
+```
+
+Run the unit-test image independently of Hosted Dev credentials:
+
+```sh
+docker build --target test -t moneybowl-outbox-dispatcher-test ../outbox-dispatcher
+docker run --rm moneybowl-outbox-dispatcher-test
+```
+
+After the database migration is present, the dispatcher may be started in
+dry-run mode for read-only observation:
+
+```sh
+docker compose --env-file .env \
+  -f compose.yaml -f compose.hosted.yaml \
+  --profile outbox-dispatch up -d outbox-dispatcher
+```
+
+Confirm `dispatcher_started` reports `"dry_run":true`. Dry-run may read only
+the narrow dispatch metadata feed; it does not invoke workers.
+
+### Live activation
+
+Setting `OUTBOX_DISPATCH_DRY_RUN=false` makes the dispatcher invoke workers.
+For NSE routes, that can cause actual UAT NSE requests whenever an eligible
+outbox event exists. Do not make this change merely to test Docker or
+connectivity.
+
+Live activation therefore requires explicit approval after the local SQL
+regression, dispatcher unit tests, Compose validation, dry-run observation, and
+a read-only review of queued Hosted Dev events.
+
+The dispatcher never updates `event_outbox` itself. Worker claim/lease RPCs
+remain the ownership fence. If the dispatcher is stopped, events stay durable
+and can be resumed later.

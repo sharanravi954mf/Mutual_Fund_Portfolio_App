@@ -1,0 +1,10 @@
+{
+  "integration.nse.ucc_registration_requested": {
+    "worker_slug": "nse-ucc-registration-worker",
+    "token_env": "NSE_UCC_WORKER_TOKEN"
+  },
+  "integration.nse.ucc_verification_requested": {
+    "worker_slug": "nse-ucc-reconciliation-worker",
+    "token_env": "NSE_UCC_RECONCILIATION_WORKER_TOKEN"
+  }
+}
