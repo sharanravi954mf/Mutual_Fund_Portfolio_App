@@ -19,6 +19,10 @@ export type VerificationWorkerDependencies = {
 };
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const retryableReadHttpStatuses = new Set([408, 429, 500, 502, 503, 504]);
+function isRetryableReadHttpFailure(status: number) {
+  return retryableReadHttpStatuses.has(status);
+}
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -171,6 +175,8 @@ export function createNseUccReconciliationHandler(
       : observation.exactIdentityMatch
       ? "SUCCESS" as const
       : "BUSINESS_FAILURE" as const;
+    const retryableHttpFailure = normalizedOutcome === "HTTP_FAILURE" &&
+      isRetryableReadHttpFailure(result.status);
     await twice(() =>
       deps.persistence.finish({
         eventOutboxId: eventId,
@@ -193,6 +199,18 @@ export function createNseUccReconciliationHandler(
         maxAttempts,
       })
     );
+    if (retryableHttpFailure) {
+      const retryAvailable = event.attempt < maxAttempts;
+      return json({
+        data: {
+          outcome: retryAvailable
+            ? "safe_read_retry_available"
+            : "verification_http_attempts_exhausted",
+          verification_purpose: source.verification_purpose,
+          exact_identity_match: false,
+        },
+      }, retryAvailable ? 202 : 502);
+    }
     await deps.persistence.distribute(
       source.target_operation_id,
       source.operation_id,

@@ -34,6 +34,9 @@ function setup(
   options: {
     match?: boolean;
     failure?: boolean;
+    httpStatus?: number;
+    attempt?: number;
+    maxAttempts?: number;
     noEvent?: boolean;
     purpose?:
       | "POST_REGISTRATION_VERIFICATION"
@@ -45,6 +48,7 @@ function setup(
   let audited = "";
   let transmitted = "";
   let loadedOperationId = "";
+  const attempt = options.attempt ?? 1;
   const persistence: VerificationPersistence = {
     recoverExpired: () => {
       sequence.push("recover");
@@ -66,8 +70,10 @@ function setup(
         event_outbox_id: EVENT,
         integration_operation_id: OPERATION,
         correlation_id: CALL,
-        attempt: 1,
-        claim_state: "newly_claimed",
+        attempt,
+        claim_state: attempt === 1
+          ? "newly_claimed" as const
+          : "safe_retry_claimed" as const,
         claim_token: CLAIM,
       });
     },
@@ -122,7 +128,7 @@ function setup(
         }
         return Promise.resolve({
           kind: "response" as const,
-          status: 200,
+          status: options.httpStatus ?? 200,
           contentType: "application/json",
           safeHeaderMetadata: { content_type: "application/json" },
           rawBody: JSON.stringify({
@@ -135,7 +141,7 @@ function setup(
         });
       },
     },
-    maxAttempts: 3,
+    maxAttempts: options.maxAttempts ?? 3,
     now: (() => {
       const values = [
         new Date("2026-09-02T00:00:00Z"),
@@ -260,4 +266,44 @@ Deno.test("read gateway failure is truthful retryable transport failure", async 
     "transport",
     "result",
   ]);
+});
+
+for (const status of [408, 429, 500, 502, 503, 504]) {
+  Deno.test(`HTTP ${status} is a retryable read failure while attempts remain`, async () => {
+    const c = setup({ httpStatus: status, attempt: 1, maxAttempts: 3 });
+    const response = await c.handler(invocation());
+    assertEquals(response.status, 202);
+    assertEquals(
+      (await response.json()).data.outcome,
+      "safe_read_retry_available",
+    );
+    assertEquals(c.finishes[0].normalizedOutcome, "HTTP_FAILURE");
+    assertEquals(c.sequence.at(-1), "result");
+  });
+}
+
+for (const status of [400, 403]) {
+  Deno.test(`HTTP ${status} remains a terminal verification HTTP failure`, async () => {
+    const c = setup({ httpStatus: status, attempt: 1, maxAttempts: 3 });
+    const response = await c.handler(invocation());
+    assertEquals(response.status, 502);
+    assertEquals(
+      (await response.json()).data.outcome,
+      "identity_not_confirmed",
+    );
+    assertEquals(c.finishes[0].normalizedOutcome, "HTTP_FAILURE");
+    assertEquals(c.sequence.at(-1), "distribute");
+  });
+}
+
+Deno.test("retryable HTTP failure at the attempt limit is exhausted without distribution", async () => {
+  const c = setup({ httpStatus: 503, attempt: 3, maxAttempts: 3 });
+  const response = await c.handler(invocation());
+  assertEquals(response.status, 502);
+  assertEquals(
+    (await response.json()).data.outcome,
+    "verification_http_attempts_exhausted",
+  );
+  assertEquals(c.finishes[0].normalizedOutcome, "HTTP_FAILURE");
+  assertEquals(c.sequence.at(-1), "result");
 });

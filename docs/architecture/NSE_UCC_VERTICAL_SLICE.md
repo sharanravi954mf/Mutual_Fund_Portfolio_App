@@ -93,7 +93,7 @@ PREPARED -> QUEUED transactionally. QUEUED or retryable SUBMISSION_FAILED -> SUB
 - A genuine mapper contract error is VALIDATION_FAILED. A source/RPC infrastructure failure occurs before transport and remains recoverable under the bounded outbox policy; it does not permanently invalidate the investor.
 - HTTP 200 + REG_FAILED is BUSINESS_FAILED.
 - HTTP 400 and 403 are definitive HTTP_FAILED.
-- HTTP 500/503 and other possibly mutating provider failures are RECONCILIATION_REQUIRED.
+- For CLIENTCOMMON183, HTTP 500/503 and other possibly mutating provider failures are RECONCILIATION_REQUIRED.
 - A proven NOT_SENT failure on attempt 1 becomes SUBMISSION_FAILED with retry_allowed=true. Attempt 2 exhausts the budget and leaves retry_allowed=false.
 - Safe retry start clears completed_at, native status/remark, and retry state; the account becomes REGISTRATION_PENDING.
 - REG_SUCCESS requires a nonblank returned client_code exactly matching the submitted client_code. Mismatch preserves evidence and requires reconciliation without replacing the existing external_account_id.
@@ -110,7 +110,7 @@ Safe header metadata is allowlisted: request content_type/user_agent/accept and 
 
 The existing event_outbox remains the only queue. Claiming uses FOR UPDATE SKIP LOCKED, fenced claim tokens, leases, retry counters, and max attempts. For CLIENTCOMMON183, an expired claim with no REQUEST evidence is proven NOT_SENT and becomes bounded retryable SUBMISSION_FAILED; an expired SUBMITTING claim with REQUEST but no RESULT receives immutable AMBIGUOUS evidence and becomes RECONCILIATION_REQUIRED.
 
-Client Master is READ_ONLY and has separate truthful recovery. An expired QUEUED claim with no REQUEST is safely requeued within the bounded budget. An expired SUBMITTING read with REQUEST but no RESULT receives an immutable TRANSPORT_FAILURE RESULT that closes the abandoned call; a retry uses a new call_id and preserves the original pair. A timeout/network failure with no usable response is also TRANSPORT_FAILURE, not write-side ambiguity, and is safely retryable only while attempts remain.
+Client Master is READ_ONLY and has separate truthful recovery. An expired QUEUED claim with no REQUEST is safely requeued within the bounded budget. An expired SUBMITTING read with REQUEST but no RESULT receives an immutable TRANSPORT_FAILURE RESULT that closes the abandoned call; a retry uses a new call_id and preserves the original pair. A timeout/network failure with no usable response is also TRANSPORT_FAILURE, not write-side ambiguity, and is safely retryable only while attempts remain. Client Master HTTP 408, 429, 500, 502, 503, and 504 are likewise bounded retryable read failures; other non-2xx results remain terminal HTTP_FAILED.
 
 ## Response distribution
 

@@ -370,4 +370,198 @@ BEGIN
  EXCEPTION WHEN OTHERS THEN IF strpos(SQLERRM,'integration_interaction_scope_mismatch')=0 THEN RAISE; END IF; END;
 END $$;
 
+
+-- Retryable Client Master HTTP failures are READ_ONLY bounded retries, not terminal verification outcomes.
+DO $$
+DECLARE
+  v_target public.integration_operations;
+  v_verification public.integration_operations;
+  v_event public.event_outbox;
+  v_claim record;
+  v_request public.integration_api_interactions;
+  v_result public.integration_api_interactions;
+  v_http_status pg_catalog.int4;
+  v_headers pg_catalog.jsonb := '{"content_type":"application/json","user_agent":"MoneyBowl-UAT-Test","accept":"application/json"}';
+  v_result_headers pg_catalog.jsonb := '{"content_type":"application/json","x_request_id":"synthetic-request"}';
+  v_started pg_catalog.timestamptz := '2026-09-04T12:00:00Z';
+  v_completed pg_catalog.timestamptz := '2026-09-04T12:00:01Z';
+BEGIN
+  SELECT * INTO v_target FROM public.integration_operations
+  WHERE id = 'c0070000-0000-4000-8000-000000000002';
+  IF v_target.id IS NULL OR v_target.state <> 'SUCCESS' THEN
+    RAISE EXCEPTION 'retryable_http_fixture_target_missing';
+  END IF;
+
+  FOREACH v_http_status IN ARRAY ARRAY[408, 429, 500, 502, 503, 504]::pg_catalog.int4[] LOOP
+    SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
+      v_target.id, 'POST_REGISTRATION_VERIFICATION'
+    );
+    SELECT * INTO v_event FROM public.event_outbox
+    WHERE entity_id = v_verification.id
+      AND event_type = 'integration.nse.ucc_verification_requested';
+    SELECT * INTO v_claim FROM public.claim_nse_ucc_verification_event(v_event.id, 3, 120);
+    SELECT * INTO v_request FROM public.start_nse_ucc_verification(
+      v_event.id, v_claim.claim_token, pg_catalog.gen_random_uuid(),
+      '{"client_code":"MBUAT0002","PAN":"","from_date":"","to_date":""}',
+      v_headers, v_started
+    );
+    PERFORM public.finish_nse_ucc_verification(
+      v_event.id, v_claim.claim_token, v_request.call_id, '{}', 'application/json',
+      v_result_headers, v_http_status, NULL, 'client_master_http_failure',
+      'HTTP_FAILURE', 'client_master_http_failure', false, false, v_completed, 9, 3
+    );
+    SELECT * INTO v_verification FROM public.integration_operations WHERE id = v_verification.id;
+    SELECT * INTO v_event FROM public.event_outbox WHERE id = v_event.id;
+    IF v_verification.state <> 'SUBMISSION_FAILED'
+       OR NOT v_verification.retry_allowed
+       OR v_verification.ambiguous_outcome
+       OR v_verification.reconciliation_required
+       OR v_verification.safety_class <> 'READ_ONLY'
+       OR v_event.status <> 'failed'
+       OR v_event.error_message <> 'verification_read_retryable'
+       OR (SELECT count(*) FROM public.integration_api_interactions WHERE call_id = v_request.call_id) <> 2 THEN
+      RAISE EXCEPTION 'retryable_http_read_policy_invalid:%', v_http_status;
+    END IF;
+
+    SELECT * INTO v_claim FROM public.claim_nse_ucc_verification_event(v_event.id, 3, 120);
+    IF v_claim.attempt <> 2 OR v_claim.claim_state <> 'safe_retry_claimed' THEN
+      RAISE EXCEPTION 'retryable_http_read_claim_invalid:%', v_http_status;
+    END IF;
+    SELECT * INTO v_request FROM public.start_nse_ucc_verification(
+      v_event.id, v_claim.claim_token, pg_catalog.gen_random_uuid(),
+      '{"client_code":"MBUAT0002","PAN":"","from_date":"","to_date":""}',
+      v_headers, v_started + pg_catalog.make_interval(secs => v_http_status)
+    );
+    PERFORM public.finish_nse_ucc_verification(
+      v_event.id, v_claim.claim_token, v_request.call_id, '{}', 'application/json',
+      v_result_headers, 400, NULL, 'client_master_http_failure',
+      'HTTP_FAILURE', 'client_master_http_failure', false, false,
+      v_completed + pg_catalog.make_interval(secs => v_http_status), 9, 3
+    );
+    SELECT * INTO v_verification FROM public.integration_operations WHERE id = v_verification.id;
+    IF v_verification.state <> 'HTTP_FAILED' OR v_verification.retry_allowed
+       OR (SELECT count(DISTINCT call_id) FROM public.integration_api_interactions
+           WHERE integration_operation_id = v_verification.id AND phase = 'REQUEST') <> 2 THEN
+      RAISE EXCEPTION 'retryable_http_evidence_history_invalid:%', v_http_status;
+    END IF;
+  END LOOP;
+
+  FOREACH v_http_status IN ARRAY ARRAY[400, 403]::pg_catalog.int4[] LOOP
+    SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
+      v_target.id, 'POST_REGISTRATION_VERIFICATION'
+    );
+    SELECT * INTO v_event FROM public.event_outbox
+    WHERE entity_id = v_verification.id
+      AND event_type = 'integration.nse.ucc_verification_requested';
+    SELECT * INTO v_claim FROM public.claim_nse_ucc_verification_event(v_event.id, 3, 120);
+    SELECT * INTO v_request FROM public.start_nse_ucc_verification(
+      v_event.id, v_claim.claim_token, pg_catalog.gen_random_uuid(),
+      '{"client_code":"MBUAT0002","PAN":"","from_date":"","to_date":""}',
+      v_headers, v_started
+    );
+    PERFORM public.finish_nse_ucc_verification(
+      v_event.id, v_claim.claim_token, v_request.call_id, '{}', 'application/json',
+      v_result_headers, v_http_status, NULL, 'client_master_http_failure',
+      'HTTP_FAILURE', 'client_master_http_failure', false, false, v_completed, 9, 3
+    );
+    SELECT * INTO v_verification FROM public.integration_operations WHERE id = v_verification.id;
+    SELECT * INTO v_event FROM public.event_outbox WHERE id = v_event.id;
+    IF v_verification.state <> 'HTTP_FAILED' OR v_verification.retry_allowed
+       OR v_verification.ambiguous_outcome OR v_verification.reconciliation_required
+       OR v_event.status <> 'completed' THEN
+      RAISE EXCEPTION 'definitive_http_read_policy_invalid:%', v_http_status;
+    END IF;
+  END LOOP;
+
+  -- A retryable status is exhausted only when the bounded retry budget is spent.
+  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
+    v_target.id, 'POST_REGISTRATION_VERIFICATION'
+  );
+  SELECT * INTO v_event FROM public.event_outbox
+  WHERE entity_id = v_verification.id AND event_type = 'integration.nse.ucc_verification_requested';
+  SELECT * INTO v_claim FROM public.claim_nse_ucc_verification_event(v_event.id, 2, 120);
+  SELECT * INTO v_request FROM public.start_nse_ucc_verification(
+    v_event.id, v_claim.claim_token, pg_catalog.gen_random_uuid(),
+    '{"client_code":"MBUAT0002","PAN":"","from_date":"","to_date":""}', v_headers, v_started
+  );
+  PERFORM public.finish_nse_ucc_verification(
+    v_event.id, v_claim.claim_token, v_request.call_id, '{}', 'application/json',
+    v_result_headers, 503, NULL, 'client_master_http_failure', 'HTTP_FAILURE',
+    'client_master_http_failure', false, false, v_completed, 9, 2
+  );
+  SELECT * INTO v_claim FROM public.claim_nse_ucc_verification_event(v_event.id, 2, 120);
+  SELECT * INTO v_request FROM public.start_nse_ucc_verification(
+    v_event.id, v_claim.claim_token, pg_catalog.gen_random_uuid(),
+    '{"client_code":"MBUAT0002","PAN":"","from_date":"","to_date":""}', v_headers,
+    v_started + interval '1 minute'
+  );
+  PERFORM public.finish_nse_ucc_verification(
+    v_event.id, v_claim.claim_token, v_request.call_id, '{}', 'application/json',
+    v_result_headers, 503, NULL, 'client_master_http_failure', 'HTTP_FAILURE',
+    'client_master_http_failure', false, false, v_completed + interval '1 minute', 9, 2
+  );
+  SELECT * INTO v_verification FROM public.integration_operations WHERE id = v_verification.id;
+  SELECT * INTO v_event FROM public.event_outbox WHERE id = v_event.id;
+  IF v_verification.state <> 'SUBMISSION_FAILED' OR v_verification.retry_allowed
+     OR v_event.status <> 'failed' OR v_event.error_message <> 'verification_read_attempts_exhausted'
+     OR v_verification.ambiguous_outcome OR v_verification.reconciliation_required THEN
+    RAISE EXCEPTION 'retryable_http_read_exhaustion_invalid';
+  END IF;
+
+  -- Historical terminalized retryable HTTP evidence is reopened only by the explicit service RPC.
+  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
+    v_target.id, 'POST_REGISTRATION_VERIFICATION'
+  );
+  SELECT * INTO v_event FROM public.event_outbox
+  WHERE entity_id = v_verification.id AND event_type = 'integration.nse.ucc_verification_requested';
+  SELECT * INTO v_claim FROM public.claim_nse_ucc_verification_event(v_event.id, 3, 120);
+  SELECT * INTO v_request FROM public.start_nse_ucc_verification(
+    v_event.id, v_claim.claim_token, pg_catalog.gen_random_uuid(),
+    '{"client_code":"MBUAT0002","PAN":"","from_date":"","to_date":""}', v_headers, v_started
+  );
+  UPDATE public.integration_operations SET state = 'HTTP_FAILED', retry_allowed = false,
+    native_business_status = NULL, business_remark_category = 'client_master_http_failure'
+  WHERE id = v_verification.id;
+  INSERT INTO public.integration_api_interactions(
+    workspace_id, integration_operation_id, integration_key, integration_environment, category,
+    safety_class, operation_type, api_key, contract_version, endpoint_path, http_method,
+    call_id, phase, attempt_number, correlation_id, payload_encryption_key_reference,
+    payload_encryption_key_version, started_at, response_payload_ciphertext,
+    response_header_metadata, response_content_type, response_bytes, response_hash,
+    http_status, http_success, completed_at, elapsed_ms, normalized_outcome, error_category,
+    timeout_occurred, network_failure, ambiguous_outcome, reconciliation_required
+  ) VALUES (
+    v_request.workspace_id, v_request.integration_operation_id, v_request.integration_key,
+    v_request.integration_environment, v_request.category, v_request.safety_class,
+    v_request.operation_type, v_request.api_key, v_request.contract_version,
+    v_request.endpoint_path, v_request.http_method, v_request.call_id, 'RESULT',
+    v_request.attempt_number, v_request.correlation_id, 'integration_payload_encryption_key_v1', 1,
+    v_request.started_at,
+    extensions.pgp_sym_encrypt('{}', public.integration_payload_encryption_key('integration_payload_encryption_key_v1'), 'cipher-algo=aes256, compress-algo=0'),
+    v_result_headers, 'application/json', 2, extensions.digest('{}'::pg_catalog.bytea, 'sha256'),
+    503, false, v_completed, 9, 'HTTP_FAILURE', 'client_master_http_failure',
+    false, false, false, false
+  ) RETURNING * INTO v_result;
+  UPDATE public.integration_operations SET last_interaction_id = v_result.id
+  WHERE id = v_verification.id;
+  UPDATE public.event_outbox SET status = 'completed', retry_count = 2,
+    claimed_by = NULL, claim_token = NULL, claim_expires_at = NULL
+  WHERE id = v_event.id;
+  BEGIN
+    UPDATE public.integration_operations SET state = 'SUBMISSION_FAILED', retry_allowed = true
+    WHERE id = v_verification.id;
+    RAISE EXCEPTION 'direct_historical_http_reopen_allowed';
+  EXCEPTION WHEN OTHERS THEN
+    IF strpos(SQLERRM, 'invalid_integration_operation_transition') = 0 THEN RAISE; END IF;
+  END;
+  SELECT * INTO v_verification FROM public.reopen_nse_ucc_retryable_http_verification(v_event.id, 3);
+  SELECT * INTO v_event FROM public.event_outbox WHERE id = v_event.id;
+  IF v_verification.state <> 'SUBMISSION_FAILED' OR NOT v_verification.retry_allowed
+     OR v_event.status <> 'failed' OR v_event.error_message <> 'verification_read_retryable'
+     OR (SELECT count(*) FROM public.integration_api_interactions
+         WHERE integration_operation_id = v_verification.id) <> 2 THEN
+    RAISE EXCEPTION 'historical_retryable_http_reopen_invalid';
+  END IF;
+END $$;
+
 ROLLBACK;
