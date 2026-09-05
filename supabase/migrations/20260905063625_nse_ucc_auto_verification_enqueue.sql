@@ -49,8 +49,11 @@ BEGIN
   FROM public.integration_operations verification
   WHERE verification.reconciliation_target_operation_id = v_target.id
     AND verification.operation_purpose = p_verification_purpose
-    AND (verification.state IN ('PREPARED', 'QUEUED', 'SUBMITTING')
-      OR (verification.state = 'SUBMISSION_FAILED' AND verification.retry_allowed))
+    AND (
+      p_verification_purpose = 'POST_REGISTRATION_VERIFICATION'
+      OR verification.state IN ('PREPARED', 'QUEUED', 'SUBMITTING')
+      OR (verification.state = 'SUBMISSION_FAILED' AND verification.retry_allowed)
+    )
   ORDER BY verification.created_at, verification.id
   LIMIT 1
   FOR UPDATE;

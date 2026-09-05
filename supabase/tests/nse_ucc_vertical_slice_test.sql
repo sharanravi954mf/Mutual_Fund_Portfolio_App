@@ -9,7 +9,8 @@ INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_d
  ('c0010000-0000-4000-8000-000000000001','authenticated','authenticated','ucc-one@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
  ('c0010000-0000-4000-8000-000000000002','authenticated','authenticated','ucc-two@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
  ('c0010000-0000-4000-8000-000000000003','authenticated','authenticated','ucc-three@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
- ('c0010000-0000-4000-8000-000000000004','authenticated','authenticated','ucc-four@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now());
+ ('c0010000-0000-4000-8000-000000000004','authenticated','authenticated','ucc-four@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
+ ('c0010000-0000-4000-8000-000000000005','authenticated','authenticated','ucc-five@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now());
 UPDATE public.profiles SET
  id = ('c0020000-0000-4000-8000-' || right(user_id::text, 12))::uuid,
  role='investor', full_name='MONEYBOWL SYNTHETIC',
@@ -21,7 +22,7 @@ DELETE FROM public.workspace_memberships WHERE profile_id::text LIKE 'c0020000-0
 INSERT INTO public.workspace_memberships (workspace_id,profile_id,role,status)
 SELECT 'c0030000-0000-4000-8000-000000000001',
  ('c0020000-0000-4000-8000-00000000000' || suffix)::uuid,'investor','active'
-FROM unnest(ARRAY['1','2','3','4']) suffix;
+FROM unnest(ARRAY['1','2','3','4','5']) suffix;
 
 INSERT INTO public.profile_pan_records (id,profile_id,pan_ciphertext,pan_lookup_hmac,masked_pan,source,source_system,status,verified_at) VALUES
  ('c0040000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001',
@@ -38,6 +39,23 @@ INSERT INTO public.investor_registration_profiles (workspace_id,investor_profile
 INSERT INTO public.investor_addresses (workspace_id,investor_profile_id,address_type,address_line_1,city,region,postal_code,country,is_current) VALUES
  ('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001','domestic','SYNTHETIC UAT ADDRESS','UATCITY','KARNATAKA','000000','INDIA',true);
 SELECT 1 FROM public.set_investor_bank_account('c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000001','savings','TESTACCOUNT01','TEST0000000',NULL,'MONEYBOWL SYNTHETIC','verified',true);
+INSERT INTO public.integration_accounts (id,workspace_id,investor_profile_id,integration_key,integration_environment,state,integration_metadata) VALUES ('c0060000-0000-4000-8000-000000000005','c0030000-0000-4000-8000-000000000001','c0020000-0000-4000-8000-000000000005','NSE_INVEST','UAT','REGISTRATION_PENDING','{}');
+
+CREATE FUNCTION pg_temp.new_successful_ucc_target() RETURNS uuid LANGUAGE plpgsql AS $$
+DECLARE
+ v_id uuid := pg_catalog.gen_random_uuid(); v_workspace_id uuid; v_event_id uuid; v_claim record; v_call_id uuid := pg_catalog.gen_random_uuid();
+ v_headers jsonb := '{"content_type":"application/json","user_agent":"MoneyBowl-UAT-Test","accept":"application/json"}';
+BEGIN
+ SELECT workspace_id INTO v_workspace_id FROM public.integration_accounts WHERE id='c0060000-0000-4000-8000-000000000005';
+ INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state)
+ VALUES (v_id,v_workspace_id,'c0060000-0000-4000-8000-000000000005','NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED');
+ INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type)
+ VALUES ('integration.nse.ucc_registration_requested','{}','pending',v_id,'integration_operation') RETURNING id INTO v_event_id;
+ SELECT * INTO v_claim FROM public.claim_nse_ucc_registration_event(v_event_id,2,120);
+ PERFORM public.start_nse_ucc_submission(v_event_id,v_claim.claim_token,v_call_id,'{"reg_details":[{"client_code":"MBUAT0099","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_headers,now());
+ PERFORM public.finish_nse_ucc_submission(v_event_id,v_claim.claim_token,v_call_id,'{"reg_details":[{"client_code":"MBUAT0099","reg_id":"SYNTHETIC","reg_status":"REG_SUCCESS","reg_remark":""}]}','application/json','{"content_type":"application/json"}',200,now(),1,'REG_SUCCESS','none','SUCCESS',NULL,false,false,'MBUAT0099','SYNTHETIC',2);
+ RETURN v_id;
+END $$;
 
 DO $$
 DECLARE
@@ -181,7 +199,17 @@ BEGIN
   RAISE EXCEPTION 'post_registration_verification_invalid';
  END IF;
 
- -- An immediate no-match is evidence, but it must not undo a successful registration.
+ -- A terminal post-registration verification is reused by both replay and direct preparation.
+ PERFORM public.finish_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","reg_id":"SYNTHETIC","reg_status":"REG_SUCCESS","reg_remark":""}]}','application/json',v_response_headers,200,v_completed,20,'REG_SUCCESS','none','SUCCESS',NULL,false,false,'MBUAT0002','SYNTHETIC',2);
+ SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation2.id,'POST_REGISTRATION_VERIFICATION');
+ IF v_verification.id <> v_verification_event.entity_id
+    OR (SELECT count(*) FROM public.integration_operations verification WHERE verification.reconciliation_target_operation_id=v_operation2.id AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION') <> 1
+    OR (SELECT count(*) FROM public.event_outbox event WHERE event.entity_id=v_verification.id AND event.event_type='integration.nse.ucc_verification_requested') <> 1 THEN
+  RAISE EXCEPTION 'terminal_post_registration_verification_replay_duplicated';
+ END IF;
+
+ -- An immediate no-match on another successful registration is evidence, but it must not undo registration.
+ v_operation2.id := pg_temp.new_successful_ucc_target();
  SELECT count(*) INTO v_count FROM public.event_outbox WHERE event_type='integration.nse.ucc_registration_requested';
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation2.id,'POST_REGISTRATION_VERIFICATION');
  SELECT * INTO v_verification_event FROM public.event_outbox WHERE entity_id=v_verification.id;
@@ -195,7 +223,7 @@ BEGIN
   'ucc_not_found','BUSINESS_FAILURE',NULL,false,false,v_completed,9,3);
  PERFORM public.distribute_nse_ucc_verification_result(v_operation2.id,v_verification.id);
  SELECT * INTO v_operation2 FROM public.integration_operations WHERE id=v_operation2.id;
- SELECT * INTO v_account2 FROM public.integration_accounts WHERE id=v_account2.id;
+ SELECT * INTO v_account2 FROM public.integration_accounts WHERE id=v_operation2.integration_account_id;
  IF v_operation2.state<>'SUCCESS' OR v_account2.state<>'REGISTERED'
     OR v_account2.current_registration_status<>'REG_SUCCESS'
     OR v_account2.integration_metadata->'nse_registration'->>'client_master_verification_status'<>'NOT_CONFIRMED'
@@ -203,6 +231,7 @@ BEGIN
   RAISE EXCEPTION 'post_registration_no_match_changed_registration';
  END IF;
 
+ SELECT * INTO v_account2 FROM public.integration_accounts WHERE id='c0060000-0000-4000-8000-000000000002';
  INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000003',v_account2.workspace_id,v_account2.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation2;
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation2.id,'integration_operation') RETURNING * INTO v_event2; SELECT * INTO v_claim2 FROM public.claim_nse_ucc_registration_event(v_event2.id,2,120);
  PERFORM public.start_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000013','{"reg_details":[{"client_code":"MBUAT0002"}]}','application/json',v_request_headers,v_started);
@@ -339,8 +368,9 @@ BEGIN
  IF (SELECT count(*) FROM public.integration_api_interactions WHERE integration_operation_id=v_verification.id)<>2 THEN RAISE EXCEPTION 'verification_evidence_pair_missing'; END IF;
 
  -- Client Master read crash recovery: before REQUEST is proven not sent.
+ v_operation2.id := pg_temp.new_successful_ucc_target();
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
-  'c0070000-0000-4000-8000-000000000002','POST_REGISTRATION_VERIFICATION');
+  v_operation2.id,'POST_REGISTRATION_VERIFICATION');
  SELECT * INTO v_verification_event FROM public.event_outbox WHERE entity_id=v_verification.id;
  SELECT * INTO v_verification_claim FROM public.claim_nse_ucc_verification_event(v_verification_event.id,3,120);
  UPDATE public.event_outbox SET claim_expires_at=now()-interval '1 second' WHERE id=v_verification_event.id;
@@ -364,11 +394,12 @@ BEGIN
   '{"response_status":"S","report_data":[]}','application/json',v_response_headers,200,'S',
   'ucc_not_found','BUSINESS_FAILURE',NULL,false,false,v_completed,9,3);
  PERFORM public.distribute_nse_ucc_verification_result(
-  'c0070000-0000-4000-8000-000000000002',v_verification.id);
+  v_operation2.id,v_verification.id);
 
  -- After REQUEST, preserve the abandoned attempt with TRANSPORT_FAILURE, then use a new call_id.
+ v_operation2.id := pg_temp.new_successful_ucc_target();
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
-  'c0070000-0000-4000-8000-000000000002','POST_REGISTRATION_VERIFICATION');
+  v_operation2.id,'POST_REGISTRATION_VERIFICATION');
  SELECT * INTO v_verification_event FROM public.event_outbox WHERE entity_id=v_verification.id;
  SELECT * INTO v_verification_claim FROM public.claim_nse_ucc_verification_event(v_verification_event.id,3,120);
  SELECT * INTO v_request FROM public.start_nse_ucc_verification(
@@ -395,7 +426,7 @@ BEGIN
   '{"response_status":"S","report_data":[]}','application/json',v_response_headers,200,'S',
   'ucc_not_found','BUSINESS_FAILURE',NULL,false,false,v_completed+interval '1 minute',9,3);
  PERFORM public.distribute_nse_ucc_verification_result(
-  'c0070000-0000-4000-8000-000000000002',v_verification.id);
+  v_operation2.id,v_verification.id);
 
  -- Scope trigger rejects an interaction linked to a different workspace/context.
  BEGIN
@@ -421,13 +452,8 @@ DECLARE
   v_started pg_catalog.timestamptz := '2026-09-04T12:00:00Z';
   v_completed pg_catalog.timestamptz := '2026-09-04T12:00:01Z';
 BEGIN
-  SELECT * INTO v_target FROM public.integration_operations
-  WHERE id = 'c0070000-0000-4000-8000-000000000002';
-  IF v_target.id IS NULL OR v_target.state <> 'SUCCESS' THEN
-    RAISE EXCEPTION 'retryable_http_fixture_target_missing';
-  END IF;
-
   FOREACH v_http_status IN ARRAY ARRAY[408, 429, 500, 502, 503, 504]::pg_catalog.int4[] LOOP
+    v_target.id := pg_temp.new_successful_ucc_target();
     SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
       v_target.id, 'POST_REGISTRATION_VERIFICATION'
     );
@@ -482,6 +508,7 @@ BEGIN
   END LOOP;
 
   FOREACH v_http_status IN ARRAY ARRAY[400, 403]::pg_catalog.int4[] LOOP
+    v_target.id := pg_temp.new_successful_ucc_target();
     SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
       v_target.id, 'POST_REGISTRATION_VERIFICATION'
     );
@@ -509,6 +536,7 @@ BEGIN
   END LOOP;
 
   -- A retryable status is exhausted only when the bounded retry budget is spent.
+  v_target.id := pg_temp.new_successful_ucc_target();
   SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
     v_target.id, 'POST_REGISTRATION_VERIFICATION'
   );
@@ -544,6 +572,7 @@ BEGIN
   END IF;
 
   -- Historical terminalized retryable HTTP evidence is reopened only by the explicit service RPC.
+  v_target.id := pg_temp.new_successful_ucc_target();
   SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(
     v_target.id, 'POST_REGISTRATION_VERIFICATION'
   );
