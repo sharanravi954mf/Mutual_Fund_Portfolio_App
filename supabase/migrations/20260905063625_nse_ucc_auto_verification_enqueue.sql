@@ -9,6 +9,20 @@ ALTER FUNCTION public.finish_nse_ucc_submission(
   pg_catalog.text, pg_catalog.int4
 ) RENAME TO finish_nse_ucc_submission_base;
 
+-- Enforce lifetime idempotency for post-registration verification even if a
+-- future privileged code path bypasses prepare_nse_ucc_verification().
+CREATE UNIQUE INDEX integration_operations_one_post_reg_verification_idx
+  ON public.integration_operations (reconciliation_target_operation_id)
+  WHERE operation_type = 'UCC_VERIFICATION'
+    AND operation_purpose = 'POST_REGISTRATION_VERIFICATION';
+
+-- A verification operation owns one outbox request event for its lifetime.
+-- READ_ONLY retries reuse this row and advance its retry/claim state.
+CREATE UNIQUE INDEX event_outbox_one_ucc_verification_requested_idx
+  ON public.event_outbox (entity_type, entity_id, event_type)
+  WHERE entity_type = 'integration_operation'
+    AND event_type = 'integration.nse.ucc_verification_requested';
+
 CREATE OR REPLACE FUNCTION public.prepare_nse_ucc_verification(
   p_target_operation_id pg_catalog.uuid,
   p_verification_purpose pg_catalog.text

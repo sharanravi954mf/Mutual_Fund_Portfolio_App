@@ -208,6 +208,37 @@ BEGIN
   RAISE EXCEPTION 'terminal_post_registration_verification_replay_duplicated';
  END IF;
 
+ -- Database uniqueness independently protects the lifetime verification invariant.
+ BEGIN
+  INSERT INTO public.integration_operations (
+   workspace_id,integration_account_id,integration_key,integration_environment,
+   category,safety_class,operation_type,operation_purpose,api_key,contract_version,
+   state,reconciliation_target_operation_id
+  ) VALUES (
+   v_operation2.workspace_id,v_operation2.integration_account_id,'NSE_INVEST','UAT',
+   'RECONCILIATION','READ_ONLY','UCC_VERIFICATION','POST_REGISTRATION_VERIFICATION',
+   'CLIENT_MASTER_REPORT','NNF_1.9.7','PREPARED',v_operation2.id
+  );
+  RAISE EXCEPTION 'post_registration_lifetime_unique_index_not_enforced';
+ EXCEPTION WHEN unique_violation THEN NULL; END;
+
+ -- Database uniqueness also prevents a second request event for one verification.
+ BEGIN
+  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type)
+  VALUES (
+   'integration.nse.ucc_verification_requested',
+   pg_catalog.jsonb_build_object(
+    'integration_operation_id',v_verification.id,
+    'reconciliation_target_operation_id',v_operation2.id,
+    'verification_purpose','POST_REGISTRATION_VERIFICATION',
+    'integration_account_id',v_operation2.integration_account_id,
+    'integration_key','NSE_INVEST'
+   ),
+   'pending',v_verification.id,'integration_operation'
+  );
+  RAISE EXCEPTION 'ucc_verification_event_lifetime_unique_index_not_enforced';
+ EXCEPTION WHEN unique_violation THEN NULL; END;
+
  -- An immediate no-match on another successful registration is evidence, but it must not undo registration.
  v_operation2.id := pg_temp.new_successful_ucc_target();
  SELECT count(*) INTO v_count FROM public.event_outbox WHERE event_type='integration.nse.ucc_registration_requested';
