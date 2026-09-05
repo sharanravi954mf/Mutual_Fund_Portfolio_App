@@ -38,6 +38,54 @@ services:
     networks:
       - ingestion_internal
 
+  outbox-dispatcher:
+    profiles: ["outbox-dispatch"]
+    build:
+      context: ../outbox-dispatcher
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    scale: 1
+    deploy:
+      replicas: 1
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      NSE_UCC_WORKER_TOKEN: ${NSE_UCC_WORKER_TOKEN:-}
+      NSE_UCC_RECONCILIATION_WORKER_TOKEN: ${NSE_UCC_RECONCILIATION_WORKER_TOKEN:-}
+      OUTBOX_DISPATCH_DRY_RUN: ${OUTBOX_DISPATCH_DRY_RUN:-true}
+      OUTBOX_POLL_INTERVAL_SECONDS: ${OUTBOX_POLL_INTERVAL_SECONDS:-5}
+      OUTBOX_RETRY_DELAY_SECONDS: ${OUTBOX_RETRY_DELAY_SECONDS:-30}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-10}
+      OUTBOX_HTTP_TIMEOUT_SECONDS: ${OUTBOX_HTTP_TIMEOUT_SECONDS:-45}
+      OUTBOX_FEED_FAILURE_BACKOFF_SECONDS: ${OUTBOX_FEED_FAILURE_BACKOFF_SECONDS:-30}
+      OUTBOX_MAX_CONSECUTIVE_FEED_FAILURES: ${OUTBOX_MAX_CONSECUTIVE_FEED_FAILURES:-12}
+      OUTBOX_ROUTES_FILE: /app/routes.json
+      OUTBOX_HEARTBEAT_FILE: /tmp/dispatcher-heartbeat
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,sys,time; p='/tmp/dispatcher-heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)"
+      interval: 15s
+      timeout: 3s
+      retries: 4
+      start_period: 15s
+    cap_drop:
+      - ALL
+    cpus: 0.10
+    mem_limit: 128m
+    pids_limit: 32
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    stop_grace_period: 10s
+    networks:
+      - ingestion_internal
+
 volumes:
   caddy_data:
   caddy_config:

@@ -50,6 +50,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
         "NSE_UCC_RECONCILIATION_WORKER_TOKEN": VERIFY_TOKEN,
         "OUTBOX_ROUTES_FILE": str(_routes_file(tmp_path)),
         "OUTBOX_HEARTBEAT_FILE": str(tmp_path / "heartbeat"),
+        "OUTBOX_DISPATCH_DRY_RUN": "false",
     }
 
 
@@ -283,3 +284,38 @@ def test_run_once_updates_heartbeat_after_successful_feed(tmp_path: Path) -> Non
 
     assert dispatcher.run_once() == 0
     assert settings.heartbeat_file.exists()
+
+
+def test_dry_run_never_invokes_worker(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["OUTBOX_DISPATCH_DRY_RUN"] = "true"
+    settings = Settings.from_env(env)
+    routes = load_routes(settings.routes_file, env)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(500)
+
+    dispatcher = OutboxDispatcher(
+        settings,
+        routes,
+        httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert dispatcher.dispatch(
+        Candidate(
+            event_outbox_id=EVENT_ID,
+            event_type="integration.nse.ucc_registration_requested",
+            event_status="pending",
+            retry_count=0,
+        )
+    ) == "dry_run"
+    assert calls == 0
+
+
+def test_dry_run_defaults_to_true(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    del env["OUTBOX_DISPATCH_DRY_RUN"]
+    assert Settings.from_env(env).dry_run is True

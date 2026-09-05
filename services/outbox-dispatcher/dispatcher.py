@@ -51,6 +51,7 @@ class Candidate:
 class Settings:
     supabase_url: str
     service_role_key: str
+    dry_run: bool
     poll_interval_seconds: float
     retry_delay_seconds: int
     batch_size: int
@@ -66,6 +67,7 @@ class Settings:
         return cls(
             supabase_url=_trusted_origin(_required(env, "SUPABASE_URL")),
             service_role_key=_secret(env, "SUPABASE_SERVICE_ROLE_KEY"),
+            dry_run=_boolean(env, "OUTBOX_DISPATCH_DRY_RUN", True),
             poll_interval_seconds=_bounded_float(
                 env, "OUTBOX_POLL_INTERVAL_SECONDS", 5.0, 1.0, 60.0
             ),
@@ -118,6 +120,22 @@ def _trusted_origin(value: str) -> str:
     if parsed.scheme != "https" and not (parsed.scheme == "http" and is_local):
         raise DispatcherConfigError("SUPABASE_URL_requires_https")
     return value.rstrip("/")
+
+
+def _boolean(
+    env: Mapping[str, str],
+    name: str,
+    default: bool,
+) -> bool:
+    raw = env.get(name)
+    if raw is None or not raw.strip():
+        return default
+    normalized = raw.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise DispatcherConfigError(f"{name}_invalid")
 
 
 def _bounded_int(
@@ -311,6 +329,16 @@ class OutboxDispatcher:
 
     def dispatch(self, candidate: Candidate) -> str:
         route = self.routes[candidate.event_type]
+        if self.settings.dry_run:
+            _log(
+                "dispatch_dry_run",
+                event_outbox_id=candidate.event_outbox_id,
+                event_type=candidate.event_type,
+                event_status=candidate.event_status,
+                retry_count=candidate.retry_count,
+            )
+            return "dry_run"
+
         try:
             response = self.client.post(
                 self._worker_url(route),
@@ -386,6 +414,7 @@ def run() -> int:
         poll_interval_seconds=settings.poll_interval_seconds,
         batch_size=settings.batch_size,
         retry_delay_seconds=settings.retry_delay_seconds,
+        dry_run=settings.dry_run,
     )
 
     consecutive_feed_failures = 0

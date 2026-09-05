@@ -34,8 +34,17 @@ The service does not follow HTTP redirects, ignores proxy environment variables,
 
 For Production, revisit whether the Oracle host should retain a broad Supabase service-role credential; a narrower dispatcher credential can replace it later without changing the routing model.
 
+## Activation safety
+
+The dispatcher defaults to `OUTBOX_DISPATCH_DRY_RUN=true`. In dry-run mode it can read the narrow dispatch feed and report candidates, but it never invokes a worker.
+
+The Hosted Dev Compose service is also behind the `outbox-dispatch` profile. A normal ingestion-support `docker compose up -d` therefore does not start it.
+
+Live worker dispatch requires both an explicit profile activation and `OUTBOX_DISPATCH_DRY_RUN=false`.
+
 ## Runtime defaults
 
+- dry-run: true
 - poll interval: 5 seconds
 - failed-event retry delay: 30 seconds
 - batch size: 10
