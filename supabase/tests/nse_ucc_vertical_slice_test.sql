@@ -127,6 +127,24 @@ BEGIN
   RAISE EXCEPTION 'native_registration_status_invalid';
  END IF;
 
+ -- REG_SUCCESS queues one active post-registration verification, and replay/preparation reuse it.
+ SELECT count(*) INTO v_count FROM public.integration_operations verification
+ WHERE verification.reconciliation_target_operation_id=v_operation2.id
+   AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION'
+   AND verification.safety_class='READ_ONLY'
+   AND verification.api_key='CLIENT_MASTER_REPORT'
+   AND verification.state='QUEUED';
+ IF v_count<>1 THEN RAISE EXCEPTION 'post_registration_verification_not_enqueued'; END IF;
+ SELECT count(*) INTO v_count FROM public.event_outbox event JOIN public.integration_operations verification ON verification.id=event.entity_id
+ WHERE verification.reconciliation_target_operation_id=v_operation2.id
+   AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION'
+   AND event.event_type='integration.nse.ucc_verification_requested' AND event.status='pending';
+ IF v_count<>1 THEN RAISE EXCEPTION 'post_registration_verification_event_not_pending'; END IF;
+ SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation2.id,'POST_REGISTRATION_VERIFICATION');
+ IF v_verification.reconciliation_target_operation_id<>v_operation2.id THEN RAISE EXCEPTION 'post_registration_verification_target_invalid'; END IF;
+ PERFORM public.finish_nse_ucc_submission(v_event2.id,v_claim2.claim_token,'c0050000-0000-4000-8000-000000000012','{"reg_details":[{"client_code":"MBUAT0002","reg_id":"SYNTHETIC","reg_status":"REG_SUCCESS","reg_remark":""}]}','application/json',v_response_headers,200,v_completed,20,'REG_SUCCESS','none','SUCCESS',NULL,false,false,'MBUAT0002','SYNTHETIC',2);
+ IF (SELECT count(*) FROM public.integration_operations verification WHERE verification.reconciliation_target_operation_id=v_operation2.id AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION' AND verification.state='QUEUED')<>1 THEN RAISE EXCEPTION 'post_registration_verification_replay_duplicated'; END IF;
+
  -- A successful registration is independently verified without changing NSE-native status.
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation2.id,'POST_REGISTRATION_VERIFICATION');
  IF public.get_nse_ucc_verification_source(v_verification.id)->>'pan'<>'ZZZPZ0000Z' THEN
@@ -218,8 +236,22 @@ BEGIN
  EXCEPTION WHEN OTHERS THEN IF strpos(SQLERRM,'http_failure_not_definitive')=0 THEN RAISE; END IF; END;
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000015','{}','application/json',v_response_headers,400,v_completed,1,NULL,NULL,'HTTP_FAILURE','nse_http_definitive_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id; IF v_operation4.state<>'HTTP_FAILED' OR v_operation4.retry_allowed OR v_operation4.ambiguous_outcome THEN RAISE EXCEPTION 'http_400_invariant_invalid'; END IF;
+ IF EXISTS (SELECT 1 FROM public.integration_operations verification WHERE verification.reconciliation_target_operation_id=v_operation4.id AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION') THEN
+  RAISE EXCEPTION 'http_failure_post_registration_verification_enqueued';
+ END IF;
 
- -- The second definitive auth failure is also terminal; 5xx must use ambiguity.
+ -- A parseable business rejection remains terminal and never queues post-registration verification.
+ INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000008',v_account4.workspace_id,v_account4.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation4;
+ INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4;
+ SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120);
+ PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000018','{"reg_details":[{"client_code":"MBUAT0004"}]}','application/json',v_request_headers,v_started);
+ PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000018','{"reg_details":[{"client_code":"MBUAT0004","reg_status":"REG_FAILED"}]}','application/json',v_response_headers,200,v_completed,1,'REG_FAILED','synthetic_business_rejection','BUSINESS_FAILURE',NULL,false,false,NULL,NULL,2);
+ SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id;
+ IF v_operation4.state<>'BUSINESS_FAILED' OR EXISTS (SELECT 1 FROM public.integration_operations verification WHERE verification.reconciliation_target_operation_id=v_operation4.id AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION') THEN
+  RAISE EXCEPTION 'business_failure_post_registration_verification_enqueued';
+ END IF;
+
+ -- Definitive authentication failures are terminal; 5xx must use ambiguity.
  INSERT INTO public.integration_operations (id,workspace_id,integration_account_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,state) VALUES ('c0070000-0000-4000-8000-000000000006',v_account4.workspace_id,v_account4.id,'NSE_INVEST','UAT','CLIENT','WRITE_CLIENT','UCC_REGISTRATION','CLIENTCOMMON183','NNF_1.9.7','QUEUED') RETURNING * INTO v_operation4;
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4; SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120); PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000016','{"reg_details":[{"client_code":"MBUAT0004"}]}','application/json',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000016','{}','application/json',v_response_headers,403,v_completed,1,NULL,NULL,'HTTP_FAILURE','nse_authentication_failure',false,false,NULL,NULL,2);
@@ -228,6 +260,9 @@ BEGIN
  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type) VALUES('integration.nse.ucc_registration_requested','{}','pending',v_operation4.id,'integration_operation') RETURNING * INTO v_event4; SELECT * INTO v_claim4 FROM public.claim_nse_ucc_registration_event(v_event4.id,2,120); PERFORM public.start_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{"reg_details":[{"client_code":"MBUAT0004","primary_holder_pan":"ZZZPZ0000Z"}]}','application/json',v_request_headers,v_started);
  PERFORM public.finish_nse_ucc_submission(v_event4.id,v_claim4.claim_token,'c0050000-0000-4000-8000-000000000017','{}','application/json',v_response_headers,500,v_completed,1,NULL,NULL,'AMBIGUOUS','nse_http_ambiguous_failure',false,false,NULL,NULL,2);
  SELECT * INTO v_operation4 FROM public.integration_operations WHERE id=v_operation4.id; IF v_operation4.state<>'RECONCILIATION_REQUIRED' OR NOT v_operation4.reconciliation_required OR v_operation4.retry_allowed THEN RAISE EXCEPTION 'http_500_ambiguity_invalid'; END IF;
+ IF EXISTS (SELECT 1 FROM public.integration_operations verification WHERE verification.reconciliation_target_operation_id=v_operation4.id AND verification.operation_purpose='POST_REGISTRATION_VERIFICATION') THEN
+  RAISE EXCEPTION 'ambiguous_post_registration_verification_enqueued';
+ END IF;
  -- A no-match read leaves an ambiguous write unresolved and never resubmits it.
  SELECT count(*) INTO v_count FROM public.event_outbox WHERE event_type='integration.nse.ucc_registration_requested';
  SELECT * INTO v_verification FROM public.prepare_nse_ucc_verification(v_operation4.id,'AMBIGUOUS_WRITE_RECONCILIATION');
