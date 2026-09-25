@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              "Enter credentials to manage your investments",
+                              "Welcome back - sign in to continue.",
                               textAlign: TextAlign.center,
                               style: GoogleFonts.inter(
                                 fontSize: 14,
