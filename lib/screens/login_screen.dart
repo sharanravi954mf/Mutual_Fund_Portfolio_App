@@ -146,7 +146,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Text(
-                              "Sharan Fincorp",
+                              "MoneyBowl",
                               textAlign: TextAlign.center,
                               style: GoogleFonts.outfit(
                                 fontSize: 32,
