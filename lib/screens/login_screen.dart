@@ -374,7 +374,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                             ),
                                           )
                                         : Text(
-                                            "Login",
+                                            "Sign in",
                                             style: GoogleFonts.outfit(
                                               fontSize: 16,
                                               fontWeight: FontWeight.w600,
