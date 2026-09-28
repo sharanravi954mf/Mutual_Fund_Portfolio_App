@@ -164,6 +164,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                 color: colors.textSecondary,
                               ),
                             ),
+                            const SizedBox(height: 6),
+                            Text(
+                              "Powered by Sharan Fincorp",
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: colors.textSecondary.withValues(alpha: 0.75),
+                              ),
+                            ),
                           ],
                         ).premiumReveal(index: 1),
                         const SizedBox(height: 36),
