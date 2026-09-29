@@ -1,6 +1,7 @@
 import {
   assertEquals,
   assertFalse,
+  assertRejects,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
 import { createVerificationPersistence } from "./adapters.ts";
 import { createNseUccReconciliationHandler } from "./handler.ts";
@@ -38,6 +39,8 @@ function setup(
     attempt?: number;
     maxAttempts?: number;
     noEvent?: boolean;
+    startFailures?: number;
+    finishFailures?: number;
     purpose?:
       | "POST_REGISTRATION_VERIFICATION"
       | "AMBIGUOUS_WRITE_RECONCILIATION";
@@ -48,6 +51,8 @@ function setup(
   let audited = "";
   let transmitted = "";
   let loadedOperationId = "";
+  let startFailures = options.startFailures ?? 0;
+  let finishFailures = options.finishFailures ?? 0;
   const attempt = options.attempt ?? 1;
   const persistence: VerificationPersistence = {
     recoverExpired: () => {
@@ -94,11 +99,13 @@ function setup(
     start: (input) => {
       sequence.push("request");
       audited = input.requestPayload;
+      if (startFailures-- > 0) return Promise.reject(new Error("ack_lost"));
       return Promise.resolve({});
     },
     finish: (input) => {
       sequence.push("result");
       finishes.push(input);
+      if (finishFailures-- > 0) return Promise.reject(new Error("ack_lost"));
       return Promise.resolve({});
     },
     distribute: () => {
@@ -188,6 +195,28 @@ Deno.test("verification sends exact audited body without PAN", async () => {
     "distribute",
   ]);
   assertEquals(c.loadedOperationId(), OPERATION);
+});
+Deno.test("verification request evidence exhaustion sends zero gateway calls", async () => {
+  const c = setup({ startFailures: 2 });
+  assertEquals((await c.handler(invocation())).status, 500);
+  assertEquals(c.sequence, ["recover", "claim", "request", "request"]);
+  assertEquals(c.transmitted(), "");
+  assertEquals(c.finishes.length, 0);
+});
+Deno.test("verification result acknowledgement loss never repeats Client Master", async () => {
+  const c = setup({ finishFailures: 1 });
+  assertEquals((await c.handler(invocation())).status, 200);
+  assertEquals(c.sequence, [
+    "recover",
+    "claim",
+    "request",
+    "transport",
+    "result",
+    "result",
+    "distribute",
+  ]);
+  assertEquals(c.finishes.length, 2);
+  assertEquals(c.finishes[0], c.finishes[1]);
 });
 Deno.test("valid claimed event does not become requested_event_not_found", async () => {
   const c = setup();
@@ -306,4 +335,78 @@ Deno.test("retryable HTTP failure at the attempt limit is exhausted without dist
   );
   assertEquals(c.finishes[0].normalizedOutcome, "HTTP_FAILURE");
   assertEquals(c.sequence.at(-1), "result");
+});
+
+Deno.test("completed Client Master redelivery after distribute failure is not resent", async () => {
+  let completed = false;
+  let submissions = 0;
+  const persistence: VerificationPersistence = {
+    recoverExpired: () => Promise.resolve({}),
+    claimEvent: () =>
+      Promise.resolve(
+        completed
+          ? {
+            event_outbox_id: null,
+            integration_operation_id: null,
+            correlation_id: null,
+            attempt: 0,
+            claim_state: "no_event" as const,
+            claim_token: null,
+          }
+          : {
+            event_outbox_id: EVENT,
+            integration_operation_id: OPERATION,
+            correlation_id: CALL,
+            attempt: 1,
+            claim_state: "newly_claimed" as const,
+            claim_token: CLAIM,
+          },
+      ),
+    loadSource: () =>
+      Promise.resolve({
+        operation_id: OPERATION,
+        target_operation_id: TARGET,
+        workspace_id: CALL,
+        integration_account_id: CALL,
+        correlation_id: CALL,
+        verification_purpose: "POST_REGISTRATION_VERIFICATION" as const,
+        intended_client_code: "MBUAT0001",
+        pan: "AAAAA0000A",
+      }),
+    start: () => Promise.resolve({}),
+    finish: () => {
+      completed = true;
+      return Promise.resolve({});
+    },
+    distribute: () => Promise.reject(new Error("distribution_unavailable")),
+  };
+  const handler = createNseUccReconciliationHandler({
+    internalToken: TOKEN,
+    persistence,
+    gateway: {
+      requestHeaderMetadata: () => ({}),
+      submit: () => {
+        submissions++;
+        return Promise.resolve({
+          kind: "response" as const,
+          status: 200,
+          contentType: "application/json",
+          safeHeaderMetadata: {},
+          rawBody: JSON.stringify({
+            response_status: "S",
+            report_data: [{
+              client_code: "MBUAT0001",
+              primary_holder_pan: "AAAAA0000A",
+            }],
+          }),
+        });
+      },
+    },
+    now: () => new Date("2026-09-02T00:00:00Z"),
+    uuid: () => CALL,
+  });
+  await assertRejects(() => handler(invocation()));
+  assertEquals(submissions, 1);
+  assertEquals((await handler(invocation())).status, 404);
+  assertEquals(submissions, 1);
 });

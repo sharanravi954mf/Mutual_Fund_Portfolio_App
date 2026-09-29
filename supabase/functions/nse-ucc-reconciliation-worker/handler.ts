@@ -2,6 +2,7 @@ import {
   buildNseClientMasterRequest,
   parseNseClientMasterResponse,
 } from "../_shared/nse/nse_ucc_verification.ts";
+import { createNseEvidenceCall } from "../_shared/nse/nse_evidence_call.ts";
 import type {
   ClaimedVerificationEvent,
   VerificationGateway,
@@ -33,14 +34,6 @@ function bearer(request: Request) {
   const value = request.headers.get("authorization");
   return value?.startsWith("Bearer ") ? value.slice(7).trim() : null;
 }
-async function twice(action: () => Promise<unknown>) {
-  try {
-    await action();
-  } catch {
-    await action();
-  }
-}
-
 export function createNseUccReconciliationHandler(
   deps: VerificationWorkerDependencies,
 ) {
@@ -106,8 +99,11 @@ export function createNseUccReconciliationHandler(
     }
     const callId = uuid();
     const started = now();
+    const evidenceCall = createNseEvidenceCall(() =>
+      deps.gateway.submit(serialized)
+    );
     try {
-      await twice(() =>
+      await evidenceCall.persist(() =>
         deps.persistence.start({
           eventOutboxId: eventId,
           claimToken: event.claim_token!,
@@ -120,11 +116,11 @@ export function createNseUccReconciliationHandler(
     } catch {
       return json({ error: { code: "request_evidence_failed" } }, 500);
     }
-    const result = await deps.gateway.submit(serialized);
+    const result = await evidenceCall.submit();
     const completed = now();
     const elapsedMs = Math.max(0, completed.getTime() - started.getTime());
     if (result.kind === "failure") {
-      await twice(() =>
+      await evidenceCall.persist(() =>
         deps.persistence.finish({
           eventOutboxId: eventId,
           claimToken: event.claim_token!,
@@ -177,7 +173,7 @@ export function createNseUccReconciliationHandler(
       : "BUSINESS_FAILURE" as const;
     const retryableHttpFailure = normalizedOutcome === "HTTP_FAILURE" &&
       isRetryableReadHttpFailure(result.status);
-    await twice(() =>
+    await evidenceCall.persist(() =>
       deps.persistence.finish({
         eventOutboxId: eventId,
         claimToken: event.claim_token!,
