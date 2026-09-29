@@ -74,6 +74,7 @@ Deno.test("NSE UAT smoke test returns bounded sanitized diagnostics", async () =
         status: 200,
         headers: new Headers({ "Content-Type": "text/plain" }),
         body: new TextEncoder().encode(`NAV\u0000${"x".repeat(300)}`),
+        safeHeaderMetadata: { content_type: "text/plain" },
       }),
   });
 
