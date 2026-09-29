@@ -133,6 +133,10 @@ The generic invariant is ambiguous_outcome => reconciliation_required. Reconcili
 
 Both UCC workers require a valid JSON object with an explicit event_outbox_id. Malformed or missing input returns 400 and cannot claim another investor's event. Mapper contract failures become VALIDATION_FAILED; source/RPC infrastructure failures remain pre-request recoverable and do not permanently close a valid registration. CLIENTCOMMON183 is serialized once, recorded as immutable REQUEST evidence, and the exact same string is passed to NseClient with Accept and Content-Type application/json.
 
+Each claimed attempt creates a typed, attempt-local evidence-call boundary. Its persistence callbacks retry at most once with the same captured identifiers, timestamps, and serialized request bytes; REQUEST persistence must succeed before the boundary permits its single cached gateway submission. RESULT acknowledgement retries remain outside that submission boundary, so acknowledgement loss cannot resend an NSE request. Registration resolves request header metadata before its REQUEST persistence retry; Client Master resolves it inside that callback, preserving each existing timing contract.
+
+Registration's RESULT evidence, outbox transition, and enqueue remain the existing single database transaction, including its lifetime verification uniqueness guarantee. Client Master REQUEST/RESULT completion and downstream distribution remain separate transactions: completion is durable before the one distribution attempt, and a distribution error propagates without a recovery queue or a repeated Client Master call.
+
 ## Client-code collision protection
 
 A partial unique expression index protects the normalized NSE_INVEST/UAT external_account_candidate within a workspace. The prepare RPC also provides a stable nse_ucc_candidate_collision error, while the index closes the concurrent race. Documentation sample client codes are never candidates.

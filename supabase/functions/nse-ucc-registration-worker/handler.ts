@@ -3,6 +3,7 @@ import {
   NseUccValidationError,
   parseNseUccResponse,
 } from "../_shared/nse/nse_ucc.ts";
+import { createNseEvidenceCall } from "../_shared/nse/nse_evidence_call.ts";
 import { UccSourcePersistenceError } from "./types.ts";
 import type { ClaimedUccEvent, UccGateway, UccPersistence } from "./types.ts";
 
@@ -50,16 +51,6 @@ function log(
     error_code: errorCode,
   });
 }
-async function persistIdempotently(
-  action: () => Promise<unknown>,
-): Promise<void> {
-  try {
-    await action();
-  } catch {
-    await action();
-  }
-}
-
 export function createNseUccWorkerHandler(
   dependencies: UccWorkerDependencies,
 ): (request: Request) => Promise<Response> {
@@ -190,8 +181,11 @@ export function createNseUccWorkerHandler(
       requestHeaderMetadata,
       startedAt: startedAt.toISOString(),
     };
+    const evidenceCall = createNseEvidenceCall(() =>
+      dependencies.gateway.submit(requestPayload)
+    );
     try {
-      await persistIdempotently(() =>
+      await evidenceCall.persist(() =>
         dependencies.persistence.startSubmission(startInput)
       );
     } catch {
@@ -199,7 +193,7 @@ export function createNseUccWorkerHandler(
       return jsonResponse({ error: { code: "request_evidence_failed" } }, 500);
     }
 
-    const gatewayResult = await dependencies.gateway.submit(requestPayload);
+    const gatewayResult = await evidenceCall.submit();
     const completedAt = now();
     const elapsedMs = Math.max(0, completedAt.getTime() - startedAt.getTime());
     const finish = async (
@@ -213,7 +207,7 @@ export function createNseUccWorkerHandler(
         | "maxAttempts"
       >,
     ) => {
-      await persistIdempotently(() =>
+      await evidenceCall.persist(() =>
         dependencies.persistence.finishSubmission({
           eventOutboxId: event.event_outbox_id!,
           claimToken: event.claim_token!,

@@ -120,6 +120,8 @@ function setup(
     result?: GatewayResponse | GatewayFailure;
     failStartOnce?: boolean;
     failFinishOnce?: boolean;
+    startFailures?: number;
+    finishFailures?: number;
     sourceMutation?: (source: ReturnType<typeof syntheticUccSource>) => void;
     sourceFailure?: Error;
   } = {},
@@ -127,8 +129,9 @@ function setup(
   const starts: Start[] = [];
   const finishes: Finish[] = [];
   const sequence: string[] = [];
-  let startFailures = options.failStartOnce ? 1 : 0;
-  let finishFailures = options.failFinishOnce ? 1 : 0;
+  let startFailures = options.startFailures ?? (options.failStartOnce ? 1 : 0);
+  let finishFailures = options.finishFailures ??
+    (options.failFinishOnce ? 1 : 0);
   const source = syntheticUccSource();
   options.sourceMutation?.(source);
   const persistence: UccPersistence = {
@@ -228,6 +231,21 @@ Deno.test("idempotent persistence retry never repeats NSE transport", async () =
   assertEquals(c.gatewayCalls(), 1);
   assertEquals(c.starts.length, 2);
   assertEquals(c.starts[0], c.starts[1]);
+  assertEquals(c.finishes.length, 2);
+  assertEquals(c.finishes[0], c.finishes[1]);
+});
+Deno.test("exhausted request persistence sends zero calls with stable evidence identity", async () => {
+  const c = setup({ startFailures: 2 });
+  assertEquals((await c.handler(request())).status, 500);
+  assertEquals(c.gatewayCalls(), 0);
+  assertEquals(c.starts.length, 2);
+  assertEquals(c.starts[0], c.starts[1]);
+  assertEquals(c.finishes.length, 0);
+});
+Deno.test("result acknowledgement loss retries evidence without repeating submission", async () => {
+  const c = setup({ finishFailures: 1 });
+  assertEquals((await c.handler(request())).status, 200);
+  assertEquals(c.gatewayCalls(), 1);
   assertEquals(c.finishes.length, 2);
   assertEquals(c.finishes[0], c.finishes[1]);
 });
