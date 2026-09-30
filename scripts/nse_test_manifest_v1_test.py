@@ -22,6 +22,7 @@ EXPECTED_T001_TESTS = [
     "supabase/functions/nse-ucc-registration-worker/index_test.ts",
     "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
     "supabase/functions/nse-uat-smoke-test/index_test.ts",
+    "supabase/functions/nse-order-status-worker/index_test.ts",
 ]
 EXPECTED_FMT_CHECK_TARGETS = [
     "supabase/functions/_shared/nse/nse_evidence_call.ts",
@@ -30,6 +31,11 @@ EXPECTED_FMT_CHECK_TARGETS = [
     "supabase/functions/nse-ucc-registration-worker/index_test.ts",
     "supabase/functions/nse-ucc-reconciliation-worker/handler.ts",
     "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_order_status.ts",
+    "supabase/functions/nse-order-status-worker/adapters.ts",
+    "supabase/functions/nse-order-status-worker/handler.ts",
+    "supabase/functions/nse-order-status-worker/index.ts",
+    "supabase/functions/nse-order-status-worker/index_test.ts",
 ]
 
 
@@ -89,7 +95,7 @@ class NSETestManifestV1Tests(unittest.TestCase):
     def test_fmt_check_targets_are_exactly_the_initial_six_target_order(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(manifest["fmt_check_targets"], EXPECTED_FMT_CHECK_TARGETS)
-        self.assertEqual(len(manifest["fmt_check_targets"]), 6)
+        self.assertEqual(len(manifest["fmt_check_targets"]), 11)
 
     def test_fmt_check_print_order_is_deterministic(self) -> None:
         first_print = self.run_selector(REPOSITORY_ROOT, "print-fmt-check")
@@ -101,7 +107,7 @@ class NSETestManifestV1Tests(unittest.TestCase):
     def test_initial_manifest_is_exactly_the_post_t001_nine_suite_set(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(manifest["baseline_tests"], EXPECTED_T001_TESTS)
-        self.assertEqual(len(manifest["baseline_tests"]), 9)
+        self.assertEqual(len(manifest["baseline_tests"]), 10)
 
     def test_duplicate_path_is_rejected(self) -> None:
         self.assert_rejected(lambda _root, manifest: manifest["baseline_tests"].append(manifest["baseline_tests"][0]))
