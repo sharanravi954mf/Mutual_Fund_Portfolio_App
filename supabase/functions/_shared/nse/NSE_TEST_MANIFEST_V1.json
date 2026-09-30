@@ -1,0 +1,25 @@
+{
+  "schema": "MB_NSE_TEST_MANIFEST_V1",
+  "baseline_tests": [
+    "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
+    "supabase/functions/_shared/nse/nse_auth_test.ts",
+    "supabase/functions/_shared/nse/nse_client_test.ts",
+    "supabase/functions/_shared/nse/nse_config_test.ts",
+    "supabase/functions/_shared/nse/nse_ucc_test.ts",
+    "supabase/functions/_shared/nse/nse_ucc_verification_test.ts",
+    "supabase/functions/nse-ucc-registration-worker/index_test.ts",
+    "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
+    "supabase/functions/nse-uat-smoke-test/index_test.ts"
+  ],
+  "endpoint_tests": {
+    "nse-ucc-registration-worker": [
+      "supabase/functions/nse-ucc-registration-worker/index_test.ts"
+    ],
+    "nse-ucc-reconciliation-worker": [
+      "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts"
+    ],
+    "nse-uat-smoke-test": [
+      "supabase/functions/nse-uat-smoke-test/index_test.ts"
+    ]
+  }
+}
