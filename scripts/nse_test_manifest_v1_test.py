@@ -23,6 +23,14 @@ EXPECTED_T001_TESTS = [
     "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
     "supabase/functions/nse-uat-smoke-test/index_test.ts",
 ]
+EXPECTED_FMT_CHECK_TARGETS = [
+    "supabase/functions/_shared/nse/nse_evidence_call.ts",
+    "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
+    "supabase/functions/nse-ucc-registration-worker/handler.ts",
+    "supabase/functions/nse-ucc-registration-worker/index_test.ts",
+    "supabase/functions/nse-ucc-reconciliation-worker/handler.ts",
+    "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
+]
 
 
 class NSETestManifestV1Tests(unittest.TestCase):
@@ -43,8 +51,8 @@ class NSETestManifestV1Tests(unittest.TestCase):
         (root / "scripts").mkdir()
         shutil.copy2(SELECTOR, root / "scripts/nse_test_manifest_v1.py")
         shutil.copy2(MANIFEST, target_manifest)
-        for test_path in EXPECTED_T001_TESTS:
-            target = root / test_path
+        for target_path in [*EXPECTED_T001_TESTS, *EXPECTED_FMT_CHECK_TARGETS]:
+            target = root / target_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.touch()
         return temporary_directory
@@ -71,12 +79,24 @@ class NSETestManifestV1Tests(unittest.TestCase):
 
     def test_current_manifest_is_accepted_and_print_order_is_deterministic(self) -> None:
         accepted = self.run_selector(REPOSITORY_ROOT, "validate")
-        first_print = self.run_selector(REPOSITORY_ROOT, "print")
-        second_print = self.run_selector(REPOSITORY_ROOT, "print")
+        first_print = self.run_selector(REPOSITORY_ROOT, "print-test")
+        second_print = self.run_selector(REPOSITORY_ROOT, "print-test")
         self.assertEqual(accepted.returncode, 0)
         self.assertEqual(first_print.returncode, 0)
         self.assertEqual(first_print.stdout, second_print.stdout)
         self.assertEqual(first_print.stdout.splitlines(), EXPECTED_T001_TESTS)
+
+    def test_fmt_check_targets_are_exactly_the_initial_six_target_order(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["fmt_check_targets"], EXPECTED_FMT_CHECK_TARGETS)
+        self.assertEqual(len(manifest["fmt_check_targets"]), 6)
+
+    def test_fmt_check_print_order_is_deterministic(self) -> None:
+        first_print = self.run_selector(REPOSITORY_ROOT, "print-fmt-check")
+        second_print = self.run_selector(REPOSITORY_ROOT, "print-fmt-check")
+        self.assertEqual(first_print.returncode, 0)
+        self.assertEqual(first_print.stdout, second_print.stdout)
+        self.assertEqual(first_print.stdout.splitlines(), EXPECTED_FMT_CHECK_TARGETS)
 
     def test_initial_manifest_is_exactly_the_post_t001_nine_suite_set(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -85,6 +105,18 @@ class NSETestManifestV1Tests(unittest.TestCase):
 
     def test_duplicate_path_is_rejected(self) -> None:
         self.assert_rejected(lambda _root, manifest: manifest["baseline_tests"].append(manifest["baseline_tests"][0]))
+
+    def test_duplicate_fmt_check_path_is_rejected(self) -> None:
+        self.assert_rejected(
+            lambda _root, manifest: manifest["fmt_check_targets"].append(
+                manifest["fmt_check_targets"][0]
+            )
+        )
+
+    def test_non_typescript_fmt_check_path_is_rejected(self) -> None:
+        self.assert_rejected(
+            lambda _root, manifest: manifest["fmt_check_targets"].__setitem__(0, "supabase/functions/_shared/nse/nse_evidence_call.js")
+        )
 
     def test_absolute_path_is_rejected(self) -> None:
         self.assert_rejected(lambda _root, manifest: manifest["baseline_tests"].__setitem__(0, "/tmp/test.ts"))
@@ -120,6 +152,16 @@ class NSETestManifestV1Tests(unittest.TestCase):
             link = root / "supabase/functions/escaped"
             link.symlink_to(external, target_is_directory=True)
             manifest["baseline_tests"][0] = "supabase/functions/escaped/evil_test.ts"
+        self.assert_rejected(mutate)
+
+    def test_intermediate_directory_symlink_fmt_check_path_is_rejected(self) -> None:
+        def mutate(root: Path, manifest: dict[str, object]) -> None:
+            external = root / "external"
+            external.mkdir()
+            (external / "evil.ts").touch()
+            link = root / "supabase/functions/escaped"
+            link.symlink_to(external, target_is_directory=True)
+            manifest["fmt_check_targets"][0] = "supabase/functions/escaped/evil.ts"
         self.assert_rejected(mutate)
 
     def test_unknown_schema_is_rejected(self) -> None:

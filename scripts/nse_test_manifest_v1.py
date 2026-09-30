@@ -48,21 +48,24 @@ def safe_functions_root(repository_root: Path) -> Path:
     return resolved_root
 
 
-def validate_test_path(value: object, repository_root: Path) -> str:
-    """Return a validated, exact repository-relative regular-file test path."""
+def validate_path(value: object, repository_root: Path, *, test: bool) -> str:
+    """Return a validated, exact repository-relative regular-file path."""
+    path_kind = "test path" if test else "fmt/check path"
     if not isinstance(value, str) or not value:
-        raise ManifestError("test path must be a non-empty string")
+        raise ManifestError(f"{path_kind} must be a non-empty string")
     if value.startswith("/") or "\\" in value:
-        raise ManifestError("test path must be relative and use forward slashes")
+        raise ManifestError(f"{path_kind} must be relative and use forward slashes")
     if any(character in PATTERN_METACHARACTERS for character in value):
-        raise ManifestError("test path must not contain glob or regex metacharacters")
+        raise ManifestError(f"{path_kind} must not contain glob or regex metacharacters")
     components = value.split("/")
     if any(component in ("", ".", "..") for component in components):
-        raise ManifestError("test path contains an invalid component")
+        raise ManifestError(f"{path_kind} contains an invalid component")
     if not value.startswith(PREFIX):
-        raise ManifestError("test path must be under supabase/functions/")
-    if not value.endswith("_test.ts"):
+        raise ManifestError(f"{path_kind} must be under supabase/functions/")
+    if test and not value.endswith("_test.ts"):
         raise ManifestError("test path must name a TypeScript test file")
+    if not test and not value.endswith(".ts"):
+        raise ManifestError("fmt/check path must name a TypeScript file")
 
     resolved_functions_root = safe_functions_root(repository_root)
     candidate = repository_root.joinpath(*components)
@@ -71,31 +74,42 @@ def validate_test_path(value: object, repository_root: Path) -> str:
         for component in components:
             current = current / component
             if current.is_symlink():
-                raise ManifestError("test path must not contain symlinks")
+                raise ManifestError(f"{path_kind} must not contain symlinks")
         candidate_status = candidate.stat()
         if not stat.S_ISREG(candidate_status.st_mode):
-            raise ManifestError("test path must name an existing regular file")
+            raise ManifestError(f"{path_kind} must name an existing regular file")
         resolved_candidate = candidate.resolve(strict=True)
     except OSError as error:
-        raise ManifestError("test path cannot be safely resolved") from error
+        raise ManifestError(f"{path_kind} cannot be safely resolved") from error
     if not is_within(resolved_candidate, resolved_functions_root):
-        raise ManifestError("test path must resolve inside supabase/functions")
+        raise ManifestError(f"{path_kind} must resolve inside supabase/functions")
     return value
 
 
-def validate_manifest(manifest: object, repository_root: Path) -> list[str]:
-    """Validate manifest data and return its ordered baseline test paths."""
+def validate_manifest(manifest: object, repository_root: Path) -> tuple[list[str], list[str]]:
+    """Validate manifest data and return ordered fmt/check and test paths."""
     if not isinstance(manifest, dict) or manifest.get("schema") != SCHEMA:
         raise ManifestError("manifest schema must be MB_NSE_TEST_MANIFEST_V1")
-    if set(manifest) != {"schema", "baseline_tests", "endpoint_tests"}:
+    if set(manifest) != {"schema", "fmt_check_targets", "baseline_tests", "endpoint_tests"}:
         raise ManifestError("manifest contains unsupported fields")
+    fmt_check_targets = manifest.get("fmt_check_targets")
+    if not isinstance(fmt_check_targets, list) or not fmt_check_targets:
+        raise ManifestError("fmt_check_targets must be a non-empty array")
+    validated_fmt_check: list[str] = []
+    seen_fmt_check: set[str] = set()
+    for fmt_check_path in fmt_check_targets:
+        validated_path = validate_path(fmt_check_path, repository_root, test=False)
+        if validated_path in seen_fmt_check:
+            raise ManifestError("fmt_check_targets must contain unique paths")
+        seen_fmt_check.add(validated_path)
+        validated_fmt_check.append(validated_path)
     baseline_tests = manifest.get("baseline_tests")
     if not isinstance(baseline_tests, list) or not baseline_tests:
         raise ManifestError("baseline_tests must be a non-empty array")
     validated_baseline: list[str] = []
     seen_baseline: set[str] = set()
     for test_path in baseline_tests:
-        validated_path = validate_test_path(test_path, repository_root)
+        validated_path = validate_path(test_path, repository_root, test=True)
         if validated_path in seen_baseline:
             raise ManifestError("baseline_tests must contain unique paths")
         seen_baseline.add(validated_path)
@@ -113,7 +127,7 @@ def validate_manifest(manifest: object, repository_root: Path) -> list[str]:
         endpoint_prefix = f"supabase/functions/{endpoint}/"
         seen_endpoint: set[str] = set()
         for test_path in tests:
-            validated_path = validate_test_path(test_path, repository_root)
+            validated_path = validate_path(test_path, repository_root, test=True)
             if validated_path in seen_endpoint:
                 raise ManifestError("endpoint test lists must contain unique paths")
             if not validated_path.startswith(endpoint_prefix):
@@ -121,10 +135,10 @@ def validate_manifest(manifest: object, repository_root: Path) -> list[str]:
             if validated_path not in seen_baseline:
                 raise ManifestError("endpoint test must also be in baseline_tests")
             seen_endpoint.add(validated_path)
-    return validated_baseline
+    return validated_fmt_check, validated_baseline
 
 
-def load_and_validate() -> list[str]:
+def load_and_validate() -> tuple[list[str], list[str]]:
     """Load only the fixed manifest path and validate it."""
     try:
         with MANIFEST_PATH.open(encoding="utf-8") as manifest_file:
@@ -135,13 +149,15 @@ def load_and_validate() -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    if argv not in (["validate"], ["print"]):
+    if argv not in (["validate"], ["print-fmt-check"], ["print-test"]):
         return 2
     try:
-        tests = load_and_validate()
+        fmt_check_targets, tests = load_and_validate()
     except ManifestError:
         return 1
-    if argv == ["print"]:
+    if argv == ["print-fmt-check"]:
+        sys.stdout.write("\n".join(fmt_check_targets) + "\n")
+    if argv == ["print-test"]:
         sys.stdout.write("\n".join(tests) + "\n")
     return 0
 
