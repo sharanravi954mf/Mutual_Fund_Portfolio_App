@@ -300,10 +300,13 @@ export function parseNseOrderFundingResponse(
     if (
       !Array.isArray(e.report_data) || e.report_data.length !== Number(total)
     ) return fail();
-    // #34 establishes only empty success + string diagnostic. No positive-row exception.
+    // Endpoint-specific empty-success diagnostics only; never generalize unknown remarks.
+    const lifecycleNoRecords = source.api === "ORDER_LIFECYCLE" &&
+      Number(total) === 0 && e.error_remark === "No record(s) found.";
+    const fundAgeHistoricalEmpty = source.api === "FUND_AGE" &&
+      Number(total) === 0;
     if (
-      e.error_remark !== "" &&
-      !(source.api === "FUND_AGE" && Number(total) === 0)
+      e.error_remark !== "" && !lifecycleNoRecords && !fundAgeHistoricalEmpty
     ) return fail();
     const seen = new Set<string>();
     for (const row of e.report_data) {
@@ -325,7 +328,9 @@ export function parseNseOrderFundingResponse(
     }
     return {
       nativeStatus,
-      nativeRemarkCategory: Number(total) === 0 && e.error_remark !== ""
+      nativeRemarkCategory: lifecycleNoRecords
+        ? "order_funding_no_records"
+        : Number(total) === 0 && e.error_remark !== ""
         ? "order_funding_empty_success_diagnostic"
         : "order_funding_report_received",
       success: true,

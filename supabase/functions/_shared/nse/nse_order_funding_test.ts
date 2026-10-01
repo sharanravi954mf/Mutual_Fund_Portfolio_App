@@ -260,6 +260,31 @@ for (const f of fixtures) {
     }
   });
 }
+
+Deno.test("ORDER_LIFECYCLE: live UAT no-records diagnostic is exact, empty-only and private", () => {
+  const f = fixtures[0];
+  const s = source(f);
+  const observed = parse(
+    JSON.stringify(envelope([], "No record(s) found.")),
+    s,
+  );
+  assertEquals(observed, {
+    nativeStatus: "S",
+    nativeRemarkCategory: "order_funding_no_records",
+    success: true,
+    recordCount: 0,
+  });
+  assertEquals(JSON.stringify(observed).includes("No record(s) found."), false);
+  assertEquals(
+    parse(JSON.stringify(envelope([], "No record found.")), s).success,
+    false,
+  );
+  assertEquals(
+    parse(JSON.stringify(envelope([f.row], "No record(s) found.")), s).success,
+    false,
+  );
+});
+
 Deno.test("B02 dates: seven-day gap, transaction three-day activity gap, FUND_ORDER no invented window", () => {
   for (const f of fixtures) {
     const s = source(f);
