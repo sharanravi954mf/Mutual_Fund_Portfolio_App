@@ -226,6 +226,15 @@ BEGIN
  PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_AGE','{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"PRIVATE"}',
   '{"date":"30-04-2024","client_code":"SYNTHETIC1","settlement_type":"all"}','{"client_code":"SYNTHETIC1"}') =
   '{"native_status":"S","category":"order_funding_empty_success_diagnostic","success":true,"record_count":0}'::jsonb,'historical_empty_diagnostic');
+ -- Controlled DEV UAT 2026-10-01: FUND_ORDER returned exact no-records F shape/message.
+ PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_ORDER',
+  '{"response_status":"F","report_data_total":"0","report_data":[],"error_remark":"No record(s) found"}',
+  '{"from_date":"30-09-2026","to_date":"30-09-2026","client_code":"SYNTHETIC1"}','{"client_code":"SYNTHETIC1"}') =
+  '{"native_status":"F","category":"order_funding_no_records","success":false,"record_count":0}'::jsonb,'live_fund_order_no_records');
+ PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_ORDER',
+  '{"response_status":"F","report_data_total":"0","report_data":[],"error_remark":"No record(s) found."}',
+  '{"from_date":"30-09-2026","to_date":"30-09-2026","client_code":"SYNTHETIC1"}','{"client_code":"SYNTHETIC1"}')->>'category' =
+  'order_funding_response_invalid','fund_order_unknown_array_failure_rejected');
  -- Controlled DEV UAT 2026-10-01: omitted master filters produced this exact F shape/message.
  PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_AGE',
   '{"response_status":"F","report_data_total":"0","report_data":[],"error_remark":"amc_code value is not valid."}',

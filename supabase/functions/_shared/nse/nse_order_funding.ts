@@ -303,6 +303,13 @@ export function parseNseOrderFundingResponse(
       ) {
         return fail("order_funding_amc_code_invalid");
       }
+      if (
+        source.api === "FUND_ORDER" && Array.isArray(e.report_data) &&
+        e.report_data.length === 0 && Number(total) === 0 &&
+        e.error_remark === "No record(s) found"
+      ) {
+        return fail("order_funding_no_records");
+      }
       return fail();
     }
     if (
