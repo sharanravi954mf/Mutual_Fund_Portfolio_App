@@ -309,6 +309,39 @@ Deno.test("TRANSACTION_DETAIL: live UAT no-records diagnostic is exact, empty-on
   );
 });
 
+Deno.test("FUND_ORDER: live UAT no-records failure is exact and private", () => {
+  const f = fixtures[2];
+  const s = source(f);
+  const observed = parse(
+    JSON.stringify({
+      response_status: "F",
+      report_data_total: "0",
+      report_data: [],
+      error_remark: "No record(s) found",
+    }),
+    s,
+  );
+  assertEquals(observed, {
+    nativeStatus: "F",
+    nativeRemarkCategory: "order_funding_no_records",
+    success: false,
+    recordCount: 0,
+  });
+  assertEquals(JSON.stringify(observed).includes("No record(s) found"), false);
+  assertEquals(
+    parse(
+      JSON.stringify({
+        response_status: "F",
+        report_data_total: "0",
+        report_data: [],
+        error_remark: "No record(s) found.",
+      }),
+      s,
+    ).nativeRemarkCategory,
+    "order_funding_response_invalid",
+  );
+});
+
 Deno.test("FUND_AGE: live UAT AMC validation failure is exact and private", () => {
   const f = fixtures[3];
   const s = source(f);
