@@ -252,7 +252,10 @@ export function parseNseClientReadinessResponse(
       .includes(source.api);
     if (
       (requiresRemark && !hasRemark) ||
-      (hasRemark && envelope.error_remark !== "")
+      (hasRemark && source.api === "ELOG_REPORT" &&
+        typeof envelope.error_remark !== "string") ||
+      (hasRemark && source.api !== "ELOG_REPORT" &&
+        envelope.error_remark !== "")
     ) return fail();
     const total = envelope.report_data_total;
     if (
