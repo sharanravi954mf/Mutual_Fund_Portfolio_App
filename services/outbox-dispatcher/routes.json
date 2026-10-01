@@ -6,5 +6,9 @@
   "integration.nse.ucc_verification_requested": {
     "worker_slug": "nse-ucc-reconciliation-worker",
     "token_env": "NSE_UCC_RECONCILIATION_WORKER_TOKEN"
+  },
+  "integration.nse.order_status_requested": {
+    "worker_slug": "nse-order-status-worker",
+    "token_env": "NSE_ORDER_STATUS_WORKER_TOKEN"
   }
 }

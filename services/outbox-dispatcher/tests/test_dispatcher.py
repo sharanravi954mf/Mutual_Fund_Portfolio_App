@@ -319,3 +319,17 @@ def test_dry_run_defaults_to_true(tmp_path: Path) -> None:
     env = _env(tmp_path)
     del env["OUTBOX_DISPATCH_DRY_RUN"]
     assert Settings.from_env(env).dry_run is True
+
+
+def test_repository_order_status_route_uses_dedicated_worker() -> None:
+    routes = load_routes(
+        Path(__file__).parents[1] / "routes.json",
+        {
+            "NSE_UCC_WORKER_TOKEN": REG_TOKEN,
+            "NSE_UCC_RECONCILIATION_WORKER_TOKEN": VERIFY_TOKEN,
+            "NSE_ORDER_STATUS_WORKER_TOKEN": "o" * 40,
+        },
+    )
+    route = routes["integration.nse.order_status_requested"]
+    assert route.worker_slug == "nse-order-status-worker"
+    assert route.token == "o" * 40

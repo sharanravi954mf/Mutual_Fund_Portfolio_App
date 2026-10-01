@@ -16,6 +16,7 @@ The checked-in `routes.json` enables only:
 
 - `integration.nse.ucc_registration_requested` -> `nse-ucc-registration-worker`
 - `integration.nse.ucc_verification_requested` -> `nse-ucc-reconciliation-worker`
+- `integration.nse.order_status_requested` -> `nse-order-status-worker` (`NSE_ORDER_STATUS_WORKER_TOKEN`)
 
 Future integration APIs can reuse the same dispatcher by adding a reviewed route and its worker token. No NSE business rules belong in this service.
 
