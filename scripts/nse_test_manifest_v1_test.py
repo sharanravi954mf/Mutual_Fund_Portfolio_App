@@ -28,6 +28,8 @@ EXPECTED_BASELINE_TESTS = [
     "supabase/functions/nse-prov-orders-worker/index_test.ts",
     "supabase/functions/_shared/nse/nse_client_readiness_test.ts",
     "supabase/functions/nse-client-readiness-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_order_funding_test.ts",
+    "supabase/functions/nse-order-funding-worker/index_test.ts",
 ]
 EXPECTED_FMT_CHECK_TARGETS = [
     "supabase/functions/_shared/nse/nse_evidence_call.ts",
@@ -57,6 +59,13 @@ EXPECTED_FMT_CHECK_TARGETS = [
     "supabase/functions/nse-client-readiness-worker/handler.ts",
     "supabase/functions/nse-client-readiness-worker/index.ts",
     "supabase/functions/nse-client-readiness-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_order_funding.ts",
+    "supabase/functions/_shared/nse/nse_order_funding_test.ts",
+    "supabase/functions/nse-order-funding-worker/types.ts",
+    "supabase/functions/nse-order-funding-worker/adapters.ts",
+    "supabase/functions/nse-order-funding-worker/handler.ts",
+    "supabase/functions/nse-order-funding-worker/index.ts",
+    "supabase/functions/nse-order-funding-worker/index_test.ts",
 ]
 
 
@@ -116,7 +125,7 @@ class NSETestManifestV1Tests(unittest.TestCase):
     def test_fmt_check_targets_are_exactly_the_reviewed_target_order(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(manifest["fmt_check_targets"], EXPECTED_FMT_CHECK_TARGETS)
-        self.assertEqual(len(manifest["fmt_check_targets"]), 27)
+        self.assertEqual(len(manifest["fmt_check_targets"]), 34)
 
     def test_fmt_check_print_order_is_deterministic(self) -> None:
         first_print = self.run_selector(REPOSITORY_ROOT, "print-fmt-check")
@@ -125,10 +134,10 @@ class NSETestManifestV1Tests(unittest.TestCase):
         self.assertEqual(first_print.stdout, second_print.stdout)
         self.assertEqual(first_print.stdout.splitlines(), EXPECTED_FMT_CHECK_TARGETS)
 
-    def test_manifest_is_exactly_the_reviewed_fifteen_suite_set(self) -> None:
+    def test_manifest_is_exactly_the_reviewed_seventeen_suite_set(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(manifest["baseline_tests"], EXPECTED_BASELINE_TESTS)
-        self.assertEqual(len(manifest["baseline_tests"]), 15)
+        self.assertEqual(len(manifest["baseline_tests"]), 17)
 
     def test_duplicate_path_is_rejected(self) -> None:
         self.assert_rejected(lambda _root, manifest: manifest["baseline_tests"].append(manifest["baseline_tests"][0]))
