@@ -244,9 +244,11 @@ The Oracle-hosted generic dispatcher is intentionally separate from the public
 ingestion API. It exposes no port and is not part of the default Compose
 profile.
 
-The initial routing table enables only the existing NSE UCC registration and
-Client Master verification workers. Adding a future API requires a reviewed
-route; the dispatcher itself must not contain NSE business rules.
+The routing table includes the NSE UCC registration, Client Master verification
+and ORDER_STATUS workers. The ORDER_STATUS implementation is locally validated;
+provision its matching worker token before deploying the updated routes. Adding
+a future API requires a reviewed route; the dispatcher itself must not contain
+NSE business rules.
 
 ### Host secrets
 
@@ -257,8 +259,9 @@ Add these values only to the existing root-owned mode `0600` Hosted Dev
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NSE_UCC_WORKER_TOKEN`
 - `NSE_UCC_RECONCILIATION_WORKER_TOKEN`
+- `NSE_ORDER_STATUS_WORKER_TOKEN`
 
-The two worker-token values must match their Hosted Dev Edge Function secrets.
+The worker-token values must match their Hosted Dev Edge Function secrets.
 Never print any of these values or place them on a command line.
 
 Keep these safe defaults until live dispatch is explicitly approved:

@@ -12,7 +12,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 SELECTOR = REPOSITORY_ROOT / "scripts" / "nse_test_manifest_v1.py"
 MANIFEST = REPOSITORY_ROOT / "supabase/functions/_shared/nse/NSE_TEST_MANIFEST_V1.json"
-EXPECTED_T001_TESTS = [
+EXPECTED_BASELINE_TESTS = [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
     "supabase/functions/_shared/nse/nse_auth_test.ts",
     "supabase/functions/_shared/nse/nse_client_test.ts",
@@ -22,6 +22,8 @@ EXPECTED_T001_TESTS = [
     "supabase/functions/nse-ucc-registration-worker/index_test.ts",
     "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
     "supabase/functions/nse-uat-smoke-test/index_test.ts",
+    "supabase/functions/_shared/nse/nse_order_status_test.ts",
+    "supabase/functions/nse-order-status-worker/index_test.ts",
 ]
 EXPECTED_FMT_CHECK_TARGETS = [
     "supabase/functions/_shared/nse/nse_evidence_call.ts",
@@ -30,6 +32,13 @@ EXPECTED_FMT_CHECK_TARGETS = [
     "supabase/functions/nse-ucc-registration-worker/index_test.ts",
     "supabase/functions/nse-ucc-reconciliation-worker/handler.ts",
     "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_order_status.ts",
+    "supabase/functions/_shared/nse/nse_order_status_test.ts",
+    "supabase/functions/nse-order-status-worker/types.ts",
+    "supabase/functions/nse-order-status-worker/adapters.ts",
+    "supabase/functions/nse-order-status-worker/handler.ts",
+    "supabase/functions/nse-order-status-worker/index.ts",
+    "supabase/functions/nse-order-status-worker/index_test.ts",
 ]
 
 
@@ -51,7 +60,7 @@ class NSETestManifestV1Tests(unittest.TestCase):
         (root / "scripts").mkdir()
         shutil.copy2(SELECTOR, root / "scripts/nse_test_manifest_v1.py")
         shutil.copy2(MANIFEST, target_manifest)
-        for target_path in [*EXPECTED_T001_TESTS, *EXPECTED_FMT_CHECK_TARGETS]:
+        for target_path in [*EXPECTED_BASELINE_TESTS, *EXPECTED_FMT_CHECK_TARGETS]:
             target = root / target_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.touch()
@@ -84,12 +93,12 @@ class NSETestManifestV1Tests(unittest.TestCase):
         self.assertEqual(accepted.returncode, 0)
         self.assertEqual(first_print.returncode, 0)
         self.assertEqual(first_print.stdout, second_print.stdout)
-        self.assertEqual(first_print.stdout.splitlines(), EXPECTED_T001_TESTS)
+        self.assertEqual(first_print.stdout.splitlines(), EXPECTED_BASELINE_TESTS)
 
-    def test_fmt_check_targets_are_exactly_the_initial_six_target_order(self) -> None:
+    def test_fmt_check_targets_are_exactly_the_reviewed_target_order(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(manifest["fmt_check_targets"], EXPECTED_FMT_CHECK_TARGETS)
-        self.assertEqual(len(manifest["fmt_check_targets"]), 6)
+        self.assertEqual(len(manifest["fmt_check_targets"]), 13)
 
     def test_fmt_check_print_order_is_deterministic(self) -> None:
         first_print = self.run_selector(REPOSITORY_ROOT, "print-fmt-check")
@@ -98,10 +107,10 @@ class NSETestManifestV1Tests(unittest.TestCase):
         self.assertEqual(first_print.stdout, second_print.stdout)
         self.assertEqual(first_print.stdout.splitlines(), EXPECTED_FMT_CHECK_TARGETS)
 
-    def test_initial_manifest_is_exactly_the_post_t001_nine_suite_set(self) -> None:
+    def test_manifest_is_exactly_the_reviewed_eleven_suite_set(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        self.assertEqual(manifest["baseline_tests"], EXPECTED_T001_TESTS)
-        self.assertEqual(len(manifest["baseline_tests"]), 9)
+        self.assertEqual(manifest["baseline_tests"], EXPECTED_BASELINE_TESTS)
+        self.assertEqual(len(manifest["baseline_tests"]), 11)
 
     def test_duplicate_path_is_rejected(self) -> None:
         self.assert_rejected(lambda _root, manifest: manifest["baseline_tests"].append(manifest["baseline_tests"][0]))
@@ -140,7 +149,7 @@ class NSETestManifestV1Tests(unittest.TestCase):
     def test_final_file_symlink_is_rejected(self) -> None:
         def mutate(root: Path, manifest: dict[str, object]) -> None:
             link = root / "supabase/functions/_shared/nse/symlink_test.ts"
-            link.symlink_to(root / EXPECTED_T001_TESTS[0])
+            link.symlink_to(root / EXPECTED_BASELINE_TESTS[0])
             manifest["baseline_tests"][0] = "supabase/functions/_shared/nse/symlink_test.ts"
         self.assert_rejected(mutate)
 

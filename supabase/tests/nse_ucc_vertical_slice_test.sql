@@ -1,6 +1,10 @@
 -- NSEInvest CLIENTCOMMON183 vertical-slice database regression. Local only.
 BEGIN;
 
+-- This regression owns every synthetic encryption prerequisite and rolls it back.
+SELECT 1 FROM vault.create_secret(repeat('p', 40), 'pan_encryption_key', 'synthetic local test key');
+SELECT 1 FROM vault.create_secret(repeat('h', 40), 'pan_lookup_hmac_key', 'synthetic local test key');
+
 SELECT 1 FROM vault.create_secret(repeat('p', 40), 'integration_payload_encryption_key_v1', 'synthetic local test key');
 SELECT 1 FROM vault.create_secret(repeat('b', 40), 'bank_account_encryption_key_v1', 'synthetic local test key');
 SELECT 1 FROM vault.create_secret(repeat('h', 40), 'bank_account_lookup_hmac_key_v1', 'synthetic local test key');
