@@ -22,5 +22,9 @@
   "integration.nse.order_funding_requested": {
     "worker_slug": "nse-order-funding-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.settlement_redemption_requested": {
+    "worker_slug": "nse-settlement-redemption-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }

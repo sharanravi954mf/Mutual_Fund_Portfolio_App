@@ -34,7 +34,14 @@
     "supabase/functions/nse-order-funding-worker/adapters.ts",
     "supabase/functions/nse-order-funding-worker/handler.ts",
     "supabase/functions/nse-order-funding-worker/index.ts",
-    "supabase/functions/nse-order-funding-worker/index_test.ts"
+    "supabase/functions/nse-order-funding-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_settlement_redemption.ts",
+    "supabase/functions/_shared/nse/nse_settlement_redemption_test.ts",
+    "supabase/functions/nse-settlement-redemption-worker/types.ts",
+    "supabase/functions/nse-settlement-redemption-worker/adapters.ts",
+    "supabase/functions/nse-settlement-redemption-worker/handler.ts",
+    "supabase/functions/nse-settlement-redemption-worker/index.ts",
+    "supabase/functions/nse-settlement-redemption-worker/index_test.ts"
   ],
   "baseline_tests": [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
@@ -53,7 +60,9 @@
     "supabase/functions/_shared/nse/nse_client_readiness_test.ts",
     "supabase/functions/nse-client-readiness-worker/index_test.ts",
     "supabase/functions/_shared/nse/nse_order_funding_test.ts",
-    "supabase/functions/nse-order-funding-worker/index_test.ts"
+    "supabase/functions/nse-order-funding-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_settlement_redemption_test.ts",
+    "supabase/functions/nse-settlement-redemption-worker/index_test.ts"
   ],
   "endpoint_tests": {
     "nse-ucc-registration-worker": [
@@ -76,6 +85,9 @@
     ],
     "nse-order-funding-worker": [
       "supabase/functions/nse-order-funding-worker/index_test.ts"
+    ],
+    "nse-settlement-redemption-worker": [
+      "supabase/functions/nse-settlement-redemption-worker/index_test.ts"
     ]
   }
 }
