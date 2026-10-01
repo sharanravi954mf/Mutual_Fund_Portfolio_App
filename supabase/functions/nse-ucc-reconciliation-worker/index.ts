@@ -12,7 +12,8 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 const handler = createNseUccReconciliationHandler({
-  internalToken: Deno.env.get("NSE_UCC_RECONCILIATION_WORKER_TOKEN") ?? "",
+  internalToken: Deno.env.get("NSE_WORKER_TOKEN") ??
+    Deno.env.get("NSE_UCC_RECONCILIATION_WORKER_TOKEN") ?? "",
   persistence: createVerificationPersistence(supabase),
   gateway: createVerificationGateway(loadNseConfig()),
 });

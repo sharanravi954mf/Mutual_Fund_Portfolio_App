@@ -7,7 +7,8 @@ import { createNseUccWorkerHandler } from "./handler.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const internalToken = Deno.env.get("NSE_UCC_WORKER_TOKEN") ?? "";
+const internalToken = Deno.env.get("NSE_WORKER_TOKEN") ??
+  Deno.env.get("NSE_UCC_WORKER_TOKEN") ?? "";
 
 const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },

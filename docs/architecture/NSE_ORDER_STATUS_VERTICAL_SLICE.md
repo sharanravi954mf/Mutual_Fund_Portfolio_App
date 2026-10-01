@@ -72,7 +72,7 @@ The new worker requires a valid internal bearer token and explicit event UUID. I
 
 Transport failures and HTTP 408/429/500/502/503/504 use bounded read retries, with a maximum of three claimed attempts. Other HTTP failures are terminal. Envelope failure, malformed content and scope mismatch are terminal business failures with encrypted evidence. An expired claim before REQUEST consumes an attempt and remains bounded, including an expired retry claim. An abandoned REQUEST gets one immutable `TRANSPORT_FAILURE` RESULT, followed by a fresh call ID on retry. It never becomes write-side ambiguity. The dispatch feed includes expired ORDER_STATUS retry claims so they cannot get stuck before their next REQUEST.
 
-The reviewed route is `integration.nse.order_status_requested` → `nse-order-status-worker`. Its configured bearer-token reference is `NSE_ORDER_STATUS_WORKER_TOKEN`. No token or credential is created or changed here. Future activation requires configuring that token consistently on the worker and dispatcher before deploying the updated routes. No hosted configuration is changed by this implementation.
+The reviewed route is `integration.nse.order_status_requested` → `nse-order-status-worker`. NSE workers use the shared internal bearer secret `NSE_WORKER_TOKEN`; the token authenticates the Oracle dispatcher while endpoint/event/account/claim checks remain worker-specific. Legacy worker-specific token names are accepted only as a temporary rollout fallback in worker entrypoints. No NSE vendor credential is changed by this design.
 
 ## Local validation
 
