@@ -10,6 +10,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## Unreleased
 
 ### Added
+- **NSE B03 local candidate**: Four evidence-only settlement/redemption report contracts, owned immutable ORDER_STATUS selectors, a shared bounded read worker, private summaries and current-schema rollback regressions. No provider UAT or deployment; financial distribution remains deferred to B11.
 - **External Ingestion Support Stack (#109)**: Added a provider-host-agnostic
   FastAPI and ClamAV Docker Compose stack implementing the unchanged mailbox
   OAuth, attachment fetch, PDF extraction infrastructure with deterministic

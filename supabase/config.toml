@@ -232,3 +232,6 @@ verify_jwt = false
 
 [functions.nse-order-funding-worker]
 verify_jwt = false
+
+[functions.nse-settlement-redemption-worker]
+verify_jwt = false
