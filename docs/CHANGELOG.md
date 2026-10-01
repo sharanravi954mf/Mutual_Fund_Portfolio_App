@@ -10,6 +10,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## Unreleased
 
 ### Added
+- **NSE B04 local candidate**: Nine SIP/XSIP/step-up report adapters share one evidence-only worker, registered-account UCC scope and owned registration member selectors. Endpoint-specific dates/schemas, immutable encrypted evidence and bounded retries add no schedule or financial projection. See [B04 architecture and validation](architecture/NSE_SIP_XSIP_REPORTS_VERTICAL_SLICE.md); UAT and deployment remain separate.
 - **NSE B03 local candidate**: Four evidence-only settlement/redemption report contracts, owned immutable ORDER_STATUS selectors, a shared bounded read worker, private summaries and current-schema rollback regressions. No provider UAT or deployment; financial distribution remains deferred to B11.
 - **External Ingestion Support Stack (#109)**: Added a provider-host-agnostic
   FastAPI and ClamAV Docker Compose stack implementing the unchanged mailbox

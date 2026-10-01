@@ -732,3 +732,5 @@ The six account-scoped [NSE B01 client readiness reports](NSE_CLIENT_READINESS_V
 The four [NSE B02 order and funding reads](NSE_ORDER_FUNDING_VERTICAL_SLICE.md) reuse that evidence/outbox model with explicit endpoint contracts and owned prior-report selections. Their private summaries do not change paid, settled, reconciliation or portfolio state; canonical financial linkage remains a later domain boundary.
 
 The four [NSE B03 settlement and redemption reports](NSE_SETTLEMENT_REDEMPTION_VERTICAL_SLICE.md) require opaque selections from validated owned ORDER_STATUS evidence. Distinct payout/non-demat/statement contracts share bounded read evidence mechanics; no financial tables or canonical order states are changed. Switch/correction lineage remains gated on B11.
+
+The nine [NSE B04 SIP/XSIP reports](NSE_SIP_XSIP_REPORTS_VERTICAL_SLICE.md) use registered-account UCCs and evidence-owned registration member references. Their endpoint-specific schemas and date rules share the existing bounded read lifecycle; canonical schedules and systematic writes remain deferred to B12.
