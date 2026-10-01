@@ -12,7 +12,8 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 const handler = createNseOrderStatusHandler({
-  internalToken: Deno.env.get("NSE_ORDER_STATUS_WORKER_TOKEN") ?? "",
+  internalToken: Deno.env.get("NSE_WORKER_TOKEN") ??
+    Deno.env.get("NSE_ORDER_STATUS_WORKER_TOKEN") ?? "",
   persistence: createOrderStatusPersistence(supabase),
   gateway: createOrderStatusGateway(loadNseConfig()),
 });

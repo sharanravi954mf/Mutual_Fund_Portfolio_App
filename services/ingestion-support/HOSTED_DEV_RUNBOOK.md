@@ -257,11 +257,9 @@ Add these values only to the existing root-owned mode `0600` Hosted Dev
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `NSE_UCC_WORKER_TOKEN`
-- `NSE_UCC_RECONCILIATION_WORKER_TOKEN`
-- `NSE_ORDER_STATUS_WORKER_TOKEN`
+- `NSE_WORKER_TOKEN`
 
-The worker-token values must match their Hosted Dev Edge Function secrets.
+`NSE_WORKER_TOKEN` is the single internal bearer secret shared by the Oracle dispatcher and all Hosted Dev NSE workers. Worker-specific legacy token names may remain temporarily in Supabase during rollout, but new NSE workers must not introduce another per-API token.
 Never print any of these values or place them on a command line.
 
 Keep these safe defaults until live dispatch is explicitly approved:

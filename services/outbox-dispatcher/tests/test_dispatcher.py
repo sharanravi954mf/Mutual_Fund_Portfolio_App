@@ -17,8 +17,7 @@ from dispatcher import (
 
 
 SERVICE_KEY = "s" * 40
-REG_TOKEN = "r" * 40
-VERIFY_TOKEN = "v" * 40
+NSE_TOKEN = "n" * 40
 EVENT_ID = "10000000-0000-4000-8000-000000000001"
 
 
@@ -29,11 +28,11 @@ def _routes_file(tmp_path: Path) -> Path:
             {
                 "integration.nse.ucc_registration_requested": {
                     "worker_slug": "nse-ucc-registration-worker",
-                    "token_env": "NSE_UCC_WORKER_TOKEN",
+                    "token_env": "NSE_WORKER_TOKEN",
                 },
                 "integration.nse.ucc_verification_requested": {
                     "worker_slug": "nse-ucc-reconciliation-worker",
-                    "token_env": "NSE_UCC_RECONCILIATION_WORKER_TOKEN",
+                    "token_env": "NSE_WORKER_TOKEN",
                 },
             }
         ),
@@ -46,8 +45,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
     return {
         "SUPABASE_URL": "https://example.supabase.co",
         "SUPABASE_SERVICE_ROLE_KEY": SERVICE_KEY,
-        "NSE_UCC_WORKER_TOKEN": REG_TOKEN,
-        "NSE_UCC_RECONCILIATION_WORKER_TOKEN": VERIFY_TOKEN,
+        "NSE_WORKER_TOKEN": NSE_TOKEN,
         "OUTBOX_ROUTES_FILE": str(_routes_file(tmp_path)),
         "OUTBOX_HEARTBEAT_FILE": str(tmp_path / "heartbeat"),
         "OUTBOX_DISPATCH_DRY_RUN": "false",
@@ -82,12 +80,11 @@ def test_routes_are_config_driven_and_tokens_stay_in_environment(tmp_path: Path)
         "integration.nse.ucc_registration_requested",
         "integration.nse.ucc_verification_requested",
     }
-    assert routes["integration.nse.ucc_registration_requested"].token == REG_TOKEN
-    assert routes["integration.nse.ucc_verification_requested"].token == VERIFY_TOKEN
+    assert routes["integration.nse.ucc_registration_requested"].token == NSE_TOKEN
+    assert routes["integration.nse.ucc_verification_requested"].token == NSE_TOKEN
 
     raw_routes = Path(env["OUTBOX_ROUTES_FILE"]).read_text(encoding="utf-8")
-    assert REG_TOKEN not in raw_routes
-    assert VERIFY_TOKEN not in raw_routes
+    assert NSE_TOKEN not in raw_routes
 
 
 def test_feed_uses_service_role_but_returns_metadata_only(tmp_path: Path) -> None:
@@ -140,8 +137,7 @@ def test_feed_uses_service_role_but_returns_metadata_only(tmp_path: Path) -> Non
         "p_limit": 10,
         "p_retry_delay_seconds": 30,
     }
-    assert REG_TOKEN not in json.dumps(seen)
-    assert VERIFY_TOKEN not in json.dumps(seen)
+    assert NSE_TOKEN not in json.dumps(seen)
 
 
 def test_worker_dispatch_uses_route_token_and_event_id_only(tmp_path: Path) -> None:
@@ -174,7 +170,7 @@ def test_worker_dispatch_uses_route_token_and_event_id_only(tmp_path: Path) -> N
     assert seen["url"] == (
         "https://example.supabase.co/functions/v1/nse-ucc-registration-worker"
     )
-    assert seen["authorization"] == f"Bearer {REG_TOKEN}"
+    assert seen["authorization"] == f"Bearer {NSE_TOKEN}"
     assert seen["body"] == {"event_outbox_id": EVENT_ID}
     assert SERVICE_KEY not in json.dumps(seen)
 
@@ -188,7 +184,7 @@ def test_verification_event_routes_to_reconciliation_worker(tmp_path: Path) -> N
         assert str(request.url).endswith(
             "/functions/v1/nse-ucc-reconciliation-worker"
         )
-        assert request.headers["authorization"] == f"Bearer {VERIFY_TOKEN}"
+        assert request.headers["authorization"] == f"Bearer {NSE_TOKEN}"
         return httpx.Response(202, json={"data": {"outcome": "synthetic"}})
 
     dispatcher = OutboxDispatcher(
@@ -324,12 +320,8 @@ def test_dry_run_defaults_to_true(tmp_path: Path) -> None:
 def test_repository_order_status_route_uses_dedicated_worker() -> None:
     routes = load_routes(
         Path(__file__).parents[1] / "routes.json",
-        {
-            "NSE_UCC_WORKER_TOKEN": REG_TOKEN,
-            "NSE_UCC_RECONCILIATION_WORKER_TOKEN": VERIFY_TOKEN,
-            "NSE_ORDER_STATUS_WORKER_TOKEN": "o" * 40,
-        },
+        {"NSE_WORKER_TOKEN": NSE_TOKEN},
     )
     route = routes["integration.nse.order_status_requested"]
     assert route.worker_slug == "nse-order-status-worker"
-    assert route.token == "o" * 40
+    assert route.token == NSE_TOKEN
