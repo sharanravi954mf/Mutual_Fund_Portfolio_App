@@ -184,10 +184,9 @@ for (const c of cases) {
       classify({ ...envelope(), report_data_total: 1 }).success,
       true,
     );
-    assertEquals(
-      classify({ ...envelope(), error_remark: "PRIVATE" }).success,
-      false,
-    );
+    const diagnostic = classify({ ...envelope(), error_remark: "PRIVATE" });
+    assertEquals(diagnostic.success, c.api === "ELOG_REPORT");
+    assertEquals(JSON.stringify(diagnostic).includes("PRIVATE"), false);
     if (c.remark) {
       const body: Record<string, unknown> = envelope();
       delete body.error_remark;

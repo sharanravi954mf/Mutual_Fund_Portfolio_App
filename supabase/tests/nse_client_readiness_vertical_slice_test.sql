@@ -159,12 +159,17 @@ BEGIN
   PERFORM pg_temp.expect_error(format('UPDATE public.integration_api_interactions SET response_payload_ciphertext=NULL WHERE id=%L',result.id),'integration_api_interactions_append_only');
   PERFORM pg_temp.expect_error(format('DELETE FROM public.integration_api_interactions WHERE id=%L',req.id),'integration_api_interactions_append_only');
   FOR value IN SELECT x FROM (VALUES (body||'{"report_data_total":0}'::jsonb),(body||'{"report_data_total":null}'::jsonb),
-    (body||'{"report_data_total":"1.0"}'::jsonb),(body||'{"report_data":{}}'::jsonb),(body||'{"error_remark":"PRIVATE"}'::jsonb),
+    (body||'{"report_data_total":"1.0"}'::jsonb),(body||'{"report_data":{}}'::jsonb),
     (body||jsonb_build_object('report_data',jsonb_build_array(c.row_data||jsonb_build_object(CASE WHEN c.api='FATCA_REPORT' THEN 'pan_rp' ELSE 'client_code' END,'FOREIGN')))),
     (body||jsonb_build_object('report_data',jsonb_build_array(c.row_data,c.row_data),'report_data_total',2)),
     (body||jsonb_build_object('report_data',jsonb_build_array(c.row_data||'{"unknown":{}}'::jsonb)))) v(x) LOOP
     PERFORM pg_temp.assert_true(NOT (public.inspect_nse_client_readiness_response(c.api,value::text,c.request,src)->>'success')::bool,'bad_shape_scope_count_'||c.api);
   END LOOP;
+  value:=body||'{"error_remark":"PRIVATE"}'::jsonb;
+  PERFORM pg_temp.assert_true(
+    (public.inspect_nse_client_readiness_response(c.api,value::text,c.request,src)->>'success')::bool = (c.api='ELOG_REPORT'),
+    'success_diagnostic_policy_'||c.api);
+  PERFORM pg_temp.assert_true(public.inspect_nse_client_readiness_response(c.api,value::text,c.request,src)::text NOT LIKE '%PRIVATE%','success_diagnostic_not_projected_'||c.api);
   IF c.needs_remark THEN PERFORM pg_temp.assert_true(NOT (public.inspect_nse_client_readiness_response(c.api,(body-'error_remark')::text,c.request,src)->>'success')::bool,'required_remark'); END IF;
   -- Independently finish an empty report, F and malformed data for every API.
   FOREACH raw IN ARRAY ARRAY[(body||'{"report_data":[],"report_data_total":0}'::jsonb)::text,'{"response_status":"F","error_remark":"PRIVATE"}','PRIVATE'] LOOP
