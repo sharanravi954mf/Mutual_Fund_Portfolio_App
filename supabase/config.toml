@@ -223,3 +223,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.nse-order-status-worker]
 verify_jwt = false
+
+[functions.nse-prov-orders-worker]
+verify_jwt = false

@@ -1,0 +1,723 @@
+-- PROV_ORDERS: handbook v1.9.7 pp78–82; account-scoped read-only UAT.
+-- Generic outbox owns immutable non-sensitive options; generic ledger owns all
+-- provider bytes. No report-specific query or observation tables.
+BEGIN;
+
+CREATE FUNCTION public.validate_nse_prov_orders_filters(p_filters pg_catalog.jsonb)
+RETURNS pg_catalog.void LANGUAGE plpgsql IMMUTABLE SET search_path = '' AS $$
+BEGIN
+  IF p_filters IS NULL OR pg_catalog.jsonb_typeof(p_filters) <> 'object' THEN
+    RAISE EXCEPTION 'prov_orders_filters_invalid';
+  END IF;
+  -- Only the common fields are reused; ORDER_STATUS still rejects date_type.
+  BEGIN
+    PERFORM public.validate_nse_order_status_filters(p_filters - 'date_type');
+  EXCEPTION WHEN raise_exception THEN RAISE EXCEPTION 'prov_orders_filters_invalid'; END;
+  IF p_filters ? 'date_type' AND p_filters->'date_type' <> 'null'::pg_catalog.jsonb
+    AND (pg_catalog.jsonb_typeof(p_filters->'date_type') <> 'string'
+      OR p_filters->>'date_type' NOT IN ('REQUEST DATE','ORDER DATE')) THEN
+    RAISE EXCEPTION 'prov_orders_filters_invalid';
+  END IF;
+END;
+$$;
+
+CREATE UNIQUE INDEX event_outbox_one_prov_orders_idx ON public.event_outbox(entity_id)
+  WHERE event_type = 'integration.nse.prov_orders_requested';
+
+-- Preserve query context after completion as well as while queued/retrying.
+-- This guard is deliberately confined to this new event type.
+CREATE FUNCTION public.guard_nse_prov_orders_context()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE v_index pg_catalog.jsonb;
+BEGIN
+  IF TG_OP <> 'INSERT' AND OLD.event_type = 'integration.nse.prov_orders_requested' THEN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'prov_orders_context_immutable'; END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.event_type IS DISTINCT FROM OLD.event_type
+      OR NEW.entity_id IS DISTINCT FROM OLD.entity_id OR NEW.entity_type IS DISTINCT FROM OLD.entity_type
+      OR NEW.payload IS DISTINCT FROM OLD.payload OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'prov_orders_context_immutable';
+    END IF;
+  ELSIF TG_OP = 'UPDATE' AND NEW.event_type = 'integration.nse.prov_orders_requested' THEN
+    RAISE EXCEPTION 'prov_orders_context_immutable';
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW.event_type = 'integration.nse.prov_orders_requested' THEN
+    IF NEW.entity_type IS DISTINCT FROM 'integration_operation'
+      OR pg_catalog.jsonb_typeof(NEW.payload) IS DISTINCT FROM 'object'
+      OR NOT (NEW.payload ?& ARRAY['integration_operation_id','filters','scope_result_id','scope_rows','id_filter'])
+      OR NEW.payload->>'integration_operation_id' IS DISTINCT FROM NEW.entity_id::pg_catalog.text
+      OR EXISTS (SELECT 1 FROM pg_catalog.jsonb_object_keys(NEW.payload) k
+        WHERE k NOT IN ('integration_operation_id','filters','scope_result_id','scope_rows','id_filter'))
+      OR NOT EXISTS (SELECT 1 FROM public.integration_operations o WHERE o.id=NEW.entity_id
+        AND o.integration_key='NSE_INVEST' AND o.integration_environment='UAT'
+        AND o.category='TRANSACTION' AND o.safety_class='READ_ONLY'
+        AND o.operation_type='PROV_ORDERS' AND o.api_key='PROV_ORDERS' AND o.contract_version='NNF_1.9.7') THEN
+      RAISE EXCEPTION 'prov_orders_context_invalid';
+    END IF;
+    PERFORM public.validate_nse_prov_orders_filters(NEW.payload->'filters');
+    IF ((NEW.payload->'scope_result_id'='null'::pg_catalog.jsonb
+      AND NEW.payload->'scope_rows'='null'::pg_catalog.jsonb AND NEW.payload->'id_filter'='null'::pg_catalog.jsonb)
+      OR (pg_catalog.jsonb_typeof(NEW.payload->'scope_result_id')='string'
+        AND pg_catalog.jsonb_typeof(NEW.payload->'scope_rows')='array'
+        AND NEW.payload->>'id_filter' IN ('order_ids','member_unique_ids'))) IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'prov_orders_id_scope_invalid';
+    END IF;
+    IF NEW.payload->>'scope_result_id' IS NOT NULL THEN
+      IF NEW.payload->>'scope_result_id' !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        OR pg_catalog.jsonb_array_length(NEW.payload->'scope_rows') NOT BETWEEN 1 AND 50 THEN
+        RAISE EXCEPTION 'prov_orders_id_scope_invalid';
+      END IF;
+      FOR v_index IN SELECT value FROM pg_catalog.jsonb_array_elements(NEW.payload->'scope_rows') LOOP
+        IF pg_catalog.jsonb_typeof(v_index) IS DISTINCT FROM 'number'
+          OR v_index::pg_catalog.text !~ '^[0-9]{1,10}$'
+          OR (v_index::pg_catalog.text)::pg_catalog.numeric > 2147483647 THEN
+          RAISE EXCEPTION 'prov_orders_id_scope_invalid';
+        END IF;
+      END LOOP;
+      IF NOT EXISTS (SELECT 1 FROM public.integration_api_interactions i
+        JOIN public.integration_operations source ON source.id=i.integration_operation_id
+        JOIN public.integration_operations target ON target.id=NEW.entity_id
+        WHERE i.id=(NEW.payload->>'scope_result_id')::pg_catalog.uuid
+          AND i.phase='RESULT' AND i.normalized_outcome='SUCCESS' AND i.operation_type='PROV_ORDERS'
+          AND source.workspace_id=target.workspace_id AND source.integration_account_id=target.integration_account_id
+          AND source.state='SUCCESS' AND source.last_interaction_id=i.id) THEN
+        RAISE EXCEPTION 'prov_orders_id_scope_invalid';
+      END IF;
+    END IF;
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER nse_prov_orders_context_guard BEFORE INSERT OR UPDATE OR DELETE ON public.event_outbox
+  FOR EACH ROW EXECUTE FUNCTION public.guard_nse_prov_orders_context();
+
+CREATE FUNCTION public.get_nse_prov_orders_source(p_integration_operation_id pg_catalog.uuid)
+RETURNS pg_catalog.jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_operation public.integration_operations; v_account public.integration_accounts;
+  v_context pg_catalog.jsonb; v_result public.integration_api_interactions;
+  v_request pg_catalog.jsonb; v_report pg_catalog.jsonb; v_row pg_catalog.jsonb;
+  v_index pg_catalog.int4; v_id pg_catalog.text; v_ids pg_catalog.text[] := ARRAY[]::pg_catalog.text[];
+  v_scope_rows pg_catalog.int4[]; v_id_filter pg_catalog.text;
+BEGIN
+  SELECT * INTO v_operation FROM public.integration_operations WHERE id=p_integration_operation_id
+    AND integration_key='NSE_INVEST' AND integration_environment='UAT'
+    AND category='TRANSACTION' AND safety_class='READ_ONLY'
+    AND operation_type='PROV_ORDERS' AND api_key='PROV_ORDERS' AND contract_version='NNF_1.9.7';
+  SELECT payload INTO v_context FROM public.event_outbox WHERE entity_id=v_operation.id
+    AND entity_type='integration_operation' AND event_type='integration.nse.prov_orders_requested';
+  SELECT * INTO v_account FROM public.integration_accounts WHERE id=v_operation.integration_account_id
+    AND workspace_id=v_operation.workspace_id AND state='REGISTERED'
+    AND integration_key='NSE_INVEST' AND integration_environment='UAT';
+  IF v_context IS NULL OR v_account.id IS NULL
+    OR NULLIF(pg_catalog.btrim(v_account.external_account_id),'') IS NULL
+    OR v_account.external_account_id <> pg_catalog.btrim(v_account.external_account_id)
+    OR pg_catalog.length(v_account.external_account_id)>20 OR v_account.external_account_id ~ '[[:cntrl:],]'
+    OR NOT EXISTS (SELECT 1 FROM public.workspaces w WHERE w.id=v_account.workspace_id AND w.workspace_status='active')
+    OR NOT EXISTS (SELECT 1 FROM public.workspace_memberships m WHERE m.workspace_id=v_account.workspace_id
+      AND m.profile_id=v_account.investor_profile_id AND m.status='active' AND m.ended_at IS NULL)
+    OR EXISTS (SELECT 1 FROM public.integration_accounts a WHERE a.id<>v_account.id
+      AND a.integration_key='NSE_INVEST' AND a.integration_environment='UAT'
+      AND a.external_account_id=v_account.external_account_id) THEN
+    RAISE EXCEPTION 'prov_orders_account_scope_invalid';
+  END IF;
+  PERFORM public.validate_nse_prov_orders_filters(v_context->'filters');
+  v_request := pg_catalog.jsonb_build_object('order_status','','settlement_type','') || (v_context->'filters') ||
+    pg_catalog.jsonb_build_object('date_type',COALESCE(v_context->'filters'->>'date_type','REQUEST DATE'),
+      'client_code',v_account.external_account_id,'order_ids','','member_unique_ids','');
+  IF v_context->>'scope_result_id' IS NOT NULL THEN
+    -- A successful immutable RESULT plus its account-bound operation supplies
+    -- ownership, without a second observation table or plaintext vendor IDs.
+    SELECT i.* INTO v_result FROM public.integration_api_interactions i
+    JOIN public.integration_operations o ON o.id=i.integration_operation_id
+    WHERE i.id=(v_context->>'scope_result_id')::pg_catalog.uuid
+      AND i.phase='RESULT' AND i.normalized_outcome='SUCCESS'
+      AND i.workspace_id=v_account.workspace_id AND i.operation_type='PROV_ORDERS'
+      AND i.api_key='PROV_ORDERS' AND i.contract_version='NNF_1.9.7'
+      AND i.integration_key='NSE_INVEST' AND i.integration_environment='UAT' AND i.safety_class='READ_ONLY'
+      AND o.workspace_id=v_account.workspace_id AND o.integration_account_id=v_account.id
+      AND o.state='SUCCESS' AND o.last_interaction_id=i.id;
+    SELECT pg_catalog.array_agg(value::pg_catalog.int4) INTO v_scope_rows
+      FROM pg_catalog.jsonb_array_elements_text(v_context->'scope_rows');
+    v_id_filter := v_context->>'id_filter';
+    IF v_result.id IS NULL OR COALESCE(pg_catalog.cardinality(v_scope_rows),0) NOT BETWEEN 1 AND 50
+      OR v_id_filter NOT IN ('order_ids','member_unique_ids') THEN RAISE EXCEPTION 'prov_orders_id_scope_invalid'; END IF;
+    v_report := extensions.pgp_sym_decrypt(v_result.response_payload_ciphertext,
+      public.integration_payload_encryption_key(v_result.payload_encryption_key_reference))::pg_catalog.jsonb;
+    FOREACH v_index IN ARRAY v_scope_rows LOOP
+      IF v_index IS NULL OR v_index<0 OR v_index>=pg_catalog.jsonb_array_length(v_report->'report_data') THEN
+        RAISE EXCEPTION 'prov_orders_id_scope_invalid';
+      END IF;
+      v_row := v_report->'report_data'->v_index;
+      v_id := v_row->>CASE WHEN v_id_filter='order_ids' THEN 'order_id' ELSE 'member_unique_id' END;
+      IF v_row->>'client_code' IS DISTINCT FROM v_account.external_account_id
+        OR pg_catalog.jsonb_typeof(v_row->CASE WHEN v_id_filter='order_ids' THEN 'order_id' ELSE 'member_unique_id' END) IS DISTINCT FROM 'string'
+        OR NULLIF(pg_catalog.btrim(v_id),'') IS NULL OR v_id<>pg_catalog.btrim(v_id)
+        OR v_id ~ '[[:cntrl:],]' OR (v_id_filter='member_unique_ids' AND pg_catalog.length(v_id)>25) THEN
+        RAISE EXCEPTION 'prov_orders_id_scope_invalid';
+      END IF;
+      v_ids := pg_catalog.array_append(v_ids,v_id);
+    END LOOP;
+    v_request := v_request || pg_catalog.jsonb_build_object(v_id_filter,pg_catalog.array_to_string(v_ids,','));
+  END IF;
+  RETURN pg_catalog.jsonb_build_object('operation_id',v_operation.id,'workspace_id',v_operation.workspace_id,
+    'integration_account_id',v_account.id,'request',v_request);
+END;
+$$;
+
+CREATE FUNCTION public.prepare_nse_prov_orders(
+  p_workspace_id pg_catalog.uuid, p_integration_account_id pg_catalog.uuid, p_filters pg_catalog.jsonb,
+  p_request_id pg_catalog.uuid DEFAULT pg_catalog.gen_random_uuid(),
+  p_scope_result_id pg_catalog.uuid DEFAULT NULL, p_scope_rows pg_catalog.int4[] DEFAULT NULL, p_id_filter pg_catalog.text DEFAULT NULL
+)
+RETURNS public.integration_operations LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_account public.integration_accounts; v_operation public.integration_operations; v_context pg_catalog.jsonb;
+BEGIN
+  IF p_request_id IS NULL THEN RAISE EXCEPTION 'prov_orders_request_id_required'; END IF;
+  PERFORM public.validate_nse_prov_orders_filters(p_filters);
+  IF NOT ((p_scope_result_id IS NULL AND p_scope_rows IS NULL AND p_id_filter IS NULL)
+    OR (p_scope_result_id IS NOT NULL AND p_scope_rows IS NOT NULL AND p_id_filter IS NOT NULL
+      AND p_id_filter IN ('order_ids','member_unique_ids') AND pg_catalog.cardinality(p_scope_rows) BETWEEN 1 AND 50
+      AND pg_catalog.array_ndims(p_scope_rows)=1)) THEN RAISE EXCEPTION 'prov_orders_id_scope_invalid'; END IF;
+  v_context := pg_catalog.jsonb_build_object('integration_operation_id',p_request_id,'filters',p_filters,
+    'scope_result_id',p_scope_result_id,'scope_rows',p_scope_rows,'id_filter',p_id_filter);
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_request_id::pg_catalog.text,1));
+  SELECT * INTO v_account FROM public.integration_accounts WHERE id=p_integration_account_id
+    AND workspace_id=p_workspace_id AND integration_key='NSE_INVEST' AND integration_environment='UAT' FOR UPDATE;
+  IF v_account.id IS NULL THEN RAISE EXCEPTION 'prov_orders_account_scope_invalid'; END IF;
+  SELECT * INTO v_operation FROM public.integration_operations WHERE id=p_request_id;
+  IF v_operation.id IS NOT NULL THEN
+    IF v_operation.integration_account_id IS DISTINCT FROM v_account.id
+      OR v_operation.operation_type <> 'PROV_ORDERS'
+      OR NOT EXISTS (SELECT 1 FROM public.event_outbox WHERE entity_id=v_operation.id
+        AND event_type='integration.nse.prov_orders_requested' AND payload=v_context) THEN
+      RAISE EXCEPTION 'prov_orders_prepare_conflict';
+    END IF;
+    PERFORM public.get_nse_prov_orders_source(v_operation.id);
+    RETURN v_operation;
+  END IF;
+  INSERT INTO public.integration_operations(id,workspace_id,integration_account_id,integration_key,integration_environment,
+    category,safety_class,operation_type,api_key,contract_version,state)
+  VALUES(p_request_id,v_account.workspace_id,v_account.id,'NSE_INVEST','UAT','TRANSACTION','READ_ONLY',
+    'PROV_ORDERS','PROV_ORDERS','NNF_1.9.7','PREPARED') RETURNING * INTO v_operation;
+  INSERT INTO public.event_outbox(event_type,payload,status,entity_id,entity_type)
+  VALUES('integration.nse.prov_orders_requested',v_context,'pending',v_operation.id,'integration_operation');
+  PERFORM public.get_nse_prov_orders_source(v_operation.id);
+  UPDATE public.integration_operations SET state='QUEUED' WHERE id=v_operation.id RETURNING * INTO v_operation;
+  RETURN v_operation;
+END;
+$$;
+
+CREATE FUNCTION public.inspect_nse_prov_orders_response(p_payload pg_catalog.text, p_request pg_catalog.jsonb)
+RETURNS pg_catalog.jsonb LANGUAGE plpgsql IMMUTABLE SET search_path = '' AS $$
+DECLARE v_common pg_catalog.jsonb;
+BEGIN
+  -- p79 shared envelope and identity columns. PROV_ORDERS has no evidence-backed
+  -- exception to p79's blank success error_remark rule (unlike ORDER_STATUS).
+  v_common := public.inspect_nse_order_status_response(p_payload,p_request);
+  IF (v_common->>'success')::pg_catalog.bool AND (p_payload::pg_catalog.jsonb)->>'error_remark' <> '' THEN
+    RETURN '{"native_status":"S","category":"prov_orders_response_invalid","success":false,"record_count":0,"valid_count":0,"invalid_count":0,"other_count":0}'::pg_catalog.jsonb;
+  END IF;
+  RETURN v_common || pg_catalog.jsonb_build_object('category',pg_catalog.replace(v_common->>'category','order_status_','prov_orders_'));
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.recover_expired_nse_prov_orders_events(
+  p_event_outbox_id pg_catalog.uuid,
+  p_max_attempts pg_catalog.int4 DEFAULT 3
+)
+RETURNS pg_catalog.text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_event public.event_outbox;
+  v_operation public.integration_operations;
+  v_request public.integration_api_interactions;
+  v_result_id pg_catalog.uuid;
+  v_retry_allowed pg_catalog.bool;
+  v_completed_at pg_catalog.timestamptz := pg_catalog.now();
+  v_key pg_catalog.text := 'integration_payload_encryption_key_v1';
+  v_empty_hash pg_catalog.bytea := extensions.digest(''::pg_catalog.bytea, 'sha256');
+BEGIN
+  IF p_event_outbox_id IS NULL THEN RAISE EXCEPTION 'event_outbox_id_required'; END IF;
+  IF p_max_attempts IS NULL OR p_max_attempts < 1 OR p_max_attempts > 3 THEN RAISE EXCEPTION 'invalid_max_attempts'; END IF;
+  SELECT * INTO v_event FROM public.event_outbox event
+  WHERE event.id = p_event_outbox_id FOR UPDATE;
+  IF v_event.id IS NULL OR v_event.event_type <> 'integration.nse.prov_orders_requested'
+     OR v_event.entity_type <> 'integration_operation' OR v_event.status <> 'processing'
+     OR v_event.claim_expires_at IS NULL OR v_event.claim_expires_at > pg_catalog.now() THEN RETURN 'no_recovery_required'; END IF;
+  SELECT * INTO v_operation FROM public.integration_operations operation
+  WHERE operation.id = v_event.entity_id FOR UPDATE;
+  IF v_operation.id IS NULL OR v_operation.operation_type <> 'PROV_ORDERS'
+     OR v_operation.safety_class <> 'READ_ONLY' THEN RETURN 'no_recovery_required'; END IF;
+  v_retry_allowed := v_event.retry_count < p_max_attempts;
+  IF v_operation.state = 'QUEUED' OR (v_operation.state = 'SUBMISSION_FAILED' AND v_operation.retry_allowed) THEN
+    UPDATE public.integration_operations SET state = 'SUBMISSION_FAILED',
+      attempt_count = GREATEST(attempt_count, v_event.retry_count), retry_allowed = v_retry_allowed,
+      business_remark_category = 'prov_orders_pre_request_claim_expired',
+      native_business_status = NULL, ambiguous_outcome = false, reconciliation_required = false,
+      completed_at = v_completed_at
+    WHERE id = v_operation.id;
+  ELSIF v_operation.state = 'SUBMITTING' THEN
+    SELECT * INTO v_request FROM public.integration_api_interactions request
+    WHERE request.integration_operation_id = v_operation.id AND request.phase = 'REQUEST'
+      AND NOT EXISTS (
+        SELECT 1 FROM public.integration_api_interactions result
+        WHERE result.call_id = request.call_id AND result.phase = 'RESULT'
+      )
+    ORDER BY request.attempt_number DESC, request.created_at DESC LIMIT 1;
+    IF v_request.id IS NULL THEN RETURN 'no_recovery_required'; END IF;
+    INSERT INTO public.integration_api_interactions (
+      workspace_id, integration_operation_id, integration_key, integration_environment,
+      category, safety_class, operation_type, api_key, contract_version, endpoint_path,
+      http_method, call_id, phase, attempt_number, correlation_id,
+      payload_encryption_key_reference, payload_encryption_key_version, started_at,
+      response_payload_ciphertext, response_header_metadata, response_content_type,
+      response_bytes, response_hash, http_status, http_success, completed_at, elapsed_ms,
+      normalized_outcome, error_category, timeout_occurred, network_failure,
+      ambiguous_outcome, reconciliation_required
+    ) VALUES (
+      v_request.workspace_id, v_request.integration_operation_id, v_request.integration_key,
+      v_request.integration_environment, v_request.category, v_request.safety_class,
+      v_request.operation_type, v_request.api_key, v_request.contract_version,
+      v_request.endpoint_path, v_request.http_method, v_request.call_id, 'RESULT',
+      v_request.attempt_number, v_request.correlation_id, v_key, 1, v_request.started_at,
+      extensions.pgp_sym_encrypt('', public.integration_payload_encryption_key(v_key), 'cipher-algo=aes256, compress-algo=0'),
+      '{}'::pg_catalog.jsonb, NULL, 0, v_empty_hash, NULL, NULL, v_completed_at,
+      GREATEST(0::pg_catalog.int8, (EXTRACT(EPOCH FROM (v_completed_at - v_request.started_at)) * 1000)::pg_catalog.int8),
+      'TRANSPORT_FAILURE', 'prov_orders_read_lease_expired', false, false, false, false
+    ) RETURNING id INTO v_result_id;
+    UPDATE public.integration_operations SET state = 'SUBMISSION_FAILED',
+      attempt_count = GREATEST(attempt_count, v_event.retry_count), retry_allowed = v_retry_allowed,
+      business_remark_category = 'prov_orders_read_lease_expired',
+      native_business_status = NULL, ambiguous_outcome = false, reconciliation_required = false,
+      completed_at = v_completed_at, last_interaction_id = v_result_id
+    WHERE id = v_operation.id;
+  ELSE
+    RETURN 'no_recovery_required';
+  END IF;
+  UPDATE public.event_outbox SET status = 'failed',
+    error_message = CASE WHEN v_retry_allowed THEN 'prov_orders_read_retryable' ELSE 'prov_orders_read_attempts_exhausted' END,
+    claimed_by = NULL, claim_token = NULL, claim_expires_at = NULL, updated_at = pg_catalog.now()
+  WHERE id = v_event.id;
+  RETURN CASE WHEN v_retry_allowed THEN 'safe_read_retry_available' ELSE 'prov_orders_attempts_exhausted' END;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.claim_nse_prov_orders_event(
+  p_event_outbox_id pg_catalog.uuid,
+  p_max_attempts pg_catalog.int4 DEFAULT 3,
+  p_lease_seconds pg_catalog.int4 DEFAULT 120
+)
+RETURNS TABLE (
+  event_outbox_id pg_catalog.uuid, integration_operation_id pg_catalog.uuid,
+  correlation_id pg_catalog.uuid, attempt pg_catalog.int4, claim_state pg_catalog.text,
+  claim_token pg_catalog.uuid
+)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_event public.event_outbox; v_operation public.integration_operations;
+BEGIN
+  IF p_event_outbox_id IS NULL THEN RAISE EXCEPTION 'event_outbox_id_required'; END IF;
+  IF p_max_attempts IS NULL OR p_max_attempts < 1 OR p_max_attempts > 3 THEN RAISE EXCEPTION 'invalid_max_attempts'; END IF;
+  IF p_lease_seconds IS NULL OR p_lease_seconds < 15 OR p_lease_seconds > 900 THEN RAISE EXCEPTION 'invalid_lease_seconds'; END IF;
+  WITH candidate AS (
+    SELECT event.id, pg_catalog.gen_random_uuid() AS token
+    FROM public.event_outbox event JOIN public.integration_operations operation ON operation.id = event.entity_id
+    WHERE event.id = p_event_outbox_id
+      AND event.event_type = 'integration.nse.prov_orders_requested'
+      AND event.entity_type = 'integration_operation' AND event.retry_count < p_max_attempts
+      AND operation.operation_type = 'PROV_ORDERS' AND operation.safety_class = 'READ_ONLY'
+      AND operation.api_key = 'PROV_ORDERS' AND operation.integration_key = 'NSE_INVEST'
+      AND operation.integration_environment = 'UAT' AND operation.category = 'TRANSACTION'
+      AND operation.contract_version = 'NNF_1.9.7'
+      AND (
+        (event.status = 'pending' AND operation.state = 'QUEUED')
+        OR (event.status = 'failed' AND operation.state = 'SUBMISSION_FAILED' AND operation.retry_allowed)
+      )
+    FOR UPDATE OF event SKIP LOCKED
+  ) UPDATE public.event_outbox event SET
+    status = 'processing', retry_count = event.retry_count + 1, claimed_at = pg_catalog.now(),
+    claimed_by = candidate.token, claim_token = candidate.token,
+    claim_expires_at = pg_catalog.now() + (p_lease_seconds::pg_catalog.text || ' seconds')::pg_catalog.interval,
+    error_message = NULL, updated_at = pg_catalog.now()
+  FROM candidate WHERE event.id = candidate.id RETURNING event.* INTO v_event;
+  IF v_event.id IS NULL THEN
+    RETURN QUERY SELECT NULL::pg_catalog.uuid, NULL::pg_catalog.uuid, NULL::pg_catalog.uuid,
+      0::pg_catalog.int4, 'no_event'::pg_catalog.text, NULL::pg_catalog.uuid;
+    RETURN;
+  END IF;
+  SELECT * INTO v_operation FROM public.integration_operations WHERE id = v_event.entity_id;
+  RETURN QUERY SELECT v_event.id, v_operation.id, v_operation.correlation_id,
+    v_event.retry_count,
+    CASE WHEN v_event.retry_count = 1 THEN 'newly_claimed' ELSE 'safe_retry_claimed' END,
+    v_event.claim_token;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.start_nse_prov_orders(
+  p_event_outbox_id pg_catalog.uuid, p_claim_token pg_catalog.uuid,
+  p_call_id pg_catalog.uuid, p_request_payload pg_catalog.text,
+  p_request_header_metadata pg_catalog.jsonb, p_started_at pg_catalog.timestamptz
+)
+RETURNS public.integration_api_interactions
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_event public.event_outbox; v_operation public.integration_operations;
+  v_json pg_catalog.jsonb; v_existing public.integration_api_interactions;
+  v_bytes pg_catalog.int8; v_hash pg_catalog.bytea; v_key pg_catalog.text := 'integration_payload_encryption_key_v1';
+BEGIN
+  IF p_call_id IS NULL OR p_started_at IS NULL OR NULLIF(p_request_payload, '') IS NULL THEN RAISE EXCEPTION 'prov_orders_request_incomplete'; END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_call_id::pg_catalog.text, 0));
+  BEGIN v_json := p_request_payload::pg_catalog.jsonb; EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'prov_orders_request_invalid_json'; END;
+  IF NOT public.integration_header_metadata_is_safe(p_request_header_metadata, 'REQUEST')
+     OR p_request_header_metadata->>'content_type' IS DISTINCT FROM 'application/json'
+     OR p_request_header_metadata->>'accept' IS DISTINCT FROM 'application/json' THEN RAISE EXCEPTION 'unsafe_request_header_metadata'; END IF;
+  v_bytes := pg_catalog.octet_length(pg_catalog.convert_to(p_request_payload, 'UTF8'));
+  v_hash := extensions.digest(pg_catalog.convert_to(p_request_payload, 'UTF8'), 'sha256');
+  SELECT * INTO v_event FROM public.event_outbox event WHERE event.id = p_event_outbox_id FOR UPDATE;
+  IF v_event.id IS NULL OR v_event.event_type <> 'integration.nse.prov_orders_requested'
+     OR v_event.status <> 'processing' OR v_event.claim_token IS NULL OR v_event.claim_token IS DISTINCT FROM p_claim_token
+     OR v_event.claim_expires_at IS NULL OR v_event.claim_expires_at <= pg_catalog.now() THEN RAISE EXCEPTION 'claim_not_owned'; END IF;
+  SELECT * INTO v_operation FROM public.integration_operations operation WHERE operation.id = v_event.entity_id FOR UPDATE;
+  IF v_operation.operation_type <> 'PROV_ORDERS' OR v_operation.api_key <> 'PROV_ORDERS'
+     OR v_operation.category <> 'TRANSACTION' OR v_operation.safety_class <> 'READ_ONLY'
+     OR v_operation.contract_version <> 'NNF_1.9.7' THEN RAISE EXCEPTION 'integration_operation_not_prov_orders'; END IF;
+  SELECT * INTO v_existing FROM public.integration_api_interactions interaction WHERE interaction.call_id = p_call_id AND interaction.phase = 'REQUEST';
+  IF v_existing.id IS NOT NULL THEN
+    IF v_existing.integration_operation_id IS DISTINCT FROM v_operation.id
+       OR v_existing.attempt_number IS DISTINCT FROM v_event.retry_count
+       OR v_existing.correlation_id IS DISTINCT FROM v_operation.correlation_id
+       OR v_existing.endpoint_path <> '/nsemfdesk/api/v2/reports/PROV_ORDERS'
+       OR v_existing.http_method <> 'POST' OR v_existing.request_content_type <> 'application/json'
+       OR v_existing.request_hash IS DISTINCT FROM v_hash OR v_existing.request_bytes IS DISTINCT FROM v_bytes
+       OR v_existing.request_header_metadata IS DISTINCT FROM p_request_header_metadata
+       OR v_existing.started_at IS DISTINCT FROM p_started_at THEN RAISE EXCEPTION 'integration_request_idempotency_conflict'; END IF;
+    RETURN v_existing;
+  END IF;
+  IF v_operation.state NOT IN ('QUEUED', 'SUBMISSION_FAILED')
+     OR (v_operation.state = 'SUBMISSION_FAILED' AND NOT v_operation.retry_allowed) THEN
+    RAISE EXCEPTION 'integration_operation_not_prov_orders';
+  END IF;
+  IF v_json IS DISTINCT FROM public.get_nse_prov_orders_source(v_operation.id)->'request' THEN
+    RAISE EXCEPTION 'prov_orders_request_scope_mismatch';
+  END IF;
+  INSERT INTO public.integration_api_interactions (
+    workspace_id, integration_operation_id, integration_key, integration_environment,
+    category, safety_class, operation_type, api_key, contract_version, endpoint_path,
+    http_method, call_id, phase, attempt_number, correlation_id,
+    payload_encryption_key_reference, payload_encryption_key_version,
+    request_payload_ciphertext, request_header_metadata, request_content_type,
+    request_bytes, request_hash, started_at, normalized_outcome
+  ) VALUES (
+    v_operation.workspace_id, v_operation.id, v_operation.integration_key, v_operation.integration_environment,
+    v_operation.category, v_operation.safety_class, v_operation.operation_type, v_operation.api_key,
+    v_operation.contract_version, '/nsemfdesk/api/v2/reports/PROV_ORDERS', 'POST',
+    p_call_id, 'REQUEST', v_event.retry_count, v_operation.correlation_id, v_key, 1,
+    extensions.pgp_sym_encrypt(p_request_payload, public.integration_payload_encryption_key(v_key), 'cipher-algo=aes256, compress-algo=0'),
+    p_request_header_metadata, 'application/json', v_bytes, v_hash, p_started_at, 'REQUEST_RECORDED'
+  ) RETURNING * INTO v_existing;
+  UPDATE public.integration_operations SET state = 'SUBMITTING', attempt_count = v_event.retry_count,
+    native_business_status = NULL, business_remark_category = NULL, retry_allowed = false,
+    ambiguous_outcome = false, reconciliation_required = false, submitted_at = p_started_at,
+    completed_at = NULL, last_interaction_id = v_existing.id
+  WHERE id = v_operation.id;
+  RETURN v_existing;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.finish_nse_prov_orders(
+  p_event_outbox_id pg_catalog.uuid, p_claim_token pg_catalog.uuid, p_call_id pg_catalog.uuid,
+  p_response_payload pg_catalog.text, p_response_content_type pg_catalog.text,
+  p_response_header_metadata pg_catalog.jsonb, p_http_status pg_catalog.int4,
+  p_native_status_value pg_catalog.text, p_native_remark_category pg_catalog.text,
+  p_normalized_outcome pg_catalog.text, p_error_category pg_catalog.text,
+  p_timeout_occurred pg_catalog.bool, p_network_failure pg_catalog.bool,
+  p_completed_at pg_catalog.timestamptz, p_elapsed_ms pg_catalog.int8,
+  p_max_attempts pg_catalog.int4 DEFAULT 3
+)
+RETURNS public.integration_api_interactions
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_request public.integration_api_interactions;
+  v_existing public.integration_api_interactions;
+  v_event public.event_outbox;
+  v_operation public.integration_operations;
+  v_interaction public.integration_api_interactions;
+  v_request_json pg_catalog.jsonb;
+  v_observation pg_catalog.jsonb;
+  v_retry_allowed pg_catalog.bool := false;
+  v_retryable_http_status pg_catalog.bool := false;
+  v_bytes pg_catalog.int8;
+  v_hash pg_catalog.bytea;
+  v_key pg_catalog.text := 'integration_payload_encryption_key_v1';
+  v_state pg_catalog.text;
+  v_event_status pg_catalog.text := 'completed';
+BEGIN
+  IF p_call_id IS NULL OR p_completed_at IS NULL OR p_elapsed_ms IS NULL OR p_elapsed_ms < 0
+     OR p_max_attempts IS NULL OR p_max_attempts < 1 OR p_max_attempts > 3 OR p_normalized_outcome IS NULL
+     OR p_normalized_outcome NOT IN ('SUCCESS', 'BUSINESS_FAILURE', 'HTTP_FAILURE', 'TRANSPORT_FAILURE') THEN
+    RAISE EXCEPTION 'prov_orders_result_invalid';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_call_id::pg_catalog.text, 0));
+  SELECT * INTO v_request FROM public.integration_api_interactions interaction
+  WHERE interaction.call_id = p_call_id AND interaction.phase = 'REQUEST';
+  IF v_request.id IS NULL THEN RAISE EXCEPTION 'integration_request_evidence_missing'; END IF;
+  IF NOT public.integration_header_metadata_is_safe(p_response_header_metadata, 'RESULT') THEN
+    RAISE EXCEPTION 'unsafe_response_header_metadata';
+  END IF;
+
+  SELECT * INTO v_event FROM public.event_outbox WHERE id=p_event_outbox_id FOR UPDATE;
+  SELECT * INTO v_operation FROM public.integration_operations WHERE id=v_request.integration_operation_id FOR UPDATE;
+  IF v_event.id IS NULL OR v_event.entity_id IS DISTINCT FROM v_operation.id
+    OR v_event.event_type <> 'integration.nse.prov_orders_requested' OR v_event.entity_type <> 'integration_operation'
+    OR v_request.operation_type <> 'PROV_ORDERS' OR v_request.api_key <> 'PROV_ORDERS'
+    OR v_request.safety_class <> 'READ_ONLY' OR v_request.integration_environment <> 'UAT'
+    OR v_request.integration_key <> 'NSE_INVEST' THEN RAISE EXCEPTION 'prov_orders_result_scope_mismatch'; END IF;
+  v_request_json := extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,
+    public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::pg_catalog.jsonb;
+  IF p_http_status BETWEEN 200 AND 299 THEN
+    v_observation := public.inspect_nse_prov_orders_response(p_response_payload,v_request_json);
+    IF p_normalized_outcome IS DISTINCT FROM (CASE WHEN (v_observation->>'success')::pg_catalog.bool THEN 'SUCCESS' ELSE 'BUSINESS_FAILURE' END)
+      OR p_native_status_value IS DISTINCT FROM v_observation->>'native_status'
+      OR p_native_remark_category IS DISTINCT FROM v_observation->>'category' THEN
+      RAISE EXCEPTION 'prov_orders_result_classification_mismatch';
+    END IF;
+  ELSIF p_http_status IS NOT NULL THEN
+    IF p_http_status NOT BETWEEN 100 AND 599 OR p_normalized_outcome <> 'HTTP_FAILURE'
+      OR p_native_status_value IS NOT NULL OR p_native_remark_category IS DISTINCT FROM 'prov_orders_http_failure' THEN
+      RAISE EXCEPTION 'prov_orders_result_classification_mismatch';
+    END IF;
+  ELSE
+    IF p_normalized_outcome <> 'TRANSPORT_FAILURE' OR p_native_status_value IS NOT NULL
+      OR p_native_remark_category IS DISTINCT FROM 'prov_orders_transport_failed' OR COALESCE(p_response_payload,'') <> '' THEN
+      RAISE EXCEPTION 'prov_orders_result_classification_mismatch';
+    END IF;
+  END IF;
+  IF (p_normalized_outcome = 'SUCCESS' AND p_error_category IS NOT NULL)
+    OR (p_normalized_outcome IN ('BUSINESS_FAILURE','HTTP_FAILURE') AND p_error_category IS DISTINCT FROM p_native_remark_category)
+    OR (p_normalized_outcome = 'TRANSPORT_FAILURE' AND (p_error_category IS NULL OR p_error_category NOT IN
+      ('nse_request_timeout','nse_network_error','nse_response_invalid','nse_response_too_large','nse_request_invalid')))
+    OR (p_http_status IS NOT NULL AND (COALESCE(p_timeout_occurred,false) OR COALESCE(p_network_failure,false))) THEN
+    RAISE EXCEPTION 'prov_orders_result_metadata_invalid';
+  END IF;
+  v_bytes := pg_catalog.octet_length(pg_catalog.convert_to(COALESCE(p_response_payload, ''), 'UTF8'));
+  v_hash := extensions.digest(pg_catalog.convert_to(COALESCE(p_response_payload, ''), 'UTF8'), 'sha256');
+  SELECT * INTO v_existing FROM public.integration_api_interactions interaction
+  WHERE interaction.call_id = p_call_id AND interaction.phase = 'RESULT';
+  IF v_existing.id IS NOT NULL THEN
+    IF v_existing.integration_operation_id IS DISTINCT FROM v_request.integration_operation_id
+       OR v_existing.attempt_number IS DISTINCT FROM v_request.attempt_number
+       OR v_existing.correlation_id IS DISTINCT FROM v_request.correlation_id
+       OR v_existing.response_hash IS DISTINCT FROM v_hash OR v_existing.response_bytes IS DISTINCT FROM v_bytes
+       OR v_existing.response_content_type IS DISTINCT FROM p_response_content_type
+       OR v_existing.response_header_metadata IS DISTINCT FROM p_response_header_metadata
+       OR v_existing.http_status IS DISTINCT FROM p_http_status
+       OR v_existing.native_status_value IS DISTINCT FROM p_native_status_value
+       OR v_existing.native_remark_category IS DISTINCT FROM p_native_remark_category
+       OR v_existing.normalized_outcome IS DISTINCT FROM p_normalized_outcome
+       OR v_existing.error_category IS DISTINCT FROM p_error_category
+       OR v_existing.timeout_occurred IS DISTINCT FROM COALESCE(p_timeout_occurred, false)
+       OR v_existing.network_failure IS DISTINCT FROM COALESCE(p_network_failure, false)
+       OR v_existing.completed_at IS DISTINCT FROM p_completed_at OR v_existing.elapsed_ms IS DISTINCT FROM p_elapsed_ms THEN
+      RAISE EXCEPTION 'integration_result_idempotency_conflict';
+    END IF;
+    RETURN v_existing;
+  END IF;
+
+  IF v_event.status <> 'processing' OR v_event.claim_token IS DISTINCT FROM p_claim_token
+    OR v_event.claim_token IS NULL OR v_event.claim_expires_at IS NULL OR v_event.claim_expires_at <= pg_catalog.now()
+    OR v_event.retry_count <> v_request.attempt_number THEN RAISE EXCEPTION 'claim_not_owned'; END IF;
+  IF v_operation.state <> 'SUBMITTING' THEN RAISE EXCEPTION 'integration_operation_not_submitting'; END IF;
+  v_retryable_http_status := p_normalized_outcome = 'HTTP_FAILURE'
+    AND p_http_status = ANY (ARRAY[408, 429, 500, 502, 503, 504]::pg_catalog.int4[]);
+  IF p_normalized_outcome = 'TRANSPORT_FAILURE' OR v_retryable_http_status THEN
+    v_state := 'SUBMISSION_FAILED';
+    v_retry_allowed := v_event.retry_count < p_max_attempts;
+    v_event_status := 'failed';
+  ELSIF p_normalized_outcome = 'SUCCESS' THEN
+    v_state := 'SUCCESS';
+  ELSIF p_normalized_outcome = 'BUSINESS_FAILURE' THEN
+    v_state := 'BUSINESS_FAILED';
+  ELSE
+    v_state := 'HTTP_FAILED';
+  END IF;
+
+  INSERT INTO public.integration_api_interactions (
+    workspace_id, integration_operation_id, integration_key, integration_environment, category,
+    safety_class, operation_type, api_key, contract_version, endpoint_path, http_method,
+    call_id, phase, attempt_number, correlation_id, payload_encryption_key_reference,
+    payload_encryption_key_version, started_at, response_payload_ciphertext,
+    response_header_metadata, response_content_type, response_bytes, response_hash,
+    http_status, http_success, completed_at, elapsed_ms, native_status_field,
+    native_status_value, native_remark_category, normalized_outcome, error_category,
+    timeout_occurred, network_failure, ambiguous_outcome, reconciliation_required
+  ) VALUES (
+    v_request.workspace_id, v_request.integration_operation_id, v_request.integration_key,
+    v_request.integration_environment, v_request.category, v_request.safety_class,
+    v_request.operation_type, v_request.api_key, v_request.contract_version,
+    v_request.endpoint_path, v_request.http_method, p_call_id, 'RESULT', v_request.attempt_number,
+    v_request.correlation_id, v_key, 1, v_request.started_at,
+    extensions.pgp_sym_encrypt(COALESCE(p_response_payload, ''), public.integration_payload_encryption_key(v_key), 'cipher-algo=aes256, compress-algo=0'),
+    p_response_header_metadata, p_response_content_type, v_bytes, v_hash, p_http_status,
+    CASE WHEN p_http_status IS NULL THEN NULL ELSE p_http_status BETWEEN 200 AND 299 END,
+    p_completed_at, p_elapsed_ms, CASE WHEN p_native_status_value IS NULL THEN NULL ELSE 'response_status' END,
+    p_native_status_value, p_native_remark_category, p_normalized_outcome, p_error_category,
+    COALESCE(p_timeout_occurred, false), COALESCE(p_network_failure, false), false, false
+  ) RETURNING * INTO v_interaction;
+
+  UPDATE public.integration_operations SET
+    state = v_state,
+    native_business_status = p_native_status_value,
+    business_remark_category = p_native_remark_category,
+    retry_allowed = v_retry_allowed,
+    ambiguous_outcome = false,
+    reconciliation_required = false,
+    completed_at = p_completed_at,
+    last_interaction_id = v_interaction.id
+  WHERE id = v_operation.id;
+  UPDATE public.event_outbox SET
+    status = v_event_status,
+    error_message = CASE WHEN v_event_status = 'failed' THEN
+      CASE WHEN v_retry_allowed THEN 'prov_orders_read_retryable' ELSE 'prov_orders_read_attempts_exhausted' END
+    ELSE NULL END,
+    claimed_by = NULL,
+    claim_token = NULL,
+    claim_expires_at = NULL,
+    updated_at = pg_catalog.now()
+  WHERE id = v_event.id;
+  RETURN v_interaction;
+END;
+$$;
+
+
+-- Service-only, account/workspace-bound safe summary; raw evidence never leaves
+-- this function. No duplicate observation storage or unscoped decrypt RPC.
+CREATE FUNCTION public.get_nse_prov_orders_summary(p_workspace_id pg_catalog.uuid, p_integration_account_id pg_catalog.uuid, p_operation_id pg_catalog.uuid)
+RETURNS pg_catalog.jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
+DECLARE v_result public.integration_api_interactions; v_request public.integration_api_interactions; v_summary pg_catalog.jsonb;
+BEGIN
+  SELECT i.* INTO v_result FROM public.integration_operations o
+  JOIN public.integration_api_interactions i ON i.id=o.last_interaction_id
+  WHERE o.id=p_operation_id AND o.workspace_id=p_workspace_id AND o.integration_account_id=p_integration_account_id
+    AND o.integration_key='NSE_INVEST' AND o.integration_environment='UAT' AND o.operation_type='PROV_ORDERS'
+    AND o.api_key='PROV_ORDERS' AND o.contract_version='NNF_1.9.7' AND o.safety_class='READ_ONLY'
+    AND o.state='SUCCESS' AND i.phase='RESULT' AND i.normalized_outcome='SUCCESS';
+  IF v_result.id IS NULL THEN RETURN NULL; END IF;
+  SELECT * INTO v_request FROM public.integration_api_interactions WHERE call_id=v_result.call_id AND phase='REQUEST';
+  v_summary := public.inspect_nse_prov_orders_response(
+    extensions.pgp_sym_decrypt(v_result.response_payload_ciphertext,public.integration_payload_encryption_key(v_result.payload_encryption_key_reference)),
+    extensions.pgp_sym_decrypt(v_request.request_payload_ciphertext,public.integration_payload_encryption_key(v_request.payload_encryption_key_reference))::pg_catalog.jsonb);
+  IF NOT (v_summary->>'success')::pg_catalog.bool THEN RAISE EXCEPTION 'prov_orders_evidence_invalid'; END IF;
+  RETURN v_summary || pg_catalog.jsonb_build_object('operation_id',p_operation_id,'workspace_id',p_workspace_id,
+    'integration_account_id',p_integration_account_id,'result_interaction_id',v_result.id,'observed_at',v_result.completed_at);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.guard_nse_prov_orders_context() FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.validate_nse_prov_orders_filters(pg_catalog.jsonb),
+  public.inspect_nse_prov_orders_response(pg_catalog.text,pg_catalog.jsonb) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.get_nse_prov_orders_source(pg_catalog.uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_nse_prov_orders_source(pg_catalog.uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.prepare_nse_prov_orders(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.jsonb, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int4[], pg_catalog.text) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.prepare_nse_prov_orders(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.jsonb, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.int4[], pg_catalog.text) TO service_role;
+REVOKE ALL ON FUNCTION public.recover_expired_nse_prov_orders_events(pg_catalog.uuid, pg_catalog.int4) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.recover_expired_nse_prov_orders_events(pg_catalog.uuid, pg_catalog.int4) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_nse_prov_orders_event(pg_catalog.uuid, pg_catalog.int4, pg_catalog.int4) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.claim_nse_prov_orders_event(pg_catalog.uuid, pg_catalog.int4, pg_catalog.int4) TO service_role;
+REVOKE ALL ON FUNCTION public.start_nse_prov_orders(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.jsonb, pg_catalog.timestamptz) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.start_nse_prov_orders(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.jsonb, pg_catalog.timestamptz) TO service_role;
+REVOKE ALL ON FUNCTION public.finish_nse_prov_orders(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.jsonb, pg_catalog.int4, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.bool, pg_catalog.bool, pg_catalog.timestamptz, pg_catalog.int8, pg_catalog.int4) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.finish_nse_prov_orders(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid, pg_catalog.text, pg_catalog.text, pg_catalog.jsonb, pg_catalog.int4, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.text, pg_catalog.bool, pg_catalog.bool, pg_catalog.timestamptz, pg_catalog.int8, pg_catalog.int4) TO service_role;
+REVOKE ALL ON FUNCTION public.get_nse_prov_orders_summary(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_nse_prov_orders_summary(pg_catalog.uuid, pg_catalog.uuid, pg_catalog.uuid) TO service_role;
+
+
+-- Expired retry claims before REQUEST must remain discoverable by the dispatcher.
+CREATE OR REPLACE FUNCTION public.list_dispatchable_outbox_events(
+  p_event_types pg_catalog.text[],
+  p_limit pg_catalog.int4 DEFAULT 10,
+  p_retry_delay_seconds pg_catalog.int4 DEFAULT 30
+)
+RETURNS TABLE (
+  event_outbox_id pg_catalog.uuid,
+  event_type pg_catalog.text,
+  event_status pg_catalog.text,
+  retry_count pg_catalog.int4,
+  claim_expires_at pg_catalog.timestamptz,
+  created_at pg_catalog.timestamptz
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF p_event_types IS NULL
+     OR pg_catalog.cardinality(p_event_types) < 1
+     OR pg_catalog.cardinality(p_event_types) > 32 THEN
+    RAISE EXCEPTION 'dispatch_event_types_invalid';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.unnest(p_event_types) AS requested(event_type)
+    WHERE NULLIF(pg_catalog.btrim(requested.event_type), '') IS NULL
+       OR requested.event_type !~ '^[a-z0-9][a-z0-9_.-]{0,99}$'
+  ) THEN
+    RAISE EXCEPTION 'dispatch_event_type_invalid';
+  END IF;
+
+  IF p_limit IS NULL OR p_limit < 1 OR p_limit > 50 THEN
+    RAISE EXCEPTION 'dispatch_limit_invalid';
+  END IF;
+
+  IF p_retry_delay_seconds IS NULL
+     OR p_retry_delay_seconds < 0
+     OR p_retry_delay_seconds > 3600 THEN
+    RAISE EXCEPTION 'dispatch_retry_delay_invalid';
+  END IF;
+
+  RETURN QUERY
+  SELECT
+    event.id,
+    event.event_type,
+    event.status,
+    event.retry_count,
+    event.claim_expires_at,
+    event.created_at
+  FROM public.event_outbox AS event
+  JOIN public.integration_operations AS operation
+    ON event.entity_type = 'integration_operation'
+   AND operation.id = event.entity_id
+  WHERE event.event_type = ANY (p_event_types)
+    AND NOT operation.ambiguous_outcome
+    AND NOT operation.reconciliation_required
+    AND (
+      (
+        event.status = 'pending'
+        AND operation.state = 'QUEUED'
+      )
+      OR (
+        event.status = 'failed'
+        AND operation.state = 'SUBMISSION_FAILED'
+        AND operation.retry_allowed
+        AND event.updated_at <= pg_catalog.now()
+          - pg_catalog.make_interval(secs => p_retry_delay_seconds)
+      )
+      OR (
+        event.status = 'processing'
+        AND event.claim_expires_at IS NOT NULL
+        AND event.claim_expires_at <= pg_catalog.now()
+        AND (operation.state IN ('QUEUED', 'SUBMITTING')
+          OR (operation.operation_type IN ('ORDER_STATUS','PROV_ORDERS') AND operation.safety_class = 'READ_ONLY'
+            AND operation.state = 'SUBMISSION_FAILED' AND operation.retry_allowed))
+      )
+    )
+  ORDER BY
+    CASE WHEN event.status = 'processing' THEN 0 ELSE 1 END,
+    event.created_at,
+    event.id
+  LIMIT p_limit;
+END;
+$$;
+
+
+COMMIT;
