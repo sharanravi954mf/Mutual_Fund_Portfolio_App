@@ -51,25 +51,16 @@ export function buildNseProvOrdersRequest(
 /** The shared envelope/identity columns are documented together on pp79–83.
  * PROV_ORDERS rows use request_date (not ORDER_STATUS's order_date); neither
  * sample specifies requiredness for every column. No date/settlement/financial
- * field is projected or renamed. The ORDER_STATUS live-UAT diagnostic exception
- * is NOT authority for this route: p79 still requires a blank success remark.
+ * field is projected or renamed. Historical live_uat request 20 independently
+ * records success_like response_status with nonempty_diagnostic error_remark.
+ * The remark remains a required string, confined to encrypted RESULT evidence;
+ * it does not override a structurally valid, fully scoped S response.
  */
 export function parseNseProvOrdersResponse(
   rawBody: string,
   request: NseProvOrdersRequest,
 ): NseProvOrdersObservation {
   const common = parseNseOrderStatusResponse(rawBody, request);
-  if (common.success && JSON.parse(rawBody).error_remark !== "") {
-    return {
-      nativeStatus: "S",
-      nativeRemarkCategory: "prov_orders_response_invalid",
-      success: false,
-      recordCount: 0,
-      validCount: 0,
-      invalidCount: 0,
-      otherCount: 0,
-    };
-  }
   return {
     ...common,
     nativeRemarkCategory: common.nativeRemarkCategory.replace(

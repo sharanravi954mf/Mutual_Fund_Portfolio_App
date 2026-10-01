@@ -275,23 +275,87 @@ Deno.test("PROV_ORDERS: date_type is optional, null defaults, ORDER_STATUS stays
     common,
   );
 });
-Deno.test("PROV_ORDERS: p79 blank success remark rule does not inherit ORDER_STATUS's UAT exception", () => {
+Deno.test("PROV_ORDERS: historical request 20 empty success retains diagnostic only in evidence", () => {
+  // live_uat_results.json ordinal 20: success_like, nonempty_diagnostic,
+  // string count, and an empty array. Safe evidence retains no literal values.
   const raw = JSON.stringify({
     response_status: "S",
     report_data_total: "0",
     report_data: [],
-    error_remark: "PRIVATE",
+    error_remark: "SYNTHETIC PRIVATE UAT DIAGNOSTIC",
   });
   assertEquals(parseNseProvOrdersResponse(raw, request), {
     nativeStatus: "S",
-    nativeRemarkCategory: "prov_orders_response_invalid",
-    success: false,
+    nativeRemarkCategory: "prov_orders_no_records",
+    success: true,
     recordCount: 0,
     validCount: 0,
     invalidCount: 0,
     otherCount: 0,
   });
+  assertEquals(
+    JSON.stringify(parseNseProvOrdersResponse(raw, request)).includes(
+      "PRIVATE",
+    ),
+    false,
+  );
   assertEquals(parseNseOrderStatusResponse(raw, request).success, true);
+});
+Deno.test("PROV_ORDERS: success diagnostic does not change row counts or expose PII", () => {
+  const raw = JSON.stringify({
+    ...JSON.parse(report([row, { ...row, order_status: "VALID" }])),
+    error_remark: "SYNTHETIC PRIVATE UAT DIAGNOSTIC",
+  });
+  assertEquals(parseNseProvOrdersResponse(raw, request), {
+    nativeStatus: "S",
+    nativeRemarkCategory: "prov_orders_report_received",
+    success: true,
+    recordCount: 2,
+    validCount: 1,
+    invalidCount: 1,
+    otherCount: 0,
+  });
+});
+Deno.test("PROV_ORDERS: nonempty diagnostic never bypasses envelope or account/ID checks", () => {
+  const valid = {
+    ...JSON.parse(report()),
+    error_remark: "SYNTHETIC PRIVATE UAT DIAGNOSTIC",
+  };
+  for (
+    const patch of [
+      { response_status: "F" },
+      { response_status: "UNKNOWN" },
+      { report_data: {} },
+      { report_data: "" },
+      { report_data: [null] },
+      { report_data_total: "0" },
+      { report_data_total: "2" },
+      { report_data_total: "1.0" },
+      { report_data_total: -1 },
+      { report_data: [{ ...row, client_code: "OTHER" }] },
+      { error_remark: null },
+      { error_remark: 123 },
+      { error_remark: undefined },
+    ]
+  ) {
+    const parsed = parseNseProvOrdersResponse(
+      JSON.stringify({ ...valid, ...patch }),
+      request,
+    );
+    assertEquals(parsed.success, false);
+    assertEquals(parsed.recordCount, 0);
+    assertEquals(JSON.stringify(parsed).includes("PRIVATE"), false);
+  }
+  for (
+    const selected of [
+      build({ order_ids: "OTHER" }),
+      build({ member_unique_ids: "OTHER" }),
+    ]
+  ) {
+    const parsed = parseNseProvOrdersResponse(JSON.stringify(valid), selected);
+    assertEquals(parsed.nativeRemarkCategory, "prov_orders_scope_mismatch");
+    assertEquals(parsed.success, false);
+  }
 });
 Deno.test("PROV_ORDERS: p80-81 response enums and request_date are not request enums/order_date", () => {
   const raw = report([

@@ -191,6 +191,55 @@ Deno.test("PROV_ORDERS worker: persistence acknowledgement retry never repeats t
   assertEquals(s.finishes[0], s.finishes[1]);
   assertEquals(s.sent.length, 1);
 });
+Deno.test("PROV_ORDERS worker: historical success diagnostic stays in RESULT, never response or logs", async () => {
+  const logs: unknown[][] = [];
+  const original = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+    debug: console.debug,
+  };
+  for (const level of ["log", "info", "warn", "error", "debug"] as const) {
+    console[level] = (...args: unknown[]) => {
+      logs.push(args);
+    };
+  }
+  try {
+    // The empty case reconstructs request 20's safe historical schema/categories.
+    // The nonempty case is synthetic coverage of the same diagnostic policy.
+    for (const rows of [[], JSON.parse(response).report_data]) {
+      const raw = JSON.stringify({
+        response_status: "S",
+        report_data_total: String(rows.length),
+        report_data: rows,
+        error_remark: "SYNTHETIC PRIVATE UAT DIAGNOSTIC",
+      });
+      const s = setup({ raw, startFailures: 1, finishFailures: 1 });
+      const result = await s.handler(invocation());
+      const category = rows.length === 0
+        ? "prov_orders_no_records"
+        : "prov_orders_report_received";
+      assertEquals(result.status, 200);
+      assertEquals(await result.json(), {
+        data: { outcome: category, record_count: rows.length },
+      });
+      assertEquals(s.sent.length, 1);
+      assertEquals(s.finishes.length, 2);
+      assertEquals(s.finishes[0], s.finishes[1]);
+      assertEquals(s.finishes[0].responsePayload, raw);
+      const { responsePayload: _raw, ...metadata } = s.finishes[0];
+      assertEquals(metadata.normalizedOutcome, "SUCCESS");
+      assertEquals(metadata.nativeStatusValue, "S");
+      assertEquals(metadata.nativeRemarkCategory, category);
+      assertEquals(metadata.errorCategory, null);
+      assertEquals(JSON.stringify(metadata).includes("PRIVATE"), false);
+    }
+    assertEquals(logs, []);
+  } finally {
+    Object.assign(console, original);
+  }
+});
 for (
   const [options, status] of [
     [{ startFailures: 2 }, 500],
@@ -245,7 +294,10 @@ Deno.test("PROV_ORDERS worker: transport failures close read evidence without am
 for (
   const raw of [
     "PRIVATE",
-    response.replace('"error_remark":""', '"error_remark":"PRIVATE"'),
+    response.replace('"error_remark":""', '"error_remark":"PRIVATE"').replace(
+      '"report_data_total":"1"',
+      '"report_data_total":"0"',
+    ),
     response.replace('"SYNTHETIC1"', '"OTHER"'),
     '{"response_status":"F","report_data_total":"0","report_data":"","error_remark":"PRIVATE"}',
   ]

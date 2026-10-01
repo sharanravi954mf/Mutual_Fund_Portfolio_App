@@ -190,7 +190,7 @@ BEGIN
   PERFORM pg_temp.finish_read(req,'PRIVATE',http,'HTTP_FAILURE',NULL,'prov_orders_http_failure');
   PERFORM pg_temp.assert_true((SELECT state='HTTP_FAILED' AND NOT retry_allowed FROM public.integration_operations WHERE id=op.id),'terminal_http');
  END LOOP;
- FOREACH body IN ARRAY ARRAY['{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"PRIVATE DIAGNOSTIC"}','not json','null','[]','{}','{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"","extra":"\u0000"}','{"response_status":"S","report_data_total":"0","report_data":{},"error_remark":""}',
+ FOREACH body IN ARRAY ARRAY['{"response_status":"S","report_data_total":"1","report_data":[],"error_remark":"PRIVATE DIAGNOSTIC"}','not json','null','[]','{}','{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"","extra":"\u0000"}','{"response_status":"S","report_data_total":"0","report_data":{},"error_remark":""}',
   '{"response_status":"S","report_data_total":"1","report_data":[],"error_remark":""}',
   '{"response_status":"S","report_data_total":"1","report_data":[null],"error_remark":""}',
   '{"response_status":"S","report_data_total":"1","report_data":[{"client_code":"OTHER","order_id":"100","order_status":"VALID"}],"error_remark":""}',
@@ -294,12 +294,66 @@ BEGIN
  -- Native error text is retained only in the encrypted result, never summaries.
  source := '{"client_code":"SYNTHETIC1","order_ids":"","member_unique_ids":""}';
  candidate := public.inspect_nse_prov_orders_response('{"response_status":"S","report_data_total":0,"report_data":[],"error_remark":"PRIVATE"}',source);
- PERFORM pg_temp.assert_true(candidate->>'category'='prov_orders_response_invalid' AND candidate->>'success'='false','provisional_success_remark_rule');
+ PERFORM pg_temp.assert_true(candidate->>'category'='prov_orders_no_records' AND candidate->>'success'='true' AND candidate::text NOT LIKE '%PRIVATE%','provisional_historical_success_remark');
  PERFORM pg_temp.assert_true(public.inspect_nse_order_status_response('{"response_status":"S","report_data_total":0,"report_data":[],"error_remark":"PRIVATE"}',source)->>'success'='true','order_status_success_remark_unchanged');
  FOR fn IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('validate_nse_prov_orders_filters','inspect_nse_prov_orders_response','guard_nse_prov_orders_context') LOOP
   PERFORM pg_temp.assert_true(NOT has_function_privilege('service_role',fn,'EXECUTE')
     AND NOT has_function_privilege('authenticated',fn,'EXECUTE') AND NOT has_function_privilege('anon',fn,'EXECUTE'),'private_helpers');
+ END LOOP;
+END $$;
+
+-- Historical request 20: HTTP 200, success_like, nonempty_diagnostic, string
+-- count, empty report_data. Literal values were deliberately not retained in
+-- live_uat evidence; all values below are synthetic. Nonempty rows additionally
+-- exercise the diagnostic policy with account and identifier checks intact.
+DO $$
+DECLARE op public.integration_operations; req public.integration_api_interactions; res public.integration_api_interactions;
+ body text; rows jsonb; envelope jsonb; patch jsonb; source jsonb; obs jsonb; category text;
+BEGIN
+ FOREACH rows IN ARRAY ARRAY['[]'::jsonb,
+  '[{"client_code":"SYNTHETIC1","order_id":"100","member_unique_id":"MEMBER1","order_status":"INVALID","email":"PRIVATE"}]'::jsonb] LOOP
+  body := jsonb_build_object('response_status','S','report_data_total',jsonb_array_length(rows)::text,
+    'report_data',rows,'error_remark','SYNTHETIC PRIVATE UAT DIAGNOSTIC')::text;
+  category := CASE WHEN jsonb_array_length(rows)=0 THEN 'prov_orders_no_records' ELSE 'prov_orders_report_received' END;
+  SELECT * INTO op FROM pg_temp.prepare(); SELECT * INTO req FROM pg_temp.start_read(op.id);
+  SELECT * INTO res FROM pg_temp.finish_read(req,body,200,'SUCCESS','S',category);
+  PERFORM pg_temp.assert_true(res.native_status_value='S' AND res.normalized_outcome='SUCCESS'
+    AND res.native_remark_category=category AND res.error_category IS NULL,'historical_success_accepted');
+  PERFORM pg_temp.assert_true(extensions.pgp_sym_decrypt(res.response_payload_ciphertext,
+    public.integration_payload_encryption_key(res.payload_encryption_key_reference))=body,'historical_diagnostic_encrypted');
+  PERFORM pg_temp.assert_true((to_jsonb(res)-'response_payload_ciphertext')::text NOT LIKE '%PRIVATE%','no_plaintext_result_diagnostic');
+  obs := public.get_nse_prov_orders_summary(op.workspace_id,op.integration_account_id,op.id);
+  PERFORM pg_temp.assert_true(obs->>'success'='true' AND obs->>'category'=category
+    AND (obs->>'record_count')::integer=jsonb_array_length(rows)
+    AND (obs->>'invalid_count')::integer=jsonb_array_length(rows)
+    AND obs->>'valid_count'='0' AND obs->>'other_count'='0'
+    AND obs::text NOT LIKE '%PRIVATE%' AND NOT obs ? 'error_remark','historical_safe_summary');
+  SELECT * INTO op FROM public.integration_operations WHERE id=op.id;
+  PERFORM pg_temp.assert_true(op.state='SUCCESS' AND NOT op.retry_allowed AND NOT op.ambiguous_outcome
+    AND NOT op.reconciliation_required AND to_jsonb(op)::text NOT LIKE '%PRIVATE%','historical_safe_operation');
+  PERFORM pg_temp.assert_true((SELECT status='completed' AND error_message IS NULL AND to_jsonb(e)::text NOT LIKE '%PRIVATE%'
+    FROM public.event_outbox e WHERE entity_id=op.id),'historical_safe_outbox');
+  PERFORM pg_temp.assert_true((SELECT count(*)=2 FROM public.integration_api_interactions WHERE integration_operation_id=op.id),'historical_one_call_pair');
+ END LOOP;
+ source := '{"client_code":"SYNTHETIC1","order_ids":"","member_unique_ids":""}';
+ envelope := body::jsonb;
+ FOREACH patch IN ARRAY ARRAY['{"response_status":"F"}'::jsonb,'{"response_status":"UNKNOWN"}'::jsonb,
+   '{"report_data":{}}'::jsonb,'{"report_data":""}'::jsonb,'{"report_data":[null]}'::jsonb,
+   '{"report_data_total":"0"}'::jsonb,'{"report_data_total":"2"}'::jsonb,'{"report_data_total":"1.0"}'::jsonb,
+   '{"report_data_total":-1}'::jsonb,'{"error_remark":null}'::jsonb,'{"error_remark":123}'::jsonb,
+   '{"report_data":[{"client_code":"OTHER","order_id":"100","order_status":"VALID"}]}'::jsonb] LOOP
+  body := (envelope||patch)::text;
+  obs := public.inspect_nse_prov_orders_response(body,source);
+  PERFORM pg_temp.assert_true(obs->>'success'='false' AND obs->>'record_count'='0' AND obs::text NOT LIKE '%PRIVATE%','diagnostic_cannot_bypass_validation');
+  SELECT * INTO op FROM pg_temp.prepare(); SELECT * INTO req FROM pg_temp.start_read(op.id);
+  PERFORM pg_temp.finish_read(req,body,200,'BUSINESS_FAILURE',obs->>'native_status',obs->>'category');
+  PERFORM pg_temp.assert_true(public.get_nse_prov_orders_summary(op.workspace_id,op.integration_account_id,op.id) IS NULL,'invalid_diagnostic_report_not_projected');
+ END LOOP;
+ PERFORM pg_temp.assert_true(public.inspect_nse_prov_orders_response((envelope-'error_remark')::text,source)->>'success'='false','remark_field_still_required');
+ FOREACH patch IN ARRAY ARRAY['{"order_ids":"OTHER"}'::jsonb,'{"member_unique_ids":"OTHER"}'::jsonb] LOOP
+  obs := public.inspect_nse_prov_orders_response(envelope::text,source||patch);
+  PERFORM pg_temp.assert_true(obs->>'success'='false' AND obs->>'category'='prov_orders_scope_mismatch','diagnostic_preserves_id_scope');
  END LOOP;
 END $$;
 
