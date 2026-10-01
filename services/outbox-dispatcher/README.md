@@ -20,6 +20,7 @@ The checked-in `routes.json` enables only:
 - `integration.nse.prov_orders_requested` -> `nse-prov-orders-worker`
 - `integration.nse.client_readiness_requested` -> `nse-client-readiness-worker` (six typed B01 reports)
 - `integration.nse.settlement_redemption_requested` -> `nse-settlement-redemption-worker` (four evidence-only B03 reports)
+- `integration.nse.sip_xsip_reports_requested` -> `nse-sip-xsip-reports-worker` (nine evidence-only B04 reports)
 - `integration.nse.order_funding_requested` -> `nse-order-funding-worker` (four typed B02 reports)
 
 All NSE routes use the same internal bearer secret, `NSE_WORKER_TOKEN`. The token authenticates the trusted dispatcher to NSE workers; each worker still validates its exact event, operation, account/workspace scope, and claim. Future NSE APIs should reuse this token instead of creating one secret per API. No NSE business rules belong in this service.

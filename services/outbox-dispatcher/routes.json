@@ -26,5 +26,9 @@
   "integration.nse.settlement_redemption_requested": {
     "worker_slug": "nse-settlement-redemption-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.sip_xsip_reports_requested": {
+    "worker_slug": "nse-sip-xsip-reports-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }
