@@ -335,3 +335,13 @@ def test_repository_prov_orders_route_uses_shared_nse_token() -> None:
     route = routes["integration.nse.prov_orders_requested"]
     assert route.worker_slug == "nse-prov-orders-worker"
     assert route.token == NSE_TOKEN
+
+
+def test_repository_readiness_route_uses_shared_nse_token() -> None:
+    routes = load_routes(
+        Path(__file__).parents[1] / "routes.json",
+        {"NSE_WORKER_TOKEN": NSE_TOKEN},
+    )
+    route = routes["integration.nse.client_readiness_requested"]
+    assert route.worker_slug == "nse-client-readiness-worker"
+    assert route.token == NSE_TOKEN

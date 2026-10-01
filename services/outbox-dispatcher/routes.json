@@ -14,5 +14,9 @@
   "integration.nse.prov_orders_requested": {
     "worker_slug": "nse-prov-orders-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.client_readiness_requested": {
+    "worker_slug": "nse-client-readiness-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }
