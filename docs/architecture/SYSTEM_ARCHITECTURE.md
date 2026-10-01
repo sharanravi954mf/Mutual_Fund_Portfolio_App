@@ -728,3 +728,5 @@ NSEInvest UCC registration is the first complete outbound vertical slice: its ma
 The distinct [NSE PROV_ORDERS read](NSE_PROV_ORDERS_VERTICAL_SLICE.md) retains immutable query options in the existing outbox and derives private summaries from encrypted evidence. It adds no report tables and does not update canonical orders or transactions without a durable NSE identity mapping.
 
 The six account-scoped [NSE B01 client readiness reports](NSE_CLIENT_READINESS_VERTICAL_SLICE.md) share a bounded read worker, immutable encrypted identity context and the existing interaction ledger. They derive private summaries without adding report tables or changing canonical readiness/consent state.
+
+The four [NSE B02 order and funding reads](NSE_ORDER_FUNDING_VERTICAL_SLICE.md) reuse that evidence/outbox model with explicit endpoint contracts and owned prior-report selections. Their private summaries do not change paid, settled, reconciliation or portfolio state; canonical financial linkage remains a later domain boundary.

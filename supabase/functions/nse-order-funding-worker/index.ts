@@ -1,0 +1,19 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import {
+  createOrderFundingGateway,
+  createOrderFundingPersistence,
+} from "./adapters.ts";
+import { createNseOrderFundingHandler } from "./handler.ts";
+
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL") ?? "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  { auth: { persistSession: false } },
+);
+const handler = createNseOrderFundingHandler({
+  internalToken: Deno.env.get("NSE_WORKER_TOKEN") ?? "",
+  persistence: createOrderFundingPersistence(supabase),
+  gateway: createOrderFundingGateway(loadNseConfig()),
+});
+Deno.serve(handler);

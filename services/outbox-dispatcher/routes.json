@@ -18,5 +18,9 @@
   "integration.nse.client_readiness_requested": {
     "worker_slug": "nse-client-readiness-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.order_funding_requested": {
+    "worker_slug": "nse-order-funding-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }

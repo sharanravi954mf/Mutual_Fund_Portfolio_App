@@ -229,3 +229,6 @@ verify_jwt = false
 
 [functions.nse-client-readiness-worker]
 verify_jwt = false
+
+[functions.nse-order-funding-worker]
+verify_jwt = false
