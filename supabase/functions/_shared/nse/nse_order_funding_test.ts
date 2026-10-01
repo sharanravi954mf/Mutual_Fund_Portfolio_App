@@ -309,6 +309,42 @@ Deno.test("TRANSACTION_DETAIL: live UAT no-records diagnostic is exact, empty-on
   );
 });
 
+Deno.test("FUND_AGE: live UAT AMC validation failure is exact and private", () => {
+  const f = fixtures[3];
+  const s = source(f);
+  const observed = parse(
+    JSON.stringify({
+      response_status: "F",
+      report_data_total: "0",
+      report_data: [],
+      error_remark: "amc_code value is not valid.",
+    }),
+    s,
+  );
+  assertEquals(observed, {
+    nativeStatus: "F",
+    nativeRemarkCategory: "order_funding_amc_code_invalid",
+    success: false,
+    recordCount: 0,
+  });
+  assertEquals(
+    JSON.stringify(observed).includes("amc_code value is not valid."),
+    false,
+  );
+  assertEquals(
+    parse(
+      JSON.stringify({
+        response_status: "F",
+        report_data_total: "0",
+        report_data: [],
+        error_remark: "some other validation failure",
+      }),
+      s,
+    ).nativeRemarkCategory,
+    "order_funding_response_invalid",
+  );
+});
+
 Deno.test("B02 dates: seven-day gap, transaction three-day activity gap, FUND_ORDER no invented window", () => {
   for (const f of fixtures) {
     const s = source(f);
