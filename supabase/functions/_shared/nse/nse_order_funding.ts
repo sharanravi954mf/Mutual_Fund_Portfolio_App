@@ -301,12 +301,13 @@ export function parseNseOrderFundingResponse(
       !Array.isArray(e.report_data) || e.report_data.length !== Number(total)
     ) return fail();
     // Endpoint-specific empty-success diagnostics only; never generalize unknown remarks.
-    const lifecycleNoRecords = source.api === "ORDER_LIFECYCLE" &&
+    const exactNoRecords = (source.api === "ORDER_LIFECYCLE" ||
+      source.api === "TRANSACTION_DETAIL") &&
       Number(total) === 0 && e.error_remark === "No record(s) found.";
     const fundAgeHistoricalEmpty = source.api === "FUND_AGE" &&
       Number(total) === 0;
     if (
-      e.error_remark !== "" && !lifecycleNoRecords && !fundAgeHistoricalEmpty
+      e.error_remark !== "" && !exactNoRecords && !fundAgeHistoricalEmpty
     ) return fail();
     const seen = new Set<string>();
     for (const row of e.report_data) {
@@ -328,7 +329,7 @@ export function parseNseOrderFundingResponse(
     }
     return {
       nativeStatus,
-      nativeRemarkCategory: lifecycleNoRecords
+      nativeRemarkCategory: exactNoRecords
         ? "order_funding_no_records"
         : Number(total) === 0 && e.error_remark !== ""
         ? "order_funding_empty_success_diagnostic"

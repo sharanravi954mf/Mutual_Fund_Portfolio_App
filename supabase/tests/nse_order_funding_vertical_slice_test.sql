@@ -213,6 +213,15 @@ BEGIN
   '{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"No record found."}',
   '{"from_date":"30-09-2026","to_date":"30-09-2026","client_code":"SYNTHETIC1"}',
   '{"client_code":"SYNTHETIC1","selectors":{}}')->>'success')::bool,'lifecycle_unknown_success_diagnostic_rejected');
+ PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('TRANSACTION_DETAIL',
+  '{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"No record(s) found."}',
+  '{"from_date":"30-09-2026","to_date":"30-09-2026","client_code":"SYNTHETIC1","date_type":"REQUEST_DATE"}',
+  '{"client_code":"SYNTHETIC1","selectors":{}}') =
+  '{"native_status":"S","category":"order_funding_no_records","success":true,"record_count":0}'::jsonb,'live_transaction_detail_no_records');
+ PERFORM pg_temp.assert_true(NOT (public.inspect_nse_order_funding_response('TRANSACTION_DETAIL',
+  '{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"No record found."}',
+  '{"from_date":"30-09-2026","to_date":"30-09-2026","client_code":"SYNTHETIC1","date_type":"REQUEST_DATE"}',
+  '{"client_code":"SYNTHETIC1","selectors":{}}')->>'success')::bool,'transaction_detail_unknown_success_diagnostic_rejected');
  -- Narrow #34 compatibility: no diagnostic projection and no positive-row rule.
  PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_AGE','{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"PRIVATE"}',
   '{"date":"30-04-2024","client_code":"SYNTHETIC1","settlement_type":"all"}','{"client_code":"SYNTHETIC1"}') =
