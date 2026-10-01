@@ -226,6 +226,15 @@ BEGIN
  PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_AGE','{"response_status":"S","report_data_total":"0","report_data":[],"error_remark":"PRIVATE"}',
   '{"date":"30-04-2024","client_code":"SYNTHETIC1","settlement_type":"all"}','{"client_code":"SYNTHETIC1"}') =
   '{"native_status":"S","category":"order_funding_empty_success_diagnostic","success":true,"record_count":0}'::jsonb,'historical_empty_diagnostic');
+ -- Controlled DEV UAT 2026-10-01: omitted master filters produced this exact F shape/message.
+ PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_AGE',
+  '{"response_status":"F","report_data_total":"0","report_data":[],"error_remark":"amc_code value is not valid."}',
+  '{"date":"30-09-2026","client_code":"SYNTHETIC1","settlement_type":"all"}','{"client_code":"SYNTHETIC1"}') =
+  '{"native_status":"F","category":"order_funding_amc_code_invalid","success":false,"record_count":0}'::jsonb,'live_fund_age_amc_validation');
+ PERFORM pg_temp.assert_true(public.inspect_nse_order_funding_response('FUND_AGE',
+  '{"response_status":"F","report_data_total":"0","report_data":[],"error_remark":"some other validation failure"}',
+  '{"date":"30-09-2026","client_code":"SYNTHETIC1","settlement_type":"all"}','{"client_code":"SYNTHETIC1"}')->>'category' =
+  'order_funding_response_invalid','fund_age_unknown_array_failure_rejected');
 END $$;
 
 -- Selector lineage fixtures are produced through the existing real local RPCs.

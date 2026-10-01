@@ -293,9 +293,17 @@ export function parseNseOrderFundingResponse(
       Number(total) > 10000 || typeof e.error_remark !== "string"
     ) return fail();
     if (nativeStatus === "F") {
-      return e.report_data === "" && Number(total) === 0
-        ? fail("order_funding_business_failed")
-        : fail();
+      if (e.report_data === "" && Number(total) === 0) {
+        return fail("order_funding_business_failed");
+      }
+      if (
+        source.api === "FUND_AGE" && Array.isArray(e.report_data) &&
+        e.report_data.length === 0 && Number(total) === 0 &&
+        e.error_remark === "amc_code value is not valid."
+      ) {
+        return fail("order_funding_amc_code_invalid");
+      }
+      return fail();
     }
     if (
       !Array.isArray(e.report_data) || e.report_data.length !== Number(total)
