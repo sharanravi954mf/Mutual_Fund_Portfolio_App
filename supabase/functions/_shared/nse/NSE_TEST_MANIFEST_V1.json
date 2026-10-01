@@ -20,7 +20,14 @@
     "supabase/functions/nse-prov-orders-worker/adapters.ts",
     "supabase/functions/nse-prov-orders-worker/handler.ts",
     "supabase/functions/nse-prov-orders-worker/index.ts",
-    "supabase/functions/nse-prov-orders-worker/index_test.ts"
+    "supabase/functions/nse-prov-orders-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_client_readiness.ts",
+    "supabase/functions/_shared/nse/nse_client_readiness_test.ts",
+    "supabase/functions/nse-client-readiness-worker/types.ts",
+    "supabase/functions/nse-client-readiness-worker/adapters.ts",
+    "supabase/functions/nse-client-readiness-worker/handler.ts",
+    "supabase/functions/nse-client-readiness-worker/index.ts",
+    "supabase/functions/nse-client-readiness-worker/index_test.ts"
   ],
   "baseline_tests": [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
@@ -35,7 +42,9 @@
     "supabase/functions/_shared/nse/nse_order_status_test.ts",
     "supabase/functions/nse-order-status-worker/index_test.ts",
     "supabase/functions/_shared/nse/nse_prov_orders_test.ts",
-    "supabase/functions/nse-prov-orders-worker/index_test.ts"
+    "supabase/functions/nse-prov-orders-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_client_readiness_test.ts",
+    "supabase/functions/nse-client-readiness-worker/index_test.ts"
   ],
   "endpoint_tests": {
     "nse-ucc-registration-worker": [
@@ -52,6 +61,9 @@
     ],
     "nse-prov-orders-worker": [
       "supabase/functions/nse-prov-orders-worker/index_test.ts"
+    ],
+    "nse-client-readiness-worker": [
+      "supabase/functions/nse-client-readiness-worker/index_test.ts"
     ]
   }
 }
