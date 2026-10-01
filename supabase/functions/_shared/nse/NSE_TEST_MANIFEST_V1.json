@@ -13,7 +13,14 @@
     "supabase/functions/nse-order-status-worker/adapters.ts",
     "supabase/functions/nse-order-status-worker/handler.ts",
     "supabase/functions/nse-order-status-worker/index.ts",
-    "supabase/functions/nse-order-status-worker/index_test.ts"
+    "supabase/functions/nse-order-status-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_prov_orders.ts",
+    "supabase/functions/_shared/nse/nse_prov_orders_test.ts",
+    "supabase/functions/nse-prov-orders-worker/types.ts",
+    "supabase/functions/nse-prov-orders-worker/adapters.ts",
+    "supabase/functions/nse-prov-orders-worker/handler.ts",
+    "supabase/functions/nse-prov-orders-worker/index.ts",
+    "supabase/functions/nse-prov-orders-worker/index_test.ts"
   ],
   "baseline_tests": [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
@@ -26,7 +33,9 @@
     "supabase/functions/nse-ucc-reconciliation-worker/index_test.ts",
     "supabase/functions/nse-uat-smoke-test/index_test.ts",
     "supabase/functions/_shared/nse/nse_order_status_test.ts",
-    "supabase/functions/nse-order-status-worker/index_test.ts"
+    "supabase/functions/nse-order-status-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_prov_orders_test.ts",
+    "supabase/functions/nse-prov-orders-worker/index_test.ts"
   ],
   "endpoint_tests": {
     "nse-ucc-registration-worker": [
@@ -40,6 +49,9 @@
     ],
     "nse-order-status-worker": [
       "supabase/functions/nse-order-status-worker/index_test.ts"
+    ],
+    "nse-prov-orders-worker": [
+      "supabase/functions/nse-prov-orders-worker/index_test.ts"
     ]
   }
 }

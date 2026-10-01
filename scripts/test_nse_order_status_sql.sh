@@ -26,12 +26,16 @@ psql_local < "$repo_root/supabase/tests/nse_ucc_vertical_slice_test.sql"
 for pass in 1 2; do
   printf 'ORDER_STATUS regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_order_status_vertical_slice_test.sql"
+  printf 'PROV_ORDERS regression pass %s (must rollback)\n' "$pass"
+  psql_local < "$repo_root/supabase/tests/nse_prov_orders_vertical_slice_test.sql"
 done
 psql_local -c "DO \$\$ BEGIN
-  IF EXISTS (SELECT 1 FROM public.integration_operations WHERE operation_type='ORDER_STATUS')
+  IF EXISTS (SELECT 1 FROM public.integration_operations WHERE operation_type IN ('ORDER_STATUS','PROV_ORDERS'))
+    OR EXISTS (SELECT 1 FROM public.event_outbox WHERE event_type='integration.nse.prov_orders_requested')
     OR EXISTS (SELECT 1 FROM public.nse_order_status_queries)
     OR EXISTS (SELECT 1 FROM public.nse_order_status_observations)
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'order-status-%@moneybowl.invalid')
+    OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'prov-orders-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name='integration_payload_encryption_key_v1')
   THEN RAISE EXCEPTION 'order_status_test_did_not_rollback'; END IF;
 END \$\$;"

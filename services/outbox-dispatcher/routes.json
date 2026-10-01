@@ -10,5 +10,9 @@
   "integration.nse.order_status_requested": {
     "worker_slug": "nse-order-status-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.prov_orders_requested": {
+    "worker_slug": "nse-prov-orders-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }
