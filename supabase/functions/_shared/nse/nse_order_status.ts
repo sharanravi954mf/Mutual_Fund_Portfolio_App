@@ -173,7 +173,7 @@ export function parseNseOrderStatusResponse(
   }
   if (
     body.response_status !== "S" || !Array.isArray(body.report_data) ||
-    body.report_data.length !== Number(total) || body.error_remark !== ""
+    body.report_data.length !== Number(total)
   ) {
     return observation;
   }

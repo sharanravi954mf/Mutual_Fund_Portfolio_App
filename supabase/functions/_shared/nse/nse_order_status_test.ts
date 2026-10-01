@@ -148,6 +148,28 @@ Deno.test("ORDER_STATUS: empty success is a successful read, not reconciliation"
     otherCount: 0,
   });
 });
+Deno.test("ORDER_STATUS: live UAT success diagnostic does not invalidate or leak the read", () => {
+  const observation = parseNseOrderStatusResponse(
+    JSON.stringify({
+      response_status: "S",
+      report_data_total: "0",
+      report_data: [],
+      error_remark: "PRIVATE LIVE UAT DIAGNOSTIC",
+    }),
+    request,
+  );
+  assertEquals(observation, {
+    nativeStatus: "S",
+    nativeRemarkCategory: "order_status_no_records",
+    success: true,
+    recordCount: 0,
+    validCount: 0,
+    invalidCount: 0,
+    otherCount: 0,
+  });
+  assertEquals(JSON.stringify(observation).includes("PRIVATE"), false);
+});
+
 Deno.test("ORDER_STATUS: failure envelope never copies error_remark", () => {
   const observation = parseNseOrderStatusResponse(
     JSON.stringify({

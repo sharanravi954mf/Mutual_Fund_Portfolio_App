@@ -31,7 +31,7 @@ ID precedence does not waive required request syntax. Both TypeScript and SQL en
 
 ## Response and observations
 
-The p79 envelope defines mandatory `response_status` (`S`/`F`), `report_data_total`, `report_data`, and `error_remark`. The table describes a numeric count, while pp79/82 examples encode it as a decimal string: accept either a nonnegative integer or a digit string, requiring exact agreement with the array length. On `S`, `report_data` is an array and `error_remark` is blank. On `F`, `report_data` is blank and `error_remark` carries the provider error; that error remains only in encrypted evidence. Empty `S` arrays are successful reads with zero observations.
+The p79 envelope defines mandatory `response_status` (`S`/`F`), `report_data_total`, `report_data`, and `error_remark`. The table describes a numeric count, while pp79/82 examples encode it as a decimal string: accept either a nonnegative integer or a digit string, requiring exact agreement with the array length. The handbook says `error_remark` is blank on `S`, but historical safe UAT characterization and the controlled 2026-10-01 commissioning read both observed a non-empty diagnostic with `response_status=S`. MoneyBowl therefore treats `error_remark` as provider diagnostic text rather than a success override: for a structurally valid `S` envelope it remains only in encrypted RESULT evidence and is never projected to observations/logs. On `F`, `report_data` is blank and `error_remark` carries the provider error. Empty `S` arrays remain successful reads with zero observations.
 
 The ORDER_STATUS sample on pp82–83 contains these row keys:
 

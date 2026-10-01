@@ -202,8 +202,12 @@ BEGIN
   PERFORM pg_temp.assert_true(NOT EXISTS(SELECT 1 FROM public.nse_order_status_observations WHERE operation_id=op.id),'no_partial_observation');
  END LOOP;
  SELECT * INTO op FROM pg_temp.prepare(); SELECT * INTO req FROM pg_temp.start_read(op.id);
- PERFORM pg_temp.finish_read(req,'{"response_status":"S","report_data_total":0,"report_data":[],"error_remark":""}',200,'SUCCESS','S','order_status_no_records');
- PERFORM pg_temp.assert_true((SELECT record_count=0 FROM public.nse_order_status_observations WHERE operation_id=op.id),'empty_success');
+ PERFORM pg_temp.finish_read(req,'{"response_status":"S","report_data_total":0,"report_data":[],"error_remark":"PRIVATE LIVE UAT DIAGNOSTIC"}',200,'SUCCESS','S','order_status_no_records');
+ PERFORM pg_temp.assert_true((SELECT record_count=0 FROM public.nse_order_status_observations WHERE operation_id=op.id),'empty_success_with_live_uat_diagnostic');
+ PERFORM pg_temp.assert_true(NOT EXISTS(
+   SELECT 1 FROM public.nse_order_status_observations observation WHERE observation.operation_id=op.id
+     AND to_jsonb(observation)::text LIKE '%PRIVATE%'
+ ),'success_diagnostic_not_projected');
  -- Both ID selectors present: order_ids wins, even when member_unique_ids differs.
  obs:=public.inspect_nse_order_status_response('{"response_status":"S","report_data_total":1.00000000000000000000,"report_data":[{"client_code":"SYNTHETIC1","order_id":"100","order_status":"VALID","member_unique_id":"OTHER"}],"error_remark":""}',
  '{"client_code":"SYNTHETIC1","order_ids":"100","member_unique_ids":"IGNORED"}');
