@@ -1,6 +1,6 @@
 # NSE B06.4 — NAV observations and blocked SET evidence
 
-Rebased onto freshly fetched `origin/develop` (`d029c80`, merged B06.2) on
+Rebased onto freshly fetched `origin/develop` (`59cfa88`, merged B06.2 and B06.3) on
 2026-10-02. B06.2 owns MASTER_DOWNLOAD orchestration, worker, events and dispatcher
 routes. This slice registers private SQL validators in that runtime and retains
 the existing NAV observation and blocked SET domain seams. No worker, event,
@@ -8,7 +8,7 @@ dispatcher route or browser command is added.
 
 The unpublished local migration is now
 `20261002152000_nse_b06_4_nav_set_observations.sql`, after B06.2's `150000`/`150100`
-and distinct from B06.3's candidate. No applied migration was edited.
+and distinct from B06.3's merged `20261002151000`. No applied migration was edited.
 
 ## Evidence and limits
 
@@ -169,18 +169,23 @@ and audits on completion failure, ownership and actual service/browser roles.
 Existing NAV/SET tests retain source precedence, no inferred crosswalk, dated
 corrections, pinned paging, multichunk evidence, truncation, atomic rejection,
 immutable audits and ACL coverage. The protected Deno manifest retains B06.2's
-worker and B06.4's services, with 69 fmt/check targets and 27 suites.
+worker and B06.4's services, with 74 fmt/check targets and 29 suites, including
+every merged SIP/STP/SWP entry. Shared worker tests retain both variant groups.
+The SCH invalid-selector regression retains lowercase SIP/STP/SWP and adds
+lowercase NAV/SET; the systematic registry assertion now requires all six exact
+selectors. The B06.3 parser, service, migration and architecture document are
+unchanged from develop.
 
 | Check | Reconciled result |
 | --- | --- |
-| Protected Deno fmt/check/test | 69 targets; 710 tests pass |
+| Protected Deno fmt/check/test | 74 targets; 828 tests pass |
 | Full migration reset and PL/pgSQL lint | Pass; no new warnings/errors |
-| Full NSE/UCC/dispatcher/B01–B06/facade SQL | Pass twice; SCH 235, NAV/SET 248, runtime integration 76 assertions per pass, plus actual role exercises |
-| Reference, SCH, NAV/SET and frontend concurrency | Pass; prepare/claim/finalize and assessment replay produce no duplicates |
+| Full NSE/UCC/dispatcher/B01–B06/facade SQL | Pass twice; SCH 255, systematic 489, NAV/SET 248, NAV/SET runtime 76 assertions per pass, plus actual role exercises |
+| Reference, SCH, systematic, NAV/SET and frontend concurrency | Pass; prepare/claim/finalize and assessment replay produce no duplicates |
 | Manifest/diagnostic-policy/Compose tests | 22 pass |
 | Dispatcher/reconciler pytest | 55 pass |
 | Documentation, migration history, shell syntax, whitespace | Pass |
-| Every persistent SQL test on a fresh restored database | Develop: 22 pass / 15 fail; candidate: 24 pass / the same 15 fail |
+| Every persistent SQL test on a fresh restored database | Develop: 23 pass / 15 fail; candidate: 25 pass / the same 15 fail |
 | Existing order/payment concurrency | Pass on fresh develop and candidate |
 | Existing registrar/referral concurrency | Same baseline failures: missing PAN key / unresolved referral profile |
 
@@ -200,16 +205,17 @@ Reproduce the maintained relevant suite with:
 /opt/moneybowl-toolchains/nse-test/deno-2.9.6-env-003/nse-test-runner manifest-v1 check
 /opt/moneybowl-toolchains/nse-test/deno-2.9.6-env-003/nse-test-runner manifest-v1 test
 bash scripts/test_nse_order_status_sql.sh
+bash scripts/test_nse_systematic_sql.sh
 python3 -m unittest scripts/nse_test_manifest_v1_test.py scripts/nse_response_diagnostics_policy_test.py scripts/test_outbox_compose.py
 python3 .github/scripts/validate_docs.py
 python3 .github/scripts/validate_migration_history.py
 python3 .github/scripts/validate_commits.py
 ```
 
-Local receipts: `/tmp/b064-reconcile-{deno,check,fmt,sql,python,dispatcher,docs}.log`,
-`/tmp/b064-reconcile-{baseline,candidate}-all-db.log` and
-`/tmp/b064-reconcile-extra-checks.log`; comparison inventory:
-`/tmp/b064-reconcile-validation-comparison.json`. The broad comparison rebuilds fresh
+Local receipts: `/tmp/b064-integration-{deno,check,fmt,sql,systematic,python,dispatcher,docs}.log`,
+`/tmp/b064-integration-{baseline,candidate}-all-db.log` and
+`/tmp/b064-integration-extra-checks.log`; comparison inventory:
+`/tmp/b064-integration-validation-comparison.json`. The broad comparison rebuilds fresh
 schemas from the fetched develop archive and candidate, then restores an isolated
 database for each persistent SQL test; it also runs `run_all.sh` and referral
 concurrency in the disposable container. Existing applied migration blobs,
