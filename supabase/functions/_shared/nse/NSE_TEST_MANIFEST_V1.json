@@ -66,7 +66,12 @@
     "supabase/functions/nse-master-download-worker/adapters.ts",
     "supabase/functions/nse-master-download-worker/handler.ts",
     "supabase/functions/nse-master-download-worker/index.ts",
-    "supabase/functions/nse-master-download-worker/index_test.ts"
+    "supabase/functions/nse-master-download-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_systematic_masters.ts",
+    "supabase/functions/_shared/nse/nse_systematic_master_service.ts",
+    "supabase/functions/_shared/nse/nse_systematic_masters_fixtures.ts",
+    "supabase/functions/_shared/nse/nse_systematic_masters_test.ts",
+    "supabase/functions/_shared/nse/nse_systematic_master_service_test.ts"
   ],
   "baseline_tests": [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
@@ -94,7 +99,9 @@
     "supabase/functions/_shared/nse/nse_response_diagnostics_test.ts",
     "supabase/functions/nse-stp-swp-reports-worker/index_test.ts",
     "supabase/functions/_shared/nse/nse_master_download_test.ts",
-    "supabase/functions/nse-master-download-worker/index_test.ts"
+    "supabase/functions/nse-master-download-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_systematic_masters_test.ts",
+    "supabase/functions/_shared/nse/nse_systematic_master_service_test.ts"
   ],
   "endpoint_tests": {
     "nse-ucc-registration-worker": [
