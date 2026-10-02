@@ -43,7 +43,8 @@ flowchart LR
 
 `prepare_nse_master_download(workspace, connection, file_type, idempotency_key)`
 locks the B06.1 connection and atomically inserts one job and one metadata-only
-outbox event. Only SCH is enabled. A repeated key returns the same job; it never
+outbox event. B06.2 initially enables only SCH; [B06.4](NSE_NAV_SET.md) adds
+NAV observations and terminal rejected SET evidence through the same registry. A repeated key returns the same job; it never
 refreshes data. A new explicit service preparation is required for another read.
 No investor account, UCC, browser facade or console command is created.
 

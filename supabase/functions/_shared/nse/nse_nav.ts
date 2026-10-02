@@ -67,6 +67,7 @@ type RpcClient = {
 const rejections = [
   "nse_nav_encoding_invalid",
   "nse_nav_framing_invalid",
+  "nse_nav_row_limit",
   "nse_nav_column_count",
   "nse_nav_field_invalid",
   "nse_nav_date_invalid",
@@ -112,7 +113,8 @@ function validation(value: unknown, scope: NseNavScope): NseNavValidation {
   ) fail();
   if (v.status === "VALIDATED_OBSERVATIONS") {
     if (
-      !integer(v.row_count, 1) || v.rejection_code !== null ||
+      !integer(v.row_count, 1) || v.row_count > 100000 ||
+      v.rejection_code !== null ||
       v.rejected_line !== null
     ) fail();
   } else if (v.status === "REJECTED") {
@@ -144,7 +146,8 @@ function observation(value: unknown, expectedLine: number): NseNavObservation {
   return Object.freeze(o) as NseNavObservation;
 }
 
-/** B06.2 calls this after staging. SQL is the sole parser of encrypted evidence.
+/** Internal observation review; B06.2 finalizes through its private SQL adapter.
+ * SQL is the sole parser of encrypted evidence.
  * No HTTP, outbox, route, crosswalk inference or current_nav write occurs here.
  */
 export function createNseNavService(client: RpcClient) {

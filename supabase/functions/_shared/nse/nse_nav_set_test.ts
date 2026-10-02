@@ -274,3 +274,21 @@ Deno.test("NAV and SET errors never leak database/provider diagnostics", async (
     );
   }
 });
+
+Deno.test("NAV service accepts terminal row-limit rejection and refuses oversized receipts", async () => {
+  const data = {
+    ...receipt(),
+    status: "REJECTED",
+    row_count: 0,
+    rejection_code: "nse_nav_row_limit",
+  };
+  assertEquals(
+    (await createNseNavService(mock(data)).validate(scope)).status,
+    "REJECTED",
+  );
+  await assertRejects(() =>
+    createNseNavService(mock({ ...receipt(), row_count: 100001 })).validate(
+      scope,
+    )
+  );
+});

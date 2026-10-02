@@ -80,6 +80,7 @@ for pass in 1 2; do
   psql_local < "$repo_root/supabase/tests/nse_systematic_product_masters_test.sql"
   printf 'B06.4 NAV/SET regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_nav_set_test.sql"
+  psql_local < "$repo_root/supabase/tests/nse_nav_set_runtime_test.sql"
   printf 'NSE frontend application facade regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_frontend_integration_v1_test.sql"
 done

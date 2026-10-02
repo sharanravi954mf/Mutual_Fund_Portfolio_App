@@ -740,3 +740,5 @@ The seven [NSE B05 STP/SWP/AMC Pause reports](NSE_STP_SWP_REPORTS_VERTICAL_SLICE
 The member-owned [B06.1 reference foundation](NSE_MASTER_DOWNLOAD_FOUNDATION.md) and [B06.2 MASTER_DOWNLOAD/SCH runtime](NSE_MASTER_DOWNLOAD_SCH.md) use the existing outbox without dummy investor accounts. SCH structural validation produces private immutable rows and receipts; publication and crosswalk approval remain blocked. Later reference variants register their own private validators.
 
 The [NSE B06.3 systematic product references](NSE_SYSTEMATIC_PRODUCT_MASTERS.md) register SIP/STP/SWP parsers with that shared MASTER_DOWNLOAD runtime. Immutable typed rows and structural validation remain separate from explicit reference-only CAS publication; product semantics and investor eligibility remain uncommissioned.
+
+[B06.4 NAV/SET](NSE_NAV_SET.md) registers private validators in the B06.2 runtime. NAV yields document-backed uncommissioned observations with publication blocked. SET records evidence with terminal rejected validation until its API layout is characterized; it supplies no calendar authority. Existing NAV valuation sources and precedence remain unchanged.

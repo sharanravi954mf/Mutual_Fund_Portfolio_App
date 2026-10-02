@@ -14,8 +14,8 @@ CREATE TABLE nse_nav.validations (
   layout_sha256 text NOT NULL DEFAULT '67ee2e34c7cf776a2731e950837bd3aa6f2e6f7e5f521cbdbbce5cc60aae307d'
     CHECK (layout_sha256='67ee2e34c7cf776a2731e950837bd3aa6f2e6f7e5f521cbdbbce5cc60aae307d'),
   status text NOT NULL CHECK (status IN ('VALIDATED_OBSERVATIONS','REJECTED')),
-  row_count integer NOT NULL CHECK (row_count>=0),
-  rejection_code text CHECK (rejection_code IN ('nse_nav_encoding_invalid','nse_nav_framing_invalid',
+  row_count integer NOT NULL CHECK (row_count BETWEEN 0 AND 100000),
+  rejection_code text CHECK (rejection_code IN ('nse_nav_encoding_invalid','nse_nav_framing_invalid','nse_nav_row_limit',
     'nse_nav_column_count','nse_nav_field_invalid','nse_nav_date_invalid','nse_nav_value_invalid','nse_nav_duplicate_identity')),
   rejected_line integer CHECK (rejected_line>0),
   api_compatibility text NOT NULL DEFAULT 'UNCOMMISSIONED' CHECK (api_compatibility='UNCOMMISSIONED'),
@@ -119,6 +119,9 @@ BEGIN
       IF body='' OR strpos(body,E'\r')>0 THEN
         RAISE EXCEPTION USING MESSAGE='nse_nav_framing_invalid',ERRCODE='N6401'; END IF;
       lines:=pg_catalog.string_to_array(body,E'\n');
+      -- Match the shared runtime receipt bound before inserting any observations.
+      IF cardinality(lines)>100000 THEN
+        RAISE EXCEPTION USING MESSAGE='nse_nav_row_limit',ERRCODE='N6401'; END IF;
       FOREACH line IN ARRAY lines LOOP
         line_no:=line_no+1;
         IF line='' THEN RAISE EXCEPTION USING MESSAGE='nse_nav_framing_invalid',ERRCODE='N6401'; END IF;
@@ -213,4 +216,40 @@ REVOKE ALL ON FUNCTION public.validate_nse_nav_snapshot(uuid,uuid), public.read_
   public.assess_nse_set_snapshot(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.validate_nse_nav_snapshot(uuid,uuid), public.read_nse_nav_observations(uuid,uuid,integer,integer),
   public.assess_nse_set_snapshot(uuid,uuid) TO service_role;
+-- B06.2's single runtime invokes these private adapters inside finalization.
+-- Domain receipts retain their more precise observation/blocked status and evidence.
+CREATE FUNCTION nse_reference.validate_nav_v1(p_snapshot uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE s nse_reference.snapshots; v jsonb;
+BEGIN
+ SELECT * INTO STRICT s FROM nse_reference.snapshots WHERE id=p_snapshot AND file_type='NAV';
+ v:=public.validate_nse_nav_snapshot(s.workspace_id,s.id);
+ IF v->>'status' NOT IN ('VALIDATED_OBSERVATIONS','REJECTED') OR v->>'status' IS NULL THEN
+  RAISE EXCEPTION 'nse_nav_validation_invalid'; END IF;
+ RETURN pg_catalog.jsonb_build_object('validation_scope','DOCUMENT_BACKED_UNCOMMISSIONED_OBSERVATIONS',
+  'status',CASE WHEN v->>'status'='VALIDATED_OBSERVATIONS' THEN 'STAGED_VALIDATED' ELSE 'REJECTED' END,
+  'category',CASE WHEN v->>'status'='VALIDATED_OBSERVATIONS' THEN 'nse_reference_nav_observations_uncommissioned'
+    ELSE 'nse_reference_nav_layout_invalid' END,
+  'row_count',(v->>'row_count')::integer,
+  -- The parser stops at the first rejection; this is not a total invalid-row count.
+  'rejected_rows',CASE WHEN v->>'rejected_line' IS NOT NULL THEN 1 ELSE 0 END);
+END $$;
+CREATE FUNCTION nse_reference.validate_set_v1(p_snapshot uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE s nse_reference.snapshots; assessment jsonb;
+BEGIN
+ SELECT * INTO STRICT s FROM nse_reference.snapshots WHERE id=p_snapshot AND file_type='SET';
+ assessment:=public.assess_nse_set_snapshot(s.workspace_id,s.id);
+ IF assessment->>'status' IS DISTINCT FROM 'BLOCKED_LAYOUT_UNCHARACTERIZED' THEN
+  RAISE EXCEPTION 'nse_set_assessment_invalid'; END IF;
+ -- REJECTED is terminal validation failure, not provider/business success. Zero
+ -- rows have been interpreted, so do not invent a rejected-row count or calendar.
+ RETURN pg_catalog.jsonb_build_object('validation_scope','EVIDENCE_ONLY_LAYOUT_UNCHARACTERIZED',
+  'status','REJECTED','category','nse_reference_set_layout_uncharacterized','row_count',0,'rejected_rows',0);
+END $$;
+REVOKE ALL ON FUNCTION nse_reference.validate_nav_v1(uuid), nse_reference.validate_set_v1(uuid)
+ FROM PUBLIC,anon,authenticated,service_role;
+INSERT INTO nse_reference.validators(file_type,parser_version,function_name) VALUES
+ ('NAV','NSE_NAV_WEB83_V1','validate_nav_v1'),
+ ('SET','NSE_SET_EVIDENCE_V1','validate_set_v1');
 COMMIT;

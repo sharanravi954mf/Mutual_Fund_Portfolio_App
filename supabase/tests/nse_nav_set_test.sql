@@ -102,6 +102,7 @@ BEGIN
   PERFORM pg_temp.err(format('SELECT public.read_nse_nav_observations(%L,%L,0,%s)','b0640000-0000-4000-8001-000000000001',s,i),'nse_nav_page_invalid');
  END LOOP;
  -- Syntactically complete transport can still contain bad/truncated rows.
+ PERFORM pg_temp.bad_nav(repeat(E'a|b\n',100001),'nse_nav_row_limit',NULL);
  PERFORM pg_temp.bad_nav(row1||'|','nse_nav_column_count');
  PERFORM pg_temp.bad_nav(left(row1,length(row1)-5),'nse_nav_column_count');
  PERFORM pg_temp.bad_nav('NAV Date|SCHEME CODE|SCHEME NAME|RTA SCHEME CODE|DIV FLAG|ISIN|NAV VALUE|RTA CODE','nse_nav_date_invalid');

@@ -63,7 +63,10 @@ function fixture(
     },
     async finalize() {
       calls.push("finalize");
-      return { outcome: "STAGED_VALIDATED", snapshot_id: eventId };
+      return {
+        outcome: fileType === "SET" ? "REJECTED" : "STAGED_VALIDATED",
+        snapshot_id: eventId,
+      };
     },
   };
   const handler = () =>
@@ -363,5 +366,50 @@ for (const fileType of ["SIP", "STP", "SWP"] as const) {
       assertEquals(args.p_claim_token, token);
       assert(!("p_file_type" in args));
     }
+  });
+}
+
+for (const fileType of ["NAV", "SET"] as const) {
+  Deno.test(`master worker: ${fileType} uses one shared capture and SQL outcome`, async () => {
+    const f = fixture("CAPTURE", fileType);
+    const response = await f.handler()(f.request());
+    assertEquals(response.status, 200);
+    assertEquals(f.calls, [
+      "claim",
+      "begin",
+      "http",
+      "append",
+      "seal",
+      "finalize",
+    ]);
+    assertEquals(await response.json(), {
+      data: {
+        outcome: fileType === "NAV" ? "STAGED_VALIDATED" : "REJECTED",
+        snapshot_id: eventId,
+        publication_gate: "BLOCKED",
+      },
+    });
+  });
+  Deno.test(`master adapter: ${fileType} scope comes from owned SQL claim`, async () => {
+    const p = createMasterPersistence({
+      rpc: () =>
+        Promise.resolve({
+          error: null,
+          data: {
+            action: "CAPTURE",
+            event_outbox_id: eventId,
+            workspace_id: eventId,
+            connection_id: eventId,
+            download_id: eventId,
+            file_type: fileType,
+            environment: "UAT",
+          },
+        }),
+    });
+    assertEquals(await p.claim(eventId, token), {
+      action: "CAPTURE",
+      eventId,
+      scope: { ...scope, fileType },
+    });
   });
 }
