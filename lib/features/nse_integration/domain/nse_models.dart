@@ -23,7 +23,14 @@ enum NseReadKind {
   xsipRegReport,
   xsipCanReport,
   xsipInstDueReport,
-  xsipTopupReport;
+  xsipTopupReport,
+  stpRegReport,
+  stpCanReport,
+  stpInstDueReport,
+  swpRegReport,
+  swpCanReport,
+  swpInstDueReport,
+  sipAmcPauseReport;
 
   static const _apis = [
     'ORDER_STATUS',
@@ -50,7 +57,14 @@ enum NseReadKind {
     'XSIP_REG_REPORT',
     'XSIP_CAN_REPORT',
     'XSIP_INST_DUE_REPORT',
-    'XSIP_TOPUP_REPORT'
+    'XSIP_TOPUP_REPORT',
+    'STP_REG_REPORT',
+    'STP_CAN_REPORT',
+    'STP_INST_DUE_REPORT',
+    'SWP_REG_REPORT',
+    'SWP_CAN_REPORT',
+    'SWP_INST_DUE_REPORT',
+    'SIP_AMC_PAUSE_REPORT'
   ];
   String get api => _apis[index];
   String get wire => 'read_${api.toLowerCase()}';
@@ -58,7 +72,11 @@ enum NseReadKind {
   bool get optionalDates => index >= 16;
   bool get noDates => index >= 5 && index <= 7;
   bool get singleDate => this == fundAge;
-  bool get isDue => this == sipInstDueReport || this == xsipInstDueReport;
+  bool get isDue =>
+      this == sipInstDueReport ||
+      this == xsipInstDueReport ||
+      this == stpInstDueReport ||
+      this == swpInstDueReport;
   static NseReadKind parse(Object? value) =>
       values.firstWhere((kind) => kind.wire == value,
           orElse: () => throw const FormatException('Unknown read kind'));
@@ -106,9 +124,11 @@ class NseFailure implements Exception {
         'NOT_AUTHORIZED' =>
           'You do not have access to this client’s NSE reads.',
         'TARGET_UNAVAILABLE' => 'This operation or client is unavailable.',
+        'OWNED_STP_REGISTRATION_SELECTION_REQUIRED' =>
+          'Owned STP registration evidence must be selected by the service. This console command is unavailable.',
         'INVALID_COMMAND' => 'Check the dates and selected report rows.',
         'BLOCKED_PREREQUISITE' =>
-          'The account or owned order evidence is not ready.',
+          'The investor integration or owned evidence is not ready.',
         'FEATURE_DISABLED' =>
           'NSE reads have not been enabled for this workspace.',
         'REQUEST_CONFLICT' =>
@@ -121,7 +141,8 @@ class NseFailure implements Exception {
 }
 
 String nseReasonLabel(String? reason) => switch (reason) {
-      'REGISTERED_ACCOUNT_REQUIRED' => 'A registered NSE account is required.',
+      'REGISTERED_ACCOUNT_REQUIRED' =>
+        'Registered NSE investor / UCC data is required.',
       'ACCOUNT_IDENTITY_UNAVAILABLE' => 'The account identity needs review.',
       'VERIFIED_IDENTITY_REQUIRED' => 'Verified investor identity is required.',
       'FEATURE_DISABLED' =>
@@ -132,6 +153,8 @@ String nseReasonLabel(String? reason) => switch (reason) {
         'Select eligible rows from an owned ORDER_STATUS result.',
       'ORDER_EVIDENCE_NOT_ELIGIBLE' =>
         'This row does not meet this report’s ownership and order requirements.',
+      'OWNED_STP_REGISTRATION_SELECTION_REQUIRED' =>
+        'Owned STP registration evidence must be selected by the service. This console command is unavailable.',
       'INVALID_COMMAND' => 'Check the dates and selected rows.',
       null => 'Available',
       _ => 'Prerequisites need review.',

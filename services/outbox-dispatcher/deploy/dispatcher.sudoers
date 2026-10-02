@@ -1,0 +1,2 @@
+# sudo >=1.9.10 regex arguments. No arbitrary unit, command, SHA or config path.
+ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl ^start --wait moneybowl-outbox-dispatcher-reconcile@[0-9a-f]{40}\.service$

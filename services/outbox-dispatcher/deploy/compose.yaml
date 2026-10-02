@@ -1,0 +1,38 @@
+# Only this service is managed here, under the existing ingestion Compose project.
+services:
+  outbox-dispatcher:
+    image: ${DISPATCHER_IMAGE:?exact SHA image required}
+    user: "10002:10002"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 0.10
+    mem_limit: 128m
+    pids_limit: 32
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    stop_grace_period: 10s
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?existing DEV URL required}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?existing key required}
+      NSE_WORKER_TOKEN: ${NSE_WORKER_TOKEN:?existing shared worker token required}
+      OUTBOX_DISPATCH_DRY_RUN: ${OUTBOX_DISPATCH_DRY_RUN:?preserve current setting}
+      OUTBOX_POLL_INTERVAL_SECONDS: ${OUTBOX_POLL_INTERVAL_SECONDS:?preserve current setting}
+      OUTBOX_RETRY_DELAY_SECONDS: ${OUTBOX_RETRY_DELAY_SECONDS:?preserve current setting}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:?preserve current setting}
+      OUTBOX_HTTP_TIMEOUT_SECONDS: ${OUTBOX_HTTP_TIMEOUT_SECONDS:?preserve current setting}
+      OUTBOX_FEED_FAILURE_BACKOFF_SECONDS: ${OUTBOX_FEED_FAILURE_BACKOFF_SECONDS:?preserve current setting}
+      OUTBOX_MAX_CONSECUTIVE_FEED_FAILURES: ${OUTBOX_MAX_CONSECUTIVE_FEED_FAILURES:?preserve current setting}
+      OUTBOX_ROUTES_FILE: /app/routes.json
+      OUTBOX_HEARTBEAT_FILE: /tmp/dispatcher-heartbeat
+    healthcheck:
+      test: [CMD, python, -c, "import os,sys,time; p='/tmp/dispatcher-heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
+      start_period: 15s
+    networks: [ingestion_internal]
+networks:
+  ingestion_internal:
+    external: true
+    name: moneybowl-ingestion-support_ingestion_internal

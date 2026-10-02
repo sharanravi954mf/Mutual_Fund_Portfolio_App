@@ -1,3 +1,4 @@
+import { matchNseResponseDiagnostic } from "./nse_response_diagnostics.ts";
 /** B01 supported slices; handbook v1.9.7 pp141–150,157–160,162–164,192–193.
  * No caller PAN/UCC/product selectors. Database-owned source only.
  */
@@ -255,6 +256,7 @@ export function parseNseClientReadinessResponse(
       (hasRemark && source.api === "ELOG_REPORT" &&
         typeof envelope.error_remark !== "string") ||
       (hasRemark && source.api !== "ELOG_REPORT" &&
+        source.api !== "CLIENT_KYC_REPORT" &&
         envelope.error_remark !== "")
     ) return fail();
     const total = envelope.report_data_total;
@@ -268,6 +270,17 @@ export function parseNseClientReadinessResponse(
       envelope.report_data.length > 10000
     ) return fail();
     const rows = envelope.report_data;
+    if (
+      source.api === "CLIENT_KYC_REPORT" && hasRemark &&
+      envelope.error_remark !== "" &&
+      matchNseResponseDiagnostic(
+          "NSE_CLIENT_KYC_REPORT",
+          nativeStatus,
+          envelope.error_remark,
+          Number(total),
+          rows,
+        )?.outcome !== "SUCCESS"
+    ) return fail();
     let validate: (r: unknown, s: ReadinessSource) => boolean;
     switch (source.api) {
       case "CLIENT_AUTHORIZATION":

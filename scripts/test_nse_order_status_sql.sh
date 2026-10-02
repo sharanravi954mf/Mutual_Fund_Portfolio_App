@@ -61,12 +61,15 @@ for pass in 1 2; do
   psql_local < "$repo_root/supabase/tests/nse_settlement_redemption_vertical_slice_test.sql"
   printf 'B04 SIP/XSIP regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_sip_xsip_reports_vertical_slice_test.sql"
+  printf 'B05 STP/SWP/AMC regression pass %s (must rollback)\n' "$pass"
+  psql_local < "$repo_root/supabase/tests/nse_stp_swp_reports_vertical_slice_test.sql"
+  psql_local < "$repo_root/supabase/tests/nse_response_diagnostics_test.sql"
   printf 'NSE frontend application facade regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_frontend_integration_v1_test.sql"
 done
 psql_local -c "DO \$\$ BEGIN
-  IF EXISTS (SELECT 1 FROM public.integration_operations WHERE operation_type IN ('ORDER_STATUS','PROV_ORDERS','CLIENT_READINESS','ORDER_FUNDING','SETTLEMENT_REDEMPTION','SIP_XSIP_REPORTS'))
-    OR EXISTS (SELECT 1 FROM public.event_outbox WHERE event_type IN ('integration.nse.prov_orders_requested','integration.nse.client_readiness_requested','integration.nse.order_funding_requested','integration.nse.settlement_redemption_requested','integration.nse.sip_xsip_reports_requested'))
+  IF EXISTS (SELECT 1 FROM public.integration_operations WHERE operation_type IN ('ORDER_STATUS','PROV_ORDERS','CLIENT_READINESS','ORDER_FUNDING','SETTLEMENT_REDEMPTION','SIP_XSIP_REPORTS','STP_SWP_REPORTS'))
+    OR EXISTS (SELECT 1 FROM public.event_outbox WHERE event_type IN ('integration.nse.prov_orders_requested','integration.nse.client_readiness_requested','integration.nse.order_funding_requested','integration.nse.settlement_redemption_requested','integration.nse.sip_xsip_reports_requested','integration.nse.stp_swp_reports_requested'))
     OR EXISTS (SELECT 1 FROM public.nse_order_status_queries)
     OR EXISTS (SELECT 1 FROM public.nse_order_status_observations)
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'order-status-%@moneybowl.invalid')
@@ -74,8 +77,9 @@ psql_local -c "DO \$\$ BEGIN
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'client-readiness-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'order-funding-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'settlement-redemption-%@moneybowl.invalid')
-    OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger WHERE tgname LIKE 'b03_no_%' OR tgname LIKE 'b04_no_%')
+    OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger WHERE tgname LIKE 'b03_no_%' OR tgname LIKE 'b04_no_%' OR tgname LIKE 'b05_no_%')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'sip-xsip-reports-%@moneybowl.invalid')
+    OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'stp-swp-reports-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM nse_app.submission_receipts)
     OR EXISTS (SELECT 1 FROM nse_app.dev_access)
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'nse-app-%@moneybowl.invalid')

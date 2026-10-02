@@ -205,6 +205,19 @@ BEGIN
  PERFORM pg_temp.expect_error($q$SELECT public.validate_nse_client_readiness_filters('UNKNOWN','{}')$q$,'client_readiness_filters_invalid');
 END $$;
 
+-- New 2026-10-02 CLIENT_KYC_REPORT live envelope regression, through durable finish.
+DO $$
+DECLARE op public.integration_operations; req public.integration_api_interactions; result public.integration_api_interactions;
+ raw text:='{"response_status":"S","error_remark":"No record(s) found.","report_data_total":"0","report_data":[]}'; summary jsonb;
+BEGIN
+ op:=pg_temp.prepare('CLIENT_KYC_REPORT');req:=pg_temp.start_read(op.id);result:=pg_temp.finish_read(req,raw,200);
+ summary:=public.get_nse_client_readiness_summary(op.workspace_id,op.integration_account_id,op.id);
+ PERFORM pg_temp.assert_true(result.normalized_outcome='SUCCESS' AND summary->>'record_count'='0'
+   AND summary::text NOT LIKE '%No record%' AND result.native_remark_category='client_readiness_report_received','kyc_live_empty_success');
+ PERFORM pg_temp.assert_true((SELECT state='SUCCESS' AND NOT retry_allowed FROM public.integration_operations WHERE id=op.id),'kyc_live_no_retry');
+ PERFORM pg_temp.assert_true(extensions.pgp_sym_decrypt(result.response_payload_ciphertext,public.integration_payload_encryption_key(result.payload_encryption_key_reference))=raw,'kyc_live_encrypted_exact_diagnostic');
+END $$;
+
 -- Classifier portability: preserve malformed JSON evidence with the same safe
 -- category in SQL and TypeScript, including escaped NUL and numeric overflow.
 DO $$

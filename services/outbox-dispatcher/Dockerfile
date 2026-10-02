@@ -26,6 +26,7 @@ RUN pip install --requirement requirements-dev.txt
 
 COPY dispatcher.py routes.json ./
 COPY tests ./tests
+COPY deploy ./deploy
 COPY pyproject.toml ./pyproject.toml
 
 USER 10002:10002

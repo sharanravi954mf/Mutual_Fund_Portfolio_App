@@ -238,3 +238,6 @@ verify_jwt = false
 
 [functions.nse-sip-xsip-reports-worker]
 verify_jwt = false
+
+[functions.nse-stp-swp-reports-worker]
+verify_jwt = false

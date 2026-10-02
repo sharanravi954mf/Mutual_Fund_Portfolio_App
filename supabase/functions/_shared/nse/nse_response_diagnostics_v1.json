@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "client_kyc_report_v1",
+      "api": "NSE_CLIENT_KYC_REPORT",
+      "native_status": "S",
+      "diagnostic": "No record(s) found.",
+      "count": 0,
+      "shape": "empty_array",
+      "outcome": "SUCCESS",
+      "category": "client_readiness_report_received",
+      "retry": false,
+      "evidence": "2026-10-02 retained DEV/UAT evidence supplied in B05 commissioning request"
+    },
+    {
+      "id": "order_lifecycle_v1",
+      "api": "NSE_ORDER_LIFECYCLE",
+      "native_status": "S",
+      "diagnostic": "No record(s) found.",
+      "count": 0,
+      "shape": "empty_array",
+      "outcome": "SUCCESS",
+      "category": "order_funding_no_records",
+      "retry": false,
+      "evidence": "20261001170827_nse_b02_order_lifecycle_no_records.sql"
+    },
+    {
+      "id": "transaction_detail_v1",
+      "api": "NSE_TRANSACTION_DETAIL",
+      "native_status": "S",
+      "diagnostic": "No record(s) found.",
+      "count": 0,
+      "shape": "empty_array",
+      "outcome": "SUCCESS",
+      "category": "order_funding_no_records",
+      "retry": false,
+      "evidence": "20261001172138_nse_b02_transaction_detail_no_records.sql"
+    },
+    {
+      "id": "fund_order_v1",
+      "api": "NSE_FUND_ORDER",
+      "native_status": "F",
+      "diagnostic": "No record(s) found",
+      "count": 0,
+      "shape": "empty_array",
+      "outcome": "BUSINESS_FAILURE",
+      "category": "order_funding_no_records",
+      "retry": false,
+      "evidence": "20261001174352_nse_b02_fund_order_no_records.sql"
+    },
+    {
+      "id": "fund_age_v1",
+      "api": "NSE_FUND_AGE",
+      "native_status": "F",
+      "diagnostic": "amc_code value is not valid.",
+      "count": 0,
+      "shape": "empty_array",
+      "outcome": "BUSINESS_FAILURE",
+      "category": "order_funding_amc_code_invalid",
+      "retry": false,
+      "evidence": "20261001173250_nse_b02_fund_age_amc_validation.sql"
+    }
+  ]
+}

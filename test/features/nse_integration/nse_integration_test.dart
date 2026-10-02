@@ -168,14 +168,38 @@ void main() {
   });
   test('console requires explicit DEV build flags',
       () => expect(NseConsoleAccess.enabled, false));
-  test('all 25 commands round-trip without provider identifiers', () {
-    expect(NseReadKind.values.length, 25);
+  test('all 32 commands round-trip without provider identifiers', () {
+    expect(NseReadKind.values.length, 32);
     for (final kind in NseReadKind.values) {
       expect(NseReadKind.parse(kind.wire), kind);
     }
     expect(NseReadCommand.fromJson(command().toJson()).toJson(),
         command().toJson());
     expect(() => NseReadKind.parse('read_normal'), throwsFormatException);
+  });
+  test(
+      'B05 browser commands contain only application dates; due evidence stays blocked',
+      () {
+    for (final kind in NseReadKind.values.skip(25)) {
+      final cmd =
+          NseReadCommand(kind: kind, from: '2026-10-02', to: '2026-10-03');
+      expect(cmd.toJson(), {
+        'kind': kind.wire,
+        'options': {'from': '2026-10-02', 'to': '2026-10-03'}
+      });
+      expect(NseReadCommand.fromJson(cmd.toJson()).kind, kind);
+      expect(kind.optionalDates, true);
+    }
+    final blocked = NseCapability.fromJson({
+      'kind': 'read_stp_inst_due_report',
+      'availability': 'BLOCKED_PREREQUISITE',
+      'reason': 'OWNED_STP_REGISTRATION_SELECTION_REQUIRED'
+    });
+    expect(blocked.available, false);
+    expect(blocked.canSelectEvidence, false);
+    expect(nseReasonLabel(blocked.reason), contains('unavailable'));
+    expect(NseReadKind.swpInstDueReport.isDue, true);
+    expect(NseReadKind.sipAmcPauseReport.isDue, false);
   });
   test('operation DTO rejects unknown state and inconsistent terminal flag',
       () {
