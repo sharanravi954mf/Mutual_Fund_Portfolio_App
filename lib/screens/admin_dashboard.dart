@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/auth_provider.dart';
+import '../features/nse_integration/presentation/nse_integration_entry.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
@@ -844,6 +845,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               Icons.draw_outlined, colors, context),
                           _buildDrawerItem(6, t('settings'),
                               Icons.settings_outlined, colors, context),
+                          if (NseConsoleAccess.visible(authProvider))
+                            ListTile(
+                                leading: const Icon(Icons.fact_check_outlined),
+                                title: const Text('NSE Integration'),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  Navigator.of(context)
+                                      .pushNamed('/nse-integration');
+                                }),
                         ],
                       ),
                     ),
@@ -1221,6 +1231,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     5, t('invoice_signer'), Icons.draw_outlined, colors),
                 _buildSidebarItem(
                     6, t('settings'), Icons.settings_outlined, colors),
+                if (NseConsoleAccess.visible(authProvider))
+                  ListTile(
+                      leading: const Icon(Icons.fact_check_outlined),
+                      title: const Text('NSE Integration'),
+                      onTap: () =>
+                          Navigator.of(context).pushNamed('/nse-integration')),
               ],
             ),
           ),
