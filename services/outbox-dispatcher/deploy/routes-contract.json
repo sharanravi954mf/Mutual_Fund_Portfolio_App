@@ -34,5 +34,9 @@
   "integration.nse.stp_swp_reports_requested": {
     "worker_slug": "nse-stp-swp-reports-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.master_download_requested": {
+    "worker_slug": "nse-master-download-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }

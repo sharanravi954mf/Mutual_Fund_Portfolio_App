@@ -283,7 +283,8 @@ def main():
     parser.add_argument("--validate-routes")
     args = parser.parse_args()
     if args.validate_routes:
-        validate_routes(Path(args.validate_routes).read_text())
+        expected = json_value(Path(__file__).with_name("routes-contract.json").read_text())
+        validate_routes(Path(args.validate_routes).read_text(), expected=expected)
         print("ROUTES_VALID")
         return
     require(args.config is not None, "config_required")
