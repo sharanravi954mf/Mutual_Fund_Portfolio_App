@@ -72,6 +72,7 @@ for pass in 1 2; do
   printf 'B05 STP/SWP/AMC regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_stp_swp_reports_vertical_slice_test.sql"
   psql_local < "$repo_root/supabase/tests/nse_response_diagnostics_test.sql"
+  psql_local < "$repo_root/supabase/tests/nse_bank_mandate_test.sql"
   printf 'B06.1 reference foundation regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_master_reference_foundation_test.sql"
   printf 'B06.2 SCH regression pass %s (must rollback)\n' "$pass"

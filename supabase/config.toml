@@ -244,3 +244,6 @@ verify_jwt = false
 
 [functions.nse-master-download-worker]
 verify_jwt = false
+
+[functions.nse-mandate-status-worker]
+verify_jwt = false
