@@ -369,3 +369,23 @@ def test_repository_sip_xsip_reports_route_uses_shared_nse_token() -> None:
     route = routes["integration.nse.sip_xsip_reports_requested"]
     assert route.worker_slug == "nse-sip-xsip-reports-worker"
     assert route.token == NSE_TOKEN
+
+
+def test_master_download_uses_commissioned_route_and_event_id_only(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["OUTBOX_ROUTES_FILE"] = str(Path(__file__).parents[1] / "routes.json")
+    settings = Settings.from_env(env)
+    routes = load_routes(settings.routes_file, env)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": {"publication_gate": "BLOCKED"}})
+
+    dispatcher = OutboxDispatcher(settings, routes, httpx.Client(transport=httpx.MockTransport(handler)))
+    result = dispatcher.dispatch(Candidate(EVENT_ID, "integration.nse.master_download_requested", "pending", 0))
+    assert result == "worker_accepted"
+    assert str(requests[0].url).endswith("/functions/v1/nse-master-download-worker")
+    assert json.loads(requests[0].content) == {"event_outbox_id": EVENT_ID}
+    assert requests[0].headers["authorization"] == f"Bearer {NSE_TOKEN}"
+    assert SERVICE_KEY not in str(requests[0].headers)

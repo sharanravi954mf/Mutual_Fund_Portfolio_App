@@ -241,3 +241,6 @@ verify_jwt = false
 
 [functions.nse-stp-swp-reports-worker]
 verify_jwt = false
+
+[functions.nse-master-download-worker]
+verify_jwt = false

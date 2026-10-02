@@ -5,6 +5,8 @@ It does not implement any variant parser, business publication, deployed worker,
 browser command or provider call. B06.2, B06.3 and B06.4 can branch independently
 from this candidate and build on the interfaces below.
 
+B06.2 now extends these interfaces with a [shared worker and staged SCH parser](NSE_MASTER_DOWNLOAD_SCH.md). The foundation contract and historical validation below remain unchanged.
+
 ## Authority and baseline
 
 Fresh `git fetch origin develop` on 2026-10-02 resolved to

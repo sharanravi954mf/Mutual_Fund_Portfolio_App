@@ -71,14 +71,15 @@ class Fake(r.Runtime):
             raise r.ReconcileError('health_failed')
 
 def test_route_validation_closed_duplicate_safe_and_no_drops():
-    raw=(BASE/'routes.json').read_text(); assert r.validate_routes(raw)==r.EXPECTED_ROUTES
+    expected=json.loads((BASE/'deploy/routes-contract.json').read_text())
+    raw=(BASE/'routes.json').read_text(); assert r.validate_routes(raw,expected=expected)==expected
     missing=json.loads(raw); missing.pop(next(iter(missing)))
-    with pytest.raises(r.ReconcileError,match='required_route_missing'): r.validate_routes(json.dumps(missing))
+    with pytest.raises(r.ReconcileError,match='required_route_missing'): r.validate_routes(json.dumps(missing),expected=expected)
     with pytest.raises(r.ReconcileError,match='duplicate_json_key'): r.validate_routes('{"event":{},"event":{}}')
     for key,value in [('worker_slug','https://foreign.invalid'),('token_env','SUPABASE_SERVICE_ROLE_KEY')]:
         bad=json.loads(raw); bad[next(iter(bad))][key]=value
-        with pytest.raises(r.ReconcileError,match='route_not_allowed'): r.validate_routes(json.dumps(bad))
-    with pytest.raises(r.ReconcileError,match='live_route_dropped'): r.validate_routes(raw,{'old.route':{}})
+        with pytest.raises(r.ReconcileError,match='route_not_allowed'): r.validate_routes(json.dumps(bad),expected=expected)
+    with pytest.raises(r.ReconcileError,match='live_route_dropped'): r.validate_routes(raw,{'old.route':{}},expected)
 
 @pytest.mark.parametrize('requested',['b'*40,'','main','a'*39,'a'*41])
 def test_stale_or_invalid_event_does_not_build(tmp_path,requested):

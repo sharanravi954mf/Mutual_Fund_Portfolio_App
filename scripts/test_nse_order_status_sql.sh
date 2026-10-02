@@ -30,10 +30,12 @@ DO $$ DECLARE fn record; finding record; BEGIN
     WHERE l.lanname='plpgsql' AND (n.nspname IN ('nse_app','nse_reference') OR
       (n.nspname='public' AND p.proname IN ('list_nse_read_targets_v1','get_nse_read_context_v1',
         'list_nse_settlement_candidates_v1','submit_nse_read_v1','list_nse_read_operations_v1','get_nse_read_operation_v1',
-        'begin_nse_master_download','append_nse_master_chunk','finish_nse_master_download','read_nse_master_chunk','stage_nse_reference_snapshot','get_nse_reference_snapshot')))
+        'begin_nse_master_download','append_nse_master_chunk','finish_nse_master_download','read_nse_master_chunk','stage_nse_reference_snapshot','get_nse_reference_snapshot','prepare_nse_master_download','claim_nse_master_download','begin_nse_master_job_capture','append_nse_master_job_chunk','finish_nse_master_job_capture','finalize_nse_master_download','get_nse_master_download_job')))
   LOOP
     FOR finding IN SELECT * FROM extensions.plpgsql_check_function_tb(fn.oid::regprocedure,
       CASE WHEN fn.prorettype<>'trigger'::regtype THEN 0::regclass
+        WHEN fn.oid::regprocedure::text LIKE 'nse_reference.guard_job_event%' THEN 'public.event_outbox'::regclass
+        WHEN fn.oid::regprocedure::text LIKE 'nse_reference.guard_job_download%' THEN 'nse_reference.downloads'::regclass
         WHEN fn.oid::regprocedure::text LIKE 'nse_reference.audit_evidence%' THEN 'nse_reference.downloads'::regclass
         WHEN fn.oid::regprocedure::text LIKE 'nse_reference.%' THEN 'nse_reference.connections'::regclass
         ELSE 'nse_app.dev_access'::regclass END,
@@ -70,6 +72,8 @@ for pass in 1 2; do
   psql_local < "$repo_root/supabase/tests/nse_response_diagnostics_test.sql"
   printf 'B06.1 reference foundation regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_master_reference_foundation_test.sql"
+  printf 'B06.2 SCH regression pass %s (must rollback)\n' "$pass"
+  psql_local < "$repo_root/supabase/tests/nse_master_sch_test.sql"
   printf 'NSE frontend application facade regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_frontend_integration_v1_test.sql"
 done
@@ -97,4 +101,5 @@ psql_local -c "DO \$\$ BEGIN
   THEN RAISE EXCEPTION 'order_status_test_did_not_rollback'; END IF;
 END \$\$;"
 bash "$repo_root/scripts/test_nse_reference_concurrency.sh" "$container"
+bash "$repo_root/scripts/test_nse_master_concurrency.sh" "$container"
 bash "$repo_root/scripts/test_nse_frontend_concurrency.sh" "$container"
