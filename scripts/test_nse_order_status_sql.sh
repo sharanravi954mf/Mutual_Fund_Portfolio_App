@@ -19,6 +19,31 @@ for migration in "$repo_root"/supabase/migrations/*.sql; do
   printf 'Applying %s\n' "${migration##*/}"
   psql_local < "$migration"
 done
+printf 'NSE application facade PL/pgSQL lint\n'
+psql_local <<'SQL'
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS plpgsql_check WITH SCHEMA extensions;
+DO $$ DECLARE fn record; finding record; BEGIN
+  FOR fn IN SELECT p.oid, p.prorettype FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+    JOIN pg_catalog.pg_language l ON l.oid=p.prolang
+    WHERE l.lanname='plpgsql' AND (n.nspname='nse_app' OR
+      (n.nspname='public' AND p.proname IN ('list_nse_read_targets_v1','get_nse_read_context_v1',
+        'list_nse_settlement_candidates_v1','submit_nse_read_v1','list_nse_read_operations_v1','get_nse_read_operation_v1')))
+  LOOP
+    FOR finding IN SELECT * FROM extensions.plpgsql_check_function_tb(fn.oid::regprocedure,
+      CASE WHEN fn.prorettype='trigger'::regtype THEN 'nse_app.dev_access'::regclass ELSE 0::regclass END,
+      fatal_errors := false)
+    LOOP
+      IF finding.level='error' THEN
+        RAISE EXCEPTION 'facade_lint_failed:%:%',fn.oid::regprocedure,finding.message;
+      END IF;
+      RAISE NOTICE 'facade_lint:%:%:line %:%',fn.oid::regprocedure,finding.level,finding.lineno,finding.message;
+    END LOOP;
+  END LOOP;
+END $$;
+ROLLBACK;
+SQL
 printf 'Existing generic dispatcher SQL regression\n'
 psql_local < "$repo_root/supabase/tests/generic_outbox_dispatcher_test.sql"
 printf 'Existing NSE UCC SQL regression\n'
@@ -36,6 +61,8 @@ for pass in 1 2; do
   psql_local < "$repo_root/supabase/tests/nse_settlement_redemption_vertical_slice_test.sql"
   printf 'B04 SIP/XSIP regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_sip_xsip_reports_vertical_slice_test.sql"
+  printf 'NSE frontend application facade regression pass %s (must rollback)\n' "$pass"
+  psql_local < "$repo_root/supabase/tests/nse_frontend_integration_v1_test.sql"
 done
 psql_local -c "DO \$\$ BEGIN
   IF EXISTS (SELECT 1 FROM public.integration_operations WHERE operation_type IN ('ORDER_STATUS','PROV_ORDERS','CLIENT_READINESS','ORDER_FUNDING','SETTLEMENT_REDEMPTION','SIP_XSIP_REPORTS'))
@@ -49,6 +76,10 @@ psql_local -c "DO \$\$ BEGIN
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'settlement-redemption-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger WHERE tgname LIKE 'b03_no_%' OR tgname LIKE 'b04_no_%')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'sip-xsip-reports-%@moneybowl.invalid')
+    OR EXISTS (SELECT 1 FROM nse_app.submission_receipts)
+    OR EXISTS (SELECT 1 FROM nse_app.dev_access)
+    OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'nse-app-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name='integration_payload_encryption_key_v1')
   THEN RAISE EXCEPTION 'order_status_test_did_not_rollback'; END IF;
 END \$\$;"
+bash "$repo_root/scripts/test_nse_frontend_concurrency.sh" "$container"

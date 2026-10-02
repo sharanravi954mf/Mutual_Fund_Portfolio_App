@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'features/nse_integration/presentation/nse_integration_entry.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -81,13 +82,22 @@ class MyApp extends StatelessWidget {
         settings: const RouteSettings(name: '/'),
         builder: (_) => const AuthWrapper(),
       ),
-      builder: (context, child) => ReferralAttributionLifecycle(
-        child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => NseSessionLifecycle(
+        child: ReferralAttributionLifecycle(
+            child: child ?? const SizedBox.shrink()),
       ),
     );
   }
 
   Route<void>? _onGenerateRoute(RouteSettings settings) {
+    final uri = Uri.tryParse(settings.name ?? '');
+    if (uri?.path == '/nse-integration') {
+      return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => NseIntegrationEntry(
+              target: uri!.queryParameters['target'],
+              operation: uri.queryParameters['operation']));
+    }
     if (settings.name == null || settings.name == '/') {
       return MaterialPageRoute<void>(
         settings: settings,
