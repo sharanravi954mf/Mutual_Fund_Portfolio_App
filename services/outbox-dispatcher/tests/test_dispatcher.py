@@ -389,3 +389,22 @@ def test_master_download_uses_commissioned_route_and_event_id_only(tmp_path: Pat
     assert json.loads(requests[0].content) == {"event_outbox_id": EVENT_ID}
     assert requests[0].headers["authorization"] == f"Bearer {NSE_TOKEN}"
     assert SERVICE_KEY not in str(requests[0].headers)
+
+
+def test_mandate_status_route_uses_shared_token_and_event_only(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["OUTBOX_ROUTES_FILE"] = str(Path(__file__).parents[1] / "routes.json")
+    settings = Settings.from_env(env)
+    routes = load_routes(settings.routes_file, env)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": {"outcome": "mandate_status_unique_match_received"}})
+
+    dispatcher = OutboxDispatcher(settings, routes, httpx.Client(transport=httpx.MockTransport(handler)))
+    assert dispatcher.dispatch(Candidate(EVENT_ID, "integration.nse.mandate_status_requested", "pending", 0)) == "worker_accepted"
+    assert str(requests[0].url).endswith("/functions/v1/nse-mandate-status-worker")
+    assert json.loads(requests[0].content) == {"event_outbox_id": EVENT_ID}
+    assert requests[0].headers["authorization"] == f"Bearer {NSE_TOKEN}"
+    assert not any("bank_add" in event or "bank_del" in event or "mandate_registration" in event for event in routes)

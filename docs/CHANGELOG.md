@@ -10,6 +10,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## Unreleased
 
 ### Added
+- **NSE B07 partial local candidate**: Owned MANDATE_STATUS reads with exact C031 member-reference casing, unique matching, encrypted evidence and bounded retry. Immutable owner review proposals keep mandate registration and bank ADD/DEL blocked pending consent, provider relationship/dependency evidence and mandate contract resolution. See [scope and blockers](architecture/NSE_BANK_MANDATE_LIFECYCLE.md).
 - **NSE B06.3 local candidate**: Typed SIP/STP/SWP product references use the shared B06.2 MASTER_DOWNLOAD validator/runtime path. Immutable evidence, service-only access and explicit reference-only CAS publication retain uncommissioned product semantics and no investor eligibility authority. See [architecture and validation](architecture/NSE_SYSTEMATIC_PRODUCT_MASTERS.md).
 - **NSE B06.4 reconciled local candidate**: Dated, uncommissioned NAV observations and terminal blocked SET evidence share B06.2’s MASTER_DOWNLOAD validator registry and runtime. Source precedence and valuation publication remain unchanged; see [integration and validation](architecture/NSE_NAV_SET.md).
 - **NSE B06.2 local candidate**: Member-owned MASTER_DOWNLOAD preparation, outbox worker and recovery; strict observed SCH structural validation and immutable source identities. Crosswalk approval and business publication remain blocked. See [scope, evidence and validation](architecture/NSE_MASTER_DOWNLOAD_SCH.md).

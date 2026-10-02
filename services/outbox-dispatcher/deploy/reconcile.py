@@ -34,6 +34,7 @@ BASE_ROUTES = {
     "ucc_verification": "nse-ucc-reconciliation-worker",
     "order_status": "nse-order-status-worker",
     "prov_orders": "nse-prov-orders-worker",
+    "mandate_status": "nse-mandate-status-worker",
     "client_readiness": "nse-client-readiness-worker",
     "order_funding": "nse-order-funding-worker",
     "settlement_redemption": "nse-settlement-redemption-worker",

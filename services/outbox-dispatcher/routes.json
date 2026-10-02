@@ -38,5 +38,9 @@
   "integration.nse.master_download_requested": {
     "worker_slug": "nse-master-download-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.mandate_status_requested": {
+    "worker_slug": "nse-mandate-status-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }
