@@ -36,9 +36,9 @@ second=$!
 first_status=0; wait "$first" || first_status=$?
 second_status=0; wait "$second" || second_status=$?
 if [[ "$first_status" == 0 && "$second_status" != 0 ]]; then
-  rg -q 'nse_systematic_publication_conflict' "$test_dir/b.log"
+  grep -q 'nse_systematic_publication_conflict' "$test_dir/b.log"
 elif [[ "$second_status" == 0 && "$first_status" != 0 ]]; then
-  rg -q 'nse_systematic_publication_conflict' "$test_dir/a.log"
+  grep -q 'nse_systematic_publication_conflict' "$test_dir/a.log"
 else
   cat "$test_dir/a.log" "$test_dir/b.log"
   exit 1
