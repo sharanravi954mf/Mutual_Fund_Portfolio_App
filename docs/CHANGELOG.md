@@ -10,6 +10,8 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## Unreleased
 
 ### Added
+- **NSE B05 local candidate**: Seven STP/SWP/AMC PAUSE observation contracts, owned selectors, safe DEV/UAT console commands, and a versioned diagnostic policy including the exact CLIENT_KYC_REPORT empty-success correction. [B05 architecture and validation](architecture/NSE_STP_SWP_REPORTS_VERTICAL_SLICE.md) records blocked STP-due browser/UNPAUSE variants.
+- **Oracle dispatcher automation source**: Exact-develop reconciliation, existing webhook-spool integration, timer fallback, preserved settings/hardening and verified image rollback. [One-time commissioning remains required](architecture/ORACLE_OUTBOX_DISPATCHER_RECONCILIATION.md); no host automation was installed by this local implementation.
 - **NSE B04 local candidate**: Nine SIP/XSIP/step-up report adapters share one evidence-only worker, registered-account UCC scope and owned registration member selectors. Endpoint-specific dates/schemas, immutable encrypted evidence and bounded retries add no schedule or financial projection. See [B04 architecture and validation](architecture/NSE_SIP_XSIP_REPORTS_VERTICAL_SLICE.md); UAT and deployment remain separate.
 - **NSE B03 local candidate**: Four evidence-only settlement/redemption report contracts, owned immutable ORDER_STATUS selectors, a shared bounded read worker, private summaries and current-schema rollback regressions. No provider UAT or deployment; financial distribution remains deferred to B11.
 - **External Ingestion Support Stack (#109)**: Added a provider-host-agnostic

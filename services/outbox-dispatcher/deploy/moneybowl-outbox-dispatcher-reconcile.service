@@ -1,0 +1,14 @@
+[Unit]
+Description=MoneyBowl exact-develop outbox dispatcher reconciliation
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+Environment=HOME=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/moneybowl-runtime/outbox-dispatcher/reconcile.py --config /home/ubuntu/moneybowl-runtime/outbox-dispatcher/config.json
+TimeoutStartSec=60min
+NoNewPrivileges=true

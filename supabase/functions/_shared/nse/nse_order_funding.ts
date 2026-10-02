@@ -1,3 +1,4 @@
+import { matchNseResponseDiagnostic } from "./nse_response_diagnostics.ts";
 /** B02: handbook v1.9.7 pp115–121,150–157; recovered C006, plan V2-06.
  * Source objects are private database projections, never caller query options.
  */
@@ -296,19 +297,15 @@ export function parseNseOrderFundingResponse(
       if (e.report_data === "" && Number(total) === 0) {
         return fail("order_funding_business_failed");
       }
-      if (
-        source.api === "FUND_AGE" && Array.isArray(e.report_data) &&
-        e.report_data.length === 0 && Number(total) === 0 &&
-        e.error_remark === "amc_code value is not valid."
-      ) {
-        return fail("order_funding_amc_code_invalid");
-      }
-      if (
-        source.api === "FUND_ORDER" && Array.isArray(e.report_data) &&
-        e.report_data.length === 0 && Number(total) === 0 &&
-        e.error_remark === "No record(s) found"
-      ) {
-        return fail("order_funding_no_records");
+      const diagnostic = matchNseResponseDiagnostic(
+        "NSE_" + source.api,
+        nativeStatus,
+        e.error_remark,
+        Number(total),
+        e.report_data,
+      );
+      if (diagnostic?.outcome === "BUSINESS_FAILURE") {
+        return fail(diagnostic.category);
       }
       return fail();
     }
@@ -316,9 +313,14 @@ export function parseNseOrderFundingResponse(
       !Array.isArray(e.report_data) || e.report_data.length !== Number(total)
     ) return fail();
     // Endpoint-specific empty-success diagnostics only; never generalize unknown remarks.
-    const exactNoRecords = (source.api === "ORDER_LIFECYCLE" ||
-      source.api === "TRANSACTION_DETAIL") &&
-      Number(total) === 0 && e.error_remark === "No record(s) found.";
+    const diagnostic = matchNseResponseDiagnostic(
+      "NSE_" + source.api,
+      nativeStatus,
+      e.error_remark,
+      Number(total),
+      e.report_data,
+    );
+    const exactNoRecords = diagnostic?.outcome === "SUCCESS";
     const fundAgeHistoricalEmpty = source.api === "FUND_AGE" &&
       Number(total) === 0;
     if (

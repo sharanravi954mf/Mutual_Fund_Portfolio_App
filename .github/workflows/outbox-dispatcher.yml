@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/outbox-dispatcher.yml"
       - "services/outbox-dispatcher/**"
+      - "scripts/test_outbox_compose.py"
       - "services/ingestion-support/compose.hosted.yaml"
       - "services/ingestion-support/.env.hosted.example"
       - "supabase/migrations/*generic_outbox_dispatcher.sql"
@@ -15,6 +16,7 @@ on:
     paths:
       - ".github/workflows/outbox-dispatcher.yml"
       - "services/outbox-dispatcher/**"
+      - "scripts/test_outbox_compose.py"
       - "services/ingestion-support/compose.hosted.yaml"
       - "services/ingestion-support/.env.hosted.example"
       - "supabase/migrations/*generic_outbox_dispatcher.sql"
@@ -41,3 +43,9 @@ jobs:
 
       - name: Build dispatcher runtime image
         run: docker build --target runtime -t moneybowl-outbox-dispatcher:test services/outbox-dispatcher
+
+      - name: Validate dispatcher deployment artifacts
+        run: |
+          python services/outbox-dispatcher/deploy/reconcile.py --validate-routes services/outbox-dispatcher/routes.json
+          bash -n services/outbox-dispatcher/deploy/bootstrap.sh
+          python scripts/test_outbox_compose.py

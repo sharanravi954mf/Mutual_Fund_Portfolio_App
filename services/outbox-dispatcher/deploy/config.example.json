@@ -1,0 +1,5 @@
+{
+  "repo": "/home/ubuntu/moneybowl",
+  "env_file": "/home/ubuntu/moneybowl/services/ingestion-support/.env",
+  "state": "/home/ubuntu/moneybowl-runtime/outbox-dispatcher/state"
+}

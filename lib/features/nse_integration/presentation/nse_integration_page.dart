@@ -157,7 +157,7 @@ class _NseIntegrationPageState extends State<NseIntegrationPage>
                           ]),
                         if (c.context != null &&
                             c.phase != NseConsolePhase.accessDenied) ...[
-                          _panel('NSE account', [
+                          _panel('NSE Investor / UCC Integration', [
                             Text(
                                 'Registration: ${c.context!.accountState.replaceAll('_', ' ')}'),
                             Text(
@@ -265,8 +265,9 @@ class _NseIntegrationPageState extends State<NseIntegrationPage>
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             if (kind.optionalDates) ...[
-              const Text(
-                  'The account selector overrides report dates. Dates do not narrow an account-selected report.'),
+              Text(kind == NseReadKind.sipAmcPauseReport
+                  ? 'Read PAUSE observations for this investor. Optional dates cover up to seven days.'
+                  : 'The investor/UCC selector overrides report dates. Dates do not narrow an investor-selected report.'),
               CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Supply optional dates'),

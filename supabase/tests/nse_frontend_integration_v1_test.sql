@@ -61,10 +61,13 @@ SELECT pg_temp.assert_true(jsonb_array_length(public.list_nse_read_targets_v1()-
 SELECT pg_temp.assert_true(public.get_nse_read_context_v1('aa030000-0000-4000-8000-000000000005')->'error'->>'code'='NOT_AUTHORIZED','cross_workspace');
 SELECT pg_temp.assert_true(public.submit_nse_read_v1('aa030000-0000-4000-8000-000000000004',gen_random_uuid(),
  '{"kind":"read_order_status","options":{"from":"2026-10-01","to":"2026-10-02"}}')->'error'->>'code'='FEATURE_DISABLED','disabled_default');
-DO $$ DECLARE n integer; BEGIN
+DO $$ DECLARE n integer; api text; BEGIN
  FOREACH n IN ARRAY ARRAY[3,4,5,6,7,8,9] LOOP
   PERFORM pg_temp.identity(n);
   PERFORM pg_temp.assert_true(public.get_nse_read_context_v1('aa030000-0000-4000-8000-000000000004')->'error'->>'code'='NOT_AUTHORIZED','denied_persona_'||n);
+  FOREACH api IN ARRAY ARRAY['stp_reg_report','stp_can_report','stp_inst_due_report','swp_reg_report','swp_can_report','swp_inst_due_report','sip_amc_pause_report'] LOOP
+   PERFORM pg_temp.assert_true(public.submit_nse_read_v1('aa030000-0000-4000-8000-000000000004',gen_random_uuid(),jsonb_build_object('kind','read_'||api,'options','{}'::jsonb))->'error'->>'code'='NOT_AUTHORIZED','b05_denied_'||n||'_'||api);
+  END LOOP;
  END LOOP;
 END $$;
 SELECT pg_temp.identity(1);
@@ -102,6 +105,10 @@ DO $$ DECLARE cap jsonb; opts jsonb; result jsonb; cmd jsonb; count integer:=0; 
   IF cap->>'options_type'='settlement' THEN
    PERFORM pg_temp.assert_true(cap->>'reason'='POSITIVE_OWNED_ORDER_EVIDENCE_REQUIRED','b03_blocked'); CONTINUE;
   END IF;
+  IF cap->>'api'='STP_INST_DUE_REPORT' THEN
+   PERFORM pg_temp.assert_true(cap->>'reason'='OWNED_STP_REGISTRATION_SELECTION_REQUIRED','b05_due_blocked');
+   PERFORM pg_temp.assert_true(public.submit_nse_read_v1('aa030000-0000-4000-8000-000000000004',gen_random_uuid(),'{"kind":"read_stp_inst_due_report","options":{}}')->'error'->>'code'='BLOCKED_PREREQUISITE','b05_due_no_event'); CONTINUE;
+  END IF;
   opts:=CASE cap->>'options_type' WHEN 'date' THEN '{"date":"2026-10-01"}'::jsonb WHEN 'dates' THEN '{"from":"2026-10-01","to":"2026-10-02"}'::jsonb ELSE '{}'::jsonb END;
   cmd:=jsonb_build_object('kind',cap->>'kind','options',opts);
   BEGIN
@@ -111,8 +118,21 @@ DO $$ DECLARE cap jsonb; opts jsonb; result jsonb; cmd jsonb; count integer:=0; 
   EXCEPTION WHEN SQLSTATE 'Z0001' THEN NULL; END;
   count:=count+1;
  END LOOP;
- PERFORM pg_temp.assert_true(count=21,'all_account_reads');
+ PERFORM pg_temp.assert_true(count=27,'all_account_reads');
 END $$;
+
+-- Every B05 application command rejects raw vendor selectors under authenticated.
+DO $$ DECLARE api text; key text; BEGIN
+ FOREACH api IN ARRAY ARRAY['stp_reg_report','stp_can_report','stp_inst_due_report','swp_reg_report','swp_can_report','swp_inst_due_report','sip_amc_pause_report'] LOOP
+  FOREACH key IN ARRAY ARRAY['client_code','stp_reg_id','swp_reg_id','registration_no','request_id','member_unique_ids','scheme_code','amc_code','url','modification_type'] LOOP
+   PERFORM pg_temp.assert_true(public.submit_nse_read_v1('aa030000-0000-4000-8000-000000000004',gen_random_uuid(),jsonb_build_object('kind','read_'||api,'options',jsonb_build_object(key,'FOREIGN')))->'error'->>'code'='INVALID_COMMAND','b05_browser_selector_rejected_'||api||'_'||key);
+  END LOOP;
+ END LOOP;
+END $$;
+RESET ROLE;
+SELECT pg_temp.assert_true(nse_app.compile('{"kind":"read_sip_amc_pause_report","options":{"from":"2025-01-01","to":"2025-01-08"}}')->'filters'='{"from_date":"01/01/2025","to_date":"08/01/2025"}'::jsonb,'amc_facade_slash_dates_without_due_nonpast_rule');
+SET LOCAL ROLE authenticated;
+
 DO $$ DECLARE cmd jsonb; BEGIN
  FOREACH cmd IN ARRAY ARRAY[
   '{"kind":"prepare_nse_ucc_registration","options":{}}'::jsonb,

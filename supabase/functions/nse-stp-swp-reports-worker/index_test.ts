@@ -1,46 +1,37 @@
 import {
+  B05_APIS,
+  b05Envelope,
+  b05Source,
+} from "../_shared/nse/nse_stp_swp_reports_fixtures.ts";
+import {
   assertEquals,
   assertRejects,
 } from "https://deno.land/std@0.177.0/testing/asserts.ts";
-import { createNseClientReadinessHandler } from "./handler.ts";
+import { createNseStpSwpReportsHandler } from "./handler.ts";
 import {
-  createClientReadinessGateway,
-  createClientReadinessPersistence,
+  createStpSwpReportsGateway,
+  createStpSwpReportsPersistence,
 } from "./adapters.ts";
-import type { ClientReadinessPersistence } from "./types.ts";
-import type { ReadinessSource } from "../_shared/nse/nse_client_readiness.ts";
+import type { StpSwpReportsPersistence } from "./types.ts";
+import type { StpSwpReportsSource } from "../_shared/nse/nse_stp_swp_reports.ts";
 
 const EVENT = "10000000-0000-4000-8000-000000000001";
 const OPERATION = "10000000-0000-4000-8000-000000000002";
 const CLAIM = "10000000-0000-4000-8000-000000000003";
 const CALL = "10000000-0000-4000-8000-000000000004";
 const TOKEN = "synthetic-token";
-const source: ReadinessSource = {
+const source: StpSwpReportsSource = {
   operation_id: OPERATION,
   workspace_id: CALL,
   integration_account_id: CALL,
-  api: "CLIENT_AUTHORIZATION",
+  api: "STP_REG_REPORT",
   client_code: "SYNTHETIC1",
   pan: "AAAAA0000A",
-  request: {
-    from_date: "21-01-2025",
-    to_date: "28-01-2025",
-    client_code: "SYNTHETIC1",
-    date_type: "AUTH_SENT_DATE",
-  },
+  today: "2026-10-01",
+  selectors: { mode: "client", rows: [] },
+  request: { client_code: "SYNTHETIC1" },
 };
-const response = JSON.stringify({
-  response_status: "S",
-  report_data_total: "1",
-  error_remark: "",
-  report_data: [{
-    client_code: "SYNTHETIC1",
-    primary_holder_pan: "AAAAA0000A",
-    auth_status: "SUCCESS",
-    first_holder_auth_status: "SUCCESS",
-    bank1_account_no: "PRIVATE",
-  }],
-});
+const response = JSON.stringify(b05Envelope("STP_REG_REPORT"));
 function invocation(body: unknown = { event_outbox_id: EVENT }, token = TOKEN) {
   return new Request("http://localhost", {
     method: "POST",
@@ -50,25 +41,29 @@ function invocation(body: unknown = { event_outbox_id: EVENT }, token = TOKEN) {
 }
 function setup(
   options: {
-    source?: ReadinessSource;
+    source?: StpSwpReportsSource;
+    now?: string;
     status?: number;
     attempt?: number;
     raw?: string;
     transportFailure?: boolean;
+    errorCategory?: string;
     startFailures?: number;
     finishFailures?: number;
+    interpretationMismatch?: boolean;
     sourceFailure?: boolean;
     badSource?: boolean;
     noEvent?: boolean;
   } = {},
 ) {
+  const testSource = options.source ?? source;
   const sequence: string[] = [];
-  const starts: Parameters<ClientReadinessPersistence["start"]>[0][] = [];
-  const finishes: Parameters<ClientReadinessPersistence["finish"]>[0][] = [];
+  const starts: Parameters<StpSwpReportsPersistence["start"]>[0][] = [];
+  const finishes: Parameters<StpSwpReportsPersistence["finish"]>[0][] = [];
   const sent: string[] = [];
   let startFailures = options.startFailures ?? 0,
     finishFailures = options.finishFailures ?? 0;
-  const persistence: ClientReadinessPersistence = {
+  const persistence: StpSwpReportsPersistence = {
     recoverExpired: () => {
       sequence.push("recover");
       return Promise.resolve({});
@@ -90,8 +85,11 @@ function setup(
       if (options.sourceFailure) return Promise.reject(new Error("PRIVATE"));
       return Promise.resolve(
         options.badSource
-          ? { ...source, request: { ...source.request, client_code: "" } }
-          : options.source ?? source,
+          ? {
+            ...testSource,
+            request: { ...testSource.request, client_code: "" },
+          }
+          : testSource,
       );
     },
     start: (input) => {
@@ -104,10 +102,17 @@ function setup(
       sequence.push("result");
       finishes.push(input);
       if (finishFailures-- > 0) return Promise.reject(new Error("PRIVATE"));
-      return Promise.resolve({});
+      return Promise.resolve({
+        normalized_outcome: options.interpretationMismatch
+          ? "BUSINESS_FAILURE"
+          : input.normalizedOutcome,
+        native_remark_category: options.interpretationMismatch
+          ? "stp_swp_reports_interpretation_mismatch"
+          : input.nativeRemarkCategory,
+      });
     },
   };
-  const handler = createNseClientReadinessHandler({
+  const handler = createNseStpSwpReportsHandler({
     internalToken: TOKEN,
     persistence,
     gateway: {
@@ -116,14 +121,14 @@ function setup(
         accept: "application/json",
       }),
       submit: (body, api) => {
-        assertEquals(api, (options.source ?? source).api);
+        assertEquals(api, testSource.api);
         sequence.push("transport");
         sent.push(body);
         return Promise.resolve(
           options.transportFailure
             ? {
               kind: "failure",
-              errorCategory: "nse_request_timeout",
+              errorCategory: options.errorCategory ?? "nse_request_timeout",
               timeout: true,
               networkFailure: false,
             }
@@ -138,19 +143,19 @@ function setup(
         );
       },
     },
-    now: () => new Date("2026-09-30T00:00:00Z"),
+    now: () => new Date(options.now ?? "2026-09-30T00:00:00Z"),
     uuid: () => CALL,
   });
   return { handler, sequence, starts, finishes, sent };
 }
-Deno.test("CLIENT_READINESS worker: authentication and explicit event before claim", async () => {
+Deno.test("STP_SWP_REPORTS worker: authentication and explicit event before claim", async () => {
   const s = setup();
   assertEquals((await s.handler(new Request("http://localhost"))).status, 405);
   assertEquals((await s.handler(invocation({}, "bad"))).status, 403);
   for (
     const body of [null, [], {}, { event_outbox_id: "bad" }, {
       event_outbox_id: EVENT,
-      api: "FATCA_REPORT",
+      api: "TRANSACTION_DETAIL",
     }]
   ) {
     assertEquals((await s.handler(invocation(body))).status, 400);
@@ -167,12 +172,12 @@ Deno.test("CLIENT_READINESS worker: authentication and explicit event before cla
   );
   assertEquals(s.sequence, []);
 });
-Deno.test("CLIENT_READINESS worker: one exact evidenced read and safe output with private authorization fields", async () => {
+Deno.test("STP_SWP_REPORTS worker: one exact evidenced read and safe output with private lifecycle fields", async () => {
   const s = setup();
   const result = await s.handler(invocation());
   assertEquals(result.status, 200);
   assertEquals(await result.json(), {
-    data: { outcome: "client_readiness_report_received", record_count: 1 },
+    data: { outcome: "stp_swp_reports_report_received", record_count: 1 },
   });
   assertEquals(s.sequence, [
     "recover",
@@ -187,7 +192,7 @@ Deno.test("CLIENT_READINESS worker: one exact evidenced read and safe output wit
   assertEquals(s.finishes[0].responsePayload, response);
   assertEquals(s.finishes[0].normalizedOutcome, "SUCCESS");
 });
-Deno.test("CLIENT_READINESS worker: persistence acknowledgement retry never repeats transport", async () => {
+Deno.test("STP_SWP_REPORTS worker: persistence acknowledgement retry never repeats transport", async () => {
   const s = setup({ startFailures: 1, finishFailures: 1 });
   assertEquals((await s.handler(invocation())).status, 200);
   assertEquals(s.starts.length, 2);
@@ -196,7 +201,7 @@ Deno.test("CLIENT_READINESS worker: persistence acknowledgement retry never repe
   assertEquals(s.finishes[0], s.finishes[1]);
   assertEquals(s.sent.length, 1);
 });
-Deno.test("CLIENT_READINESS worker keeps PII and diagnostics only in evidence", async () => {
+Deno.test("STP_SWP_REPORTS worker keeps PII and diagnostics only in evidence", async () => {
   const original = console.error;
   const logs: unknown[] = [];
   console.error = (...x) => logs.push(x);
@@ -204,7 +209,7 @@ Deno.test("CLIENT_READINESS worker keeps PII and diagnostics only in evidence", 
     for (
       const raw of [
         response,
-        response.replace('"error_remark":""', '"error_remark":"PRIVATE"'),
+        JSON.stringify({ ...JSON.parse(response), error_remark: "PRIVATE" }),
       ]
     ) {
       const s = setup({ raw });
@@ -227,7 +232,7 @@ for (
     [{ noEvent: true }, 404],
   ] as const
 ) {
-  Deno.test(`CLIENT_READINESS worker fails before transport ${JSON.stringify(options)}`, async () => {
+  Deno.test(`STP_SWP_REPORTS worker fails before transport ${JSON.stringify(options)}`, async () => {
     const s = setup(options);
     const result = await s.handler(invocation());
     assertEquals(result.status, status);
@@ -235,7 +240,7 @@ for (
     assertEquals((await result.text()).includes("PRIVATE"), false);
   });
 }
-Deno.test("CLIENT_READINESS worker: permanent RESULT persistence failure is sanitized", async () => {
+Deno.test("STP_SWP_REPORTS worker: permanent RESULT persistence failure is sanitized", async () => {
   const s = setup({ finishFailures: 2 });
   const result = await s.handler(invocation());
   assertEquals(result.status, 500);
@@ -244,7 +249,7 @@ Deno.test("CLIENT_READINESS worker: permanent RESULT persistence failure is sani
 });
 for (const status of [408, 429, 500, 502, 503, 504]) {
   for (const attempt of [1, 3]) {
-    Deno.test(`CLIENT_READINESS bounded HTTP ${status} attempt ${attempt}`, async () => {
+    Deno.test(`STP_SWP_REPORTS bounded HTTP ${status} attempt ${attempt}`, async () => {
       const s = setup({ status, attempt, raw: "PRIVATE" });
       const result = await s.handler(invocation());
       assertEquals(result.status, attempt < 3 ? 202 : 502);
@@ -256,13 +261,13 @@ for (const status of [408, 429, 500, 502, 503, 504]) {
   }
 }
 for (const status of [400, 401, 403, 404, 501]) {
-  Deno.test(`CLIENT_READINESS terminal HTTP ${status}`, async () => {
+  Deno.test(`STP_SWP_REPORTS terminal HTTP ${status}`, async () => {
     const s = setup({ status });
     assertEquals((await s.handler(invocation())).status, 502);
     assertEquals(s.finishes[0].normalizedOutcome, "HTTP_FAILURE");
   });
 }
-Deno.test("CLIENT_READINESS worker: transport failures close read evidence without ambiguity", async () => {
+Deno.test("STP_SWP_REPORTS worker: transport failures close read evidence without ambiguity", async () => {
   for (const attempt of [1, 3]) {
     const s = setup({ transportFailure: true, attempt });
     await s.handler(invocation());
@@ -273,15 +278,16 @@ Deno.test("CLIENT_READINESS worker: transport failures close read evidence witho
 for (
   const raw of [
     "PRIVATE",
-    response.replace('"error_remark":""', '"error_remark":"PRIVATE"').replace(
-      '"report_data_total":"1"',
-      '"report_data_total":"0"',
-    ),
+    JSON.stringify({ ...JSON.parse(response), error_remark: "PRIVATE" })
+      .replace(
+        '"report_data_total":"1"',
+        '"report_data_total":"0"',
+      ),
     response.replace('"SYNTHETIC1"', '"OTHER"'),
     '{"response_status":"F","report_data_total":"0","report_data":"","error_remark":"PRIVATE"}',
   ]
 ) {
-  Deno.test(`CLIENT_READINESS worker: unusable report ${raw.length}`, async () => {
+  Deno.test(`STP_SWP_REPORTS worker: unusable report ${raw.length}`, async () => {
     const s = setup({ raw });
     const result = await s.handler(invocation());
     assertEquals(result.status, 202);
@@ -289,9 +295,9 @@ for (
     assertEquals((await result.text()).includes("PRIVATE"), false);
   });
 }
-Deno.test("CLIENT_READINESS gateway uses exact report endpoint, existing auth, and one injected fetch", async () => {
+Deno.test("STP_SWP_REPORTS gateway uses exact report endpoint, existing auth, and one injected fetch", async () => {
   let calls = 0;
-  const gateway = createClientReadinessGateway(
+  const gateway = createStpSwpReportsGateway(
     {
       baseUrl: "https://example.invalid",
       loginUserId: "synthetic",
@@ -304,7 +310,7 @@ Deno.test("CLIENT_READINESS gateway uses exact report endpoint, existing auth, a
       calls++;
       assertEquals(
         String(_url),
-        "https://example.invalid/nsemfdesk/api/v2/reports/client_authorization",
+        "https://example.invalid/nsemfdesk/api/v2/reports/STP_REG_REPORT",
       );
       assertEquals(init?.method, "POST");
       assertEquals(init?.redirect, "error");
@@ -333,9 +339,9 @@ Deno.test("CLIENT_READINESS gateway uses exact report endpoint, existing auth, a
     });
   }
 });
-Deno.test("CLIENT_READINESS persistence: exact endpoint RPCs and no UCC distribution", async () => {
+Deno.test("STP_SWP_REPORTS persistence: exact endpoint RPCs and no UCC distribution", async () => {
   const names: string[] = [];
-  const persistence = createClientReadinessPersistence({
+  const persistence = createStpSwpReportsPersistence({
     rpc: (name: string) => {
       names.push(name);
       return Promise.resolve({
@@ -356,13 +362,13 @@ Deno.test("CLIENT_READINESS persistence: exact endpoint RPCs and no UCC distribu
   await persistence.start(s.starts[0]);
   await persistence.finish(s.finishes[0]);
   assertEquals(names, [
-    "recover_expired_nse_client_readiness_events",
-    "claim_nse_client_readiness_event",
-    "get_nse_client_readiness_source",
-    "start_nse_client_readiness",
-    "finish_nse_client_readiness",
+    "recover_expired_nse_stp_swp_reports_events",
+    "claim_nse_stp_swp_reports_event",
+    "get_nse_stp_swp_reports_source",
+    "start_nse_stp_swp_reports",
+    "finish_nse_stp_swp_reports",
   ]);
-  const failing = createClientReadinessPersistence(
+  const failing = createStpSwpReportsPersistence(
     {
       rpc: () => Promise.resolve({ data: null, error: { message: "PRIVATE" } }),
     } as never,
@@ -370,18 +376,19 @@ Deno.test("CLIENT_READINESS persistence: exact endpoint RPCs and no UCC distribu
   await assertRejects(
     () => failing.loadSource(OPERATION),
     Error,
-    "client_readiness_persistence_unavailable",
+    "stp_swp_reports_persistence_unavailable",
   );
 });
 
 for (
   const [api, path] of [
-    ["CLIENT_AUTHORIZATION", "client_authorization"],
-    ["CLIENT_DETAIL", "CLIENT_DETAIL_REPORT"],
-    ["TWO_FA", "2fa"],
-    ["CLIENT_KYC_REPORT", "CLIENT_KYC_REPORT"],
-    ["FATCA_REPORT", "FATCA_REPORT"],
-    ["ELOG_REPORT", "ELOG_UPLOAD_REPORT"],
+    ["STP_REG_REPORT", "STP_REG_REPORT"],
+    ["STP_CAN_REPORT", "STP_CAN_REPORT"],
+    ["STP_INST_DUE_REPORT", "STP_INST_DUE_REPORT"],
+    ["SWP_REG_REPORT", "SWP_REG_REPORT"],
+    ["SWP_CAN_REPORT", "SWP_CAN_REPORT"],
+    ["SWP_INST_DUE_REPORT", "SWP_INST_DUE_REPORT"],
+    ["SIP_AMC_PAUSE_REPORT", "SIP_AMC_PAUSE"],
   ] as const
 ) {
   Deno.test(`${api} gateway: exact path and bounded response failures`, async () => {
@@ -394,7 +401,7 @@ for (
       userAgent: "MoneyBowl-Test",
     };
     let calls = 0;
-    const gateway = createClientReadinessGateway(
+    const gateway = createStpSwpReportsGateway(
       config,
       ((_url, init) => {
         calls++;
@@ -417,7 +424,7 @@ for (
   });
 }
 
-Deno.test("B01 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL", async () => {
+Deno.test("B05 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL", async () => {
   for (
     const bytes of [
       new Uint8Array([0xef, 0xbb, 0xbf, 0x7b, 0x7d]),
@@ -425,7 +432,7 @@ Deno.test("B01 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL
       new Uint8Array([0x00, 0x7b, 0x7d]),
     ]
   ) {
-    const gateway = createClientReadinessGateway({
+    const gateway = createStpSwpReportsGateway({
       baseUrl: "https://example.invalid",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
@@ -433,7 +440,7 @@ Deno.test("B01 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL
       memberCode: "synthetic",
       userAgent: "test",
     }, (() => Promise.resolve(new Response(bytes))) as typeof fetch);
-    const result = await gateway.submit("{}", "CLIENT_KYC_REPORT");
+    const result = await gateway.submit("{}", "STP_CAN_REPORT");
     assertEquals(result.kind, "response");
     if (result.kind === "response") {
       assertEquals(
@@ -445,27 +452,91 @@ Deno.test("B01 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL
   }
 });
 
-Deno.test("CLIENT_KYC_REPORT live S/no-record diagnostic is encrypted-result-only success without retry", async () => {
-  const raw =
-    '{"response_status":"S","error_remark":"No record(s) found.","report_data_total":"0","report_data":[]}';
-  const s = setup({
-    source: {
-      ...source,
-      api: "CLIENT_KYC_REPORT",
-      request: { pan_no: source.pan },
-    },
-    raw,
-    finishFailures: 1,
+Deno.test("B05 durable parser disagreement retains RESULT but never acknowledges success", async () => {
+  for (
+    const raw of [
+      response,
+      '{"response_status":"S","report_data_total":1e-400,"report_data":[]}',
+    ]
+  ) {
+    const s = setup({ interpretationMismatch: true, raw });
+    const result = await s.handler(invocation());
+    assertEquals(result.status, 202);
+    assertEquals(await result.json(), {
+      data: {
+        outcome: "stp_swp_reports_interpretation_mismatch",
+        record_count: 0,
+      },
+    });
+    assertEquals(s.sent.length, 1);
+    assertEquals(s.finishes[0].responsePayload, raw);
+    assertEquals(s.finishes[0].normalizedOutcome, "SUCCESS");
+  }
+});
+
+Deno.test("B05 nontransient transport failures never offer retry", async () => {
+  for (
+    const errorCategory of [
+      "nse_response_too_large",
+      "nse_response_invalid",
+      "nse_request_invalid",
+    ]
+  ) {
+    const s = setup({ transportFailure: true, errorCategory });
+    const r = await s.handler(invocation());
+    assertEquals(await r.json(), {
+      data: { outcome: "stp_swp_reports_transport_failed" },
+    });
+    assertEquals(s.sent.length, 1);
+  }
+});
+
+for (
+  const api of B05_APIS
+) {
+  Deno.test(`${api} worker persists one REQUEST/RESULT pair for an empty observation`, async () => {
+    const raw = JSON.stringify(b05Envelope(api, []));
+    const s = setup({
+      source: b05Source(api),
+      raw,
+      startFailures: 1,
+      finishFailures: 1,
+    });
+    const r = await s.handler(invocation());
+    assertEquals(r.status, 200);
+    assertEquals(await r.json(), {
+      data: { outcome: "stp_swp_reports_no_records", record_count: 0 },
+    });
+    assertEquals(s.sent.length, 1);
+    assertEquals(s.starts.length, 2);
+    assertEquals(s.finishes.length, 2);
+    assertEquals(s.starts[0], s.starts[1]);
+    assertEquals(s.finishes[0], s.finishes[1]);
+    assertEquals(s.starts[0].requestPayload, s.sent[0]);
+    assertEquals(s.finishes[0].responsePayload, raw);
   });
-  const response = await s.handler(invocation());
-  assertEquals(response.status, 200);
-  const safe = await response.text();
-  assertEquals(safe.includes("No record(s) found"), false);
-  assertEquals(safe.includes("retry"), false);
-  assertEquals(s.sent.length, 1);
-  assertEquals(s.finishes.length, 2);
-  assertEquals(s.finishes[0].responsePayload, raw);
-  assertEquals(s.finishes[0].normalizedOutcome, "SUCCESS");
-  const { responsePayload: _raw, ...metadata } = s.finishes[0];
-  assertEquals(JSON.stringify(metadata).includes("No record(s) found"), false);
+}
+Deno.test("Due workers recheck supplied dates against deterministic India midnight before transport", async () => {
+  for (const api of ["STP_INST_DUE_REPORT", "SWP_INST_DUE_REPORT"] as const) {
+    const due = {
+      ...b05Source(api),
+      api,
+      today: "2026-09-29",
+      request: {
+        ...b05Source(api).request,
+        from_date: "30-09-2026",
+        to_date: "01-10-2026",
+      },
+    };
+    const before = setup({
+      source: due,
+      now: "2026-09-30T18:29:59Z",
+      raw: '{"response_status":"S","report_data_total":0,"report_data":[]}',
+    });
+    assertEquals((await before.handler(invocation())).status, 200);
+    const after = setup({ source: due, now: "2026-09-30T18:30:00Z" });
+    assertEquals((await after.handler(invocation())).status, 422);
+    assertEquals(after.sent.length, 0);
+    assertEquals(after.starts.length, 0);
+  }
 });
