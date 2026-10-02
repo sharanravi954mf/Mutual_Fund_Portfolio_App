@@ -10,6 +10,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## Unreleased
 
 ### Added
+- **Email Signup + Verification V1 local candidate**: Unified first-screen Sign In/Sign Up, Supabase PKCE email verification, neutral auth accounts, verified investor matching and profile-free Explorer routing. Metadata cannot grant business roles. See [lifecycle, validation and manual DEV prerequisites](architecture/EMAIL_SIGNUP_VERIFICATION_V1.md).
 - **NSE B07 partial local candidate**: Owned MANDATE_STATUS reads with exact C031 member-reference casing, unique matching, encrypted evidence and bounded retry. Immutable owner review proposals keep mandate registration and bank ADD/DEL blocked pending consent, provider relationship/dependency evidence and mandate contract resolution. See [scope and blockers](architecture/NSE_BANK_MANDATE_LIFECYCLE.md).
 - **NSE B06.3 local candidate**: Typed SIP/STP/SWP product references use the shared B06.2 MASTER_DOWNLOAD validator/runtime path. Immutable evidence, service-only access and explicit reference-only CAS publication retain uncommissioned product semantics and no investor eligibility authority. See [architecture and validation](architecture/NSE_SYSTEMATIC_PRODUCT_MASTERS.md).
 - **NSE B06.4 reconciled local candidate**: Dated, uncommissioned NAV observations and terminal blocked SET evidence share B06.2’s MASTER_DOWNLOAD validator registry and runtime. Source precedence and valuation publication remain unchanged; see [integration and validation](architecture/NSE_NAV_SET.md).

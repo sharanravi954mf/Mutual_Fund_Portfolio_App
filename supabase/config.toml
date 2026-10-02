@@ -76,7 +76,7 @@ enabled = true
 # in emails.
 site_url = "http://127.0.0.1:3000"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+additional_redirect_urls = ["http://127.0.0.1:3000/auth/callback", "http://localhost:3000/auth/callback", "app.moneybowl://auth/callback"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # If disabled, the refresh token will never expire.
@@ -90,6 +90,7 @@ enable_signup = true
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
+minimum_password_length = 12
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
@@ -98,9 +99,9 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+enable_confirmations = true
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
-max_frequency = "1s"
+max_frequency = "60s"
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
@@ -117,9 +118,9 @@ max_frequency = "1s"
 # content_path = "./supabase/templates/invite.html"
 
 [auth.sms]
-# Allow/disallow new user signups via SMS to your project.
-enable_signup = true
-# If enabled, users need to confirm their phone number before signing in.
+# Existing phone/password login remains; public mobile signup is not part of V1.
+enable_signup = false
+# Existing phone provider behavior is retained; no new mobile signup UI.
 enable_confirmations = false
 # Template for sending OTP to users
 template = "Your code is {{ .Code }} ."

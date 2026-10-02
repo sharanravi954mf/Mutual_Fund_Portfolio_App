@@ -157,8 +157,7 @@ void main() {
       expect(find.text('login_screen'), findsOneWidget);
     });
 
-    testWidgets('resolves to AccountAccessErrorScreen if profile is missing',
-        (tester) async {
+    testWidgets('Explorer needs no business profile', (tester) async {
       final auth = FakeAuthProvider(
         isAuthenticated: true,
         userAccount: UserAccount(
@@ -174,9 +173,59 @@ void main() {
         home: Builder(builder: (context) => guard.resolve(context, auth)),
       ));
 
-      expect(find.textContaining('error_screen: Profile Setup Unavailable'),
-          findsOneWidget);
+      expect(find.text('explorer_screen'), findsOneWidget);
     });
+
+    for (final state in [
+      AccountState.linkPending,
+      AccountState.linkedInvestor,
+      AccountState.advisor
+    ]) {
+      testWidgets('profile requirement for $state', (tester) async {
+        final auth = FakeAuthProvider(
+            isAuthenticated: true,
+            userAccount: UserAccount(
+                userId: 'user-id',
+                accountState: state,
+                onboardingCompleted: true,
+                createdAt: now,
+                updatedAt: now));
+        await tester.pumpWidget(MaterialApp(
+            home: Builder(builder: (context) => guard.resolve(context, auth))));
+        if (state == AccountState.linkPending) {
+          expect(find.text('linking_screen'), findsOneWidget);
+        } else {
+          expect(
+              find.textContaining('Profile Setup Unavailable'), findsOneWidget);
+        }
+      });
+    }
+    for (final role in [
+      UserRole.advisor,
+      UserRole.admin,
+      UserRole.platformAdmin,
+      UserRole.operations
+    ]) {
+      testWidgets('trusted active $role keeps staff dashboard', (tester) async {
+        final auth = FakeAuthProvider(
+            isAuthenticated: true,
+            userAccount: UserAccount(
+                userId: 'user-id',
+                accountState: AccountState.advisor,
+                onboardingCompleted: true,
+                createdAt: now,
+                updatedAt: now),
+            userProfile: UserProfile(
+                id: 'staff',
+                role: role,
+                accountStatus: AccountStatus.active,
+                createdAt: now,
+                updatedAt: now));
+        await tester.pumpWidget(MaterialApp(
+            home: Builder(builder: (context) => guard.resolve(context, auth))));
+        expect(find.text('advisor_dashboard'), findsOneWidget);
+      });
+    }
 
     testWidgets('resolves to AccountAccessErrorScreen if user is suspended',
         (tester) async {

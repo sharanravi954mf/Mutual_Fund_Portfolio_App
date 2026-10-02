@@ -53,6 +53,19 @@ class ExplorerHomeScreen extends StatelessWidget {
                   'You can explore the platform before linking any investments.',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: context.watch<AuthProvider>().isLoading
+                        ? null
+                        : context.read<AuthProvider>().beginPortfolioLinking,
+                    icon: const Icon(Icons.link),
+                    label: const Text('Link existing investments'),
+                  ),
+                ),
+                if (context.watch<AuthProvider>().errorMessage != null)
+                  Text(context.watch<AuthProvider>().errorMessage!),
                 const SizedBox(height: 28),
                 Wrap(
                   spacing: 16,
@@ -152,8 +165,6 @@ class PortfolioLinkingScreen extends StatefulWidget {
 }
 
 class _PortfolioLinkingScreenState extends State<PortfolioLinkingScreen> {
-  bool _showVerificationExplanation = false;
-
   Future<void> _chooseExplorer() async {
     await context.read<AuthProvider>().chooseExplorer();
     if (!mounted) return;
@@ -163,7 +174,6 @@ class _PortfolioLinkingScreenState extends State<PortfolioLinkingScreen> {
   Future<void> _beginLinking() async {
     await context.read<AuthProvider>().beginPortfolioLinking();
     if (!mounted) return;
-    setState(() => _showVerificationExplanation = true);
     _showErrorIfNeeded();
   }
 
@@ -197,7 +207,7 @@ class _PortfolioLinkingScreenState extends State<PortfolioLinkingScreen> {
             constraints: const BoxConstraints(maxWidth: 560),
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: _showVerificationExplanation
+              child: (authProvider.userAccount?.onboardingCompleted ?? false)
                   ? const _VerificationExplanation()
                   : _ChoiceCard(
                       isLoading: authProvider.isLoading,

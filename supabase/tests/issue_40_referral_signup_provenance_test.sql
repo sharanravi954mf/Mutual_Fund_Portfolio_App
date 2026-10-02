@@ -20,12 +20,16 @@ WHERE user_id IN (
 UPDATE public.user_accounts SET account_state = 'advisor'
 WHERE user_id = '40f00000-0000-4000-8000-000000000006';
 
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000001' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000001', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000001';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000002' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000002', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000002';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000003' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000003', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000003';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000006' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000006', role = 'platform_admin', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000006';
 
@@ -148,10 +152,13 @@ WHERE user_id IN (
 );
 UPDATE public.user_accounts SET account_state = 'advisor'
 WHERE user_id = '40f00000-0000-4000-8000-000000000007';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000004' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000004', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000004';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000005' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000005', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000005';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000007' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000007', role = 'advisor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000007';
 INSERT INTO public.investor_account_links (

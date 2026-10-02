@@ -52,17 +52,16 @@ void main() {
       expect(result.resolution, IdentityResolution.automaticLink);
     });
 
-    test('routes zero and multiple matches to link pending', () async {
+    test('preserves neutral Explorer results', () async {
       for (final resolution in [
         IdentityResolution.noMatch,
         IdentityResolution.ambiguousMatch,
       ]) {
         final result = await IdentityBootstrapService(
-          _FakeIdentityRepository(
-              _result(AccountState.linkPending, resolution)),
+          _FakeIdentityRepository(_result(AccountState.explorer, resolution)),
         ).load();
 
-        expect(result.account.accountState, AccountState.linkPending);
+        expect(result.account.accountState, AccountState.explorer);
         expect(result.resolution, resolution);
       }
     });

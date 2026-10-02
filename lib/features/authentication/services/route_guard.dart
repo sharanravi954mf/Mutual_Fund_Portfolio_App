@@ -46,7 +46,9 @@ class RouteGuard {
 
     // 4. UserProfile availability check
     final UserProfile? profile = authProvider.userProfile;
-    if (profile == null) {
+    if (profile == null &&
+        (accountState == AccountState.advisor ||
+            accountState == AccountState.linkedInvestor)) {
       return errorBuilder(
         "Profile Setup Unavailable",
         "Your profile details are currently being initialized. Please contact support if this persists.",
@@ -54,14 +56,14 @@ class RouteGuard {
     }
 
     // 5. Account status restrictions (Inactive/Suspended check)
-    if (profile.isSuspended) {
+    if (profile?.isSuspended ?? false) {
       return errorBuilder(
         "Account Suspended",
         "Your account has been suspended by Sharan Fincorp. Please contact support.",
       );
     }
 
-    if (profile.isInactive) {
+    if (profile?.isInactive ?? false) {
       return errorBuilder(
         "Account Inactive",
         "Your account is currently inactive. Please contact support.",
@@ -73,7 +75,7 @@ class RouteGuard {
 
     switch (destination) {
       case ProtectedDestination.advisorDashboard:
-        if (!profile.isAuthorizedForAdvisorDashboard) {
+        if (!(profile?.isAuthorizedForAdvisorDashboard ?? false)) {
           return errorBuilder(
             "Access Denied",
             "You do not have authorization to access the Advisor Dashboard.",
@@ -82,7 +84,7 @@ class RouteGuard {
         return advisorBuilder(context);
 
       case ProtectedDestination.investorDashboard:
-        if (!profile.isAuthorizedForInvestorDashboard) {
+        if (!(profile?.isAuthorizedForInvestorDashboard ?? false)) {
           return errorBuilder(
             "Access Denied",
             "You do not have authorization to access the Investor Dashboard.",

@@ -16,8 +16,10 @@ WHERE user_id IN (
   '40f00000-0000-4000-8000-000000000012'
 );
 
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000011' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000011', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000011';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000012' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000012', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000012';
 
@@ -92,6 +94,7 @@ INSERT INTO auth.users (
 
 UPDATE public.user_accounts SET account_state = 'linked_investor'
 WHERE user_id = '40f00000-0000-4000-8000-000000000013';
+INSERT INTO public.profiles(user_id,role,email) SELECT id,'investor',email FROM auth.users WHERE id='40f00000-0000-4000-8000-000000000013' ON CONFLICT (user_id) DO NOTHING;
 UPDATE public.profiles SET id = '40f10000-0000-4000-8000-000000000013', role = 'investor', account_status = 'active'
 WHERE user_id = '40f00000-0000-4000-8000-000000000013';
 INSERT INTO public.investor_account_links (

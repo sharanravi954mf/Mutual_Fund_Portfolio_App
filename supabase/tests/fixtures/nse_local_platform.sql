@@ -48,3 +48,14 @@ ALTER TABLE auth.users ADD COLUMN is_sso_user boolean DEFAULT false NOT NULL;
 ALTER TABLE auth.users ADD COLUMN deleted_at timestamp with time zone;
 ALTER TABLE auth.users ADD COLUMN is_anonymous boolean DEFAULT false NOT NULL;
 ALTER TABLE auth.users ADD CONSTRAINT users_email_change_confirm_status_check CHECK (((email_change_confirm_status >= 0) AND (email_change_confirm_status <= 2)));
+
+-- Modern GoTrue helpers accept both PostgREST JWT settings. The bare image
+-- otherwise resolves auth.uid() to NULL in tests using request.jwt.claims.
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+ SELECT coalesce(nullif(current_setting('request.jwt.claim.sub',true),''),
+   nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid;
+$$;
+CREATE OR REPLACE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$
+ SELECT coalesce(nullif(current_setting('request.jwt.claim.role',true),''),
+   nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'role');
+$$;

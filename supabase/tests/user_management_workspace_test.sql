@@ -14,6 +14,11 @@ VALUES
   ('61000000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'b-advisor@moneyball.test', '{}', '{"role":"user"}', now(), now()),
   ('61000000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 'b-investor@moneyball.test', '{}', '{"role":"user"}', now(), now());
 
+-- Trusted fixture provisioning: public signup no longer creates business profiles.
+INSERT INTO public.profiles(user_id,role,email,full_name)
+SELECT id,'investor',email,'Fixture' FROM auth.users WHERE id::text LIKE '61000000%';
+UPDATE auth.users SET email_confirmed_at=now() WHERE id::text LIKE '61000000%';
+
 -- User accounts
 UPDATE public.user_accounts SET account_state = 'advisor' WHERE user_id IN ('61000000-0000-0000-0000-000000000001', '61000000-0000-0000-0000-000000000002', '61000000-0000-0000-0000-000000000003', '61000000-0000-0000-0000-000000000005');
 UPDATE public.user_accounts SET account_state = 'linked_investor' WHERE user_id IN ('61000000-0000-0000-0000-000000000004', '61000000-0000-0000-0000-000000000006');
@@ -160,7 +165,7 @@ BEGIN
   -------------------------------------------------------------
   -- Create pending invitation for Workspace A
   INSERT INTO public.workspace_invitations (workspace_id, email, role, invited_by, token_hash, expires_at)
-  VALUES ('63000000-0000-0000-0000-000000000001', 'invitee@moneyball.test', 'investor', '62000000-0000-0000-0000-000000000002', v_hash, now() + interval '1 day');
+  VALUES ('63000000-0000-0000-0000-000000000001', 'b-investor@moneyball.test', 'investor', '62000000-0000-0000-0000-000000000002', v_hash, now() + interval '1 day');
 
   -- Login as invitee (B-Investor who is not a member of Workspace A)
   PERFORM set_config('request.jwt.claim.sub', '61000000-0000-0000-0000-000000000006', true);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -10,7 +11,10 @@ import '../features/investor_identity/models/user_profile.dart';
 import '../services/supabase_service.dart';
 
 class AuthProvider extends ChangeNotifier {
-  final SupabaseService _supabaseService = SupabaseService();
+  late final SupabaseService _supabaseService;
+  StreamSubscription<AuthState>? _authSubscription;
+  int _sessionGeneration = 0;
+  bool _disposed = false;
   late final IdentityBootstrapService _identityBootstrapService;
   late final OnboardingCoordinator _onboardingCoordinator;
 
@@ -31,7 +35,12 @@ class AuthProvider extends ChangeNotifier {
 
   bool get isAuthenticated => _user != null;
 
-  AuthProvider({IdentityBootstrapService? identityBootstrapService}) {
+  AuthProvider(
+      {IdentityBootstrapService? identityBootstrapService,
+      SupabaseClient? client,
+      Uri? initialUri}) {
+    _supabaseService =
+        client == null ? SupabaseService() : SupabaseService.withClient(client);
     _identityBootstrapService = identityBootstrapService ??
         IdentityBootstrapService(
           SupabaseIdentityRepository(_supabaseService.client),
@@ -40,22 +49,60 @@ class AuthProvider extends ChangeNotifier {
       repository: SupabaseIdentityRepository(_supabaseService.client),
       verificationService: const PlaceholderIdentityVerificationService(),
     );
-    _init();
+    _init(initialUri ?? Uri.base);
   }
 
-  void _init() {
-    _supabaseService.client.auth.onAuthStateChange.listen((data) async {
-      final Session? session = data.session;
-      _user = session?.user;
-      if (_user != null) {
-        await _loadIdentity(_user!);
-      } else {
+  void _init(Uri callback) {
+    _authSubscription =
+        _supabaseService.client.auth.onAuthStateChange.listen((data) {
+      final nextUser = data.session?.user;
+      if (_user?.id != nextUser?.id ||
+          data.event == AuthChangeEvent.signedOut) {
+        _sessionGeneration++;
+        _identityLoad = null;
+        _identityLoadUserId = null;
         _userAccount = null;
         _userProfile = null;
+      }
+      _user = nextUser;
+      if (nextUser != null) {
+        unawaited(_loadIdentity(nextUser));
+      } else {
         _isLoading = false;
         notifyListeners();
       }
+    }, onError: (Object _) {
+      _errorMessage =
+          'This verification link could not be used. It may have expired or already been opened. Sign in if verified, or request a new email from Sign Up.';
+      _isLoading = false;
+      notifyListeners();
     });
+    // initialize() may emit initialSession before this provider is constructed.
+    _user = _supabaseService.currentUser;
+    if (_user != null) {
+      unawaited(_loadIdentity(_user!));
+    } else {
+      _isLoading = false;
+    }
+    if (callback.queryParameters.containsKey('error') ||
+        callback.fragment.contains('error=') ||
+        (_user == null && callback.path == '/auth/callback')) {
+      _errorMessage =
+          'This verification link could not be used. Sign in if already verified, or request a new email from Sign Up.';
+    }
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _sessionGeneration++;
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadIdentity(User user) {
@@ -76,6 +123,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _performIdentityLoad(User user) async {
+    final generation = _sessionGeneration;
     _user = user;
     _isLoading = true;
     _errorMessage = null;
@@ -83,18 +131,38 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final result = await _identityBootstrapService.load();
-      if (_user?.id == user.id) {
-        _userAccount = result.account;
+      if (_disposed ||
+          _sessionGeneration != generation ||
+          _user?.id != user.id) {
+        return;
+      }
+      _userAccount = result.account;
+
+      // A linked investor must have a live business relationship; Explorer
+      // accounts legitimately have no profile. Do not synthesize one.
+      String? profileId;
+      if (result.account.accountState == AccountState.linkedInvestor) {
+        final link = await _supabaseService.client
+            .from('investor_account_links')
+            .select('profile_id')
+            .eq('user_id', user.id)
+            .eq('link_status', 'active')
+            .single();
+        profileId = link['profile_id'] as String;
+      }
+      final query = _supabaseService.client.from('profiles').select();
+      final profileResponse = await (profileId == null
+              ? query.eq('user_id', user.id)
+              : query.eq('id', profileId))
+          .maybeSingle();
+      if (result.account.accountState == AccountState.linkedInvestor &&
+          profileResponse == null) {
+        throw StateError('Linked profile unavailable');
       }
 
-      // Fetch the active profile to verify roles and account status
-      final profileResponse = await _supabaseService.client
-          .from('profiles')
-          .select()
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-      if (_user?.id == user.id) {
+      if (!_disposed &&
+          _sessionGeneration == generation &&
+          _user?.id == user.id) {
         if (profileResponse != null) {
           _userProfile = UserProfile.fromJson(profileResponse);
         } else {
@@ -102,13 +170,17 @@ class AuthProvider extends ChangeNotifier {
         }
       }
     } catch (e) {
-      if (_user?.id == user.id) {
+      if (!_disposed &&
+          _sessionGeneration == generation &&
+          _user?.id == user.id) {
         _errorMessage = 'Unable to load your account securely.';
         _userAccount = null;
         _userProfile = null;
       }
     } finally {
-      if (_user?.id == user.id) {
+      if (!_disposed &&
+          _sessionGeneration == generation &&
+          _user?.id == user.id) {
         _isLoading = false;
         notifyListeners();
       }
@@ -123,6 +195,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> chooseExplorer() async {
+    _errorMessage = null;
     _isLoading = true;
     notifyListeners();
     try {
@@ -136,6 +209,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> beginPortfolioLinking() async {
+    _errorMessage = null;
     _isLoading = true;
     notifyListeners();
     try {
@@ -154,7 +228,6 @@ class AuthProvider extends ChangeNotifier {
 
   /// Sign in using credentials and load corresponding profile role
   Future<bool> signIn(String emailOrPhone, String password) async {
-    _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
@@ -170,7 +243,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = e is AuthException ? e.message : e.toString();
+      _errorMessage =
+          'Unable to sign in. Check your credentials and verify your email. If needed, request a new verification email from Sign Up.';
       _isLoading = false;
       notifyListeners();
       return false;
@@ -188,7 +262,8 @@ class AuthProvider extends ChangeNotifier {
       _userProfile = null;
       _errorMessage = null;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage =
+          'Unable to sign out. Check your connection and try again.';
     }
     _isLoading = false;
     notifyListeners();

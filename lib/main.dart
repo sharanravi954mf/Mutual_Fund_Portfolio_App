@@ -37,6 +37,8 @@ void main() async {
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
+      authOptions:
+          const FlutterAuthClientOptions(authFlowType: AuthFlowType.pkce),
     );
   } catch (e) {
     // Supabase can fail to initialize if placeholder values are used.
@@ -98,7 +100,9 @@ class MyApp extends StatelessWidget {
               target: uri!.queryParameters['target'],
               operation: uri.queryParameters['operation']));
     }
-    if (settings.name == null || settings.name == '/') {
+    if (settings.name == null ||
+        settings.name == '/' ||
+        uri?.path == '/auth/callback') {
       return MaterialPageRoute<void>(
         settings: settings,
         builder: (_) => const AuthWrapper(),
@@ -207,7 +211,7 @@ class AccountAccessErrorScreen extends StatelessWidget {
                 title,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.outfit(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                 ),
@@ -217,11 +221,17 @@ class AccountAccessErrorScreen extends StatelessWidget {
                 message,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
-                  color: Colors.grey.shade400,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 14,
                 ),
               ),
               const SizedBox(height: 32),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
+                onPressed: authProvider.refreshIdentity,
+              ),
+              const SizedBox(height: 12),
               ElevatedButton.icon(
                 icon: const Icon(Icons.logout),
                 label: const Text("Sign Out"),
