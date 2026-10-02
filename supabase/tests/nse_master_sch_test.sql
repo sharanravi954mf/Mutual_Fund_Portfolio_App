@@ -64,7 +64,7 @@ BEGIN
  PERFORM pg_temp.ok((SELECT count(*)=1 FROM public.list_dispatchable_outbox_events(ARRAY['integration.nse.master_download_requested'])),'member_dispatch_feed');
  PERFORM pg_temp.ok((SELECT payload='{}'::jsonb FROM public.event_outbox WHERE id=e),'no_member_payload');
  PERFORM pg_temp.err($q$SELECT public.prepare_nse_master_download('b0610000-0000-4000-8001-000000000002','b0610000-0000-4000-8002-000000000001','SCH',gen_random_uuid())$q$,'connection_unavailable');
- FOREACH bad IN ARRAY ARRAY['sch','SCH ','sip','stp','swp','NAV','SET','UNKNOWN',NULL] LOOP
+ FOREACH bad IN ARRAY ARRAY['sch','SCH ','sip','stp','swp','nav','set','UNKNOWN',NULL] LOOP
   PERFORM pg_temp.err(format('SELECT public.prepare_nse_master_download(%L,%L,%L,gen_random_uuid())','b0610000-0000-4000-8001-000000000001','b0610000-0000-4000-8002-000000000001',bad),'variant_disabled');
  END LOOP;
  PERFORM pg_temp.err(format('UPDATE public.event_outbox SET payload=%L WHERE id=%L','{"file_type":"NAV"}',e),'event_immutable');

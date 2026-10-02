@@ -280,7 +280,7 @@ BEGIN RAISE EXCEPTION 'b063_injected_completion_failure'; END $$;
 DO $$ DECLARE kind text; e uuid; t uuid; key uuid; s uuid; prior uuid; r jsonb; c jsonb; body text; bad text;
  fn regprocedure; role_name text; rec record;
 BEGIN
- PERFORM pg_temp.ok((SELECT array_agg(file_type::text ORDER BY file_type::text)=ARRAY['SCH','SIP','STP','SWP'] FROM nse_reference.validators),'exact_shared_variant_registry');
+ PERFORM pg_temp.ok((SELECT array_agg(file_type::text ORDER BY file_type::text)=ARRAY['NAV','SCH','SET','SIP','STP','SWP'] FROM nse_reference.validators),'exact_shared_variant_registry');
  FOREACH kind IN ARRAY ARRAY['SIP','STP','SWP'] LOOP
   PERFORM pg_temp.ok((SELECT parser_version='NSE_WEB_'||kind||'_V1' AND function_name='validate_'||lower(kind)||'_v1'
    FROM nse_reference.validators WHERE file_type::text=kind),'registered_profile_'||kind);
