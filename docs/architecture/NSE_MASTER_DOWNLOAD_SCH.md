@@ -129,6 +129,11 @@ event type, dispatcher or investor operation change is needed to enable a parser
 A reviewed migration is required for registration. Existing receipts never reparse;
 a new capture/snapshot is required for another parser version in this slice.
 
+[B06.3](NSE_SYSTEMATIC_PRODUCT_MASTERS.md) now registers SIP/STP/SWP through this
+contract. Shared finalization remains staging-only with a blocked publication gate;
+B06.3 adds a separate reference-only publisher with explicitly uncommissioned
+product semantics. SCH publication and crosswalk approval remain blocked.
+
 ## Remaining publication gate
 
 Publication is structurally blocked. Required evidence is: a current authoritative
