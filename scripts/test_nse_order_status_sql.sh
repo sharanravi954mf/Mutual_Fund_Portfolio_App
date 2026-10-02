@@ -19,7 +19,7 @@ for migration in "$repo_root"/supabase/migrations/*.sql; do
   printf 'Applying %s\n' "${migration##*/}"
   psql_local < "$migration"
 done
-printf 'NSE application facade PL/pgSQL lint\n'
+printf 'NSE application facade and reference foundation PL/pgSQL lint\n'
 psql_local <<'SQL'
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS plpgsql_check WITH SCHEMA extensions;
@@ -27,12 +27,16 @@ DO $$ DECLARE fn record; finding record; BEGIN
   FOR fn IN SELECT p.oid, p.prorettype FROM pg_catalog.pg_proc p
     JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
     JOIN pg_catalog.pg_language l ON l.oid=p.prolang
-    WHERE l.lanname='plpgsql' AND (n.nspname='nse_app' OR
+    WHERE l.lanname='plpgsql' AND (n.nspname IN ('nse_app','nse_reference') OR
       (n.nspname='public' AND p.proname IN ('list_nse_read_targets_v1','get_nse_read_context_v1',
-        'list_nse_settlement_candidates_v1','submit_nse_read_v1','list_nse_read_operations_v1','get_nse_read_operation_v1')))
+        'list_nse_settlement_candidates_v1','submit_nse_read_v1','list_nse_read_operations_v1','get_nse_read_operation_v1',
+        'begin_nse_master_download','append_nse_master_chunk','finish_nse_master_download','read_nse_master_chunk','stage_nse_reference_snapshot','get_nse_reference_snapshot')))
   LOOP
     FOR finding IN SELECT * FROM extensions.plpgsql_check_function_tb(fn.oid::regprocedure,
-      CASE WHEN fn.prorettype='trigger'::regtype THEN 'nse_app.dev_access'::regclass ELSE 0::regclass END,
+      CASE WHEN fn.prorettype<>'trigger'::regtype THEN 0::regclass
+        WHEN fn.oid::regprocedure::text LIKE 'nse_reference.audit_evidence%' THEN 'nse_reference.downloads'::regclass
+        WHEN fn.oid::regprocedure::text LIKE 'nse_reference.%' THEN 'nse_reference.connections'::regclass
+        ELSE 'nse_app.dev_access'::regclass END,
       fatal_errors := false)
     LOOP
       IF finding.level='error' THEN
@@ -64,6 +68,8 @@ for pass in 1 2; do
   printf 'B05 STP/SWP/AMC regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_stp_swp_reports_vertical_slice_test.sql"
   psql_local < "$repo_root/supabase/tests/nse_response_diagnostics_test.sql"
+  printf 'B06.1 reference foundation regression pass %s (must rollback)\n' "$pass"
+  psql_local < "$repo_root/supabase/tests/nse_master_reference_foundation_test.sql"
   printf 'NSE frontend application facade regression pass %s (must rollback)\n' "$pass"
   psql_local < "$repo_root/supabase/tests/nse_frontend_integration_v1_test.sql"
 done
@@ -77,13 +83,18 @@ psql_local -c "DO \$\$ BEGIN
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'client-readiness-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'order-funding-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'settlement-redemption-%@moneybowl.invalid')
-    OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger WHERE tgname LIKE 'b03_no_%' OR tgname LIKE 'b04_no_%' OR tgname LIKE 'b05_no_%')
+    OR EXISTS (SELECT 1 FROM pg_catalog.pg_trigger WHERE tgname LIKE 'b03_no_%' OR tgname LIKE 'b04_no_%' OR tgname LIKE 'b05_no_%' OR tgname LIKE 'b061_no_%')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'sip-xsip-reports-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'stp-swp-reports-%@moneybowl.invalid')
+    OR EXISTS (SELECT 1 FROM nse_reference.connections)
+    OR EXISTS (SELECT 1 FROM nse_reference.downloads)
+    OR EXISTS (SELECT 1 FROM nse_reference.snapshots)
+    OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'b061-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM nse_app.submission_receipts)
     OR EXISTS (SELECT 1 FROM nse_app.dev_access)
     OR EXISTS (SELECT 1 FROM auth.users WHERE email LIKE 'nse-app-%@moneybowl.invalid')
     OR EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE name='integration_payload_encryption_key_v1')
   THEN RAISE EXCEPTION 'order_status_test_did_not_rollback'; END IF;
 END \$\$;"
+bash "$repo_root/scripts/test_nse_reference_concurrency.sh" "$container"
 bash "$repo_root/scripts/test_nse_frontend_concurrency.sh" "$container"

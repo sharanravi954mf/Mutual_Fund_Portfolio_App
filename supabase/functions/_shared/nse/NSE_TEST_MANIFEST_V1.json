@@ -58,7 +58,10 @@
     "supabase/functions/nse-stp-swp-reports-worker/adapters.ts",
     "supabase/functions/nse-stp-swp-reports-worker/handler.ts",
     "supabase/functions/nse-stp-swp-reports-worker/index.ts",
-    "supabase/functions/nse-stp-swp-reports-worker/index_test.ts"
+    "supabase/functions/nse-stp-swp-reports-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_master_download.ts",
+    "supabase/functions/_shared/nse/nse_master_evidence.ts",
+    "supabase/functions/_shared/nse/nse_master_download_test.ts"
   ],
   "baseline_tests": [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
@@ -84,7 +87,8 @@
     "supabase/functions/nse-sip-xsip-reports-worker/index_test.ts",
     "supabase/functions/_shared/nse/nse_stp_swp_reports_test.ts",
     "supabase/functions/_shared/nse/nse_response_diagnostics_test.ts",
-    "supabase/functions/nse-stp-swp-reports-worker/index_test.ts"
+    "supabase/functions/nse-stp-swp-reports-worker/index_test.ts",
+    "supabase/functions/_shared/nse/nse_master_download_test.ts"
   ],
   "endpoint_tests": {
     "nse-ucc-registration-worker": [
