@@ -1,8 +1,9 @@
 # NSE B06.3 — SIP, STP and SWP product references
 
 B06.3 adds three explicit document-profile parsers, immutable typed reference rows,
-and atomic reference publication on the merged B06.1 foundation (`6721741`). It
-has no worker, event, dispatcher route, investor registration or schedule mutation.
+and atomic reference publication on the B06.1 foundation and merged B06.2 runtime
+(`d029c80`). All three variants use the existing MASTER_DOWNLOAD worker, event and
+dispatcher route. They add no investor registration or schedule mutation.
 The implementation is local; provider compatibility and eligibility interpretation
 remain uncommissioned.
 
@@ -68,8 +69,7 @@ including BOM/line endings, download identity and member/workspace ownership.
 There is no assumed unique vendor business-row key. Multiple rows for one scheme
 are retained as candidates; only byte-identical row duplicates reject. NSE scheme
 codes remain in the `NSE` namespace. No equality join to `mutual_funds.scheme_code`,
-registrar identifiers, SCH rows or investor state is implied. B06.2's eventual
-approved scheme crosswalk and separately characterized product semantics are
+registrar identifiers, SCH rows or investor state is implied. An approved scheme crosswalk (still blocked in B06.2) and separately characterized product semantics are
 required before any consumer may authorize an order or systematic registration.
 
 ## Publication and reading
@@ -107,7 +107,7 @@ claimed. Transport completeness still relies on B06.1's conservative framing.
 A parseable file shortened before transmission cannot be identified from the
 undocumented layout alone.
 
-## B06.2 integration seam
+## Shared B06.2 runtime integration
 
 `createNseSystematicMasterService(client)` accepts an RPC client and a frozen
 `{workspaceId, connectionId, snapshotId, fileType}` scope. `validate` loads the
@@ -117,12 +117,36 @@ bytes before decoding, parses, and verifies the database validation receipt.
 atomic publisher. It never fetches NSE or automatically retries a request.
 Database publication independently validates, including direct RPC callers.
 
-After B06.2 merges, its shared runtime can stage B06.1 evidence and call this seam
-for the selected systematic variant. It must retain the expected-current value
-across acknowledgment retries. No B06.2-owned runtime/dispatcher file was edited.
-The shared Deno manifest has append-only test entries to retain when merging.
-Changes to schema/semantics require a new parser version and additive migration;
-existing receipts, rows and publication history cannot be rewritten.
+Migration `20261002151000_nse_b06_3_systematic_product_masters.sql` follows both
+B06.2 migrations. Its migration-owned registry entries map SIP/STP/SWP to private
+`validate_sip_v1`, `validate_stp_v1` and `validate_swp_v1` functions. The registry's
+parser profile is `NSE_WEB_<variant>_V1`; the typed receipt retains the common
+implementation version `nse-systematic-web-v1` and the same explicit layout ID.
+SCH registration and all applied migrations are unchanged; NAV/SET stay disabled.
+
+The existing `prepare_nse_master_download` → outbox → worker →
+`finalize_nse_master_download` path captures B06.1 evidence and dispatches validation
+in SQL. The adapters call the same `validate_systematic` parser as the service RPC,
+retaining its exact digests, types, ownership checks and immutable rows. They catch
+only enumerated parser rejections inside a subtransaction, rolling back every
+partial typed row and receipt before returning `REJECTED`. The shared runtime
+retains the staged snapshot, rejection receipt and completion. A whole-file rejection
+reports zero accepted rows; `rejected_rows=0` does not claim a measured bad-row count.
+Integrity, ownership, audit and unexpected errors propagate and roll back finalization.
+
+Successful runtime receipts say `STRUCTURE_ONLY_REFERENCE_ONLY` and keep
+`publication_gate=BLOCKED`: the worker performs no publication. The explicit service
+publisher remains a separate reference-only CAS action. Its receipts, current reads
+and product pages explicitly report `REFERENCE_ONLY`, `UNINTERPRETED` and
+`PRODUCT_SEMANTICS_UNCOMMISSIONED`. This does not unblock business publication,
+SCH crosswalk approval, or investor eligibility. A publication caller must retain
+its expected-current value across acknowledgment retries; the worker has no such
+value because it never publishes.
+
+The shared worker/adapter implementation, event contract and dispatcher routes need
+no changes. The combined Deno manifest retains B06.2 and B06.3 suites. Changes to
+schema/semantics require a new parser version and additive migration; existing
+receipts, rows and publication history cannot be rewritten.
 
 ## Local verification
 
@@ -143,17 +167,25 @@ The B06.3 tests cover each profile's types, malformed files, exact lineage,
 validation/publication separation, complete rollback, frozen readers, independent
 variant pointers, older capture/version rejection, audit atomicity, all API roles,
 private ACL/RLS catalogs, and concurrent publication/replay. Statement triggers
-fail tests on any investor, fund, operation or outbox mutation.
+fail tests on investor, fund or operation mutation. Direct publication tests also
+forbid outbox mutation; runtime integration tests allow only the existing shared
+metadata-only job/event contract. The integration suite covers all three variants,
+sealed-capture recovery, rejected files with no partial rows, completion-failure
+rollback, private plugin ACLs, actual service-role execution, and concurrent
+prepare/claim/finalize without automatic publication.
 
-Validation results on this worktree:
+Validation results after reconciliation with `origin/develop` at `d029c80`:
 
 | Check | Result |
 | --- | --- |
-| Protected NSE fmt/check/test | Pass; 757 tests (645 baseline, 112 added) |
-| B06.3 SQL/lint/concurrency | Pass; 318 assertions twice; no lint findings |
+| Protected NSE fmt/check/test | Pass; 779 tests; 71 fmt/check targets |
+| B06.3 SQL/lint/concurrency | Pass; 489 assertions twice; no lint findings |
 | Existing NSE SQL suites and concurrency | Pass after the new migration |
-| All persistent SQL files, each on a fresh restored schema | Baseline 21 pass / 15 fail; candidate 22 pass / same 15 fail |
-| Manifest/policy script tests; dispatcher tests | 22 pass; 54 pass |
+| SIP/STP/SWP runtime concurrency | One preparation, claim and validation per variant; no publication |
+| All persistent SQL files, each on a fresh restored schema | Baseline 22 pass / 15 fail; candidate 23 pass / same 15 fail |
+| Manifest/policy/Compose script tests; dispatcher tests | 22 pass; 55 pass |
+| Existing order/payment concurrency | Pass on baseline and candidate |
+| Existing registrar/referral concurrency | Same two baseline failures on candidate |
 | Documentation, migration history, commit format and shell syntax | Pass |
 
 The broad SQL suite is **not green**. Its 15 unchanged baseline failures are listed
@@ -161,5 +193,19 @@ in the [foundation validation notes](NSE_MASTER_DOWNLOAD_FOUNDATION.md#validatio
 `SUPABASE_DB_CONTAINER=<disposable-container> sh supabase/tests/run_all.sh` stops at
 `issue_114_service_role_protected_table_select:workspaces` on both baseline and
 candidate. Separate fresh-schema runs establish that no prior pass regressed.
-Logs and the comparison are retained under `/tmp/b063-*`; no existing ACL, fixture,
-financial logic or CI requirement was changed to conceal those failures.
+Registrar concurrency reports `PAN encryption configuration is unavailable` on
+both versions; referral concurrency reports `referral_profile_not_resolved` on
+both versions. No existing ACL, fixture, financial logic or CI requirement was
+changed to conceal those failures.
+
+Reconciliation receipts are `/tmp/b063-reconciled-{fmt,check,deno}.log`,
+`/tmp/b063-reconciled-{systematic-sql,all-nse-sql}.log`,
+`/tmp/b063-reconciled-{baseline,candidate}-all-db.log`,
+`/tmp/b063-reconciled-{baseline,candidate}-run-all.log`,
+`/tmp/b063-reconciled-extra-concurrency.log` and
+`/tmp/b063-reconciled-validation-comparison.json`. Each broad SQL file ran on a
+fresh restored schema. The baseline was an archive of `origin/develop` at
+`d029c80`, and every baseline migration remains byte-for-byte unchanged.
+The only test-harness correction during integration removed a redundant attempt
+to drop a session-temporary fixture trigger before the new runtime races.
+No hosted mutation, NSE UAT, live-container/systemd change, push or PR was performed.

@@ -10,6 +10,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 ## Unreleased
 
 ### Added
+- **NSE B06.3 local candidate**: Typed SIP/STP/SWP product references use the shared B06.2 MASTER_DOWNLOAD validator/runtime path. Immutable evidence, service-only access and explicit reference-only CAS publication retain uncommissioned product semantics and no investor eligibility authority. See [architecture and validation](architecture/NSE_SYSTEMATIC_PRODUCT_MASTERS.md).
 - **NSE B06.2 local candidate**: Member-owned MASTER_DOWNLOAD preparation, outbox worker and recovery; strict observed SCH structural validation and immutable source identities. Crosswalk approval and business publication remain blocked. See [scope, evidence and validation](architecture/NSE_MASTER_DOWNLOAD_SCH.md).
 - **NSE B05 local candidate**: Seven STP/SWP/AMC PAUSE observation contracts, owned selectors, safe DEV/UAT console commands, and a versioned diagnostic policy including the exact CLIENT_KYC_REPORT empty-success correction. [B05 architecture and validation](architecture/NSE_STP_SWP_REPORTS_VERTICAL_SLICE.md) records blocked STP-due browser/UNPAUSE variants.
 - **Oracle dispatcher automation source**: Exact-develop reconciliation, existing webhook-spool integration, timer fallback, preserved settings/hardening and verified image rollback. [One-time commissioning remains required](architecture/ORACLE_OUTBOX_DISPATCHER_RECONCILIATION.md); no host automation was installed by this local implementation.

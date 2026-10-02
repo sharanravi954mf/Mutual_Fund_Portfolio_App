@@ -262,5 +262,127 @@ DO $$ BEGIN
  BEGIN PERFORM 1 FROM nse_reference.systematic_validations; RAISE EXCEPTION 'anon_table_allowed'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 RESET ROLE;
+-- Integration with B06.2: only its existing metadata-only event may now mutate.
+-- Investor/fund/operation mutation guards above remain active.
+DROP TRIGGER b063_no_mutation ON public.event_outbox;
+CREATE FUNCTION pg_temp.queue_master(kind text,key uuid DEFAULT gen_random_uuid()) RETURNS uuid LANGUAGE sql AS $$
+ SELECT (public.prepare_nse_master_download('b0630000-0000-4000-8001-000000000001',
+  'b0630000-0000-4000-8002-000000000001',kind,key)->>'event_outbox_id')::uuid
+$$;
+CREATE FUNCTION pg_temp.capture_master(e uuid,t uuid,body text) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE b bytea:=convert_to(body,'UTF8'); BEGIN
+ PERFORM public.begin_nse_master_job_capture(e,t,gen_random_uuid(),'UAT','05418','https://nse.example.test');
+ PERFORM public.append_nse_master_job_chunk(e,t,0,replace(encode(b,'base64'),E'\n',''),encode(extensions.digest(b,'sha256'),'hex'));
+ PERFORM public.finish_nse_master_job_capture(e,t,'COMPLETE',200,'TEXT',octet_length(b),true,true,encode(extensions.digest(b,'sha256'),'hex'));
+END $$;
+CREATE FUNCTION pg_temp.fail_master_completion() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'b063_injected_completion_failure'; END $$;
+DO $$ DECLARE kind text; e uuid; t uuid; key uuid; s uuid; prior uuid; r jsonb; c jsonb; body text; bad text;
+ fn regprocedure; role_name text; rec record;
+BEGIN
+ PERFORM pg_temp.ok((SELECT array_agg(file_type::text ORDER BY file_type::text)=ARRAY['SCH','SIP','STP','SWP'] FROM nse_reference.validators),'exact_shared_variant_registry');
+ FOREACH kind IN ARRAY ARRAY['SIP','STP','SWP'] LOOP
+  PERFORM pg_temp.ok((SELECT parser_version='NSE_WEB_'||kind||'_V1' AND function_name='validate_'||lower(kind)||'_v1'
+   FROM nse_reference.validators WHERE file_type::text=kind),'registered_profile_'||kind);
+  prior:=(pg_temp.current(kind)->>'snapshot_id')::uuid;
+  key:=gen_random_uuid(); e:=pg_temp.queue_master(kind,key); t:=gen_random_uuid();
+  PERFORM pg_temp.ok(pg_temp.queue_master(kind,key)=e,'shared_prepare_replay_'||kind);
+  PERFORM pg_temp.ok((SELECT event_type='integration.nse.master_download_requested' AND entity_type='nse_reference_job' AND payload='{}'::jsonb
+   FROM public.event_outbox WHERE id=e),'one_existing_event_contract_'||kind);
+  PERFORM pg_temp.ok(EXISTS(SELECT 1 FROM public.list_dispatchable_outbox_events(ARRAY['integration.nse.master_download_requested']) WHERE event_outbox_id=e),'existing_dispatch_feed_'||kind);
+  PERFORM pg_temp.err(format('SELECT public.prepare_nse_master_download(%L,%L,%L,%L)',
+   'b0630000-0000-4000-8001-000000000002','b0630000-0000-4000-8002-000000000001',kind,key),'connection_unavailable');
+  PERFORM pg_temp.err(format('SELECT pg_temp.queue_master(%L,%L)','SCH',key),'idempotency_conflict');
+  c:=public.claim_nse_master_download(e,t);
+  PERFORM pg_temp.ok(c->>'action'='CAPTURE' AND c->>'file_type'=kind,'sql_owned_variant_'||kind);
+  PERFORM pg_temp.ok(public.claim_nse_master_download(e,gen_random_uuid())->>'action'='BUSY','shared_claim_fence_'||kind);
+  PERFORM pg_temp.err(format('SELECT public.begin_nse_master_download(%L,%L,%L,%L,%L,%L,%L,gen_random_uuid())',
+   c->>'workspace_id',c->>'connection_id','SCH',c->>'download_id','UAT','05418','https://nse.example.test'),'job_download_mismatch');
+  PERFORM pg_temp.capture_master(e,t,pg_temp.file(kind));
+  -- Recovery resumes SQL only, after the exact sealed capture, never another read.
+  UPDATE public.event_outbox SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE id=e;
+  PERFORM pg_temp.err(format('SELECT public.finalize_nse_master_download(%L,%L)',e,t),'claim_not_owned');
+  t:=gen_random_uuid();
+  PERFORM pg_temp.ok(public.claim_nse_master_download(e,t)->>'action'='FINALIZE','sealed_capture_resume_'||kind);
+  r:=public.finalize_nse_master_download(e,t); s:=(r->>'snapshot_id')::uuid;
+  PERFORM pg_temp.ok(r->>'outcome'='STAGED_VALIDATED','shared_finalization_'||kind);
+  PERFORM pg_temp.ok(public.finalize_nse_master_download(e,t)=r,'shared_finalize_replay_'||kind);
+  PERFORM pg_temp.ok(public.claim_nse_master_download(e,gen_random_uuid())->>'action'='DONE','no_recapture_'||kind);
+  PERFORM pg_temp.ok((pg_temp.current(kind)->>'snapshot_id')::uuid=prior,'worker_never_publishes_'||kind);
+  PERFORM pg_temp.ok((SELECT v.row_count=1 AND v.rejected_rows=0 AND v.publication_gate='BLOCKED'
+    AND v.validation_scope='STRUCTURE_ONLY_REFERENCE_ONLY' AND v.parser_version='NSE_WEB_'||kind||'_V1'
+    AND v.source_sha256=typed.source_sha256 AND typed.file_type=v.file_type
+   FROM nse_reference.validations v JOIN nse_reference.systematic_validations typed USING(snapshot_id)
+   WHERE v.snapshot_id=s),'shared_and_typed_receipts_'||kind);
+  PERFORM pg_temp.ok(nse_reference.validate_snapshot('b0630000-0000-4000-8001-000000000001',s)->>'status'='STAGED_VALIDATED','shared_validation_replay_'||kind);
+  SELECT public.get_nse_master_download_job(workspace_id,id) INTO c FROM nse_reference.jobs WHERE event_id=e;
+  PERFORM pg_temp.ok(c->>'publication_gate'='BLOCKED' AND c->>'validation_scope'='STRUCTURE_ONLY_REFERENCE_ONLY','summary_stays_blocked_'||kind);
+  PERFORM pg_temp.ok(pg_temp.publish(s,prior)->>'authority'='REFERENCE_ONLY','explicit_reference_publication_'||kind);
+  PERFORM pg_temp.ok(pg_temp.current(kind)->>'reason'='PRODUCT_SEMANTICS_UNCOMMISSIONED'
+    AND pg_temp.products(s)->>'eligibility'='UNINTERPRETED','publication_not_eligibility_'||kind);
+  prior:=s;
+  -- Unknown header, cross-variant layout, malformed late row and exact duplicates:
+  -- parser exceptions become durable rejections after rolling back partial rows.
+  body:=pg_temp.file(kind);
+  FOREACH bad IN ARRAY ARRAY[replace(body,'AMC CODE','UNKNOWN'),pg_temp.file(CASE WHEN kind='SIP' THEN 'STP' ELSE 'SIP' END),
+    body||replace(split_part(body,E'\n',2),'100.25','bad')||E'\n',body||split_part(body,E'\n',2)||E'\n'] LOOP
+   e:=pg_temp.queue_master(kind); t:=gen_random_uuid();
+   PERFORM public.claim_nse_master_download(e,t);
+   PERFORM pg_temp.capture_master(e,t,bad);
+   r:=public.finalize_nse_master_download(e,t); s:=(r->>'snapshot_id')::uuid;
+   PERFORM pg_temp.ok(r->>'outcome'='REJECTED','durable_parser_rejection_'||kind);
+   PERFORM pg_temp.ok(public.finalize_nse_master_download(e,t)=r,'rejected_ack_replay_'||kind);
+   PERFORM pg_temp.ok((SELECT row_count=0 AND rejected_rows=0 AND publication_gate='BLOCKED'
+    AND category='nse_reference_systematic_layout_invalid' FROM nse_reference.validations WHERE snapshot_id=s),'zero_accepted_rejection_'||kind);
+   PERFORM pg_temp.ok(NOT EXISTS(SELECT 1 FROM nse_reference.systematic_validations WHERE snapshot_id=s)
+    AND NOT EXISTS(SELECT 1 FROM nse_reference.sip_products WHERE snapshot_id=s)
+    AND NOT EXISTS(SELECT 1 FROM nse_reference.stp_products WHERE snapshot_id=s)
+    AND NOT EXISTS(SELECT 1 FROM nse_reference.swp_products WHERE snapshot_id=s),'no_partial_typed_data_'||kind);
+   PERFORM pg_temp.err(format('SELECT pg_temp.publish(%L,%L)',s,prior),'nse_systematic_');
+   PERFORM pg_temp.ok((pg_temp.current(kind)->>'snapshot_id')::uuid=prior,'rejection_preserves_current_'||kind);
+  END LOOP;
+  -- Infrastructure errors must propagate; no false rejection and no half completion.
+  e:=pg_temp.queue_master(kind); t:=gen_random_uuid();
+  c:=public.claim_nse_master_download(e,t);
+  PERFORM pg_temp.capture_master(e,t,body);
+  CREATE TRIGGER b063_fail_completion BEFORE INSERT ON nse_reference.completions FOR EACH ROW EXECUTE FUNCTION pg_temp.fail_master_completion();
+  PERFORM pg_temp.err(format('SELECT public.finalize_nse_master_download(%L,%L)',e,t),'b063_injected_completion_failure');
+  PERFORM pg_temp.ok(NOT EXISTS(SELECT 1 FROM nse_reference.snapshots WHERE download_id=(c->>'download_id')::uuid)
+    AND NOT EXISTS(SELECT 1 FROM nse_reference.completions done JOIN nse_reference.jobs j ON j.id=done.id WHERE j.event_id=e),'completion_failure_rolls_back_staging_'||kind);
+  DROP TRIGGER b063_fail_completion ON nse_reference.completions;
+  r:=public.finalize_nse_master_download(e,t);
+  PERFORM pg_temp.ok(r->>'outcome'='STAGED_VALIDATED','same_capture_recovers_'||kind);
+  PERFORM pg_temp.ok((pg_temp.current(kind)->>'snapshot_id')::uuid=prior,'recovery_never_publishes_'||kind);
+  -- A private variant entry point cannot process a different owned file type.
+  PERFORM pg_temp.err(format('SELECT nse_reference.validate_%s_v1(%L)',CASE WHEN kind='SIP' THEN 'stp' ELSE 'sip' END,r->>'snapshot_id'),'variant_invalid');
+ END LOOP;
+ FOR fn IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+  WHERE n.nspname='nse_reference' AND p.proname IN ('systematic_runtime_validation','validate_sip_v1','validate_stp_v1','validate_swp_v1') LOOP
+  PERFORM pg_temp.ok((SELECT prosecdef AND proconfig @> ARRAY['search_path=""'] FROM pg_proc WHERE oid=fn),'plugin_definer_search_path');
+  FOREACH role_name IN ARRAY ARRAY['anon','authenticated','service_role'] LOOP
+   PERFORM pg_temp.ok(NOT has_function_privilege(role_name,fn,'EXECUTE'),'plugin_private_'||role_name);
+  END LOOP;
+  PERFORM pg_temp.ok(NOT EXISTS(SELECT 1 FROM pg_proc p,LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a
+   WHERE p.oid=fn AND a.grantee=0 AND a.privilege_type='EXECUTE'),'plugin_no_public_execute');
+ END LOOP;
+ PERFORM pg_temp.ok(NOT EXISTS(SELECT 1 FROM nse_reference.sch_rows),'no_sch_projection');
+ PERFORM pg_temp.ok((SELECT count(*) FROM public.workspace_audit_logs WHERE action='nse.reference.validation')=
+  (SELECT count(*) FROM nse_reference.validations),'one_shared_validation_audit');
+END $$;
+-- Exercise the entire shared RPC path under the actual production API role.
+SET LOCAL ROLE service_role;
+DO $$ DECLARE kind text; e uuid; t uuid; r jsonb; BEGIN
+ FOREACH kind IN ARRAY ARRAY['SIP','STP','SWP'] LOOP
+  e:=pg_temp.queue_master(kind); t:=gen_random_uuid();
+  PERFORM public.claim_nse_master_download(e,t);
+  PERFORM pg_temp.capture_master(e,t,pg_temp.file(kind));
+  r:=public.finalize_nse_master_download(e,t);
+  IF r->>'outcome'<>'STAGED_VALIDATED' THEN RAISE EXCEPTION 'b063_service_runtime_failed'; END IF;
+  BEGIN PERFORM nse_reference.validate_sip_v1((r->>'snapshot_id')::uuid); RAISE EXCEPTION 'b063_private_plugin_allowed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ END LOOP;
+END $$;
+RESET ROLE;
+
 SELECT count(*) AS b063_assertions FROM b063_assertions;
 ROLLBACK;

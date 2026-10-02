@@ -1,4 +1,4 @@
--- B06.3: document-profile product references; no investor or runtime mutations.
+-- B06.3: reference-only product profiles registered with the shared B06.2 runtime.
 BEGIN;
 CREATE TABLE nse_reference.systematic_validations (
   snapshot_id uuid NOT NULL,
@@ -190,7 +190,8 @@ LANGUAGE sql STABLE SET search_path='' AS $$
     'download_id',s.download_id,'parser_version',v.parser_version,'layout_id',v.layout_id,
     'source_sha256',encode(v.source_sha256,'hex'),'source_bytes',v.source_bytes,
     'header_sha256',encode(v.header_sha256,'hex'),'row_count',v.row_count,
-    'rejected_rows',v.rejected_rows,'authority',v.authority)
+    'rejected_rows',v.rejected_rows,'authority',v.authority,
+    'eligibility','UNINTERPRETED','reason','PRODUCT_SEMANTICS_UNCOMMISSIONED')
   FROM nse_reference.systematic_validations v JOIN nse_reference.snapshots s ON s.id=v.snapshot_id
   WHERE v.snapshot_id=p_snapshot
 $$;
@@ -380,4 +381,47 @@ REVOKE ALL ON FUNCTION public.validate_nse_systematic_snapshot(uuid,uuid),public
   FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.validate_nse_systematic_snapshot(uuid,uuid),public.publish_nse_systematic_snapshot(uuid,uuid,uuid),
   public.get_nse_systematic_current(uuid,uuid,text),public.get_nse_systematic_products(uuid,uuid,text,integer,integer) TO service_role;
+-- The shared worker stages only. Reference publication remains an explicit CAS RPC.
+-- Catch only parser rejections, in a subtransaction that removes every partial row
+-- and typed receipt. Integrity, ownership, audit and unexpected errors propagate.
+CREATE FUNCTION nse_reference.systematic_runtime_validation(p_snapshot uuid,p_file_type text) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE s nse_reference.snapshots; receipt jsonb;
+BEGIN
+  SELECT * INTO s FROM nse_reference.snapshots WHERE id=p_snapshot AND file_type::text=p_file_type;
+  IF s.id IS NULL OR p_file_type NOT IN ('SIP','STP','SWP') THEN
+    RAISE EXCEPTION 'nse_systematic_variant_invalid'; END IF;
+  BEGIN
+    receipt:=nse_reference.validate_systematic(s.workspace_id,s.id);
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT IN ('nse_systematic_encoding_invalid','nse_systematic_framing_invalid',
+      'nse_systematic_layout_unknown','nse_systematic_row_count_invalid','nse_systematic_row_invalid',
+      'nse_systematic_column_count','nse_systematic_field_invalid','nse_systematic_number_invalid',
+      'nse_systematic_reserved_field','nse_systematic_duplicate_row') THEN RAISE; END IF;
+    RETURN pg_catalog.jsonb_build_object('status','REJECTED','category','nse_reference_systematic_layout_invalid',
+      'row_count',0,'rejected_rows',0,'validation_scope','STRUCTURE_ONLY_REFERENCE_ONLY');
+  END;
+  RETURN pg_catalog.jsonb_build_object('status','STAGED_VALIDATED','category','nse_reference_systematic_layout_valid',
+    'row_count',(receipt->>'row_count')::integer,'rejected_rows',0,'validation_scope','STRUCTURE_ONLY_REFERENCE_ONLY');
+END $$;
+CREATE FUNCTION nse_reference.validate_sip_v1(p_snapshot uuid) RETURNS jsonb
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+  SELECT nse_reference.systematic_runtime_validation(p_snapshot,'SIP')
+$$;
+CREATE FUNCTION nse_reference.validate_stp_v1(p_snapshot uuid) RETURNS jsonb
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+  SELECT nse_reference.systematic_runtime_validation(p_snapshot,'STP')
+$$;
+CREATE FUNCTION nse_reference.validate_swp_v1(p_snapshot uuid) RETURNS jsonb
+LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+  SELECT nse_reference.systematic_runtime_validation(p_snapshot,'SWP')
+$$;
+INSERT INTO nse_reference.validators(file_type,parser_version,function_name) VALUES
+  ('SIP','NSE_WEB_SIP_V1','validate_sip_v1'),
+  ('STP','NSE_WEB_STP_V1','validate_stp_v1'),
+  ('SWP','NSE_WEB_SWP_V1','validate_swp_v1');
+REVOKE ALL ON FUNCTION nse_reference.systematic_runtime_validation(uuid,text),
+  nse_reference.validate_sip_v1(uuid),nse_reference.validate_stp_v1(uuid),nse_reference.validate_swp_v1(uuid)
+  FROM PUBLIC,anon,authenticated,service_role;
+
 COMMIT;

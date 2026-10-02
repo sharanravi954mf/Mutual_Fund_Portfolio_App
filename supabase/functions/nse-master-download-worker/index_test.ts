@@ -6,7 +6,10 @@ import {
 import { createNseMasterDownloadHandler } from "./handler.ts";
 import { createMasterPersistence } from "./adapters.ts";
 import type { MasterClaim, MasterPersistence } from "./types.ts";
-import type { NseMasterCapture } from "../_shared/nse/nse_master_download.ts";
+import type {
+  NseMasterCapture,
+  NseMasterFileType,
+} from "../_shared/nse/nse_master_download.ts";
 const eventId = "b0620000-0000-4000-8000-000000000001";
 const token = "b0620000-0000-4000-8000-000000000002";
 const config = {
@@ -24,7 +27,12 @@ const scope = {
   environment: "UAT" as const,
   fileType: "SCH" as const,
 };
-function fixture(action: MasterClaim["action"] = "CAPTURE") {
+function fixture(
+  action: MasterClaim["action"] = "CAPTURE",
+  fileType: NseMasterFileType = "SCH",
+) {
+  const variantScope = { ...scope, fileType };
+  const requestBody = JSON.stringify({ file_type: fileType });
   const calls: string[] = [];
   const captures: NseMasterCapture[] = [];
   const persistence: MasterPersistence = {
@@ -34,7 +42,7 @@ function fixture(action: MasterClaim["action"] = "CAPTURE") {
       calls.push("claim");
       return action === "DONE" || action === "BUSY"
         ? { action }
-        : { action, eventId, scope };
+        : { action, eventId, scope: variantScope };
     },
     evidence(id, claimToken) {
       assertEquals(id, eventId);
@@ -42,7 +50,7 @@ function fixture(action: MasterClaim["action"] = "CAPTURE") {
       return {
         async begin(s) {
           calls.push("begin");
-          return { download_id: s.callId, request_body: '{"file_type":"SCH"}' };
+          return { download_id: s.callId, request_body: requestBody };
         },
         async append() {
           calls.push("append");
@@ -66,7 +74,7 @@ function fixture(action: MasterClaim["action"] = "CAPTURE") {
       uuid: () => token,
       fetcher: (_url, init) => {
         calls.push("http");
-        assertEquals(init?.body, '{"file_type":"SCH"}');
+        assertEquals(init?.body, requestBody);
         return Promise.resolve(
           new Response("a|b\n", {
             headers: { "content-type": "text/plain", "content-length": "4" },
@@ -282,3 +290,78 @@ Deno.test("master adapter: rejects missing acknowledgement, RPC error and forged
     await assertRejects(() => p.finalize(eventId, token));
   }
 });
+
+for (const fileType of ["SIP", "STP", "SWP"] as const) {
+  Deno.test(`master worker: ${fileType} uses the shared capture and finalization route`, async () => {
+    const f = fixture("CAPTURE", fileType);
+    const finalize = f.persistence.finalize;
+    let acknowledgements = 0;
+    f.persistence.finalize = async (...args) => {
+      const result = await finalize(...args);
+      if (!acknowledgements++) throw new Error("lost acknowledgement");
+      return result;
+    };
+    const response = await f.handler()(f.request());
+    assertEquals(response.status, 200);
+    assertEquals(f.calls, [
+      "claim",
+      "begin",
+      "http",
+      "append",
+      "seal",
+      "finalize",
+      "finalize",
+    ]);
+    assertEquals(f.captures[0].kind, "COMPLETE");
+    assertEquals((await response.json()).data, {
+      outcome: "STAGED_VALIDATED",
+      snapshot_id: eventId,
+      publication_gate: "BLOCKED",
+    });
+    const recovery = fixture("FINALIZE", fileType);
+    assertEquals((await recovery.handler()(recovery.request())).status, 200);
+    assertEquals(recovery.calls, ["claim", "finalize"]);
+  });
+  Deno.test(`master adapter: ${fileType} is SQL-selected and never a caller parameter`, async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const p = createMasterPersistence({
+      rpc(name, args) {
+        calls.push({ name, args });
+        return Promise.resolve({
+          error: null,
+          data: name === "claim_nse_master_download"
+            ? {
+              action: "CAPTURE",
+              event_outbox_id: eventId,
+              workspace_id: eventId,
+              connection_id: eventId,
+              download_id: eventId,
+              file_type: fileType,
+              environment: "UAT",
+            }
+            : {
+              download_id: eventId,
+              request_body: JSON.stringify({ file_type: fileType }),
+            },
+        });
+      },
+    });
+    const claim = await p.claim(eventId, token);
+    assert(claim.action === "CAPTURE");
+    assertEquals(claim.scope.fileType, fileType);
+    await p.evidence(eventId, token).begin(claim.scope, {
+      memberCode: config.memberCode,
+      baseUrl: config.baseUrl,
+      captureToken: token,
+    });
+    assertEquals(calls.map((call) => call.name), [
+      "claim_nse_master_download",
+      "begin_nse_master_job_capture",
+    ]);
+    for (const { args } of calls) {
+      assertEquals(args.p_event_outbox_id, eventId);
+      assertEquals(args.p_claim_token, token);
+      assert(!("p_file_type" in args));
+    }
+  });
+}
