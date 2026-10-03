@@ -17,6 +17,11 @@ VALUES
   ('51000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'active-investor@sharanfincorp.test', '{}', '{}', now(), now()),
   ('51000000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'suspended-investor@sharanfincorp.test', '{}', '{}', now(), now());
 
+-- Trusted fixture provisioning: public signup no longer creates business profiles.
+INSERT INTO public.profiles(user_id,role,email,full_name)
+SELECT id,'investor',email,'Fixture' FROM auth.users WHERE id::text LIKE '51000000%';
+UPDATE auth.users SET email_confirmed_at=now() WHERE id::text LIKE '51000000%';
+
 -- Update user accounts state
 UPDATE public.user_accounts SET account_state = 'advisor' WHERE user_id IN ('51000000-0000-0000-0000-000000000001', '51000000-0000-0000-0000-000000000002');
 UPDATE public.user_accounts SET account_state = 'linked_investor' WHERE user_id IN ('51000000-0000-0000-0000-000000000003', '51000000-0000-0000-0000-000000000004');

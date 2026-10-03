@@ -3,16 +3,19 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
   factory SupabaseService() => _instance;
-  SupabaseService._internal();
+  SupabaseService._internal() : client = Supabase.instance.client;
+  SupabaseService.withClient(this.client);
 
-  final SupabaseClient client = Supabase.instance.client;
+  final SupabaseClient client;
 
   /// Authenticate user via email/phone & password
   Future<AuthResponse> signIn(String emailOrPhone, String password) async {
     final trimmed = emailOrPhone.trim();
-    final isPhone = RegExp(r'^\d{3}').hasMatch(trimmed);
+    final isPhone = !trimmed.contains('@') &&
+        RegExp(r'^\+?[0-9 ()-]{10,}$').hasMatch(trimmed);
     if (isPhone) {
-      final phone = trimmed.startsWith('+') ? trimmed : '+91$trimmed';
+      final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+      final phone = trimmed.startsWith('+') ? '+$digits' : '+91$digits';
       return await client.auth
           .signInWithPassword(phone: phone, password: password);
     } else {

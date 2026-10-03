@@ -65,6 +65,7 @@ INSERT INTO auth.users (
 
 UPDATE public.user_accounts SET account_state = 'linked_investor'
 WHERE user_id = '${REFERRER_USER_ID}';
+INSERT INTO public.profiles(user_id,role) VALUES ('${REFERRER_USER_ID}','investor');
 UPDATE public.profiles SET id = '${REFERRER_PROFILE_ID}', role = 'investor', account_status = 'active'
 WHERE user_id = '${REFERRER_USER_ID}';
 
@@ -117,6 +118,7 @@ INSERT INTO auth.users (
 );
 UPDATE public.user_accounts SET account_state = 'linked_investor'
 WHERE user_id = '${REFEREE_USER_ID}';
+INSERT INTO public.profiles(user_id,role) VALUES ('${REFEREE_USER_ID}','investor');
 UPDATE public.profiles SET id = '${REFEREE_PROFILE_ID}', role = 'investor', account_status = 'active'
 WHERE user_id = '${REFEREE_USER_ID}';
 INSERT INTO public.investor_account_links (

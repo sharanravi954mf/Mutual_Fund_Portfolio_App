@@ -365,7 +365,10 @@ application testing, separately review and configure:
 - CAPTCHA/bot protection (not declared in the repository); and
 - JWT/session policy consistency with the application.
 
-The current Flutter client signs in with a password using either email or phone.
+The Flutter client offers Sign In and email Sign Up on its first screen; existing
+email/phone password sign-in remains. The local V1 candidate adds verified email
+bootstrap and profile-free Explorers. See [Email Signup + Verification V1](architecture/EMAIL_SIGNUP_VERIFICATION_V1.md)
+for the full lifecycle and manual DEV settings. Hosted configuration is unchanged.
 No hosted Auth credential belongs in Git.
 
 ### Scheduling and background triggers
