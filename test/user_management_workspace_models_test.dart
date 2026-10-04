@@ -118,6 +118,7 @@ void main() {
     test('AdvisorInvestorAssignment parsing', () {
       final json = {
         'id': 'assignment-uuid',
+        'workspace_id': 'workspace-uuid',
         'advisor_id': 'advisor-uuid',
         'investor_id': 'investor-uuid',
         'assigned_by': 'assigner-uuid',
@@ -132,6 +133,7 @@ void main() {
       final assignment = AdvisorInvestorAssignment.fromJson(json);
 
       expect(assignment.id, 'assignment-uuid');
+      expect(assignment.workspaceId, 'workspace-uuid');
       expect(assignment.advisorId, 'advisor-uuid');
       expect(assignment.investorId, 'investor-uuid');
       expect(assignment.status, AssignmentStatus.active);
