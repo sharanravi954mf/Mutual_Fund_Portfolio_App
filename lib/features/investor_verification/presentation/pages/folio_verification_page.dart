@@ -1,3 +1,5 @@
+import 'dart:math';
+import '../widgets/verification_workspace_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -53,12 +55,15 @@ class _FolioVerificationPageState extends State<FolioVerificationPage> {
                   FolioSubmissionForm(
                     isSubmitting: controller.isSubmitting,
                     onSubmit: (registrar, folio, relationship) async {
+                      final workspaceId = await loadVerificationWorkspace(
+                          context, controller.getWorkspaces);
+                      if (workspaceId == null) return;
                       await controller.submitVisibleFolio(
+                        workspaceId: workspaceId,
                         registrar: registrar,
                         folioNumber: folio,
                         relationship: relationship,
-                        correlationId:
-                            DateTime.now().microsecondsSinceEpoch.toString(),
+                        correlationId: _correlationId(),
                       );
                       if (mounted &&
                           controller.state is FolioVerificationReady) {
@@ -136,7 +141,7 @@ class _FolioVerificationPageState extends State<FolioVerificationPage> {
       FolioVerificationDecisionCommand(
         requestId: row.requestId,
         expectedVersion: row.version,
-        correlationId: DateTime.now().microsecondsSinceEpoch.toString(),
+        correlationId: _correlationId(),
       ),
     );
     if (mounted && controller.state is FolioVerificationReady) {
@@ -152,11 +157,21 @@ class _FolioVerificationPageState extends State<FolioVerificationPage> {
       FolioVerificationDecisionCommand(
         requestId: row.requestId,
         expectedVersion: row.version,
-        correlationId: DateTime.now().microsecondsSinceEpoch.toString(),
+        correlationId: _correlationId(),
       ),
     );
     if (mounted && controller.state is FolioVerificationReady) {
       await controller.refresh();
     }
   }
+}
+
+String _correlationId() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex =
+      bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
 }

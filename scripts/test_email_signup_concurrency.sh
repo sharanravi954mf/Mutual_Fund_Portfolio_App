@@ -2,7 +2,7 @@
 # Only run against the disposable container created by test_email_signup_sql.sh.
 set -euo pipefail
 container=${1:?disposable container required}
-[[ "$container" == moneybowl-email-signup-* ]] || exit 2
+[[ "$container" == moneybowl-email-signup-* || "$container" == moneybowl-authz-regression-* ]] || exit 2
 psql_local() { docker exec -i "$container" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
 psql_local <<'SQL'
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES

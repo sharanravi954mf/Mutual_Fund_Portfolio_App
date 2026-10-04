@@ -27,8 +27,10 @@ void main() {
         policy.canLoadInvestorPortfolio(AccountState.linkedInvestor), isTrue);
   });
 
-  test('Advisor can access all portfolios through the Advisor policy', () {
-    expect(policy.canAccessAllPortfolios(AccountState.advisor), isTrue);
+  test('Account state alone never grants access to all portfolios', () {
+    for (final state in AccountState.values) {
+      expect(policy.canAccessAllPortfolios(state), isFalse);
+    }
     expect(policy.canLoadInvestorPortfolio(AccountState.advisor), isFalse);
   });
 

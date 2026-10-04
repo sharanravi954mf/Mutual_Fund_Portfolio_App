@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { requireAdvisor } from "../_shared/authorization.ts";
+import { requirePlatformAdmin } from "../_shared/authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,7 +13,7 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const authorization = await requireAdvisor(req);
+  const authorization = await requirePlatformAdmin(req);
   if ("failure" in authorization) {
     return new Response(
       JSON.stringify({ error: authorization.failure.message }),

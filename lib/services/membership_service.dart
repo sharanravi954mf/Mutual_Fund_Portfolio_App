@@ -23,10 +23,10 @@ class MembershipService {
     MembershipStatus status,
   ) async {
     try {
-      await _client.from('workspace_memberships').update({
-        'status': status.databaseValue,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', membershipId);
+      await _client.rpc('set_workspace_membership_status', params: {
+        'p_membership_id': membershipId,
+        'p_status': status.databaseValue,
+      });
       return true;
     } catch (e) {
       return false;
@@ -38,16 +38,8 @@ class MembershipService {
     String profileId,
     WorkspaceRole role,
   ) async {
-    try {
-      final response = await _client.from('workspace_memberships').insert({
-        'workspace_id': workspaceId,
-        'profile_id': profileId,
-        'role': role.databaseValue,
-        'status': 'active',
-      }).select().single();
-      return WorkspaceMembership.fromJson(response);
-    } catch (e) {
-      return null;
-    }
+    // Admission requires a verified recipient accepting a stored invitation.
+    // A known profile UUID alone cannot establish a customer relationship.
+    throw UnsupportedError('Use a workspace invitation to add a member.');
   }
 }

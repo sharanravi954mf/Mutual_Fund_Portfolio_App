@@ -62,7 +62,11 @@ class _FakePanRepository implements VerificationRepository {
   @override
   Future<void> cancelRequest(String requestId, int expectedVersion) async {}
   @override
-  Future<VerificationRequest> createRequest(VerificationMethod method) =>
+  Future<List<VerificationWorkspace>> getWorkspaces() async =>
+      const [VerificationWorkspace('A', 'Advisor A')];
+  @override
+  Future<VerificationRequest> createRequest(VerificationMethod method,
+          {String? workspaceId}) =>
       throw UnimplementedError();
   @override
   Future<List<VerificationEvent>> getHistory(String requestId) async =>

@@ -1,3 +1,4 @@
+import '../models/verification_workspace.dart';
 import 'package:flutter/foundation.dart';
 
 import '../application/folio_verification_service.dart';
@@ -59,7 +60,11 @@ class FolioVerificationController extends ChangeNotifier {
     }
   }
 
+  Future<List<VerificationWorkspace>> getWorkspaces() =>
+      _service.getWorkspaces();
+
   Future<void> submitVisibleFolio({
+    String? workspaceId,
     required String registrar,
     required String folioNumber,
     required FolioHolderRelationship relationship,
@@ -71,6 +76,7 @@ class FolioVerificationController extends ChangeNotifier {
       await _execute(
         () async {
           final request = await _service.submitUsingVisibleFolio(
+            workspaceId: workspaceId,
             registrar: registrar,
             folioNumber: folioNumber,
             relationship: relationship,
@@ -82,6 +88,7 @@ class FolioVerificationController extends ChangeNotifier {
           );
         },
         retry: () => submitVisibleFolio(
+          workspaceId: workspaceId,
           registrar: registrar,
           folioNumber: folioNumber,
           relationship: relationship,

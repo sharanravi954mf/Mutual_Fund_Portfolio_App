@@ -12,6 +12,12 @@ class SupabaseVerificationRepository implements VerificationRepository {
   final SupabaseClient _client;
 
   @override
+  Future<List<VerificationWorkspace>> getWorkspaces() async =>
+      _rows(await _client.rpc('list_my_verification_workspaces'))
+          .map(VerificationWorkspace.fromJson)
+          .toList();
+
+  @override
   Future<List<VerificationRequest>> getStatus() async => _requests(
         await _client.rpc('get_verification_status'),
       );
@@ -25,9 +31,11 @@ class SupabaseVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<VerificationRequest> createRequest(VerificationMethod method) async {
+  Future<VerificationRequest> createRequest(VerificationMethod method,
+      {String? workspaceId}) async {
     await _client.rpc('create_verification_request', params: {
       'p_method_code': method.databaseValue,
+      if (workspaceId != null) 'p_workspace_id': workspaceId,
     });
     return (await getStatus()).first;
   }

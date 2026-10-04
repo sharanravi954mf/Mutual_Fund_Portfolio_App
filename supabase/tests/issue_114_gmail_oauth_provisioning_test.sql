@@ -7,6 +7,8 @@ VALUES
   ('91400000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'issue114-advisor@moneybowl.test', '{"user_role":"mfd"}', '{}', now(), now()),
   ('91400000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'issue114-investor@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now());
 
+INSERT INTO public.profiles(user_id,role) SELECT id,'investor' FROM auth.users WHERE id::text LIKE '91400000-%';
+
 UPDATE public.profiles SET id = '91410000-0000-0000-0000-000000000001', role = 'advisor'
 WHERE user_id = '91400000-0000-0000-0000-000000000001';
 UPDATE public.profiles SET id = '91410000-0000-0000-0000-000000000002', role = 'investor'
@@ -147,6 +149,24 @@ UPDATE public.workspace_memberships
 SET status = 'active'
 WHERE workspace_id = '91420000-0000-0000-0000-000000000001'
   AND profile_id = '91410000-0000-0000-0000-000000000001';
+
+DO $$ DECLARE change text; BEGIN
+  FOREACH change IN ARRAY ARRAY[
+    'UPDATE public.profiles SET account_status=''suspended'' WHERE id=''91410000-0000-0000-0000-000000000001''',
+    'UPDATE auth.users SET banned_until=now()+interval ''1 hour'' WHERE id=''91400000-0000-0000-0000-000000000001'''
+  ] LOOP
+    EXECUTE change;
+    EXECUTE 'SET LOCAL ROLE service_role';
+    BEGIN
+      PERFORM public.complete_mailbox_oauth_authorization((SELECT authorization_id FROM issue_114_context),
+        encode('encrypted-envelope-only'::bytea,'base64'),encode(repeat('n',12)::bytea,'base64'),1,now()+interval '1 hour');
+      RAISE EXCEPTION 'suspended_actor_completion_allowed';
+    EXCEPTION WHEN raise_exception THEN IF SQLERRM <> 'not_authorized' THEN RAISE; END IF; END;
+    EXECUTE 'RESET ROLE';
+    UPDATE public.profiles SET account_status='active' WHERE id='91410000-0000-0000-0000-000000000001';
+    UPDATE auth.users SET banned_until=NULL WHERE id='91400000-0000-0000-0000-000000000001';
+  END LOOP;
+END $$;
 
 SET ROLE service_role;
 SELECT public.complete_mailbox_oauth_authorization(

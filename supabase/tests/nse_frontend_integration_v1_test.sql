@@ -6,6 +6,9 @@ SELECT 1 FROM vault.create_secret(repeat('e',40),'integration_payload_encryption
 INSERT INTO auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 SELECT ('aa010000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'authenticated','authenticated',
  'nse-app-'||n||'@moneybowl.invalid','{}','{}',now(),now() FROM generate_series(1,9) n;
+-- Trusted fixture provisioning: public signup deliberately creates no profile.
+INSERT INTO public.profiles(user_id,role)
+SELECT id,'investor' FROM auth.users WHERE id::text LIKE 'aa010000-%';
 UPDATE public.profiles SET role=CASE right(user_id::text,1) WHEN '1' THEN 'admin' WHEN '2' THEN 'advisor' WHEN '3' THEN 'advisor'
  WHEN '6' THEN 'operations' WHEN '7' THEN 'platform_admin' WHEN '8' THEN 'advisor' ELSE 'investor' END
  WHERE user_id::text LIKE 'aa010000-%';
@@ -19,7 +22,8 @@ SELECT ('aa030000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  CASE WHEN n=5 THEN 'aa020000-0000-4000-8000-000000000002'::uuid ELSE 'aa020000-0000-4000-8000-000000000001'::uuid END,
  pg_temp.profile(n),CASE WHEN n=1 THEN 'admin' WHEN n IN (2,3,8) THEN 'advisor' WHEN n=6 THEN 'operations' ELSE 'investor' END,
  CASE WHEN n=8 THEN 'inactive' ELSE 'active' END FROM generate_series(1,9) n;
-INSERT INTO public.advisor_investor_assignments(advisor_id,investor_id) VALUES(pg_temp.profile(2),pg_temp.profile(4));
+INSERT INTO public.advisor_investor_assignments(workspace_id,advisor_id,investor_id)
+VALUES('aa020000-0000-4000-8000-000000000001',pg_temp.profile(2),pg_temp.profile(4));
 INSERT INTO public.integration_accounts(id,workspace_id,investor_profile_id,integration_key,integration_environment,external_account_id,state)
 SELECT ('aa040000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  CASE WHEN n=4 THEN 'aa020000-0000-4000-8000-000000000001'::uuid ELSE 'aa020000-0000-4000-8000-000000000002'::uuid END,
@@ -261,8 +265,8 @@ DO $$ BEGIN
 END $$;
 SELECT pg_temp.identity(3);
 DO $$ BEGIN
- BEGIN INSERT INTO public.advisor_investor_assignments(advisor_id,investor_id)
- VALUES(public.current_user_profile_id(),(SELECT id FROM public.profiles WHERE user_id='aa010000-0000-4000-8000-000000000004'));
+ BEGIN INSERT INTO public.advisor_investor_assignments(workspace_id,advisor_id,investor_id)
+ VALUES('aa020000-0000-4000-8000-000000000001',public.current_user_profile_id(),(SELECT id FROM public.profiles WHERE user_id='aa010000-0000-4000-8000-000000000004'));
  RAISE EXCEPTION 'self_assignment_allowed'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 RESET ROLE;

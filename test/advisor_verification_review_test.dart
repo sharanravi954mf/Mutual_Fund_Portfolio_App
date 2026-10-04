@@ -191,7 +191,11 @@ class _FakeRepository implements VerificationRepository {
   Future<void> cancelRequest(String requestId, int expectedVersion) async {}
 
   @override
-  Future<VerificationRequest> createRequest(VerificationMethod method) async =>
+  Future<List<VerificationWorkspace>> getWorkspaces() async =>
+      const [VerificationWorkspace('A', 'Advisor A')];
+  @override
+  Future<VerificationRequest> createRequest(VerificationMethod method,
+          {String? workspaceId}) async =>
       _request;
 
   @override

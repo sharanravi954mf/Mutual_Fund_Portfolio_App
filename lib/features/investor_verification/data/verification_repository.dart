@@ -1,9 +1,13 @@
+import '../models/verification_workspace.dart';
+export '../models/verification_workspace.dart';
 import '../models/verification_models.dart';
 
 abstract class VerificationRepository {
+  Future<List<VerificationWorkspace>> getWorkspaces();
   Future<List<VerificationRequest>> getStatus();
   Future<List<VerificationEvent>> getHistory(String requestId);
-  Future<VerificationRequest> createRequest(VerificationMethod method);
+  Future<VerificationRequest> createRequest(VerificationMethod method,
+      {String? workspaceId});
   Future<PanVerificationSubmission> submitPanVerification(String pan);
   Future<void> cancelRequest(String requestId, int expectedVersion);
   Future<List<VerificationRequest>> reviewQueue(
