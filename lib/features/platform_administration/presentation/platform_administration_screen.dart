@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../mfd_applications/data/mfd_application_repository.dart';
+import '../../mfd_applications/presentation/mfd_application_screens.dart';
 
-/// A read-only operator context. No tenant data or MFD approval UI is loaded.
+/// Independent platform context; application review never loads tenant data.
 class PlatformAdministrationScreen extends StatefulWidget {
-  const PlatformAdministrationScreen({super.key});
+  const PlatformAdministrationScreen({super.key, this.mfdRepository});
+
+  final MfdApplicationRepository? mfdRepository;
 
   @override
   State<PlatformAdministrationScreen> createState() =>
@@ -65,9 +69,14 @@ class _PlatformAdministrationScreenState
           ListTile(
               leading: const Icon(Icons.business_outlined),
               title: const Text('MFD applications'),
+              onTap: platform.capabilities.contains('mfd_applications.review')
+                  ? () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => MfdReviewQueueScreen(
+                          repository: widget.mfdRepository)))
+                  : null,
               subtitle: Text(platform.capabilities
                       .contains('mfd_applications.review')
-                  ? 'Review permission is available. Applications and decisions are coming in the next phase.'
+                  ? 'View applications and review submitted registration claims.'
                   : 'Applications and decisions are unavailable. Review permission has not been granted.')),
           ListTile(
               leading: const Icon(Icons.account_circle_outlined),

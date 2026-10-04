@@ -8,8 +8,7 @@ import 'authentication/route_guard_test.dart' show FakeAuthProvider;
 
 void main() {
   for (final mfa in [false, true]) {
-    testWidgets(
-        'read-only platform shell works without business profile (MFA $mfa)',
+    testWidgets('platform shell works without business profile (MFA $mfa)',
         (tester) async {
       final auth = FakeAuthProvider(
           isAuthenticated: true,
@@ -22,7 +21,8 @@ void main() {
           value: auth,
           child: const MaterialApp(home: PlatformAdministrationScreen())));
       expect(find.text('MoneyBowl Platform Administration'), findsOneWidget);
-      expect(find.textContaining('coming in the next phase'), findsOneWidget);
+      expect(
+          find.textContaining('View applications and review'), findsOneWidget);
       expect(
           find.text(mfa
               ? 'MFA verified for this session.'
