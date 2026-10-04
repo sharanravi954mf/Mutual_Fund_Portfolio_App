@@ -8,7 +8,9 @@ import 'package:mutual_fund_portfolio_app/features/investor_identity/models/user
 import 'package:mutual_fund_portfolio_app/features/authentication/services/route_guard.dart';
 import 'package:mutual_fund_portfolio_app/features/authentication/services/identity_verification_service.dart';
 
-class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
+class FakeAuthProvider extends ChangeNotifier
+    with WidgetsBindingObserver
+    implements AuthProvider {
   FakeAuthProvider({
     bool isLoading = false,
     bool isAuthenticated = false,
@@ -21,10 +23,30 @@ class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
         _userProfile = userProfile,
         _platformContext = platformContext;
 
+  @override
+  int accountGeneration = 0;
+  @override
+  bool platformContextCurrent = true;
+  @override
+  bool platformAssuranceMismatch = false;
+  @override
+  SupabaseClient get client => throw StateError('Inject a fake MFA repository');
+  @override
+  void invalidatePlatformContext() {
+    platformContextCurrent = false;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> refreshPlatformContext() async {}
+
   PlatformContext _platformContext;
   @override
-  PlatformContext get platformContext => _platformContext;
+  PlatformContext get platformContext => platformContextCurrent
+      ? _platformContext
+      : _platformContext.withoutStepUp();
   void updatePlatformContext(PlatformContext value) {
+    platformContextCurrent = true;
     _platformContext = value;
     notifyListeners();
   }

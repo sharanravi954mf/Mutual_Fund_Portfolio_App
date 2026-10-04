@@ -55,6 +55,7 @@ class MfdAuth extends FakeAuthProvider {
       aud: 'authenticated',
       createdAt: '2026-10-04T00:00:00Z');
   void changeSession() {
+    accountGeneration++;
     sessionUser = 'another-user';
     notifyListeners();
   }
@@ -70,7 +71,7 @@ class FakeMfdRepository implements MfdApplicationRepository {
   bool eligible = true;
   List<MfdApplication> items = [];
   List<MfdRequest> requests = [];
-  Object? failure;
+  Object? failure, loadFailure;
   Completer<void>? wait;
   int reads = 0;
   @override
@@ -85,6 +86,7 @@ class FakeMfdRepository implements MfdApplicationRepository {
   @override
   Future<MfdApplication> load(String id) async {
     reads++;
+    if (loadFailure != null) throw loadFailure!;
     return items.single;
   }
 
