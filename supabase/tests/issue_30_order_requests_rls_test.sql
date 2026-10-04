@@ -15,6 +15,9 @@ VALUES
   ('97000000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 'issue30-family-guest@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now()),
   ('97000000-0000-0000-0000-000000000010', 'authenticated', 'authenticated', 'issue30-inactive-investor@moneybowl.test', '{"user_role":"investor"}', '{}', now(), now());
 
+-- Public signup is neutral; provision trusted fixture identities explicitly.
+INSERT INTO public.profiles(user_id,role) SELECT id,'investor' FROM auth.users WHERE id::text LIKE '97000000-%';
+
 UPDATE public.user_accounts
 SET account_state = 'advisor'
 WHERE user_id IN (
@@ -533,7 +536,7 @@ BEGIN
     );
     RAISE EXCEPTION 'investor initiated for another investor';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected investor-other insert error: %', SQLERRM;
     END IF;
   END;
@@ -564,7 +567,7 @@ BEGIN
     );
     RAISE EXCEPTION 'investor initiated outside active workspace';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('investor_workspace_relationship_required', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'investor_workspace_relationship_required', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected investor outside-workspace insert error: %', SQLERRM;
     END IF;
   END;
@@ -728,7 +731,7 @@ BEGIN
     );
     RAISE EXCEPTION 'MFD initiated for an inactive investor relationship';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('investor_workspace_relationship_required', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'investor_workspace_relationship_required', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected inactive investor relationship error: %', SQLERRM;
     END IF;
   END;
@@ -759,7 +762,7 @@ BEGIN
     );
     RAISE EXCEPTION 'cross-workspace MFD initiated an order';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected cross-workspace MFD error: %', SQLERRM;
     END IF;
   END;
@@ -831,7 +834,7 @@ BEGIN
     );
     RAISE EXCEPTION 'unrelated MFD initiated an order';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected unrelated MFD insert error: %', SQLERRM;
     END IF;
   END;
@@ -869,7 +872,7 @@ BEGIN
     );
     RAISE EXCEPTION 'inactive advisor initiated an order';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected inactive advisor insert error: %', SQLERRM;
     END IF;
   END;
@@ -945,7 +948,7 @@ BEGIN
     );
     RAISE EXCEPTION 'Family Guest initiated for another family member';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'order_initiator_not_authorized', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected Family Guest insert error: %', SQLERRM;
     END IF;
   END;
@@ -983,7 +986,7 @@ BEGIN
     );
     RAISE EXCEPTION 'inactive investor relationship initiated an order';
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM NOT IN ('investor_workspace_relationship_required', 'new row violates row-level security policy for table "order_requests"') THEN
+    IF SQLERRM NOT IN ('not_authorized', 'investor_workspace_relationship_required', 'new row violates row-level security policy for table "order_requests"') THEN
       RAISE EXCEPTION 'Unexpected inactive investor self-initiation error: %', SQLERRM;
     END IF;
   END;

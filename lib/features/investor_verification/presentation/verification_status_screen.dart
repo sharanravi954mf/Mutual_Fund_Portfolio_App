@@ -1,3 +1,4 @@
+import 'widgets/verification_workspace_picker.dart';
 import 'package:flutter/material.dart';
 import '../data/supabase_verification_repository.dart';
 import '../data/verification_repository.dart';
@@ -21,7 +22,11 @@ class _VerificationStatusScreenState extends State<VerificationStatusScreen> {
   void _reload() => setState(() => _requests = _repository.getStatus());
 
   Future<void> _startAdvisorAssisted() async {
-    await _repository.createRequest(VerificationMethod.advisorAssisted);
+    final workspaceId =
+        await loadVerificationWorkspace(context, _repository.getWorkspaces);
+    if (workspaceId == null) return;
+    await _repository.createRequest(VerificationMethod.advisorAssisted,
+        workspaceId: workspaceId);
     if (mounted) _reload();
   }
 

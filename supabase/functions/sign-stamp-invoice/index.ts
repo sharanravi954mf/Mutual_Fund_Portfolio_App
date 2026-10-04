@@ -61,7 +61,7 @@ async function invoiceSignerAuthorizationFailure(
       auth: { autoRefreshToken: false, persistSession: false },
     },
   );
-  const { data: hasAdvisorAccess, error } = await callerClient.rpc("is_admin");
+  const { data: hasAdvisorAccess, error } = await callerClient.rpc("authorize_workspace_tools");
   if (error != null || hasAdvisorAccess !== true) {
     console.error(
       "Invoice Signer authorization check failed:",

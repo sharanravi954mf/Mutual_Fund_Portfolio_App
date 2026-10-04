@@ -211,8 +211,12 @@ class _FakeRepository
       status: FolioVerificationStatus.pendingAdvisorReview,
       version: 1);
   @override
+  Future<List<VerificationWorkspace>> getWorkspaces() async =>
+      const [VerificationWorkspace('A', 'Advisor A')];
+  @override
   Future<FolioSubmissionToken> acquireSubmissionToken(
-          String registrar, String folioNumber) =>
+          String registrar, String folioNumber,
+          {String? workspaceId}) =>
       _run(const FolioSubmissionToken('opaque'));
   @override
   Future<FolioVerificationPage<InvestorFolioRequestListRecord>>

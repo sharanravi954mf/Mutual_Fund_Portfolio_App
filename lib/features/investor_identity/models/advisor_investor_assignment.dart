@@ -9,7 +9,7 @@ enum AssignmentStatus {
       case 'ended':
         return AssignmentStatus.ended;
       default:
-        return AssignmentStatus.active;
+        return AssignmentStatus.ended;
     }
   }
 
@@ -19,6 +19,7 @@ enum AssignmentStatus {
 class AdvisorInvestorAssignment {
   const AdvisorInvestorAssignment({
     required this.id,
+    this.workspaceId,
     required this.advisorId,
     required this.investorId,
     this.assignedBy,
@@ -31,6 +32,7 @@ class AdvisorInvestorAssignment {
   });
 
   final String id;
+  final String? workspaceId;
   final String advisorId;
   final String investorId;
   final String? assignedBy;
@@ -41,19 +43,26 @@ class AdvisorInvestorAssignment {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  bool get isActive => status == AssignmentStatus.active;
+  bool get isActive =>
+      workspaceId != null &&
+      status == AssignmentStatus.active &&
+      endedAt == null;
   bool get isEnded => status == AssignmentStatus.ended;
 
   factory AdvisorInvestorAssignment.fromJson(Map<String, dynamic> json) {
     return AdvisorInvestorAssignment(
       id: json['id'] as String,
+      workspaceId: json['workspace_id'] as String?,
       advisorId: json['advisor_id'] as String,
       investorId: json['investor_id'] as String,
       assignedBy: json['assigned_by'] as String?,
       assignedAt: DateTime.parse(json['assigned_at'] as String),
       endedBy: json['ended_by'] as String?,
-      endedAt: json['ended_at'] != null ? DateTime.parse(json['ended_at'] as String) : null,
-      status: AssignmentStatus.fromDatabase(json['status'] as String? ?? 'active'),
+      endedAt: json['ended_at'] != null
+          ? DateTime.parse(json['ended_at'] as String)
+          : null,
+      status:
+          AssignmentStatus.fromDatabase(json['status'] as String? ?? 'ended'),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(
         json['updated_at'] as String? ?? json['created_at'] as String,
@@ -64,6 +73,7 @@ class AdvisorInvestorAssignment {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'workspace_id': workspaceId,
       'advisor_id': advisorId,
       'investor_id': investorId,
       'assigned_by': assignedBy,

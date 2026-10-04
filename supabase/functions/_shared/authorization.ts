@@ -20,7 +20,7 @@ function accessTokenFromRequest(req: Request): string | null {
   }
 
   const token = header.substring("Bearer ".length).trim();
-  return token.isEmpty ? null : token;
+  return token.length === 0 ? null : token;
 }
 
 function serverClient() {
@@ -53,25 +53,36 @@ export async function requireAuthenticated(
   return { userId: data.user.id };
 }
 
-export async function requireAdvisor(
+async function requireCapability(
   req: Request,
+  capability: "authorize_workspace_tools" | "is_platform_admin",
 ): Promise<AuthorizationResult> {
   const authentication = await requireAuthenticated(req);
   if ("failure" in authentication) {
     return authentication;
   }
 
-  const client = serverClient();
-  const { data, error } = await client
-    .from("profiles")
-    .select("id")
-    .eq("user_id", authentication.userId)
-    .eq("role", "admin")
-    .maybeSingle();
+  // Execute as the caller so the database checks current account/membership
+  // lifecycle. Never authorize tenant actions from a global profile label.
+  const client = createClient(
+    Deno.env.get("SUPABASE_URL") || "",
+    Deno.env.get("SUPABASE_ANON_KEY") || "",
+    { global: { headers: { Authorization: req.headers.get("authorization")! } },
+      auth: { autoRefreshToken: false, persistSession: false } },
+  );
+  const { data, error } = await client.rpc(capability);
 
-  if (error != null || data == null) {
-    return authorizationFailure(403, "Advisor access is required.");
+  if (error != null || data !== true) {
+    return authorizationFailure(403, "Authorized access is required.");
   }
 
   return authentication;
+}
+
+export function requireAdvisor(req: Request): Promise<AuthorizationResult> {
+  return requireCapability(req, "authorize_workspace_tools");
+}
+
+export function requirePlatformAdmin(req: Request): Promise<AuthorizationResult> {
+  return requireCapability(req, "is_platform_admin");
 }

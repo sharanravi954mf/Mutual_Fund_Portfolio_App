@@ -43,6 +43,7 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
   was performed.
 
 ### Fixed
+- **Authorization containment V1 local candidate**: Exact-workspace portfolio, order, NSE, verification and ingestion checks; scoped relationship provenance; lifecycle revocation; verified invitation admission; and separate Platform Admin authority. No deployment or MFD onboarding. See [architecture, compatibility and validation](architecture/AUTHORIZATION_CONTAINMENT_V1.md).
 - **CAMS AES ZIP Extraction (#113, related #109)**: Genuine CAMS mailback ZIPs
   use WinZip AES (method 99), which the Python standard-library reader cannot
   decrypt. In-memory extraction now uses pinned `pyzipper` with the existing

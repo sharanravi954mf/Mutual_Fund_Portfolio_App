@@ -39,7 +39,7 @@ enum MembershipStatus {
       case 'suspended':
         return MembershipStatus.suspended;
       default:
-        return MembershipStatus.active;
+        return MembershipStatus.inactive;
     }
   }
 
@@ -71,7 +71,7 @@ class WorkspaceMembership {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  bool get isActive => status == MembershipStatus.active;
+  bool get isActive => status == MembershipStatus.active && endedAt == null;
   bool get isSuspended => status == MembershipStatus.suspended;
   bool get isInactive => status == MembershipStatus.inactive;
 
@@ -81,9 +81,12 @@ class WorkspaceMembership {
       workspaceId: json['workspace_id'] as String,
       profileId: json['profile_id'] as String,
       role: WorkspaceRole.fromDatabase(json['role'] as String),
-      status: MembershipStatus.fromDatabase(json['status'] as String? ?? 'active'),
+      status: MembershipStatus.fromDatabase(
+          json['status'] as String? ?? 'inactive'),
       joinedAt: DateTime.parse(json['joined_at'] as String),
-      endedAt: json['ended_at'] != null ? DateTime.parse(json['ended_at'] as String) : null,
+      endedAt: json['ended_at'] != null
+          ? DateTime.parse(json['ended_at'] as String)
+          : null,
       invitedBy: json['invited_by'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(

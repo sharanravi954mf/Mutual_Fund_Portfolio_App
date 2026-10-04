@@ -75,6 +75,8 @@ class FolioVerificationService {
   final InvestorFolioVerificationRepository _investorRepository;
   final AdvisorFolioVerificationRepository _advisorRepository;
   final FolioVerificationLogSink _logSink;
+  Future<List<VerificationWorkspace>> getWorkspaces() =>
+      _investorRepository.getWorkspaces();
   Future<FolioVerificationRequest> submit(
           SubmitFolioVerificationCommand command) =>
       _run(
@@ -84,12 +86,14 @@ class FolioVerificationService {
               command.token, command.relationship, command.correlationId));
   Future<FolioVerificationRequest> submitUsingVisibleFolio(
           {required String registrar,
+          String? workspaceId,
           required String folioNumber,
           required FolioHolderRelationship relationship,
           required String correlationId}) =>
       _run('submit', correlationId, () async {
         final token = await _investorRepository.acquireSubmissionToken(
-            registrar, folioNumber);
+            registrar, folioNumber,
+            workspaceId: workspaceId);
         return _investorRepository.submit(token, relationship, correlationId);
       });
   Future<FolioVerificationRequest> resubmit(

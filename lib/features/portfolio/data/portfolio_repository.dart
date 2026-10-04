@@ -30,7 +30,9 @@ class PortfolioAccessPolicy {
   }
 
   bool canAccessAllPortfolios(AccountState accountState) {
-    return accountState == AccountState.advisor;
+    // Account state is a routing hint. Only server-scoped results establish
+    // access to a particular workspace's portfolio.
+    return false;
   }
 }
 

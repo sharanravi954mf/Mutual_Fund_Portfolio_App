@@ -3,11 +3,18 @@
 
 BEGIN;
 
--- 1. Initialize User Accounts (which automatically creates profiles via trigger)
+-- Disposable synthetic cryptographic fixtures; rolled back with this suite.
+SELECT vault.create_secret(repeat('synthetic-pan-',4),'pan_encryption_key');
+SELECT vault.create_secret(repeat('synthetic-lookup-',4),'pan_lookup_hmac_key');
+
+-- 1. Initialize neutral accounts and explicitly provision trusted fixture profiles.
 INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
   ('82000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'investor@test.com', '{"user_role":"investor"}', '{}', now(), now()),
   ('82000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'advisor@test.com', '{"user_role":"mfd"}', '{}', now(), now());
+
+INSERT INTO public.profiles(user_id,role) SELECT id,'investor' FROM auth.users WHERE id::text LIKE '82000000-%';
+INSERT INTO public.investor_account_links(user_id,profile_id,verification_method) SELECT user_id,id,'fixture' FROM public.profiles WHERE user_id='82000000-0000-0000-0000-000000000001';
 
 -- Update accounts
 UPDATE public.user_accounts SET account_state = 'linked_investor' WHERE user_id = '82000000-0000-0000-0000-000000000001';
@@ -23,7 +30,7 @@ DECLARE
   v_audit public.workspace_audit_logs;
   v_outbox public.event_outbox;
 BEGIN
-  -- Resolve auto-created profiles
+  -- Resolve trusted fixture profiles
   SELECT id INTO v_investor_profile_id FROM public.profiles WHERE user_id = '82000000-0000-0000-0000-000000000001';
   SELECT id INTO v_advisor_profile_id FROM public.profiles WHERE user_id = '82000000-0000-0000-0000-000000000002';
 
@@ -315,6 +322,8 @@ VALUES
   ('82000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'investor-b@test.com', '{"user_role":"investor"}', '{}', now(), now())
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO public.profiles(user_id,role) VALUES('82000000-0000-0000-0000-000000000003','investor');
+
 UPDATE public.user_accounts
 SET account_state = 'linked_investor'
 WHERE user_id = '82000000-0000-0000-0000-000000000003';
@@ -422,6 +431,7 @@ BEGIN
     RAISE EXCEPTION 'cross-workspace authenticated order was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT IN (
+      'not_authorized',
       'investor_workspace_relationship_required',
       'new row violates row-level security policy for table "order_requests"'
     ) THEN
@@ -458,6 +468,7 @@ BEGIN
     RAISE EXCEPTION 'cross-investor authenticated order was accepted';
   EXCEPTION WHEN OTHERS THEN
     IF SQLERRM NOT IN (
+      'not_authorized',
       'investor_initiator_mismatch',
       'order_initiator_not_authorized',
       'new row violates row-level security policy for table "order_requests"'

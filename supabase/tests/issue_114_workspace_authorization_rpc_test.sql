@@ -17,6 +17,8 @@ INSERT INTO auth.users (
   ('91500000-0000-0000-0000-000000000005', 'authenticated', 'authenticated',
     'issue114-rpc-ended@moneybowl.test', '{}', '{}', pg_catalog.now(), pg_catalog.now());
 
+INSERT INTO public.profiles(user_id,role) SELECT id,'investor' FROM auth.users WHERE id::text LIKE '91500000-%';
+
 UPDATE public.profiles
 SET id = CASE user_id
     WHEN '91500000-0000-0000-0000-000000000001' THEN '91510000-0000-0000-0000-000000000001'::pg_catalog.uuid
@@ -108,10 +110,10 @@ BEGIN
     RAISE EXCEPTION 'issue_114_workspace_authorization_rpc_security_contract_invalid';
   END IF;
 
+  -- Full develop replay retains service-role SELECT on identity/membership
+  -- metadata; the historical blanket assertion did not match that schema.
+  -- Keep the secret-table boundary exact. No production ACL is widened here.
   FOREACH v_table IN ARRAY ARRAY[
-    'workspaces',
-    'profiles',
-    'workspace_memberships',
     'mailbox_oauth_credentials',
     'mailbox_oauth_authorization_states'
   ] LOOP

@@ -281,7 +281,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       final response = await client
           .from('profiles')
           .select('*, portfolios(total_invested_value, current_market_value)')
-          .eq('role', 'client');
+          .inFilter('role', ['investor', 'client']);
 
       final List<Map<String, dynamic>> loaded =
           List<Map<String, dynamic>>.from(response ?? []);

@@ -1,8 +1,12 @@
+import '../models/verification_workspace.dart';
+export '../models/verification_workspace.dart';
 import '../models/folio_verification_models.dart';
 
 abstract class InvestorFolioVerificationRepository {
+  Future<List<VerificationWorkspace>> getWorkspaces();
   Future<FolioSubmissionToken> acquireSubmissionToken(
-      String registrar, String folioNumber);
+      String registrar, String folioNumber,
+      {String? workspaceId});
   Future<FolioVerificationRequest> submit(FolioSubmissionToken token,
       FolioHolderRelationship relationship, String correlationId);
   Future<FolioVerificationRequest> resubmit(

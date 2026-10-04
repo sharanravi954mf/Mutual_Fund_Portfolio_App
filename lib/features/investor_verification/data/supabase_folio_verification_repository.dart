@@ -15,10 +15,20 @@ class SupabaseFolioVerificationRepository
   final FolioVerificationDatasource _datasource;
   final Duration _timeout;
   @override
+  Future<List<VerificationWorkspace>> getWorkspaces() async =>
+      (await _rows('list_my_verification_workspaces'))
+          .map(VerificationWorkspace.fromJson)
+          .toList();
+
+  @override
   Future<FolioSubmissionToken> acquireSubmissionToken(
-      String registrar, String folioNumber) async {
-    final rows = await _rows('issue_folio_submission_token',
-        {'p_registrar': registrar, 'p_folio_number': folioNumber});
+      String registrar, String folioNumber,
+      {String? workspaceId}) async {
+    final rows = await _rows('issue_folio_submission_token', {
+      'p_registrar': registrar,
+      'p_folio_number': folioNumber,
+      if (workspaceId != null) 'p_workspace_id': workspaceId
+    });
     if (rows.length != 1) {
       throw const FolioVerificationFailure(
           FolioVerificationFailureCode.unexpected);

@@ -7,6 +7,29 @@ import 'package:mutual_fund_portfolio_app/features/investor_verification/data/su
 import 'package:mutual_fund_portfolio_app/features/investor_verification/models/folio_verification_models.dart';
 
 void main() {
+  test('forwards the explicitly selected workspace with a folio token request',
+      () async {
+    final source = _FakeDatasource([
+      [
+        {'workspace_id': 'A', 'workspace_name': 'MFD A'},
+        {'workspace_id': 'B', 'workspace_name': 'MFD B'}
+      ],
+      [
+        {'submission_token': 'opaque-B'}
+      ],
+    ]);
+    final repository = SupabaseFolioVerificationRepository(source);
+    final choices = await repository.getWorkspaces();
+    expect(choices.map((workspace) => workspace.id), ['A', 'B']);
+    await repository.acquireSubmissionToken('CAMS', 'shared-folio',
+        workspaceId: choices.last.id);
+    expect(source.calls.last.params, {
+      'p_registrar': 'CAMS',
+      'p_folio_number': 'shared-folio',
+      'p_workspace_id': 'B',
+    });
+  });
+
   test('maps request DTO into a safe domain entity', () {
     final request = const FolioVerificationRequestDto(_request).toDomain();
     expect(request.id, 'request-public-id');
