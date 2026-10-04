@@ -48,6 +48,8 @@ INSERT INTO public.folio_grants(id,request_id,user_id,profile_id,folio_reference
 VALUES(pg_temp.ident(901),pg_temp.ident(801),pg_temp.ident(3),pg_temp.ident(3),pg_temp.ident(600),'SOLE_HOLDER',pg_temp.ident(100));
 SELECT vault.create_secret(repeat('synthetic-key-',4),'verification_candidate_token_encryption_key');
 
+SELECT platform_authority.grant_authority(pg_temp.ident(8),'platform_admin',pg_temp.ident(888),'trusted containment fixture');
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub',pg_temp.ident(1)::text,true);
 SELECT pg_temp.ok((SELECT count(*)=1 FROM public.portfolios),'Advisor A sees only A portfolio for shared investor X');
@@ -100,7 +102,7 @@ SELECT pg_temp.ok(NOT public.authorize_workspace_tools() AND NOT public.is_platf
 SELECT set_config('request.jwt.claim.sub',pg_temp.ident(11)::text,true);
 SELECT pg_temp.ok((SELECT count(*)=0 FROM public.portfolios),'global advisor without membership has no data authority');
 SELECT set_config('request.jwt.claim.sub',pg_temp.ident(8)::text,true);
-SELECT pg_temp.ok(public.is_platform_admin() AND public.is_admin(),'existing explicit platform authority retained');
+SELECT pg_temp.ok(public.is_platform_admin() AND NOT public.is_admin(),'explicit platform authority is separate from sensitive catalogue authority');
 SELECT pg_temp.ok((SELECT count(*)=0 FROM public.portfolios),'platform admin has no implicit portfolio access');
 SELECT pg_temp.ok(NOT public.has_advisor_membership(pg_temp.ident(100)),'platform admin needs no MFD membership');
 SELECT set_config('request.jwt.claim.sub',pg_temp.ident(7)::text,true);

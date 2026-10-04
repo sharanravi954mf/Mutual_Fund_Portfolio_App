@@ -55,11 +55,15 @@ void main() {
   late SupabaseClient client;
   late List<http.Request> requests;
   String state = 'explorer';
+  bool platformGranted = false;
+  bool platformUnavailable = false;
   Completer<void>? bootstrapWait;
   bool missingLink = false;
   setUp(() {
     requests = [];
     state = 'explorer';
+    platformGranted = false;
+    platformUnavailable = false;
     bootstrapWait = null;
     missingLink = false;
     client = SupabaseClient('https://synthetic.invalid', 'synthetic-public-key',
@@ -82,6 +86,17 @@ void main() {
       }
       if (path.endsWith('/user')) {
         return jsonResponse(jsonEncode(userJson()), 200);
+      }
+      if (path.endsWith('/get_my_platform_context')) {
+        return jsonResponse(
+            jsonEncode({
+              'is_platform_admin': platformGranted,
+              'capabilities':
+                  platformGranted ? ['mfd_applications.review'] : [],
+              'step_up_verified': false,
+              'mfa_enrolled': false
+            }),
+            platformUnavailable ? 503 : 200);
       }
       if (path.endsWith('/bootstrap_identity')) {
         if (bootstrapWait != null) await bootstrapWait!.future;
@@ -119,6 +134,31 @@ void main() {
   tearDown(() async {
     await client.dispose();
   });
+  test(
+      'platform projection loads without business profile and revokes with same session',
+      () async {
+    platformGranted = true;
+    final auth = AuthProvider(client: client);
+    await auth.signIn('test@example.test', 'test passphrase only');
+    expect(auth.platformContext.isPlatformAdmin, isTrue);
+    expect(auth.userProfile, isNull);
+    expect(auth.accountState, AccountState.explorer);
+    expect(requests.where((r) => r.url.path.endsWith('/profiles')), isEmpty);
+    final token = client.auth.currentSession!.accessToken;
+    platformGranted = false;
+    await auth.refreshIdentity();
+    expect(client.auth.currentSession!.accessToken, token);
+    expect(auth.platformContext.isPlatformAdmin, isFalse);
+    platformGranted = true;
+    await auth.refreshIdentity();
+    expect(auth.platformContext.isPlatformAdmin, isTrue);
+    platformUnavailable = true;
+    await auth.refreshIdentity();
+    expect(auth.platformContext.isPlatformAdmin, isFalse);
+    expect(auth.accountState, isNull);
+    auth.dispose();
+  });
+
   test('signup/resend use SDK and fixed callback without business metadata',
       () async {
     final gateway = SupabaseEmailSignupGateway(client,

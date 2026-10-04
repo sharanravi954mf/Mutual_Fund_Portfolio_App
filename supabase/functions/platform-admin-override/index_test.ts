@@ -184,14 +184,15 @@ Deno.test("platform admin override returns step-up denial before service action"
   ]);
 });
 
-Deno.test("platform admin override appends denied terminal after target binding denial", async () => {
+for (const deniedCode of ["target_binding_mismatch", "platform_support_authority_expired"]) {
+Deno.test(`platform admin override audits denied terminal: ${deniedCode}`, async () => {
   const calls: RpcCall[] = [];
   const handler = createPlatformAdminOverrideHandler({
     authenticateClient: fakeAuth(),
     userClientForToken: () => fakeClient(calls, {}, "user"),
     serviceClient: fakeClient(calls, {
       platform_admin_restore_family_delegation_access: {
-        error: { message: "target_binding_mismatch" },
+        error: { message: deniedCode },
       },
       finish_platform_admin_override_attempt: { data: "terminal-id" },
     }, "service"),
@@ -201,15 +202,17 @@ Deno.test("platform admin override appends denied terminal after target binding 
   const body = await response.json();
 
   assertEquals(response.status, 403);
-  assertEquals(body.error.code, "target_binding_mismatch");
+  assertEquals(body.error.code, deniedCode);
   assertEquals(calls.map((call) => `${call.client}:${call.fn}`), [
     "user:begin_platform_admin_override_attempt",
     "service:platform_admin_restore_family_delegation_access",
     "service:finish_platform_admin_override_attempt",
   ]);
   assertEquals(calls[2].args.p_event_type, "override.denied");
-  assertEquals(calls[2].args.p_error_code, "target_binding_mismatch");
+  assertEquals(calls[2].args.p_error_code, deniedCode);
 });
+
+}
 
 Deno.test("platform admin override does not append over a finalized correlation", async () => {
   const calls: RpcCall[] = [];

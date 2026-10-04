@@ -1,3 +1,4 @@
+import 'features/platform_administration/presentation/platform_administration_screen.dart';
 import 'package:flutter/material.dart';
 import 'features/nse_integration/presentation/nse_integration_entry.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -132,6 +133,7 @@ class AuthWrapper extends StatelessWidget {
       loadingBuilder: (_) => const LoadingScreen(),
       errorBuilder: (title, message) =>
           AccountAccessErrorScreen(title: title, message: message),
+      platformBuilder: (_) => const PlatformAdministrationScreen(),
       advisorBuilder: (_) => const AdminDashboard(),
       investorBuilder: (_) => const ClientDashboard(),
       explorerBuilder: (_) => const ExplorerHomeScreen(),

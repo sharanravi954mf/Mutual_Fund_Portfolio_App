@@ -1,6 +1,7 @@
 import '../../investor_identity/models/user_account.dart';
 
 enum IdentityResolution {
+  platformContext,
   advisor,
   existingLink,
   automaticLink,
@@ -11,6 +12,8 @@ enum IdentityResolution {
 
   static IdentityResolution fromDatabase(String value) {
     switch (value) {
+      case 'platform_context':
+        return IdentityResolution.platformContext;
       case 'advisor':
         return IdentityResolution.advisor;
       case 'existing_link':

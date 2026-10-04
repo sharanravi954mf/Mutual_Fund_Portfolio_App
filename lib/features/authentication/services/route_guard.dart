@@ -9,6 +9,7 @@ class RouteGuard {
     required this.loginBuilder,
     required this.loadingBuilder,
     required this.errorBuilder,
+    required this.platformBuilder,
     required this.advisorBuilder,
     required this.investorBuilder,
     required this.explorerBuilder,
@@ -18,6 +19,7 @@ class RouteGuard {
   final WidgetBuilder loginBuilder;
   final WidgetBuilder loadingBuilder;
   final Widget Function(String title, String message) errorBuilder;
+  final WidgetBuilder platformBuilder;
   final WidgetBuilder advisorBuilder;
   final WidgetBuilder investorBuilder;
   final WidgetBuilder explorerBuilder;
@@ -42,6 +44,11 @@ class RouteGuard {
         "Account Setup Unavailable",
         "Your account is authenticated, but its secure account state could not be loaded.",
       );
+    }
+
+    // Independent server projection: no UserRole or MFD profile is required.
+    if (authProvider.platformContext.isPlatformAdmin) {
+      return platformBuilder(context);
     }
 
     // 4. UserProfile availability check
@@ -75,12 +82,12 @@ class RouteGuard {
 
     switch (destination) {
       case ProtectedDestination.advisorDashboard:
-        if (!(profile?.isAuthorizedForAdvisorDashboard ?? false)) {
-          return errorBuilder(
-            "Access Denied",
-            "You do not have authorization to access the Advisor Dashboard.",
-          );
+        if (profile?.role == UserRole.platformAdmin) {
+          return errorBuilder('Platform Access Unavailable',
+              'This account needs an explicit platform authority grant.');
         }
+        // Advisor routing is a server bootstrap projection, including an
+        // investor persona with an active professional workspace membership.
         return advisorBuilder(context);
 
       case ProtectedDestination.investorDashboard:

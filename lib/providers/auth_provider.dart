@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../features/platform_administration/data/platform_authority_repository.dart';
+import '../features/platform_administration/models/platform_context.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,6 +19,9 @@ class AuthProvider extends ChangeNotifier {
   bool _disposed = false;
   late final IdentityBootstrapService _identityBootstrapService;
   late final OnboardingCoordinator _onboardingCoordinator;
+
+  PlatformContext _platformContext = const PlatformContext();
+  PlatformContext get platformContext => _platformContext;
 
   User? _user;
   UserAccount? _userAccount;
@@ -63,6 +68,7 @@ class AuthProvider extends ChangeNotifier {
         _identityLoadUserId = null;
         _userAccount = null;
         _userProfile = null;
+        _platformContext = const PlatformContext();
       }
       _user = nextUser;
       if (nextUser != null) {
@@ -137,6 +143,18 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
       _userAccount = result.account;
+      final platform =
+          await PlatformAuthorityRepository(_supabaseService.client).load();
+      if (_disposed ||
+          _sessionGeneration != generation ||
+          _user?.id != user.id) {
+        return;
+      }
+      _platformContext = platform;
+      if (platform.isPlatformAdmin) {
+        _userProfile = null; // Platform authority requires no business profile.
+        return;
+      }
 
       // A linked investor must have a live business relationship; Explorer
       // accounts legitimately have no profile. Do not synthesize one.
@@ -176,6 +194,7 @@ class AuthProvider extends ChangeNotifier {
         _errorMessage = 'Unable to load your account securely.';
         _userAccount = null;
         _userProfile = null;
+        _platformContext = const PlatformContext();
       }
     } finally {
       if (!_disposed &&
@@ -260,6 +279,7 @@ class AuthProvider extends ChangeNotifier {
       _user = null;
       _userAccount = null;
       _userProfile = null;
+      _platformContext = const PlatformContext();
       _errorMessage = null;
     } catch (e) {
       _errorMessage =

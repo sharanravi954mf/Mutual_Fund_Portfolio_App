@@ -1,3 +1,4 @@
+import 'package:mutual_fund_portfolio_app/features/platform_administration/models/platform_context.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -13,15 +14,25 @@ class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
     bool isAuthenticated = false,
     UserAccount? userAccount,
     UserProfile? userProfile,
+    PlatformContext platformContext = const PlatformContext(),
   })  : _isLoading = isLoading,
         _isAuthenticated = isAuthenticated,
         _userAccount = userAccount,
-        _userProfile = userProfile;
+        _userProfile = userProfile,
+        _platformContext = platformContext;
 
-  bool _isLoading;
-  bool _isAuthenticated;
-  UserAccount? _userAccount;
-  UserProfile? _userProfile;
+  PlatformContext _platformContext;
+  @override
+  PlatformContext get platformContext => _platformContext;
+  void updatePlatformContext(PlatformContext value) {
+    _platformContext = value;
+    notifyListeners();
+  }
+
+  final bool _isLoading;
+  final bool _isAuthenticated;
+  final UserAccount? _userAccount;
+  final UserProfile? _userProfile;
 
   @override
   bool get isLoading => _isLoading;
@@ -130,6 +141,7 @@ void main() {
       loginBuilder: (_) => const Text('login_screen'),
       loadingBuilder: (_) => const Text('loading_screen'),
       errorBuilder: (title, message) => Text('error_screen: $title - $message'),
+      platformBuilder: (_) => const Text('platform_administration'),
       advisorBuilder: (_) => const Text('advisor_dashboard'),
       investorBuilder: (_) => const Text('investor_dashboard'),
       explorerBuilder: (_) => const Text('explorer_screen'),
@@ -155,6 +167,53 @@ void main() {
       ));
 
       expect(find.text('login_screen'), findsOneWidget);
+    });
+
+    testWidgets('platform-only grant routes without profile or advisor state',
+        (tester) async {
+      final auth = FakeAuthProvider(
+          isAuthenticated: true,
+          userAccount: UserAccount(
+              userId: 'user-id',
+              accountState: AccountState.explorer,
+              onboardingCompleted: true,
+              createdAt: now,
+              updatedAt: now),
+          platformContext: const PlatformContext(
+              isPlatformAdmin: true,
+              capabilities: {'mfd_applications.review'}));
+      await tester.pumpWidget(MaterialApp(
+          home: Builder(builder: (context) => guard.resolve(context, auth))));
+      expect(find.text('platform_administration'), findsOneWidget);
+      expect(find.text('advisor_dashboard'), findsNothing);
+      auth.updatePlatformContext(const PlatformContext());
+      await tester.pumpWidget(MaterialApp(
+          home: Builder(builder: (context) => guard.resolve(context, auth))));
+      expect(find.text('explorer_screen'), findsOneWidget);
+    });
+
+    testWidgets('legacy platform profile cannot substitute for a grant',
+        (tester) async {
+      final auth = FakeAuthProvider(
+          isAuthenticated: true,
+          userAccount: UserAccount(
+              userId: 'user-id',
+              accountState: AccountState.advisor,
+              onboardingCompleted: true,
+              createdAt: now,
+              updatedAt: now),
+          userProfile: UserProfile(
+              id: 'profile',
+              role: UserRole.platformAdmin,
+              accountStatus: AccountStatus.active,
+              createdAt: now,
+              updatedAt: now));
+      await tester.pumpWidget(MaterialApp(
+          home: Builder(builder: (context) => guard.resolve(context, auth))));
+      expect(
+          find.textContaining('Platform Access Unavailable'), findsOneWidget);
+      expect(find.text('platform_administration'), findsNothing);
+      expect(find.text('advisor_dashboard'), findsNothing);
     });
 
     testWidgets('Explorer needs no business profile', (tester) async {
@@ -203,7 +262,6 @@ void main() {
     for (final role in [
       UserRole.advisor,
       UserRole.admin,
-      UserRole.platformAdmin,
       UserRole.operations
     ]) {
       testWidgets('trusted active $role keeps staff dashboard', (tester) async {
@@ -282,7 +340,7 @@ void main() {
     });
 
     testWidgets(
-        'resolves to AccountAccessErrorScreen if investor tries to access advisor dashboard',
+        'server professional membership projection can route an investor persona to MFD context',
         (tester) async {
       final auth = FakeAuthProvider(
         isAuthenticated: true,
@@ -305,8 +363,7 @@ void main() {
         home: Builder(builder: (context) => guard.resolve(context, auth)),
       ));
 
-      expect(
-          find.textContaining('error_screen: Access Denied'), findsOneWidget);
+      expect(find.text('advisor_dashboard'), findsOneWidget);
     });
   });
 }

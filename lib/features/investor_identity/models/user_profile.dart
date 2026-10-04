@@ -88,8 +88,7 @@ class UserProfile {
   bool get isAuthorizedForAdvisorDashboard =>
       role == UserRole.advisor ||
       role == UserRole.admin ||
-      role == UserRole.operations ||
-      role == UserRole.platformAdmin;
+      role == UserRole.operations;
 
   bool get isAuthorizedForInvestorDashboard =>
       role == UserRole.investor || role == UserRole.client;
