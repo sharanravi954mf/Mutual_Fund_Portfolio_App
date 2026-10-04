@@ -164,7 +164,7 @@ void main() {
 
       expect(profile.role, UserRole.platformAdmin);
       expect(profile.isActive, isTrue);
-      expect(profile.isAuthorizedForAdvisorDashboard, isTrue);
+      expect(profile.isAuthorizedForAdvisorDashboard, isFalse);
       expect(profile.isAuthorizedForInvestorDashboard, isFalse);
     });
   });
