@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
+import '../../mfd_applications/presentation/mfd_application_screens.dart';
+import '../../investor_identity/models/user_account.dart';
 import '../../investor_verification/presentation/verification_status_screen.dart';
 
 class ExplorerHomeScreen extends StatelessWidget {
@@ -66,6 +68,22 @@ class ExplorerHomeScreen extends StatelessWidget {
                 ),
                 if (context.watch<AuthProvider>().errorMessage != null)
                   Text(context.watch<AuthProvider>().errorMessage!),
+                if (context.watch<AuthProvider>().accountState ==
+                        AccountState.explorer &&
+                    context.watch<AuthProvider>().userProfile == null &&
+                    !context
+                        .watch<AuthProvider>()
+                        .platformContext
+                        .isPlatformAdmin)
+                  Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                                builder: (_) => const MfdApplicantScreen())),
+                        icon: const Icon(Icons.business_outlined),
+                        label: const Text('Apply as MFD'),
+                      )),
                 const SizedBox(height: 28),
                 Wrap(
                   spacing: 16,
