@@ -260,3 +260,88 @@ are recorded in the final external summary. Local implementation evidence does
 not establish real Auth cryptography, camera scanning on a physical device or
 hosted commissioning. Those human checks remain explicitly NOT EXECUTED in the
 DEV runbook. Verified-factor removal/recovery stays deferred.
+
+### MFA-REVIEW-001 — same-account refresh recovery (2026-10-04)
+
+Independent review reproduced a recovery defect in the original local commit
+`cf091ccdf5c9d3c1324858ea1e24f374f4583c7a`. A superseded platform read correctly
+returned without publishing, but the MFA repository conflated
+`platformContextCurrent=false` with a current server denial. The controller then
+entered its terminal unavailable phase and discarded setup. A later successful
+projection could not recover that page. This was a recovery failure, not an
+authorization bypass.
+
+The correction keeps the provider's latest-request/session ownership checks and
+SDK response fence unchanged. The repository now distinguishes three outcomes:
+
+- Account/session ownership loss still produces a terminal changed-session
+  error, and a **current** non-admin server projection still denies access.
+- An unknown, refreshing, superseded or failed projection produces typed
+  `contextUnavailable`. It does not prove either authority or revocation.
+- Only a current affirmative server projection, with the existing SDK/factor
+  checks, can supply an actionable MFA status.
+
+`contextUnavailable` leaves the same-account controller recoverable, clears all
+actionable factor/assurance status and retains any pending setup reference and
+selection. The secret display stays hidden while status is unknown. The user
+can choose **Refresh security status** on the existing page after the overlapping
+request settles. A current denial or account-lifetime change still clears setup
+and cannot be reversed by a late response, including A -> B -> A.
+
+This is a bounded recoverable return, not an automatic retry. AuthProvider's
+existing Auth-event coalescing remains unchanged. The superseded inspection
+does not await or repeatedly chase independently started newer reads; the review
+probe deliberately waits for that inspection before releasing the newer read.
+No cached grant/AAL2 value is used for recovery. No enrollment, verification or
+MFD action is automatically replayed. All MFD request UUID/payload and explicit
+confirmation code is unchanged.
+
+Portable regressions live in
+[test/platform_mfa_session_integration_test.dart](../../test/platform_mfa_session_integration_test.dart)
+and run through `scripts/test_platform_mfa.sh`. They use the production
+controller/provider/access listener and the real installed SDK with the existing
+MockClient fixture. Coverage includes both response orders for authoritative
+denial, pending setup identity without duplicate enrollment, recoverable failed
+reads, stale assurance, removed factors, expiry, logout and both account-switch
+sequences. The expiry case expires only a synthetic SDK Session model; it is not
+real Auth token expiry commissioning. A widget regression stacks the actual MFD
+detail and security routes and dispatches lifecycle events to their real
+listeners. SDK callbacks run in one real-async test zone, with Flutter pumping
+frames separately, to avoid split fake-clock event delivery.
+
+The unchanged independent probe failed before the correction (1 pass, 1 failure,
+exit 1) and passed after it (2 passes, exit 0). The portable integration file
+passed 13 tests, exit 0. Additional final validation results follow below.
+Evidence is separate from the original implementation evidence:
+
+`/home/ubuntu/moneybowl-commissioning-evidence/mfa-review-001-20261004T193329Z-ms65bz4_`
+
+No packages, provider implementation, session fence, MFD mutation/navigation
+implementation, applied migration, authorization guard, RLS or ACL changed.
+Hosted commissioning remains NOT RUN.
+
+#### Correction validation results
+
+Final correction checks all exited 0: 13 portable integration tests, 146 focused
+Flutter tests, 467 full-suite Flutter tests, formatting/analysis of all five
+changed Dart files, 11 disposable SQL suites plus four concurrency scripts and
+both commissioning inspections, documentation/link checks, migration history and
+commit-quality validation. All 83 migrations and the dependency lock match the
+reviewed base/resolution. JavaScript web build passed using the same loopback URL
+and synthetic public-key value; existing `dart:js` Wasm and Cupertino font
+warnings remain. No build was published.
+
+Probe log hashes distinguish the reproduced failure from the corrected result:
+
+```text
+probe-before.log  4f9ea0fa8934d4938b52b9d1f4fe5a78fe808c8f73026ddb54e933a351d666f0
+probe-after.log   d234df300f007bb8c6cf805f9d9badea1763a611b9eeb48b36ce5a81b2d58aa3
+portable-final.log 0aab7c5af6c4c17b9aefd6661b391ee68f237a7941d12e89e7b2bd0cfd7700ec
+full-suite-final.log 68bb580acc704a4cb920e53f926383372fc649a0eef725c0333d95ce098ee975
+```
+
+`validation-summary.md`, `commands.jsonl`, `source-files.sha256` and
+`final-state.json` in the correction evidence directory record exact commands,
+all log hashes and the additive local commit/tree. Real Auth and hosted
+commissioning remain NOT RUN. Independent re-review and separately authorized
+deployment/human commissioning remain necessary before a hosted readiness claim.

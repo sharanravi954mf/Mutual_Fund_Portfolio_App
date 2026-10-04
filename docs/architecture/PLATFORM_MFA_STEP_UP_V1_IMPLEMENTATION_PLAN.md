@@ -325,3 +325,121 @@ The final local commit is created only after documentation, staging and boundary
 checks; its exact commit/tree and clean statuses are recorded in external
 `validation-summary.md`/`final-state.json`. Hosted commissioning and real local
 Auth remain outside the completed evidence, as described above.
+
+## MFA-REVIEW-001 correction plan — 2026-10-04 (before implementation)
+
+Fresh prechecks: canonical clean `develop` and queried remote develop both
+`cdf363680236708dea9dbbd9d8b0d6e8a4a276a7`; existing feature worktree clean at
+`cf091ccdf5c9d3c1324858ea1e24f374f4583c7a`, tree
+`efa4aff2b66531a84517bba698a07933407af335`. No Git locks or competing writable
+repository file descriptors were found. The reviewed commit will not be amended.
+
+The supplied independent probe was run unchanged before edits: ordinary existing
+factor verification passed, overlapping same-account projection recovery failed
+with `controller.current == false` after current admin context was restored
+(exit 1). This is the reported recovery defect, not an environment failure.
+Evidence:
+`/home/ubuntu/moneybowl-commissioning-evidence/mfa-review-001-20261004T193329Z-ms65bz4_`.
+
+### Bounded correction design and intended files
+
+- `lib/features/platform_administration/mfa/mfa_repository.dart`: classify a
+  non-current projection separately from affirmative current non-admin denial.
+  Check account lifetime before/after awaiting as today. Never use cached grants
+  or assurance to make an unknown status actionable.
+- `lib/features/platform_administration/mfa/mfa_models.dart`: add a typed
+  recoverable context-unavailable error with explicit Refresh guidance; no raw
+  diagnostics or new secret-bearing state.
+- `lib/features/platform_administration/mfa/mfa_controller.dart`: this failure
+  clears actionable status/confirmation while retaining the same account's
+  transient pending setup and factor selection. Explicit refresh can recover
+  the existing page. Genuine current denial/account change remains terminal.
+- Preserve AuthProvider's session/request ownership and bounded Auth-event
+  coalescing. A superseded read cannot publish or promise the newer read's result.
+  Use recoverable return instead of awaiting an independently pending newer
+  request: the supplied probe deliberately awaits the old inspection before
+  releasing the newer response. No polling, retry chain or mutation replay.
+- `test/platform_mfa_session_integration_test.dart`: portable production
+  controller/provider/SDK/access-listener regressions, including the two reviewer
+  cases, pending setup, response ordering, denial, account lifetimes, recoverable
+  read failure and actual stacked MFD/security lifecycle widgets where practical.
+- `test/platform_mfa_sdk_test.dart`: narrowly extend the existing deterministic
+  fixture for pending factor status, base-authority denial and controlled reads.
+  Keep its exported fixture compatible with the unchanged external probe.
+- `scripts/test_platform_mfa.sh`: include the portable integration file.
+- This retained plan and `docs/architecture/PLATFORM_MFA_STEP_UP_V1.md`: append
+  actual correction/validation evidence. Update the DEV runbook only if explicit
+  recovery guidance changes; retain NOT EXECUTED. No package changes.
+
+### Acceptance and validation
+
+Require same-account unknown context to remain recoverable, retain pending setup
+without new enrollment, and keep sensitive actions off. Current denial, expiry,
+removed factor and logout/A -> B/A -> B -> A must not be overridden by stale
+responses. Original UUID/payload/confirmation behavior and SDK session fence
+remain untouched. No automatic OTP/enrollment/business mutation retry.
+
+Run the new portable regression and unchanged reviewer probe, focused runner,
+full Flutter suite (`--no-pub --reporter expanded --concurrency=2`), existing
+network-disabled disposable SQL harness, changed-Dart formatting/analysis,
+documentation/link and migration-history checks, commit-quality validation and
+the supported loopback/synthetic-key release web build. Commands run with stdin
+from `/dev/null` in the evidence runner so SQL subprocesses cannot consume later
+shell commands. Preserve before/after logs, exits and source hashes externally.
+Require all 83 migrations byte-identical to base and canonical checkout clean.
+Create exactly one additive local correction commit after all gates pass.
+No publication, deployment, hosted/real Auth commissioning or child sessions.
+
+### MFA-REVIEW-001 implementation notes — 2026-10-04
+
+- Implemented the planned typed recoverable return in repository/models/
+  controller. AuthProvider and the Auth session fence remain byte-identical to
+  the reviewed candidate; no new read coalescer or waiter was needed.
+- Reused the existing SDK fixture through a relative Dart import; its public
+  fixture entry remains compatible with the unchanged external review probe.
+  Added only pending-factor status, base-authority response and login-actor
+  controls. No absolute fixture imports or remote HTTP fallback were added.
+- Added 13 portable tests, including actual stacked MFD/security lifecycle
+  observers. Initial widget runs split SDK operations between fake and real
+  async zones; safe state/count diagnostics identified the ordering issue.
+  Running its actions and SDK events in one real-async zone resolved it without
+  weakening assertions. Temporary diagnostics were removed; failed logs retained.
+- The unchanged reviewer probe now passes both tests; portable tests pass all
+  13. The runbook gained only the explicit same-account refresh recovery check
+  and remains NOT EXECUTED. Full validation results are appended when complete.
+
+### MFA-REVIEW-001 final validation — 2026-10-04
+
+| Check | Result | Exit | External log |
+| --- | --- | --- | --- |
+| Unchanged reviewer probe before edits | 1 passed, overlap recovery failed exactly as reported | 1 | `probe-before.log` |
+| Same unchanged probe after correction | 2 passed | 0 | `probe-after.log` |
+| Portable production controller/provider/SDK integration | 13 passed | 0 | `portable-final.log` |
+| `bash scripts/test_platform_mfa.sh` | 146 passed | 0 | `focused-final.log` |
+| Full Flutter suite, `--no-pub --reporter expanded --concurrency=2` | 467 passed | 0 | `full-suite-final.log` |
+| Changed-Dart formatting / analysis | 5 files, zero formatting changes, no analysis issues | 0 | `formatting-final.log`, `analysis-final.log` |
+| Disposable full-schema SQL / concurrency / inspections | 11 suites, 4 concurrency scripts, both read-only commissioning scripts passed | 0 | `sql-final.log` |
+| Migration history | 27 frozen entries passed; separately all 83 files byte-identical to base | 0 | `migration-history-final.log`, `boundary-final.log` |
+| Local release web build, loopback/test-only configuration | JavaScript build passed; unchanged Wasm/font warnings | 0 | `web-build-final.log` |
+| Documentation / links and commit quality | Repository validators passed | 0 | `docs-final.log`, `commit-quality-final.log` |
+
+Commands use the previously verified Flutter 3.44.6 / Dart 3.12.2 executable.
+Resolved Supabase Flutter 2.18.0, Supabase 2.16.2 and GoTrue 2.27.2 are unchanged;
+the ignored dependency lock is byte-identical to the reviewed resolution.
+Full commands, return codes, sanitized logs, changed-file hashes, boundary audit
+and final commit/tree are saved in this correction's external evidence directory.
+The probe file and original review evidence were not modified. No failing
+expectation was removed or weakened. The reviewed implementation commit is
+retained; exactly one additive correction commit is the final local gate.
+
+- [x] Reproduce and preserve the independent before-edit failure.
+- [x] Save the correction plan before implementation and retain original history.
+- [x] Implement typed recovery without accepting stale grants/assurance.
+- [x] Cover pending setup, actual listeners, response orders and account lifetimes.
+- [x] Pass probe, portable/focused/full suites, SQL and local build.
+- [x] Verify unchanged provider/fence/MFD contracts, dependencies and 83 migrations.
+- [x] Update architecture and the unexecuted commissioning recovery procedure.
+
+Real local Auth, physical authenticator and hosted DEV commissioning remain
+NOT RUN. Mocked SDK/session-model tests and synthetic SQL do not establish real
+TOTP cryptographic verification. No hosted or Production action occurred.

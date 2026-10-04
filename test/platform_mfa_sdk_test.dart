@@ -21,7 +21,7 @@ Map<String, dynamic> factorJson({bool verified = true}) => {
       'updated_at': '2026-10-04T00:00:00Z'
     };
 Map<String, dynamic> sdkSession(String user,
-        {bool aal2 = false, bool factor = true}) =>
+        {bool aal2 = false, bool factor = true, bool factorVerified = true}) =>
     {
       'access_token': 'synthetic.${base64Url.encode(utf8.encode(jsonEncode({
                 'sub': user,
@@ -39,7 +39,7 @@ Map<String, dynamic> sdkSession(String user,
         'email': 'synthetic@example.test',
         'app_metadata': {},
         'user_metadata': {},
-        'factors': factor ? [factorJson()] : []
+        'factors': factor ? [factorJson(verified: factorVerified)] : []
       }
     };
 Future<void> flushSdk() async {
@@ -54,6 +54,8 @@ class SdkFixture {
   late final AuthProvider auth;
   late final SupabaseMfaRepository repo;
   bool forceServerAssurance = false;
+  bool platformAdmin = true, factorVerified = true;
+  String signInActor = actorB;
   bool aal2 = false,
       serverDenies = false,
       hasFactor = true,
@@ -79,17 +81,20 @@ class SdkFixture {
               refreshStarted?.complete();
               refreshStarted = null;
               final snapshot = sdkSession(client.auth.currentUser?.id ?? actorA,
-                  aal2: aal2, factor: hasFactor);
+                  aal2: aal2,
+                  factor: hasFactor,
+                  factorVerified: factorVerified);
               final wait = refreshWait;
               refreshWait = null;
               if (wait != null) await wait.future;
               body = snapshot;
             } else {
-              body = sdkSession(actorB);
+              body = sdkSession(signInActor);
             }
           } else if (path.endsWith('/factors')) {
             enrolls++;
             hasFactor = true;
+            factorVerified = false;
             expect(jsonDecode(request.body)['factor_type'], 'totp');
             body = {
               'id': 'factor-1',
@@ -117,13 +122,16 @@ class SdkFixture {
             status = verifyStatus;
             if (status == 200) {
               aal2 = true;
+              factorVerified = true;
               body = sdkSession(actorA, aal2: true);
             } else {
               body = {'code': verifyError, 'message': 'synthetic safe error'};
             }
           } else if (path.endsWith('/get_my_platform_context')) {
             projections++;
-            final deny = serverDenies, fail = failProjection;
+            final deny = serverDenies,
+                fail = failProjection,
+                admin = platformAdmin;
             final assured =
                 client.auth.mfa.getAuthenticatorAssuranceLevel().currentLevel ==
                     AuthenticatorAssuranceLevels.aal2;
@@ -136,10 +144,10 @@ class SdkFixture {
             body = fail
                 ? {'message': 'denied', 'code': '42501'}
                 : {
-                    'is_platform_admin': true,
-                    'capabilities': ['mfd_applications.review'],
+                    'is_platform_admin': admin,
+                    'capabilities': [if (admin) 'mfd_applications.review'],
                     'step_up_verified':
-                        (assured || forceServerAssurance) && !deny,
+                        (assured || forceServerAssurance) && !deny && admin,
                     'mfa_enrolled': hasFactor
                   };
           } else if (path.endsWith('/bootstrap_identity')) {

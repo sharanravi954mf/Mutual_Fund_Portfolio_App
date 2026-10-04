@@ -163,6 +163,11 @@ class MfaController extends ChangeNotifier {
   void _fail(Object e) {
     error = mfaError(e);
     phase = MfaPhase.ready;
+    if (error == MfaError.contextUnavailable) {
+      // Keep same-account setup for an explicit refresh, but never retain an
+      // actionable factor/assurance snapshot from an unconfirmed projection.
+      status = null;
+    }
     if (error == MfaError.access || error == MfaError.sessionChanged) {
       setup = null;
       status = null;

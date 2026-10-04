@@ -11,6 +11,7 @@ enum MfaError {
   disabled,
   factorLimit,
   uncertain,
+  contextUnavailable,
   access,
   sessionChanged,
   unsupported,
@@ -32,6 +33,8 @@ extension MfaErrorMessage on MfaError {
           'The account has reached its factor limit. Pending factors may remain from earlier setup. Factor removal and recovery are not available here.',
         MfaError.uncertain =>
           'The result could not be confirmed. Check security status before another explicit attempt. A pending setup may have been created.',
+        MfaError.contextUnavailable =>
+          'Current platform access could not be confirmed. Another refresh may still be running. Refresh security status to continue. Any setup already in progress is retained on this page.',
         MfaError.access =>
           'Platform access is unavailable. Refresh access or sign in again. MFA does not grant review permission.',
         MfaError.sessionChanged =>

@@ -168,3 +168,16 @@ baselines make the rehearsal incomplete; retain evidence and stop. No automatic
 claim of hosted completion follows a local implementation PASS. Never enroll
 Ravi, retire old relationships, create real users or make hosted decisions as
 part of the local implementation task.
+
+## Same-account refresh recovery — MFA-REVIEW-001
+
+During the separately authorized rehearsal, exercise leaving for the authenticator
+and resuming with MFD review beneath the security page. Overlapping status reads
+may show that current platform access could not be confirmed. While that status
+is unknown, sensitive actions must remain disabled and setup material hidden.
+Use **Refresh security status** after the read settles. The same page must remain
+usable and any pending setup already in progress must remain available without
+another enrollment. An automatic enrollment, OTP retry or business decision is
+not an acceptable recovery. Genuine current access denial, logout or an account
+change must still clear invalid setup and block the old page. This procedure is
+still **NOT EXECUTED** on hosted DEV.

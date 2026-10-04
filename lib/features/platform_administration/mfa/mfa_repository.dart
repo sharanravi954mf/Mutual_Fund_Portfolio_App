@@ -80,8 +80,12 @@ class SupabaseMfaRepository implements MfaRepository {
       _current(id, generation);
       await auth.refreshPlatformContext();
       _current(id, generation);
-      if (!auth.platformContextCurrent ||
-          !auth.platformContext.isPlatformAdmin) {
+      if (!auth.platformContextCurrent) {
+        // A superseded read may finish before the current read. Unknown is
+        // recoverable, and never evidence of either a grant or its revocation.
+        throw const MfaFailure(MfaError.contextUnavailable);
+      }
+      if (!auth.platformContext.isPlatformAdmin) {
         throw const MfaFailure(MfaError.access);
       }
       if (auth.platformAssuranceMismatch) {
