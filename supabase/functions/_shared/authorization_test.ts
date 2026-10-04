@@ -1,4 +1,4 @@
-import { requireAdvisor, requirePlatformAdmin } from "./authorization.ts";
+import { requireAdvisor, requirePlatformAdmin, requirePlatformMutation } from "./authorization.ts";
 
 function assert(value: boolean, message: string) {
   if (!value) throw new Error(message);
@@ -21,6 +21,9 @@ Deno.test("workspace and platform authority come from separate caller-bound RPCs
     if (url.endsWith("/auth/v1/user")) {
       return new Response(JSON.stringify({ id: "synthetic-user", app_metadata: { user_role: "platform_admin" }, user_metadata: { role: "admin" } }), { headers: { "content-type": "application/json" } });
     }
+    if(url.endsWith('/rpc/can_perform_platform_mutation')) {
+      assert(JSON.parse(String(init?.body)).p_capability==='platform.catalog.manage','exact mutation capability sent to server');
+    }
     assert(url.includes("/rest/v1/rpc/"), "global profile lookup cannot authorize business access");
     return new Response(JSON.stringify(permitted), { headers: { "content-type": "application/json" } });
   };
@@ -33,6 +36,8 @@ Deno.test("workspace and platform authority come from separate caller-bound RPCs
     permitted = false;
     assert("failure" in await requirePlatformAdmin(request), "workspace admin must not become platform admin");
     assert(calls.at(-1)?.endsWith("/rpc/is_platform_admin") === true, "platform authority must use its distinct RPC");
+    assert("failure" in await requirePlatformMutation(request,"platform.catalog.manage"), "platform mutation must require database capability and step-up");
+    assert(calls.at(-1)?.endsWith("/rpc/can_perform_platform_mutation") === true, "mutation uses its MFA-gated RPC");
     const before = calls.length;
     assert("failure" in await requireAdvisor(new Request("https://function.invalid", { headers: { authorization: "Bearer " } })), "empty token denied");
     assert(calls.length === before, "empty token should not cause a network request");

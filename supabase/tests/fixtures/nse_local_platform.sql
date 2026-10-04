@@ -59,3 +59,48 @@ CREATE OR REPLACE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$
  SELECT coalesce(nullif(current_setting('request.jwt.claim.role',true),''),
    nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'role');
 $$;
+
+-- GoTrue MFA/session schema required by Platform Authority V1. Definitions read
+-- from the local Auth schema; no Auth rows, factors or secrets are imported.
+CREATE TYPE auth.factor_type AS ENUM ('totp','webauthn','phone');
+CREATE TYPE auth.factor_status AS ENUM ('unverified','verified');
+CREATE TYPE auth.aal_level AS ENUM ('aal1','aal2','aal3');
+CREATE TABLE auth.mfa_factors (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    friendly_name text,
+    factor_type auth.factor_type NOT NULL,
+    status auth.factor_status NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    secret text,
+    phone text,
+    last_challenged_at timestamp with time zone,
+    web_authn_credential jsonb,
+    web_authn_aaguid uuid,
+    last_webauthn_challenge_data jsonb
+);
+ALTER TABLE auth.mfa_factors ADD PRIMARY KEY(id);
+ALTER TABLE auth.mfa_factors ADD FOREIGN KEY(user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+CREATE TABLE auth.sessions (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone,
+    updated_at timestamp with time zone,
+    factor_id uuid,
+    aal auth.aal_level,
+    not_after timestamp with time zone,
+    refreshed_at timestamp without time zone,
+    user_agent text,
+    ip inet,
+    tag text,
+    oauth_client_id uuid,
+    refresh_token_hmac_key text,
+    refresh_token_counter bigint,
+    scopes text,
+    CONSTRAINT sessions_scopes_length CHECK ((char_length(scopes) <= 4096))
+);
+ALTER TABLE auth.sessions ADD PRIMARY KEY(id);
+ALTER TABLE auth.sessions ADD FOREIGN KEY(user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+-- Real GoTrue tables grant postgres these privileges; API roles receive none.
+GRANT ALL ON auth.sessions,auth.mfa_factors TO postgres;

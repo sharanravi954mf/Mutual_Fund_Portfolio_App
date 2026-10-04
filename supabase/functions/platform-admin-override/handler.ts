@@ -33,6 +33,7 @@ const corsHeaders = {
 };
 
 const knownDeniedCodes = new Set([
+  "platform_support_authority_expired",
   "target_binding_mismatch",
   "owner_consent_not_recorded",
   "delegation_expired",

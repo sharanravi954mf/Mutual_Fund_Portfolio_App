@@ -1,3 +1,4 @@
+import 'package:mutual_fund_portfolio_app/features/platform_administration/models/platform_context.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -890,6 +891,9 @@ class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
   final bool _isAuthenticated;
   final UserAccount? _userAccount;
   final UserProfile? _userProfile;
+
+  @override
+  PlatformContext get platformContext => const PlatformContext();
 
   @override
   bool get isLoading => _isLoading;

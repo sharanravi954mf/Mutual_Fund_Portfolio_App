@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { requirePlatformAdmin } from "../_shared/authorization.ts";
+import { requirePlatformMutation } from "../_shared/authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,7 +13,7 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const authorization = await requirePlatformAdmin(req);
+  const authorization = await requirePlatformMutation(req, "platform.catalog.manage");
   if ("failure" in authorization) {
     return new Response(
       JSON.stringify({ error: authorization.failure.message }),
@@ -26,7 +26,9 @@ serve(async (req) => {
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL") || "",
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
+    Deno.env.get("SUPABASE_ANON_KEY") || "",
+    { global: { headers: { Authorization: req.headers.get("authorization")! } },
+      auth: { autoRefreshToken: false, persistSession: false } }
   );
 
   try {
@@ -79,13 +81,10 @@ serve(async (req) => {
             }
 
             // Update fund NAV and date
-            const { error: updateError } = await supabase
-              .from("mutual_funds")
-              .update({
-                current_nav: latestNav,
-                nav_date: formattedDate
-              })
-              .eq("id", fund.id);
+            // Current authority, MFA and audit are checked atomically per write.
+            const { error: updateError } = await supabase.rpc("platform_update_fund_nav", {
+              p_fund_id: fund.id, p_nav: latestNav, p_nav_date: formattedDate,
+            });
 
             if (!updateError) {
               updatedCount++;
@@ -96,14 +95,6 @@ serve(async (req) => {
         }
       } catch (err) {
         console.error(`Error processing NAV update for scheme ${schemeCode}:`, err);
-      }
-    }
-
-    // 3. Recalculate portfolio values for all active portfolios to update current market valuations
-    const { data: portfolios } = await supabase.from("portfolios").select("id");
-    if (portfolios) {
-      for (const p of portfolios) {
-        await supabase.rpc("recalculate_portfolio_value", { portfolio_uuid: p.id });
       }
     }
 

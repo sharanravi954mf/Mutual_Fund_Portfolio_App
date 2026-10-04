@@ -56,12 +56,14 @@ DO $$ DECLARE r record; n integer; BEGIN
   SELECT * INTO r FROM public.bootstrap_identity();
   PERFORM pg_temp.assert(r.account_state='link_pending','explicit linking choice survives bootstrap');
   PERFORM public.complete_onboarding_choice('explorer');
-  FOR n IN 9..11 LOOP
+  FOR n IN 9..10 LOOP
     PERFORM set_config('request.jwt.claim.sub','ef000000-0000-0000-0000-'||lpad(n::text,12,'0'),true);
     SELECT * INTO r FROM public.bootstrap_identity();
-    PERFORM pg_temp.assert(r.account_state='advisor','trusted advisor/admin/platform admin retained');
+    PERFORM pg_temp.assert(r.account_state='advisor','trusted advisor/admin retained');
     PERFORM pg_temp.assert((SELECT count(*)>=1 FROM public.profiles WHERE user_id=auth.uid()),'staff own profile readable');
   END LOOP;
+  PERFORM set_config('request.jwt.claim.sub','ef000000-0000-0000-0000-000000000011',true);
+  PERFORM pg_temp.assert((SELECT account_state='explorer' FROM public.bootstrap_identity()),'legacy platform label needs separate authority, not advisor state');
   PERFORM set_config('request.jwt.claim.sub','ef000000-0000-0000-0000-000000000003',true);
   PERFORM pg_temp.assert(NOT public.is_admin(), 'public account has no advisor authority');
   BEGIN PERFORM public.approve_verification_request('ef999999-0000-0000-0000-000000000001','ef100000-0000-0000-0000-000000000004',1,NULL);

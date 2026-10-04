@@ -55,7 +55,8 @@ export async function requireAuthenticated(
 
 async function requireCapability(
   req: Request,
-  capability: "authorize_workspace_tools" | "is_platform_admin",
+  capability: "authorize_workspace_tools" | "is_platform_admin" | "can_perform_platform_mutation",
+  params?: Record<string, string>,
 ): Promise<AuthorizationResult> {
   const authentication = await requireAuthenticated(req);
   if ("failure" in authentication) {
@@ -70,7 +71,7 @@ async function requireCapability(
     { global: { headers: { Authorization: req.headers.get("authorization")! } },
       auth: { autoRefreshToken: false, persistSession: false } },
   );
-  const { data, error } = await client.rpc(capability);
+  const { data, error } = await client.rpc(capability, params);
 
   if (error != null || data !== true) {
     return authorizationFailure(403, "Authorized access is required.");
@@ -85,4 +86,8 @@ export function requireAdvisor(req: Request): Promise<AuthorizationResult> {
 
 export function requirePlatformAdmin(req: Request): Promise<AuthorizationResult> {
   return requireCapability(req, "is_platform_admin");
+}
+
+export function requirePlatformMutation(req: Request, capability: "platform.catalog.manage"): Promise<AuthorizationResult> {
+  return requireCapability(req, "can_perform_platform_mutation", { p_capability: capability });
 }
