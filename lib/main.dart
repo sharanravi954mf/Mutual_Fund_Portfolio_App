@@ -1,3 +1,4 @@
+import 'features/authentication/services/auth_session_fence.dart';
 import 'features/platform_administration/presentation/platform_administration_screen.dart';
 import 'package:flutter/material.dart';
 import 'features/nse_integration/presentation/nse_integration_entry.dart';
@@ -35,12 +36,16 @@ void main() async {
 
   // Initialize Supabase. Catching errors silently in case variables aren't defined yet
   try {
-    await Supabase.initialize(
+    final fence = AuthSessionFence(supabaseUrl: supabaseUrl);
+    final supabase = await Supabase.initialize(
       url: supabaseUrl,
-      anonKey: supabaseAnonKey,
+      publishableKey: supabaseAnonKey,
+      httpClient: fence,
+      debug: false,
       authOptions:
           const FlutterAuthClientOptions(authFlowType: AuthFlowType.pkce),
     );
+    fence.attach(supabase.client);
   } catch (e) {
     // Supabase can fail to initialize if placeholder values are used.
     // We continue so the app shell can run and display connection messages.

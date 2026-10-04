@@ -12,6 +12,11 @@ class PlatformContext {
   final bool stepUpVerified;
   final bool mfaEnrolled;
 
+  PlatformContext withoutStepUp() => PlatformContext(
+      isPlatformAdmin: isPlatformAdmin,
+      capabilities: capabilities,
+      mfaEnrolled: mfaEnrolled);
+
   factory PlatformContext.fromJson(Map<String, dynamic> json) =>
       PlatformContext(
         isPlatformAdmin: json['is_platform_admin'] == true,

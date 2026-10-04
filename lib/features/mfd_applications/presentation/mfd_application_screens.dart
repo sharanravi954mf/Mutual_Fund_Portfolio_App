@@ -1,3 +1,7 @@
+import '../../platform_administration/mfa/mfa_models.dart';
+import '../../platform_administration/mfa/mfa_repository.dart';
+import '../../platform_administration/mfa/platform_security_screen.dart';
+import 'mfd_account_scope.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -21,29 +25,33 @@ class MfdApplicantScreen extends StatefulWidget {
   State<MfdApplicantScreen> createState() => _MfdApplicantScreenState();
 }
 
-class _MfdApplicantScreenState extends State<MfdApplicantScreen> {
+class _MfdApplicantScreenState extends State<MfdApplicantScreen>
+    with WidgetsBindingObserver, MfdAccountScope<MfdApplicantScreen> {
+  int _readGeneration = 0;
   late final MfdApplicationRepository _repo = _repository(widget.repository);
   List<MfdApplication> _applications = [];
   bool _loading = true, _eligible = false;
   String? _error;
   final Set<String> _refreshed = {};
-  String? _openedBy;
   @override
   void initState() {
     super.initState();
-    _openedBy = context.read<AuthProvider>().user?.id;
     _load();
   }
 
   Future<void> _load() async {
+    if (!scopeCurrent) return;
+    final request = ++_readGeneration;
+    bool currentRead() => scopeCurrent && request == _readGeneration;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final applications = await _repo.list();
+      if (!currentRead()) return;
       final eligible = await _repo.canApply();
-      if (!mounted) return;
+      if (!currentRead()) return;
       setState(() {
         _applications = applications;
         _eligible = eligible;
@@ -51,12 +59,12 @@ class _MfdApplicantScreenState extends State<MfdApplicantScreen> {
       });
       for (final app in applications.where((a) => a.status == 'approved')) {
         if (_refreshed.add(app.id)) {
-          await context.read<AuthProvider>().refreshIdentity();
-          if (!mounted) return;
+          await scopeAuth.refreshIdentity();
+          if (!currentRead()) return;
         }
       }
     } catch (e) {
-      if (mounted) {
+      if (currentRead()) {
         setState(() {
           _error = mfdErrorMessage(e);
           _loading = false;
@@ -65,18 +73,26 @@ class _MfdApplicantScreenState extends State<MfdApplicantScreen> {
     }
   }
 
+  @override
+  void releaseAccountState() {
+    _applications = [];
+    _eligible = false;
+    _refreshed.clear();
+  }
+
   Future<void> _apply() async {
+    if (!scopeCurrent || !foreground) return;
     final result = await Navigator.of(context).push<MfdApplication>(
         MaterialPageRoute(
             builder: (_) => MfdApplicationForm(
                 repository: _repo, operation: MfdOperation.submit)));
-    if (mounted && result != null) await _load();
+    if (scopeCurrent && result != null) await _load();
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    if (!auth.isAuthenticated || auth.user?.id != _openedBy) {
+    context.watch<AuthProvider>();
+    if (!scopeCurrent) {
       return const Scaffold(
           body: Center(
               child: Text(
@@ -125,7 +141,7 @@ class _MfdApplicantScreenState extends State<MfdApplicantScreen> {
                                 await context
                                     .read<AuthProvider>()
                                     .refreshIdentity();
-                                if (context.mounted) {
+                                if (context.mounted && scopeCurrent) {
                                   Navigator.of(context)
                                       .popUntil((route) => route.isFirst);
                                 }
@@ -139,13 +155,16 @@ class _MfdApplicantScreenState extends State<MfdApplicantScreen> {
 }
 
 class MfdReviewQueueScreen extends StatefulWidget {
-  const MfdReviewQueueScreen({super.key, this.repository});
+  const MfdReviewQueueScreen({super.key, this.repository, this.mfaRepository});
   final MfdApplicationRepository? repository;
+  final MfaRepository? mfaRepository;
   @override
   State<MfdReviewQueueScreen> createState() => _MfdReviewQueueScreenState();
 }
 
-class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
+class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen>
+    with WidgetsBindingObserver, MfdAccountScope<MfdReviewQueueScreen> {
+  int _readGeneration = 0;
   late final MfdApplicationRepository _repo = _repository(widget.repository);
   List<MfdApplication> _items = [];
   bool _loading = true, _more = false;
@@ -157,6 +176,9 @@ class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
   }
 
   Future<void> _load({bool more = false}) async {
+    if (!scopeCurrent) return;
+    final request = ++_readGeneration;
+    bool currentRead() => scopeCurrent && request == _readGeneration;
     if (!_canReview(context.read<AuthProvider>())) {
       setState(() => _loading = false);
       return;
@@ -168,7 +190,7 @@ class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
     try {
       final items =
           await _repo.list(review: true, offset: more ? _items.length : 0);
-      if (mounted) {
+      if (currentRead()) {
         setState(() {
           _items = more ? [..._items, ...items] : items;
           _more = items.length == 50;
@@ -176,7 +198,7 @@ class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (currentRead()) {
         setState(() {
           _error = mfdErrorMessage(e);
           _loading = false;
@@ -186,7 +208,19 @@ class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
   }
 
   @override
+  void releaseAccountState() {
+    _items = [];
+  }
+
+  @override
+  Future<void> resumeAccountState() async {
+    await scopeAuth.refreshPlatformContext();
+    if (scopeCurrent) await _load();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (!scopeCurrent) return mfdAccountChanged;
     if (!_canReview(context.watch<AuthProvider>())) {
       return const Scaffold(
           body: Center(
@@ -215,8 +249,10 @@ class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
                     onTap: () async {
                       await Navigator.of(context).push<void>(MaterialPageRoute(
                           builder: (_) => MfdReviewDetailScreen(
-                              applicationId: app.id, repository: _repo)));
-                      if (mounted) await _load();
+                              applicationId: app.id,
+                              repository: _repo,
+                              mfaRepository: widget.mfaRepository)));
+                      if (scopeCurrent) await _load();
                     })),
           if (_more)
             TextButton(
@@ -228,14 +264,20 @@ class _MfdReviewQueueScreenState extends State<MfdReviewQueueScreen> {
 
 class MfdReviewDetailScreen extends StatefulWidget {
   const MfdReviewDetailScreen(
-      {super.key, required this.applicationId, this.repository});
+      {super.key,
+      required this.applicationId,
+      this.repository,
+      this.mfaRepository});
   final String applicationId;
   final MfdApplicationRepository? repository;
+  final MfaRepository? mfaRepository;
   @override
   State<MfdReviewDetailScreen> createState() => _MfdReviewDetailScreenState();
 }
 
-class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
+class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen>
+    with WidgetsBindingObserver, MfdAccountScope<MfdReviewDetailScreen> {
+  int _readGeneration = 0;
   late final MfdApplicationRepository _repo = _repository(widget.repository);
   MfdApplication? _app;
   List<MfdApplicationEvent> _events = [];
@@ -249,6 +291,9 @@ class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
   }
 
   Future<void> _load() async {
+    if (!scopeCurrent) return;
+    final request = ++_readGeneration;
+    bool currentRead() => scopeCurrent && request == _readGeneration;
     if (!_canReview(context.read<AuthProvider>())) {
       setState(() => _loading = false);
       return;
@@ -259,8 +304,9 @@ class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
     });
     try {
       final app = await _repo.load(widget.applicationId);
+      if (!currentRead()) return;
       final events = await _repo.events(widget.applicationId);
-      if (mounted) {
+      if (currentRead()) {
         setState(() {
           _app = app;
           _events = events;
@@ -268,8 +314,10 @@ class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (currentRead()) {
         setState(() {
+          _app = null;
+          _events = [];
           _error = mfdErrorMessage(e);
           _loading = false;
         });
@@ -278,6 +326,14 @@ class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
   }
 
   Future<void> _start() async {
+    if (!scopeCurrent ||
+        !foreground ||
+        _busy ||
+        _loading ||
+        !scopeAuth.platformContextCurrent ||
+        !_canReview(scopeAuth)) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -289,26 +345,59 @@ class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
         expectedVersion: _app!.version);
     try {
       await _repo.mutate(_startRequest!);
+      if (!scopeCurrent) return;
       _startRequest = null;
-      if (mounted) await _load();
+      if (scopeCurrent) await _load();
     } catch (e) {
-      if (mounted) setState(() => _error = mfdErrorMessage(e));
+      if (scopeCurrent) setState(() => _error = mfdErrorMessage(e));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (scopeCurrent) setState(() => _busy = false);
     }
   }
 
+  Future<void> _security() async {
+    if (!scopeCurrent || _busy || !foreground) return;
+    await openPlatformSecurity(context,
+        repository: widget.mfaRepository,
+        destination: MfaDestination.review(widget.applicationId));
+    if (!scopeCurrent) return;
+    await scopeAuth.refreshPlatformContext();
+    if (scopeCurrent) await _load();
+  }
+
+  @override
+  void releaseAccountState() {
+    _app = null;
+    _events = [];
+    _startRequest = null;
+  }
+
+  @override
+  Future<void> resumeAccountState() async {
+    await scopeAuth.refreshPlatformContext();
+    if (scopeCurrent && !_busy) await _load();
+  }
+
   Future<void> _decide(MfdOperation operation) async {
+    if (!scopeCurrent ||
+        !foreground ||
+        !scopeAuth.platformContext.stepUpVerified) {
+      return;
+    }
     final result = await Navigator.of(context).push<MfdApplication>(
         MaterialPageRoute(
             builder: (_) => MfdApplicationForm(
-                repository: _repo, operation: operation, application: _app)));
-    if (mounted && result != null) await _load();
+                repository: _repo,
+                operation: operation,
+                application: _app,
+                mfaRepository: widget.mfaRepository)));
+    if (scopeCurrent && result != null) await _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    if (!scopeCurrent) return mfdAccountChanged;
     if (!_canReview(auth)) {
       return const Scaffold(
           body: Center(
@@ -336,24 +425,38 @@ class _MfdReviewDetailScreenState extends State<MfdReviewDetailScreen> {
             Text(app.statusLabel),
             if (app.status == 'submitted')
               FilledButton(
-                  onPressed: _busy || _loading ? null : _start,
+                  onPressed: _busy ||
+                          _loading ||
+                          !foreground ||
+                          !auth.platformContextCurrent
+                      ? null
+                      : _start,
                   child: Text(_startRequest == null
                       ? 'Start review'
                       : 'Retry start review safely')),
             if (app.status == 'under_review') ...[
-              if (!auth.platformContext.stepUpVerified)
+              if (!auth.platformContext.stepUpVerified) ...[
                 const Text(
                     'MFA verification is required before approving or rejecting an MFD application.'),
+                OutlinedButton(
+                    onPressed:
+                        _busy || _loading || !foreground ? null : _security,
+                    child: Text(auth.platformContext.mfaEnrolled
+                        ? 'Verify MFA'
+                        : 'Set up / Verify MFA')),
+              ],
               Wrap(spacing: 12, children: [
                 FilledButton(
-                    onPressed: auth.platformContext.stepUpVerified &&
+                    onPressed: foreground &&
+                            auth.platformContext.stepUpVerified &&
                             !_busy &&
                             !_loading
                         ? () => _decide(MfdOperation.approve)
                         : null,
                     child: const Text('Approve')),
                 OutlinedButton(
-                    onPressed: auth.platformContext.stepUpVerified &&
+                    onPressed: foreground &&
+                            auth.platformContext.stepUpVerified &&
                             !_busy &&
                             !_loading
                         ? () => _decide(MfdOperation.reject)
@@ -381,15 +484,18 @@ class MfdApplicationForm extends StatefulWidget {
       {super.key,
       required this.repository,
       required this.operation,
-      this.application});
+      this.application,
+      this.mfaRepository});
   final MfdApplicationRepository repository;
   final MfdOperation operation;
   final MfdApplication? application;
+  final MfaRepository? mfaRepository;
   @override
   State<MfdApplicationForm> createState() => _MfdApplicationFormState();
 }
 
-class _MfdApplicationFormState extends State<MfdApplicationForm> {
+class _MfdApplicationFormState extends State<MfdApplicationForm>
+    with WidgetsBindingObserver, MfdAccountScope<MfdApplicationForm> {
   final _form = GlobalKey<FormState>();
   final _business = TextEditingController(),
       _arn = TextEditingController(),
@@ -397,11 +503,12 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
   bool _confirmed = false, _busy = false;
   String? _error;
   MfdRequest? _request;
-  String? _openedBy;
+  MfdApplication? _currentApplication;
+  bool _revalidating = false, _targetCurrent = true;
   @override
   void initState() {
     super.initState();
-    _openedBy = context.read<AuthProvider>().user?.id;
+    _currentApplication = widget.application;
   }
 
   bool get _submit => widget.operation == MfdOperation.submit;
@@ -421,8 +528,14 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
   }
 
   Future<void> _send() async {
-    final session = context.read<AuthProvider>();
-    if (!session.isAuthenticated || session.user?.id != _openedBy) return;
+    if (!scopeCurrent ||
+        !foreground ||
+        _busy ||
+        _revalidating ||
+        !_targetCurrent ||
+        (_currentApplication?.isTerminal ?? false)) {
+      return;
+    }
     if (_busy || !_form.currentState!.validate()) return;
     if (_approve && !_confirmed) {
       setState(() => _error =
@@ -437,7 +550,7 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
         operation: widget.operation,
         requestId: newMfdRequestId(),
         applicationId: widget.application?.id,
-        expectedVersion: widget.application?.version,
+        expectedVersion: _currentApplication?.version,
         businessName: _business.text.trim(),
         claimedArn: _arn.text.trim(),
         note: _note.text.trim());
@@ -447,9 +560,14 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
     });
     try {
       final result = await widget.repository.mutate(_request!);
-      if (mounted) Navigator.of(context).pop(result);
+      if (mounted && scopeCurrent) Navigator.of(context).pop(result);
     } catch (e) {
-      if (mounted) {
+      if (scopeCurrent) {
+        if (e is PostgrestException &&
+            (e.message == 'platform_admin_step_up_required' ||
+                e.message == 'platform_capability_required')) {
+          scopeAuth.invalidatePlatformContext();
+        }
         setState(() {
           _error = mfdErrorMessage(e);
           _busy = false;
@@ -459,16 +577,72 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
   }
 
   @override
+  void releaseAccountState() {
+    _request = null;
+    _currentApplication = null;
+    _business.clear();
+    _arn.clear();
+    _note.clear();
+    _confirmed = false;
+  }
+
+  @override
+  Future<void> resumeAccountState() => _revalidate();
+
+  Future<void> _revalidate() async {
+    if (!scopeCurrent || _submit || _busy || _revalidating) return;
+    setState(() {
+      _revalidating = true;
+      _targetCurrent = false;
+      _confirmed = false;
+    });
+    try {
+      await scopeAuth.refreshPlatformContext();
+      if (!scopeCurrent || !_canReview(scopeAuth)) return;
+      final app = await widget.repository.load(widget.application!.id);
+      if (!scopeCurrent) return;
+      setState(() {
+        _currentApplication = app;
+        _targetCurrent = true;
+        if (app.isTerminal) {
+          _error =
+              'This application is now ${app.statusLabel.toLowerCase()}. Return to review the recorded result.';
+        }
+      });
+    } catch (_) {
+      if (scopeCurrent) {
+        setState(() => _error =
+            'The current application could not be confirmed. Refresh before deciding.');
+      }
+      // An unknown target must not enable a submission.
+      if (scopeCurrent) return;
+    } finally {
+      if (scopeCurrent) setState(() => _revalidating = false);
+    }
+  }
+
+  Future<void> _security() async {
+    if (!scopeCurrent || _busy || !foreground) return;
+    await openPlatformSecurity(context,
+        repository: widget.mfaRepository,
+        destination: MfaDestination.review(widget.application!.id));
+    if (scopeCurrent) await _revalidate();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    if (!auth.isAuthenticated || auth.user?.id != _openedBy) {
+    if (!scopeCurrent) {
       return const Scaffold(
           body: Center(
               child: Text(
                   'Your signed-in account changed. Close this page and refresh.')));
     }
-    final permitted =
-        _submit || (_canReview(auth) && auth.platformContext.stepUpVerified);
+    final permitted = foreground &&
+        !_revalidating &&
+        _targetCurrent &&
+        !(_currentApplication?.isTerminal ?? false) &&
+        (_submit || (_canReview(auth) && auth.platformContext.stepUpVerified));
     return Scaffold(
         appBar: AppBar(
             title: Text(_submit
@@ -502,8 +676,8 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
                           maxLength: 100,
                           validator: (v) => _required(v, 100)),
                     ] else ...[
-                      Text(widget.application!.businessName),
-                      Text('Claimed ARN: ${widget.application!.claimedArn}'),
+                      Text(_currentApplication!.businessName),
+                      Text('Claimed ARN: ${_currentApplication!.claimedArn}'),
                       if (_approve)
                         const Text(
                             'Approval accepts the submitted registration claim following your manual review and creates an MFD workspace. No external ARN verification is performed.'),
@@ -531,7 +705,7 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
                     if (_approve)
                       CheckboxListTile(
                           value: _confirmed,
-                          onChanged: _request != null
+                          onChanged: _busy || !permitted
                               ? null
                               : (v) => setState(() => _confirmed = v ?? false),
                           title: const Text(
@@ -539,6 +713,27 @@ class _MfdApplicationFormState extends State<MfdApplicationForm> {
                     if (!permitted)
                       const Text(
                           'MFA verification and current application review permission are required before this decision.'),
+                    if (!_submit &&
+                        !auth.platformContext.stepUpVerified &&
+                        _canReview(auth))
+                      OutlinedButton(
+                          onPressed: _busy || !foreground ? null : _security,
+                          child: const Text('Verify MFA')),
+                    if (!_submit && !_targetCurrent && !_revalidating)
+                      TextButton(
+                          onPressed: _revalidate,
+                          child: const Text('Refresh current application')),
+                    if (!_submit && _revalidating)
+                      const Text(
+                          'Checking current application and permissions…'),
+                    if (_currentApplication?.isTerminal ?? false)
+                      TextButton(
+                          onPressed: () =>
+                              Navigator.of(context).pop(_currentApplication),
+                          child: const Text('Return to review')),
+                    if (_request != null)
+                      const Text(
+                          'A previous request is unresolved. Retry uses its original version and note. You can refresh to check the recorded result.'),
                     if (_error != null)
                       Text(_error!, key: const Key('mfd-error')),
                     if (_busy) const Center(child: CircularProgressIndicator()),

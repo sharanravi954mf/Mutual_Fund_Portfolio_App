@@ -27,4 +27,5 @@ bash "$repo_root/scripts/test_email_signup_concurrency.sh" "$container"
 bash "$repo_root/scripts/test_authorization_containment_concurrency.sh" "$container"
 bash "$repo_root/scripts/test_platform_admin_authority_concurrency.sh" "$container"
 bash "$repo_root/scripts/test_mfd_application_concurrency.sh" "$container"
+python3 "$repo_root/scripts/test_platform_mfa_commissioning.py" "$container"
 echo 'MFD application, platform authority and containment full-schema regressions: PASS'

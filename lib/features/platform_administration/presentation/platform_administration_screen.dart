@@ -1,3 +1,5 @@
+import '../mfa/mfa_repository.dart';
+import '../mfa/platform_security_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
@@ -6,9 +8,11 @@ import '../../mfd_applications/presentation/mfd_application_screens.dart';
 
 /// Independent platform context; application review never loads tenant data.
 class PlatformAdministrationScreen extends StatefulWidget {
-  const PlatformAdministrationScreen({super.key, this.mfdRepository});
+  const PlatformAdministrationScreen(
+      {super.key, this.mfdRepository, this.mfaRepository});
 
   final MfdApplicationRepository? mfdRepository;
+  final MfaRepository? mfaRepository;
 
   @override
   State<PlatformAdministrationScreen> createState() =>
@@ -16,26 +20,7 @@ class PlatformAdministrationScreen extends StatefulWidget {
 }
 
 class _PlatformAdministrationScreenState
-    extends State<PlatformAdministrationScreen> with WidgetsBindingObserver {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
-      context.read<AuthProvider>().refreshIdentity();
-    }
-  }
-
+    extends State<PlatformAdministrationScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -49,7 +34,7 @@ class _PlatformAdministrationScreenState
         IconButton(
             tooltip: 'Refresh access',
             icon: const Icon(Icons.refresh),
-            onPressed: auth.refreshIdentity),
+            onPressed: auth.refreshPlatformContext),
         IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
@@ -72,7 +57,8 @@ class _PlatformAdministrationScreenState
               onTap: platform.capabilities.contains('mfd_applications.review')
                   ? () => Navigator.of(context).push(MaterialPageRoute<void>(
                       builder: (_) => MfdReviewQueueScreen(
-                          repository: widget.mfdRepository)))
+                          repository: widget.mfdRepository,
+                          mfaRepository: widget.mfaRepository)))
                   : null,
               subtitle: Text(platform.capabilities
                       .contains('mfd_applications.review')
@@ -85,11 +71,16 @@ class _PlatformAdministrationScreenState
           ListTile(
               leading: const Icon(Icons.security),
               title: const Text('Account security'),
-              subtitle: Text(platform.stepUpVerified
-                  ? 'MFA verified for this session.'
-                  : platform.mfaEnrolled
-                      ? 'Complete MFA verification before sensitive platform actions.'
-                      : 'Enroll and verify MFA before sensitive platform actions.')),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => openPlatformSecurity(context,
+                  repository: widget.mfaRepository),
+              subtitle: Text(!auth.platformContextCurrent
+                  ? 'Checking current security status.'
+                  : platform.stepUpVerified
+                      ? 'MFA verified for this session.'
+                      : platform.mfaEnrolled
+                          ? 'Complete MFA verification before sensitive platform actions.'
+                          : 'Enroll and verify MFA before sensitive platform actions.')),
           const Padding(
               padding: EdgeInsets.all(16),
               child: Text(

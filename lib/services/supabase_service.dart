@@ -1,3 +1,4 @@
+import '../features/authentication/services/auth_session_fence.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupabaseService {
@@ -10,6 +11,7 @@ class SupabaseService {
 
   /// Authenticate user via email/phone & password
   Future<AuthResponse> signIn(String emailOrPhone, String password) async {
+    AuthSessionFence.forClient(client)?.invalidate();
     final trimmed = emailOrPhone.trim();
     final isPhone = !trimmed.contains('@') &&
         RegExp(r'^\+?[0-9 ()-]{10,}$').hasMatch(trimmed);
@@ -26,6 +28,7 @@ class SupabaseService {
 
   /// Sign out current user
   Future<void> signOut() async {
+    AuthSessionFence.forClient(client)?.invalidate();
     await client.auth.signOut();
   }
 

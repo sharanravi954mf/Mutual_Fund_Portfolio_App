@@ -876,7 +876,9 @@ class _EmptyAsyncStorage extends GotrueAsyncStorage {
 // ---------------------------------------------------------------------------
 // FakeAuthProvider — minimal test double for AuthProvider
 // ---------------------------------------------------------------------------
-class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
+class FakeAuthProvider extends ChangeNotifier
+    with WidgetsBindingObserver
+    implements AuthProvider {
   FakeAuthProvider({
     bool isLoading = false,
     bool isAuthenticated = false,
@@ -891,6 +893,24 @@ class FakeAuthProvider extends ChangeNotifier implements AuthProvider {
   final bool _isAuthenticated;
   final UserAccount? _userAccount;
   final UserProfile? _userProfile;
+
+  @override
+  int get accountGeneration => 0;
+
+  @override
+  bool get platformContextCurrent => true;
+
+  @override
+  bool get platformAssuranceMismatch => false;
+
+  @override
+  SupabaseClient get client => throw StateError('MFA is outside this test');
+
+  @override
+  void invalidatePlatformContext() {}
+
+  @override
+  Future<void> refreshPlatformContext() async {}
 
   @override
   PlatformContext get platformContext => const PlatformContext();
