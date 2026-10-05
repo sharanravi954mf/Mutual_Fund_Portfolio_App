@@ -1,6 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mutual_fund_portfolio_app/features/calculators/domain/loan_part_payment_calculator.dart';
 import 'package:mutual_fund_portfolio_app/features/calculators/presentation/loan_part_payment_controller.dart';
+import 'package:mutual_fund_portfolio_app/features/calculators/models/loan_part_payment.dart';
+
+class FailingCalculator extends LoanPartPaymentCalculator {
+  @override
+  LoanPartPaymentResult calculate(LoanPartPaymentInput input) =>
+      throw const LoanCalculationException();
+}
 
 void main() {
   late LoanPartPaymentController controller;
@@ -17,6 +24,56 @@ void main() {
       controller.update(entry.key, entry.value);
     }
   }
+
+  test('clock captured once per Calculate and cleared with stale results', () {
+    controller.dispose();
+    var now = DateTime(2026, 10, 5);
+    var reads = 0;
+    controller = LoanPartPaymentController(clock: () {
+      reads++;
+      return now;
+    });
+    valid();
+    controller.calculate();
+    expect(reads, 1);
+    expect(controller.calculatedAt, DateTime(2026, 10, 5));
+    now = DateTime(2027, 1, 1);
+    expect(controller.calculatedAt, DateTime(2026, 10, 5));
+    controller.calculate();
+    expect(reads, 2);
+    expect(controller.calculatedAt, now);
+    controller.update(LoanInputField.months, 'bad');
+    expect(controller.calculatedAt, isNull);
+    controller.calculate();
+    expect(reads, 3);
+    expect(controller.result, isNull);
+    expect(controller.calculatedAt, isNull);
+    valid();
+    controller.calculate();
+    controller.reset();
+    expect(controller.calculatedAt, isNull);
+  });
+
+  test(
+      'accounting invariant failure returns safe error and no result or timestamp',
+      () {
+    controller.dispose();
+    controller = LoanPartPaymentController(calculator: FailingCalculator());
+    valid();
+    controller.calculate();
+    expect(controller.result, isNull);
+    expect(controller.calculatedAt, isNull);
+    expect(controller.calculationError,
+        'Unable to reconcile this estimate. Please check your inputs and try again.');
+    expect(const LoanCalculationException().toString(),
+        'Unable to reconcile the loan estimate');
+    controller.update(LoanInputField.months, '12');
+    expect(controller.calculationError, isNull);
+    controller.calculate();
+    expect(controller.calculationError, isNotNull);
+    controller.reset();
+    expect(controller.calculationError, isNull);
+  });
 
   test('all fields required', () {
     controller.calculate();

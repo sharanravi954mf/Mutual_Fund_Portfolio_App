@@ -1,8 +1,12 @@
 # Calculators V1 — Loan Part Payment
 
-Local candidate based on `d31c40058f2e542ff302234a8b92404437753647`.
+Historical V1 candidate based on `d31c40058f2e542ff302234a8b92404437753647`.
 The [original implementation plan](CALCULATORS_V1_IMPLEMENTATION_PLAN.md) was
 saved before implementation. No hosted commissioning is part of this feature.
+
+The sections below retain the V1 delivery record. The [V1.1 contract](#v11-interest-savings-and-month-wise-schedules)
+extends it from merged base `d5b61381485eea5a267c2ae25db73fc19455d006`,
+superseding the count-only simulation and result presentation described in V1.
 
 ## Purpose and extension point
 
@@ -270,3 +274,253 @@ No additional calculators, amortization export, PDF, email/share, saved
 scenarios/history, real account/lender integration, floating-rate predictions,
 date inputs, fees or foreclosure charges. No migration, hosted test, deployment,
 DEV/Production mutation, push, PR or merge. This is one reviewable local candidate.
+
+## V1.1 interest savings and month-wise schedules
+
+The [V1.1 implementation plan](CALCULATORS_LOAN_PART_PAYMENT_V1_1_IMPLEMENTATION_PLAN.md)
+was saved before source edits. V1's four financial inputs, limits, EMI formula,
+Indian currency formatting, catalog/hub, Explorer routes and client-only privacy
+contract remain intact. No dependencies or backend files change.
+
+### Typed schedules and interest comparison
+
+`AmortizationRow` is an immutable pure-Dart record of `monthNumber`,
+`openingOutstanding`, `payment`, `interestComponent`, `principalComponent` and
+`closingOutstanding`. It contains relative months only, with no date or clock.
+Each scenario exposes an immutable `schedule`, `totalInterest` and `interestSaved`
+in addition to its V1 summary fields. The aggregate result additionally exposes
+`baselineSchedule` and `baselineRemainingInterest`. UI code formats these values;
+it does not calculate financial totals or reproduce amortization logic.
+
+One private `_amortize` engine generates all three schedules:
+
+| Schedule | Opening balance | Regular payment | Duration |
+| --- | --- | --- | --- |
+| Baseline | Original principal P | Original calculated EMI | Original n months |
+| Reduced EMI | P2 = P - A | Revised calculated EMI | Original n months unless fully repaid |
+| Reduced tenure | P2 = P - A | Original calculated EMI | Until payoff, no more than n months |
+
+Baseline remaining interest is the sum of the baseline rows' interest components.
+Each scenario's payable interest is the sum of its own rows' interest components.
+**Interest saved = baseline remaining interest - scenario total interest.**
+Neither principal repayment nor the immediate part payment is interest. The
+part payment is not an extra EMI row; both future schedules begin at P2.
+
+The current EMI card identifies baseline interest as the comparison. Both
+scenario cards preserve their original outputs and additionally show payable
+interest and emphasized savings. Tenure and final payment derive from the same
+rows used in the schedule, not a second simulation or fractional-month formula.
+
+### Single engine, numerical stability and reconciliation
+
+The financial recurrence is unchanged:
+
+```text
+interest = opening * r
+amountDue = opening + interest
+payment = min(scheduledEMI, amountDue)
+principalComponent = payment - interest
+closing = opening - principalComponent
+```
+
+To avoid cancellation in a very small early principal component, the engine
+evaluates the equivalent principal progression in full double precision:
+
+```text
+S = 0
+repeat n times: S = S*(1+r) + 1
+firstPrincipalComponent = referencePrincipal / S + partPayment*r
+nextPrincipalComponent = previousPrincipalComponent * (1+r)
+```
+
+For the baseline, reference principal is P and part payment is zero. For Reduced
+EMI, reference principal is P2 and part payment is zero. For Reduced tenure,
+reference principal is P and part payment is A. This equivalence follows by
+subtracting consecutive monthly balance equations; it is the same loan model,
+not a different summary formula. The [plan's deviation record](CALCULATORS_LOAN_PART_PAYMENT_V1_1_IMPLEMENTATION_PLAN.md#implementation-deviations)
+records the conditioning evidence and decision.
+
+Payment and interest still use the monthly formulas above. Principal repaid is
+bounded by opening balance and the final balance becomes zero only within the
+documented tolerance. Every emitted row is checked for finite, nonnegative
+values and both accounting identities:
+
+```text
+payment = interestComponent + principalComponent
+closing = opening + interestComponent - payment
+```
+
+The row/payoff tolerance is `max(referencePrincipal, scheduledEMI) * 1e-12`.
+At the maximum principal this is approximately one paisa, and it scales down
+with loan size. It is a roundoff check, not monthly monetary rounding. No EMI,
+monthly interest or balance is rounded for calculation. Last payments use the
+smaller amount due. At the contractual final month, a difference from scheduled
+EMI within this tolerance is treated as dust, retaining the scheduled EMI and
+zero closing balance; this preserves exact zero-part-payment baseline behavior.
+
+No schedule can exceed n rows (600 maximum). Unlike V1's count-only fallback,
+a material balance remaining at that bound raises `LoanCalculationException`.
+A row failing either identity also raises that value-free exception. The
+controller clears results/timestamp and displays a safe reconciliation error
+without printing, transmitting or persisting values.
+
+Savings tolerance is `max(baselineInterest, scenarioInterest) * 1e-12`. A negative
+difference within this tolerance becomes zero; a materially negative difference
+or nonfinite savings raises the same invariant exception. Scenario summaries
+are sums of the exact schedule row objects, without separate rounding or formulas.
+
+Special cases:
+
+- Zero part payment reuses the baseline rows in both scenarios. Both savings
+  values are exactly zero and schedule lengths reproduce original tenure.
+- Full part payment bypasses future-schedule loops: both lists are empty, both
+  future interest values are zero and each saving equals baseline interest.
+  The baseline is still generated to measure the interest avoided.
+- At 0%, interest and savings are zero throughout. Principal repaid equals payment
+  exactly, and the last reduced-tenure instalment can be smaller than regular EMI.
+
+### Calendar labels and ephemeral calculation time
+
+`LoanPartPaymentController` accepts an optional `DateTime Function()` clock,
+defaulting to `DateTime.now`. It reads this once per Calculate invocation and
+retains `calculatedAt` only for a successful result. Edit, reset, validation failure
+or invariant failure clears the timestamp together with the result. The screen
+also exposes an optional clock for deterministic widget tests. The pure domain
+has no clock access.
+
+Row k is labelled using the year/month of the captured calculation timestamp
+plus k calendar months. Month 1 is the **next** calendar month; there is no
+duration-based day arithmetic or displayed day of month. For October 5, 2026,
+rows 1, 2 and 13 display `Month 1 · Nov 2026`, `Month 2 · Dec 2026` and
+`Month 13 · Nov 2027`. Labels stay fixed through rebuilds, theme/layout changes,
+scenario switches and page changes. Recalculation captures a new timestamp.
+English month names use bundled `en_US` date symbols; rupee amounts retain
+`en_IN` formatting to two decimals. No asynchronous locale setup is required.
+
+The UI explains: the part payment is applied now, before the next EMI; calendar
+months are illustrative and the lender's actual EMI date may differ. The estimate
+note now covers interest savings, schedules, daily interest, rate resets, fees,
+penalties and rounding, and retains the non-advice/nonbinding disclaimer.
+
+### Bounded, responsive schedule presentation
+
+`presentation/loan_amortization_schedule.dart` presents one selected scenario.
+Reduced EMI is selected initially, matching the summary order. Accessible Material
+choice chips switch to Reduced tenure. Only 12 rows are mounted at a time;
+Previous/Next controls show `Months X–Y of Z` and disable at page boundaries.
+At most three bounded domain lists are calculated, never two 600-row widget trees.
+
+Wide layouts (at least `900 * textScale` logical pixels) use a compact six-column
+table. A local horizontal viewport protects unusually wide formatted values;
+the calculator page itself never scrolls horizontally. Narrow layouts and large
+text use monthly cards with explicit labels for all fields. Selectors and paging
+buttons have at least 48px targets, semantic labels and no hover dependency.
+Current row-range announcements use a semantic live region.
+
+Scenario changes and replacement results reset to page one. Editing any input,
+reset or failed calculation removes the entire previous schedule. Component
+identity is tied to the result and replacement is also handled explicitly inside
+the schedule widget. Full prepayment displays:
+
+> No future EMI schedule — the entered part payment fully repays the outstanding principal.
+
+### Numeric acceptance and privacy
+
+For P = ₹10,00,000, n = 120, a = 8.5%, A = ₹1,00,000:
+
+| Metric | Value displayed |
+| --- | --- |
+| Current EMI | ₹12,398.57 |
+| Reduced EMI / monthly reduction | ₹11,158.71 / ₹1,239.86 |
+| Reduced tenure / reduction | 103 / 17 months |
+| Final reduced-tenure payment | ₹3,430.50 |
+| Baseline remaining interest | ₹4,87,828.27 |
+| Reduced EMI interest / savings | ₹4,39,045.44 / ₹48,782.83 |
+| Reduced tenure interest / savings | ₹3,68,084.53 / ₹1,19,743.74 |
+
+| Row | Opening | Payment | Interest | Principal | Closing |
+| --- | --- | --- | --- | --- | --- |
+| Reduced EMI 1 | ₹9,00,000.00 | ₹11,158.71 | ₹6,375.00 | ₹4,783.71 | ₹8,95,216.29 |
+| Reduced tenure 1 | ₹9,00,000.00 | ₹12,398.57 | ₹6,375.00 | ₹6,023.57 | ₹8,93,976.43 |
+| Reduced tenure 103 | ₹3,406.37 | ₹3,430.50 | ₹24.13 | ₹3,406.37 | ₹0.00 |
+
+No month 104 exists in the reduced-tenure schedule. Currency is display-rounded
+only; arithmetic on separately rounded visible values may differ by one paisa.
+
+Rows, totals, timestamp, selected scenario and page remain local ephemeral state.
+There is no database, RPC, Supabase, network, browser storage, logging, URL or
+analytics path. The privacy import test still restricts dependencies and now
+explicitly checks clock independence. The blocked-network widget test covers
+schedule selection and paging as well as calculation. No new dependency is used.
+
+### V1.1 validation and manual review
+
+Before source changes, the existing calculator, Explorer, route-guard and MFD
+tests passed: **122 tests**. The original 800 invariant combinations remain and
+now validate every row, continuity, principal repayment, final payoff, payment
+cap, schedule length, sums, interest savings and special cases. Locked first/last
+row and interest values have deterministic numeric and UI assertions. A separate
+maximum-principal/rate 600-month case checks numerical reconciliation.
+
+Schedule tests cover 1/11/12/13/25/120/600 months, every forward page through the
+600-month schedule, previous/last partial pages, 120-vs-103 scenario lengths,
+replacement/reset and frozen calendar/year rollover. Existing 320/390/768/1440px
+normal/2x light/dark tests now exercise schedule rows, selector, both paging
+directions and target sizes. Standalone controller tests cover single clock reads,
+timestamp invalidation and safe invariant failures.
+
+Manual source review completed before the local commit:
+
+| Requested check | Evidence / result |
+| --- | --- |
+| 1. One engine for summaries and tables | All three lists use `_amortize`; totals fold those rows and tenure/final payment read the same list |
+| 2. Savings exclude principal | `_savings` subtracts only summed `interestComponent` values |
+| 3. Part payment is not an EMI | Initial balance is reduced before month 1; no payment row for A |
+| 4. Smaller final payment | `min(emi, amountDue)`; locked month 103 payment verified |
+| 5. No extra dust month | Scale-aware payoff tolerance and strict n-row bound; no month 104 in acceptance case |
+| 6. Correct starting balance | Both first openings equal P2; grid and first-row assertions |
+| 7. No invented lender date | Relative month plus `MMM yyyy` only; captured clock and calendar-rollover tests |
+| 8. Full prepayment | Empty post-payment lists and explicit no-future-schedule message |
+| 9. Zero part payment | Baseline rows reused; exact zero savings and original n |
+| 10. Zero rate | Every row has zero interest and principal equals payment |
+| 11. 600-month bound | Fixed maximum, boundary test and all 50 schedule pages exercised |
+| 12. No stale page | Scenario changes/replacement reset page; result-keyed widget lifecycle |
+| 13. Input edits clear schedules | Controller clears result/timestamp; old schedule is removed immediately |
+| 14. No network/persistence/logging | Restricted import test and blocked-network calculation/selector/paging test |
+| 15. No database code | Scope review shows no Supabase, migration, dependency or backend changes |
+
+Final V1.1 local validation (Flutter 3.44.6 / Dart 3.12.2):
+
+| Check | Result |
+| --- | --- |
+| Existing baseline before source edits | PASS: 122 tests |
+| Domain tests | PASS: 30 tests, retaining and extending all 800 invariant scenarios |
+| Controller tests | PASS: 23 tests, including injected clock and safe invariant error |
+| Calculator widget/navigation/responsive tests | PASS: 24 tests |
+| Schedule pagination/calendar tests | PASS: 12 tests |
+| Privacy boundary | PASS: 1 test; blocked-network widget test also covers paging |
+| All calculator tests | PASS: 90 tests |
+| Explorer / route guard / MFD regressions | PASS: 50 tests (8 / 17 / 25) |
+| Full Flutter suite | PASS: 564 tests |
+| Changed-file formatting | PASS: 10 Dart files, no remaining formatting changes |
+| Scoped analyzer | PASS: no issues in calculator source or tests |
+| Local release web build | PASS: JavaScript `build/web`, 93.7 seconds |
+| Documentation validation | PASS: 43 Markdown files |
+| Migration-history validation | PASS: 27 frozen files through `20260801000000`; no migration changes |
+| Commit validation | PASS: Conventional Commit message and 5 validator regressions |
+| Whitespace/scope review | PASS: no changes to hub/catalog, onboarding, old plan, dependencies or backend |
+
+The existing Wasm dry-run warnings for `dart:js` in admin/excel code and the
+Cupertino font-reference warning remain unchanged. They do not prevent the
+JavaScript web release build. The earlier standalone locale failure was corrected
+using bundled date symbols; all final checks pass without locale setup or network.
+No tests were deleted or disabled. Logs are outside the repository at
+`/tmp/moneybowl-calculators-v1-1-evidence/`.
+
+All requested automated checks ran. Hosted/provider tests and deployment were
+excluded by scope; manual device/browser/screen-reader testing was not performed.
+The responsive/accessibility evidence is deterministic widget coverage. Remaining
+limitations are the existing input bounds and monthly constant-rate estimate:
+calendar months are illustrative, money uses double precision, and lender dates,
+daily interest, rate resets, charges and rounding may differ. No export, exact
+due-date input, persistence, tax calculation or backend functionality is added.
