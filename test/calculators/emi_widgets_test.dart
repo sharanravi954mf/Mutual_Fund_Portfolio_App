@@ -80,8 +80,9 @@ void main() {
       'catalog retains calculator one and adds unique EMI route with back',
       (tester) async {
     await mount(tester, home: const CalculatorsHomeScreen());
-    expect(calculatorCatalog.map((e) => e.id), ['loan-part-payment', 'emi']);
-    expect(calculatorCatalog.map((e) => e.id).toSet().length, 2);
+    expect(calculatorCatalog.map((e) => e.id),
+        ['loan-part-payment', 'emi', 'sip']);
+    expect(calculatorCatalog.map((e) => e.id).toSet().length, 3);
     expect(find.text('Loan Part Payment Calculator'), findsOneWidget);
     expect(find.text('EMI Calculator'), findsOneWidget);
     await press(tester, 'emi');

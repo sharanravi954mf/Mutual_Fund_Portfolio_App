@@ -6,6 +6,7 @@
 | --- | --- | --- | --- |
 | 1 | Loan Part Payment Calculator | `loan-part-payment` | V1 / V1.1 below |
 | 2 | EMI Calculator | `emi` | [EMI V1](EMI_CALCULATOR_V1.md) |
+| 3 | SIP Calculator | `sip` | [SIP V1](SIP_CALCULATOR_V1.md) |
 
 Explorer continues to open the existing Calculators hub. Each calculator has its
 own input/result, domain service, controller and screen. EMI is not a mode of Loan
@@ -13,6 +14,11 @@ Part Payment. The only shared primitives are the immutable `AmortizationRow`
 (compatibly re-exported from the old loan model) and `AmortizationSchedulePager`.
 The existing loan schedule wrapper retains its scenario selection, notes and
 reset behavior. Its financial engine, controller and screen are unchanged.
+
+SIP independently simulates beginning-of-period contributions and monthly
+returns. Its dates describe investment cash flows, so it does not reuse either
+loan domain or the amortization viewer. It preserves the same ephemeral privacy
+boundary and themed form patterns. Adding SIP changes no loan financial behavior.
 
 ## Historical V1 delivery record
 
@@ -56,6 +62,9 @@ To add a future calculator entry:
 6. Reuse the row/pager only for compatible monthly schedules. Keep scenario
    controls in each calculator's presentation, and extend the feature privacy
    boundary and existing-calculator regression tests. Add only working entries.
+7. For dated cash flows, document the month mapping and inject calculation time
+   through the controller into a pure domain. Keep any independent test oracle
+   separate from product summary calculations.
 
 ## Inputs and validation contract
 

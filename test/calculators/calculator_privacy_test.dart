@@ -7,8 +7,12 @@ void main() {
       'feature dependency boundary excludes services, storage, network and logging',
       () {
     final root = Directory('lib/features/calculators').absolute;
-    // Both independent calculators and the shared pager are in this boundary.
+    // All independent calculators and the shared pager are in this boundary.
     for (final path in [
+      'domain/sip_calculator.dart',
+      'models/sip.dart',
+      'presentation/sip_controller.dart',
+      'presentation/sip_screen.dart',
       'domain/emi_calculator.dart',
       'models/emi.dart',
       'presentation/emi_controller.dart',
