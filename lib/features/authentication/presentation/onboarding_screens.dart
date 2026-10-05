@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
+import '../../calculators/presentation/calculators_home_screen.dart';
 import '../../mfd_applications/presentation/mfd_application_screens.dart';
 import '../../investor_identity/models/user_account.dart';
 import '../../investor_verification/presentation/verification_status_screen.dart';
@@ -97,10 +98,12 @@ class ExplorerHomeScreen extends StatelessWidget {
                               borderRadius: BorderRadius.circular(12),
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute<void>(
-                                  builder: (_) => ExplorerModuleScreen(
-                                    title: module.$2,
-                                    description: module.$3,
-                                  ),
+                                  builder: (_) => module.$2 == 'Calculators'
+                                      ? const CalculatorsHomeScreen()
+                                      : ExplorerModuleScreen(
+                                          title: module.$2,
+                                          description: module.$3,
+                                        ),
                                 ),
                               ),
                               child: Padding(
