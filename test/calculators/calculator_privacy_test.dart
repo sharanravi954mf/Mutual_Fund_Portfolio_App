@@ -20,6 +20,10 @@ void main() {
     };
     for (final file in sources) {
       final source = file.readAsStringSync();
+      if (file.path.contains('/domain/') || file.path.contains('/models/')) {
+        expect(source.contains('DateTime.now'), isFalse,
+            reason: 'Financial domain must be clock-independent');
+      }
       for (final match
           in RegExp(r'''(?:import|export|part)\s+['"]([^'"]+)['"]''')
               .allMatches(source)) {

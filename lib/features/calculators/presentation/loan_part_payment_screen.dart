@@ -4,16 +4,18 @@ import 'package:intl/intl.dart';
 import '../domain/loan_part_payment_calculator.dart';
 import '../models/loan_part_payment.dart';
 import 'loan_part_payment_controller.dart';
+import 'loan_amortization_schedule.dart';
 
 class LoanPartPaymentScreen extends StatefulWidget {
-  const LoanPartPaymentScreen({super.key});
+  const LoanPartPaymentScreen({super.key, this.clock});
+  final DateTime Function()? clock;
 
   @override
   State<LoanPartPaymentScreen> createState() => _LoanPartPaymentScreenState();
 }
 
 class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
-  final _controller = LoanPartPaymentController();
+  late final _controller = LoanPartPaymentController(clock: widget.clock);
   final _fields = {
     for (final field in LoanInputField.values) field: TextEditingController()
   };
@@ -40,7 +42,7 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
     _controller.calculate();
     if (_controller.errors.isNotEmpty) {
       _focus[_controller.errors.keys.first]!.requestFocus();
-    } else {
+    } else if (_controller.result != null) {
       FocusScope.of(context).unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final resultContext = _resultsKey.currentContext;
@@ -140,6 +142,8 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
                         ),
                       ),
                     ),
+                    if (_controller.calculationError case final error?)
+                      Semantics(liveRegion: true, child: Text(error)),
                     if (_controller.result case final result?) ...[
                       const SizedBox(height: 24),
                       _results(context, result),
@@ -209,6 +213,7 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
         ),
         const SizedBox(height: 16),
         Card(
+          key: const ValueKey('loan-summary'),
           color: theme.colorScheme.surfaceContainerHighest,
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -217,6 +222,11 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
               children: [
                 const Text('Current calculated EMI'),
                 _amount(money(result.currentEmi)),
+                const SizedBox(height: 16),
+                Text(
+                    'Estimated remaining interest without part payment: ${money(result.baselineRemainingInterest)}'),
+                const Text(
+                    'This is the comparison baseline for interest savings.'),
                 const SizedBox(height: 8),
                 Text(
                     'After part payment: Remaining principal ${money(result.remainingPrincipal)}'),
@@ -236,10 +246,12 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
             subtitle: 'Keep tenure same',
             label: 'Revised EMI',
             value: money(result.sameTenure.revisedEmi),
+            interestSaved: result.sameTenure.interestSaved,
             details: [
               'Current calculated EMI: ${money(result.currentEmi)}',
               'Monthly EMI reduction: ${money(result.sameTenure.monthlyReduction)}',
               'Remaining tenure: ${result.isFullyRepaid ? 0 : result.input.months} months',
+              'Estimated interest payable: ${money(result.sameTenure.totalInterest)}',
             ],
           ),
           second: _scenario(
@@ -247,6 +259,7 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
             subtitle: 'Keep EMI same',
             label: 'Revised tenure',
             value: '${result.sameEmi.revisedMonths} months',
+            interestSaved: result.sameEmi.interestSaved,
             details: [
               if (!result.isFullyRepaid)
                 'EMI stays: ${money(result.currentEmi)}',
@@ -255,12 +268,19 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
               if (!result.isFullyRepaid &&
                   result.currentEmi - result.sameEmi.finalPayment >= 0.01)
                 'Estimated final payment: ${money(result.sameEmi.finalPayment)}',
+              'Estimated interest payable: ${money(result.sameEmi.totalInterest)}',
             ],
           ),
         ),
         const SizedBox(height: 24),
+        LoanAmortizationSchedule(
+          key: ObjectKey(result),
+          result: result,
+          calculatedAt: _controller.calculatedAt!,
+        ),
+        const SizedBox(height: 24),
         const Text(
-            'Estimate assumes a reducing-balance loan with monthly interest and the part payment applied directly to principal. Your lender’s actual EMI/tenure may differ because of payment dates, daily interest, rate resets, fees, rounding or lender rules.'),
+            'Interest savings and month-wise schedules are estimates based on a monthly reducing-balance model. The part payment is assumed to be applied before the next EMI. Actual lender interest, EMI dates, rate resets, daily-interest calculation, fees, penalties and rounding may differ.'),
         const SizedBox(height: 8),
         Text(
             'This estimate is not lender advice or a binding repayment schedule.',
@@ -283,8 +303,10 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
           required String subtitle,
           required String label,
           required String value,
+          required double interestSaved,
           required List<String> details}) =>
       Card(
+        key: ValueKey(title),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -302,6 +324,12 @@ class _LoanPartPaymentScreenState extends State<LoanPartPaymentScreen> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(detail),
                 ),
+              const SizedBox(height: 8),
+              Text('Interest saved: ${_currency.format(interestSaved)}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w600)),
             ],
           ),
         ),

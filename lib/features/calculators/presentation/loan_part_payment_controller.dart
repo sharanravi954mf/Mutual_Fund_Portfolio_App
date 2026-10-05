@@ -5,17 +5,29 @@ import '../models/loan_part_payment.dart';
 
 /// Ephemeral screen-owned state. No persistence, services or telemetry.
 class LoanPartPaymentController extends ChangeNotifier {
-  final _calculator = const LoanPartPaymentCalculator();
+  LoanPartPaymentController(
+      {DateTime Function()? clock,
+      LoanPartPaymentCalculator calculator = const LoanPartPaymentCalculator()})
+      : _clock = clock ?? DateTime.now,
+        _calculator = calculator;
+  final DateTime Function() _clock;
+  final LoanPartPaymentCalculator _calculator;
   final _values = {for (final field in LoanInputField.values) field: ''};
   Map<LoanInputField, String> _errors = {};
   LoanPartPaymentResult? _result;
+  DateTime? _calculatedAt;
+  String? _calculationError;
 
   Map<LoanInputField, String> get errors => Map.unmodifiable(_errors);
   LoanPartPaymentResult? get result => _result;
+  DateTime? get calculatedAt => _calculatedAt;
+  String? get calculationError => _calculationError;
 
   void update(LoanInputField field, String value) {
     _values[field] = value;
     _result = null;
+    _calculatedAt = null;
+    _calculationError = null;
     _errors = {};
     notifyListeners();
   }
@@ -24,11 +36,16 @@ class LoanPartPaymentController extends ChangeNotifier {
     _values.updateAll((_, __) => '');
     _errors = {};
     _result = null;
+    _calculatedAt = null;
+    _calculationError = null;
     notifyListeners();
   }
 
   void calculate() {
+    final calculationTime = _clock();
     _result = null;
+    _calculatedAt = null;
+    _calculationError = null;
     _errors = {};
     final parsed = <LoanInputField, double>{};
     for (final field in LoanInputField.values) {
@@ -68,8 +85,12 @@ class LoanPartPaymentController extends ChangeNotifier {
           annualRatePercent: parsed[LoanInputField.annualRate]!,
           partPayment: parsed[LoanInputField.partPayment]!,
         ));
+        _calculatedAt = calculationTime;
       } on LoanInputException catch (error) {
         _errors = error.errors;
+      } on LoanCalculationException {
+        _calculationError =
+            'Unable to reconcile this estimate. Please check your inputs and try again.';
       }
     }
     notifyListeners();

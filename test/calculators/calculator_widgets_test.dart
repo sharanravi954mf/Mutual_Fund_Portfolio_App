@@ -8,6 +8,7 @@ import 'package:mutual_fund_portfolio_app/features/calculators/domain/loan_part_
 import 'package:mutual_fund_portfolio_app/features/calculators/presentation/calculator_catalog.dart';
 import 'package:mutual_fund_portfolio_app/features/calculators/presentation/calculators_home_screen.dart';
 import 'package:mutual_fund_portfolio_app/features/calculators/presentation/loan_part_payment_screen.dart';
+import 'package:mutual_fund_portfolio_app/features/calculators/presentation/loan_amortization_schedule.dart';
 import 'package:mutual_fund_portfolio_app/theme/app_theme.dart';
 
 class RejectNetwork extends HttpOverrides {
@@ -24,7 +25,7 @@ void main() {
   GoogleFonts.config.allowRuntimeFetching = false;
 
   Future<void> mount(WidgetTester tester,
-      {Widget home = const LoanPartPaymentScreen(),
+      {Widget? home,
       Size size = const Size(1000, 1000),
       double scale = 1,
       bool dark = false}) async {
@@ -36,7 +37,7 @@ void main() {
           data: MediaQuery.of(context)
               .copyWith(textScaler: TextScaler.linear(scale)),
           child: child!),
-      home: home,
+      home: home ?? LoanPartPaymentScreen(clock: () => DateTime(2026, 10, 5)),
     ));
     await tester.pumpAndSettle();
   }
@@ -128,13 +129,27 @@ void main() {
     expect(find.text('Reduce EMI'), findsOneWidget);
     expect(find.text('Reduce tenure'), findsOneWidget);
     expect(find.text('₹12,398.57'), findsOneWidget);
-    expect(find.text('₹11,158.71'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('Reduce EMI')),
+            matching: find.text('₹11,158.71')),
+        findsOneWidget);
     expect(find.text('Monthly EMI reduction: ₹1,239.86'), findsOneWidget);
     expect(find.text('After part payment: Remaining principal ₹9,00,000.00'),
         findsOneWidget);
     expect(find.text('103 months'), findsOneWidget);
     expect(find.text('Tenure reduced by: 17 months'), findsOneWidget);
     expect(find.text('Estimated final payment: ₹3,430.50'), findsOneWidget);
+    expect(
+        find.text(
+            'Estimated remaining interest without part payment: ₹4,87,828.27'),
+        findsOneWidget);
+    expect(
+        find.text('Estimated interest payable: ₹4,39,045.44'), findsOneWidget);
+    expect(find.text('Interest saved: ₹48,782.83'), findsOneWidget);
+    expect(
+        find.text('Estimated interest payable: ₹3,68,084.53'), findsOneWidget);
+    expect(find.text('Interest saved: ₹1,19,743.74'), findsOneWidget);
   });
 
   testWidgets(
@@ -180,12 +195,21 @@ void main() {
     await fill(tester,
         principal: '100000', months: '12', rate: '0', payment: '10000');
     await press(tester, 'calculate');
-    expect(find.text('₹7,500.00'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('Reduce EMI')),
+            matching: find.text('₹7,500.00')),
+        findsOneWidget);
     expect(find.text('11 months'), findsOneWidget);
     expect(find.text('Estimated final payment: ₹6,666.67'), findsOneWidget);
     await enter(tester, LoanInputField.partPayment, '0');
     await press(tester, 'calculate');
-    expect(find.text('₹8,333.33'), findsNWidgets(2));
+    for (final key in ['loan-summary', 'Reduce EMI']) {
+      expect(
+          find.descendant(
+              of: find.byKey(ValueKey(key)), matching: find.text('₹8,333.33')),
+          findsOneWidget);
+    }
     expect(find.text('Monthly EMI reduction: ₹0.00'), findsOneWidget);
     expect(find.text('12 months'), findsOneWidget);
     expect(find.text('Tenure reduced by: 0 months'), findsOneWidget);
@@ -199,6 +223,12 @@ void main() {
     expect(find.text('0 months'), findsOneWidget);
     expect(find.text('Remaining tenure: 0 months'), findsOneWidget);
     expect(find.text('No further monthly payments.'), findsOneWidget);
+    expect(
+        find.text(
+            'No future EMI schedule — the entered part payment fully repays the outstanding principal.'),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('schedule-month-1')), findsNothing);
+    expect(find.text('Interest saved: ₹0.00'), findsNWidgets(2));
   });
 
   testWidgets(
@@ -207,15 +237,23 @@ void main() {
     await mount(tester);
     await fill(tester);
     await press(tester, 'calculate');
+    await press(tester, 'schedule-next');
+    expect(find.text('Months 13–24 of 120'), findsOneWidget);
+    // A successful recalculation without an edit must also reset pagination.
+    await press(tester, 'calculate');
+    expect(find.text('Months 1–12 of 120'), findsOneWidget);
     await enter(tester, LoanInputField.partPayment, '200000');
     expect(find.text('Your estimated results'), findsNothing);
+    expect(find.byType(LoanAmortizationSchedule), findsNothing);
     await press(tester, 'calculate');
     expect(find.text('After part payment: Remaining principal ₹8,00,000.00'),
         findsOneWidget);
     expect(find.text('103 months'), findsNothing);
+    expect(find.text('Months 1–12 of 120'), findsOneWidget);
     await enter(tester, LoanInputField.partPayment, '-1');
     await press(tester, 'calculate');
     expect(find.text('Your estimated results'), findsNothing);
+    expect(find.byType(LoanAmortizationSchedule), findsNothing);
     expect(find.text('Enter a part payment of zero or more.'), findsOneWidget);
     await press(tester, 'reset');
     expect(
@@ -225,6 +263,7 @@ void main() {
         isTrue);
     expect(find.text('Enter a part payment of zero or more.'), findsNothing);
     expect(find.text('Your estimated results'), findsNothing);
+    expect(find.byType(LoanAmortizationSchedule), findsNothing);
   });
 
   testWidgets(
@@ -302,6 +341,28 @@ void main() {
           expect(find.text('Reduce EMI'), findsOneWidget);
           expect(find.text('Reduce tenure'), findsOneWidget);
           expect(tester.takeException(), isNull);
+          await tester.ensureVisible(find.byType(LoanAmortizationSchedule));
+          await tester.pumpAndSettle();
+          expect(
+              find.byKey(const ValueKey('schedule-month-1')), findsOneWidget);
+          expect(find.byKey(const ValueKey('schedule-month-13')), findsNothing);
+          await press(tester, 'schedule-next');
+          expect(find.text('Months 13–24 of 120'), findsOneWidget);
+          await press(tester, 'schedule-tenure');
+          expect(
+              find.byKey(const ValueKey('schedule-month-1')), findsOneWidget);
+          await press(tester, 'schedule-next');
+          await press(tester, 'schedule-previous');
+          expect(tester.takeException(), isNull);
+          for (final key in [
+            'schedule-previous',
+            'schedule-next',
+            'schedule-emi',
+            'schedule-tenure'
+          ]) {
+            expect(tester.getSize(find.byKey(ValueKey(key))).height,
+                greaterThanOrEqualTo(48));
+          }
           await enter(tester, LoanInputField.partPayment, '10000000001');
           await press(tester, 'calculate');
           expect(
@@ -332,6 +393,8 @@ void main() {
     await fill(tester);
     await press(tester, 'calculate');
     expect(find.text('103 months'), findsOneWidget);
+    await press(tester, 'schedule-tenure');
+    await press(tester, 'schedule-next');
     expect(network.calls, 0);
     expect(messages, isEmpty);
     debugPrint = oldDebugPrint;
