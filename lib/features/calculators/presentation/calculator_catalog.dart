@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'loan_part_payment_screen.dart';
 import 'emi_screen.dart';
 import 'sip_screen.dart';
+import '../income_tax/presentation/income_tax_screen.dart';
 
 /// Presentation metadata only. Every calculator owns an independent domain.
 class CalculatorDefinition {
@@ -44,5 +45,13 @@ final calculatorCatalog = List<CalculatorDefinition>.unmodifiable([
         'Estimate the growth of your monthly SIP, initial investment and optional lump sum.',
     icon: Icons.trending_up_outlined,
     builder: (_) => const SipScreen(),
+  ),
+  CalculatorDefinition(
+    id: 'income-tax',
+    title: 'Income Tax Calculator',
+    description:
+        'Compare Old and New Regime tax for supported resident-individual income. Unavailable combinations return no estimate.',
+    icon: Icons.receipt_long_outlined,
+    builder: (_) => const IncomeTaxScreen(),
   ),
 ]);
