@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'loan_part_payment_screen.dart';
+import 'emi_screen.dart';
 
 /// Presentation metadata only. Every calculator owns an independent domain.
 class CalculatorDefinition {
@@ -26,5 +27,13 @@ final calculatorCatalog = List<CalculatorDefinition>.unmodifiable([
         'See how a loan part payment can reduce your EMI or remaining tenure.',
     icon: Icons.account_balance_outlined,
     builder: (_) => const LoanPartPaymentScreen(),
+  ),
+  CalculatorDefinition(
+    id: 'emi',
+    title: 'EMI Calculator',
+    description:
+        'Calculate your monthly EMI, total interest and complete repayment schedule.',
+    icon: Icons.calculate_outlined,
+    builder: (_) => const EmiScreen(),
   ),
 ]);

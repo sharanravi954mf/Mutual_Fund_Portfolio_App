@@ -1,3 +1,7 @@
+import 'amortization_row.dart';
+
+export 'amortization_row.dart';
+
 /// All amounts are unrounded rupees; the rate is an annual percentage.
 class LoanPartPaymentInput {
   const LoanPartPaymentInput({
@@ -64,22 +68,4 @@ class LoanPartPaymentResult {
   final List<AmortizationRow> baselineSchedule;
 
   bool get isFullyRepaid => remainingPrincipal == 0;
-}
-
-/// A monthly EMI after the immediate part payment, with no calendar dependency.
-class AmortizationRow {
-  const AmortizationRow({
-    required this.monthNumber,
-    required this.openingOutstanding,
-    required this.payment,
-    required this.interestComponent,
-    required this.principalComponent,
-    required this.closingOutstanding,
-  });
-  final int monthNumber;
-  final double openingOutstanding;
-  final double payment;
-  final double interestComponent;
-  final double principalComponent;
-  final double closingOutstanding;
 }

@@ -7,6 +7,16 @@ void main() {
       'feature dependency boundary excludes services, storage, network and logging',
       () {
     final root = Directory('lib/features/calculators').absolute;
+    // Both independent calculators and the shared pager are in this boundary.
+    for (final path in [
+      'domain/emi_calculator.dart',
+      'models/emi.dart',
+      'presentation/emi_controller.dart',
+      'presentation/emi_screen.dart',
+      'presentation/amortization_schedule_pager.dart',
+    ]) {
+      expect(File('${root.path}/$path').existsSync(), isTrue);
+    }
     final sources = root
         .listSync(recursive: true)
         .whereType<File>()
@@ -44,6 +54,11 @@ void main() {
           RegExp(r'\b(print|debugPrint|log|reportError)\s*\(').hasMatch(source),
           isFalse,
           reason: file.path);
+      expect(
+          RegExp(r'\b(localStorage|sessionStorage|restorationId|restorationScopeId)\b')
+              .hasMatch(source),
+          isFalse,
+          reason: 'Calculator state must not persist: ${file.path}');
     }
   });
 }

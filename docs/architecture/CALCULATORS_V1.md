@@ -1,4 +1,20 @@
-# Calculators V1 — Loan Part Payment
+# Calculators — catalog and Loan Part Payment V1
+
+## Current catalog
+
+| Number | Calculator | Stable catalog ID | Contract |
+| --- | --- | --- | --- |
+| 1 | Loan Part Payment Calculator | `loan-part-payment` | V1 / V1.1 below |
+| 2 | EMI Calculator | `emi` | [EMI V1](EMI_CALCULATOR_V1.md) |
+
+Explorer continues to open the existing Calculators hub. Each calculator has its
+own input/result, domain service, controller and screen. EMI is not a mode of Loan
+Part Payment. The only shared primitives are the immutable `AmortizationRow`
+(compatibly re-exported from the old loan model) and `AmortizationSchedulePager`.
+The existing loan schedule wrapper retains its scenario selection, notes and
+reset behavior. Its financial engine, controller and screen are unchanged.
+
+## Historical V1 delivery record
 
 Historical V1 candidate based on `d31c40058f2e542ff302234a8b92404437753647`.
 The [original implementation plan](CALCULATORS_V1_IMPLEMENTATION_PLAN.md) was
@@ -27,7 +43,7 @@ The catalog is deliberately presentation metadata, so icons and builders never
 enter the financial domain. There is no formula DSL, expression engine,
 database-driven catalog, shared calculator repository or plugin infrastructure.
 
-To add calculator #2:
+To add a future calculator entry:
 
 1. Add its independent pure Dart input/result models and calculation service.
 2. Add deterministic contract and invariant tests for its own financial model.
@@ -37,6 +53,9 @@ To add calculator #2:
    `calculatorCatalog`. The hub and Explorer need no changes.
 5. Document its assumptions, precision and limits. Do not reuse this loan model
    for unrelated financial formulas.
+6. Reuse the row/pager only for compatible monthly schedules. Keep scenario
+   controls in each calculator's presentation, and extend the feature privacy
+   boundary and existing-calculator regression tests. Add only working entries.
 
 ## Inputs and validation contract
 
