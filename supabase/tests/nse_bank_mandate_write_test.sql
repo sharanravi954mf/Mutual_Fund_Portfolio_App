@@ -107,6 +107,68 @@ VALUES(current_setting('b07.bank')::uuid,'e0060000-0000-4000-8000-000000000001',
  pg_temp.baseline('CLIENT_MASTER_REPORT','{"response_status":"S","error_remark":"","report_data_total":1,"report_data":[{"client_code":"SYNTHETIC1"}]}'),
  pg_temp.baseline('MANDATE_STATUS','{"response_status":"S","error_remark":"","report_data_total":0,"report_data":[]}'),now()+interval '1 hour');
 
+
+-- A private database-operator designation may authorize a synthetic UAT fixture
+-- without fabricating an end-user Auth identity. Runtime roles cannot call it.
+SAVEPOINT operator_uat_authority;
+DO $$
+DECLARE
+  c nse_bank_mandate.uat_cases;
+  op uuid := 'b0720000-0000-4000-8000-000000000001';
+BEGIN
+  SELECT * INTO c FROM nse_bank_mandate.uat_cases
+   WHERE bank_account_id=current_setting('b07.bank')::uuid
+     AND integration_account_id='e0060000-0000-4000-8000-000000000001';
+
+  PERFORM pg_temp.assert_true(
+    NOT has_function_privilege(
+      'authenticated',
+      'nse_bank_mandate.create_operator_uat_intent(uuid,uuid,uuid,text,jsonb,uuid,uuid,bytea)',
+      'EXECUTE')
+    AND NOT has_function_privilege(
+      'service_role',
+      'nse_bank_mandate.create_operator_uat_intent(uuid,uuid,uuid,text,jsonb,uuid,uuid,bytea)',
+      'EXECUTE'),
+    'operator_uat_helper_private');
+
+  PERFORM nse_bank_mandate.create_operator_uat_intent(
+    'e0030000-0000-4000-8000-000000000001',
+    'e0060000-0000-4000-8000-000000000001',
+    current_setting('b07.bank')::uuid,
+    'BANK_ADD',
+    '{"default_bank_flag":"N"}',
+    op,
+    c.designation_reference,
+    c.designation_sha256);
+
+  PERFORM pg_temp.assert_true(
+    (SELECT authority_mode='UAT_OPERATOR'
+      AND actor_user_id IS NULL
+      AND operator_designation_reference=c.designation_reference
+      AND operator_designation_sha256=c.designation_sha256
+     FROM nse_bank_mandate.write_intents
+     WHERE id=op),
+    'operator_uat_intent_frozen');
+
+  PERFORM pg_temp.assert_true(
+    NOT EXISTS(SELECT 1 FROM nse_bank_mandate.approvals WHERE intent_id=op),
+    'operator_uat_no_fake_investor_approval');
+
+  PERFORM pg_temp.assert_true(
+    public.prepare_nse_bank_mandate_write(op)=op,
+    'operator_uat_prepare_allowed');
+
+  PERFORM pg_temp.assert_true(
+    EXISTS(SELECT 1 FROM public.integration_operations
+      WHERE id=op AND operation_type='BANK_MANDATE_WRITE' AND state='QUEUED')
+    AND EXISTS(SELECT 1 FROM public.event_outbox
+      WHERE entity_id=op
+        AND event_type='integration.nse.bank_add_requested'
+        AND status='pending'),
+    'operator_uat_real_runtime_path');
+END $$;
+ROLLBACK TO SAVEPOINT operator_uat_authority;
+
 SAVEPOINT changed_account_owner;
 UPDATE public.integration_accounts SET investor_profile_id=(SELECT id FROM public.profiles WHERE user_id='e0010000-0000-4000-8000-000000000002') WHERE id='e0060000-0000-4000-8000-000000000001';
 SELECT pg_temp.expect_error($q$SELECT public.prepare_nse_bank_mandate_write('b0710000-0000-4000-8000-000000000001')$q$,'b07_approved_authority_required');

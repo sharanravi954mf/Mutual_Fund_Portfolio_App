@@ -1,4 +1,6 @@
 # Changelog
+
+- **NSE B07 synthetic UAT operator authority**: private database-only designation allows the legacy synthetic registered UAT fixture to exercise the real B07 write worker without fabricating an investor Auth identity; runtime roles remain denied.
 Target Repository Path: docs/CHANGELOG.md
 
 All notable completed releases of Money Bowl are documented here. This changelog follows the spirit of [Keep a Changelog](https://keepachangelog.com/).
