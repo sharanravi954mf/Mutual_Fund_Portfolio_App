@@ -143,6 +143,17 @@ RESET ROLE;
 SELECT pg_temp.expect_error($q$SELECT public.prepare_nse_bank_mandate_write('b0710000-0000-4000-8000-000000000008')$q$,'b07_fresh_created_relationship_required');
 ROLLBACK TO SAVEPOINT ambiguous_add;
 
+-- Provider HTTP 400/403 are definitive write rejections, matching the existing
+-- UCC write policy. They must not strand the operation as MAYBE_SENT.
+SAVEPOINT definitive_http;
+DO $$ DECLARE op uuid:='b0710000-0000-4000-8000-000000000001'; c jsonb; raw text:='{"error":"synthetic validation rejection"}';BEGIN
+ PERFORM public.prepare_nse_bank_mandate_write(op);c:=pg_temp.begin_write(op);
+ PERFORM public.finish_nse_bank_mandate_write((c->>'event_id')::uuid,(c->>'claim_token')::uuid,(c->>'call')::uuid,
+  replace(encode(convert_to(raw,'UTF8'),'base64'),E'\n',''),400,'{}','SENT_WITH_RESULT',now());
+ PERFORM pg_temp.assert_true((SELECT state='HTTP_FAILED' AND NOT retry_allowed AND NOT ambiguous_outcome AND NOT reconciliation_required FROM public.integration_operations WHERE id=op),'write_http_400_definitive');
+END $$;
+ROLLBACK TO SAVEPOINT definitive_http;
+
 DO $$ DECLARE op uuid:='b0710000-0000-4000-8000-000000000001'; c jsonb; r jsonb; result jsonb; verification uuid:=gen_random_uuid(); body text;
 BEGIN
  PERFORM pg_temp.assert_true(public.prepare_nse_bank_mandate_write(op)=op AND public.prepare_nse_bank_mandate_write(op)=op,'stable_operation');
@@ -168,15 +179,18 @@ BEGIN
  PERFORM pg_temp.assert_true(nse_bank_mandate.classify(op,true,'{"response_status":"S","error_remark":"","report_data_total":2,"report_data":[{},{}]}')='MULTIPLE','multiple');
 END $$;
 
--- Verification transport failures preserve evidence and only not-sent retries.
+-- Verification is READ_BOUNDED: uncertain read transport is evidence, not a
+-- mutation ambiguity, and remains safely retryable within the attempt cap.
 SAVEPOINT verification_transport;
-DO $$ DECLARE v uuid:=gen_random_uuid();c jsonb;BEGIN
+DO $$ DECLARE v uuid:=gen_random_uuid();c jsonb; next_claim jsonb;BEGIN
  PERFORM public.prepare_nse_bank_mandate_verification('b0710000-0000-4000-8000-000000000001',v);c:=pg_temp.begin_write(v);
  PERFORM pg_temp.complete(c,'','PROVEN_NOT_SENT');
  PERFORM pg_temp.assert_true((SELECT state='SUBMISSION_FAILED' AND retry_allowed FROM public.integration_operations WHERE id=v),'read_not_sent_persisted');
  c:=pg_temp.begin_write(v);PERFORM pg_temp.complete(c,'','MAYBE_SENT');
  PERFORM pg_temp.assert_true((SELECT count(*)=4 FROM public.integration_api_interactions WHERE integration_operation_id=v),'read_failure_exact_evidence');
- PERFORM pg_temp.assert_true(public.claim_nse_bank_mandate_write((c->>'event_id')::uuid) IS NULL,'read_maybe_sent_no_retry');
+ PERFORM pg_temp.assert_true((SELECT state='SUBMISSION_FAILED' AND retry_allowed AND NOT ambiguous_outcome AND NOT reconciliation_required FROM public.integration_operations WHERE id=v),'read_maybe_sent_retryable');
+ next_claim:=public.claim_nse_bank_mandate_write((c->>'event_id')::uuid);
+ PERFORM pg_temp.assert_true(next_claim IS NOT NULL AND (next_claim->>'attempt')::int=3,'read_maybe_sent_safe_retry');
 END $$;
 ROLLBACK TO SAVEPOINT verification_transport;
 

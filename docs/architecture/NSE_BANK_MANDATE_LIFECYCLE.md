@@ -100,11 +100,16 @@ Raw URLs, raw UCC/PAN/account substitutions and arbitrary API execution are abse
 
 Exact REQUEST text is encrypted before HTTP; exact RESULT bytes, including invalid
 UTF-8, are encrypted before business projection. SQL independently interprets
-captured responses. HTTP 200 alone is not success. Only the narrow pre-transport
-PROVEN_NOT_SENT path can retry (maximum three claims). MAYBE_SENT, unmatched
-responses and expiry after REQUEST become RECONCILIATION_REQUIRED, with no resend.
-Expired REQUESTs receive an explicit missing-result evidence record. Persistence
-acknowledgement retries reuse bytes/IDs and never repeat HTTP. Responses expose
+captured responses. HTTP 200 alone is not success. For **writes**, only the narrow
+pre-transport PROVEN_NOT_SENT path can retry (maximum three claims); provider HTTP
+400/403 are terminal definitive failures matching the established UCC write
+policy. MAYBE_SENT, unmatched responses and expiry after a write REQUEST become
+RECONCILIATION_REQUIRED, with no resend. Expired REQUESTs receive an explicit
+missing-result evidence record. Persistence
+acknowledgement retries reuse bytes/IDs and never repeat HTTP. The separate
+BANK_MANDATE_VERIFY operation is READ_ONLY/READ_BOUNDED: uncertain read transport
+and HTTP 408/429/500/502/503/504 can retry up to the same three-attempt cap without
+weakening the no-resend rule for writes. Responses expose
 fixed categories only; `evidence_recorded` is not a provider success assertion.
 
 ### Reconciliation and provider relationships

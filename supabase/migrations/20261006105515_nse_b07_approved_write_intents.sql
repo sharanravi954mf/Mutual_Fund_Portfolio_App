@@ -360,16 +360,27 @@ BEGIN
  IF e.id IS NULL THEN RETURN NULL; END IF;
  SELECT * INTO o FROM public.integration_operations WHERE id=e.entity_id FOR UPDATE;
  IF e.status='processing' AND e.claim_expires_at<=clock_timestamp() THEN
-  -- A persisted request with lost result may have left this process. Never resend.
   IF o.state='SUBMITTING' THEN
    SELECT * INTO req FROM public.integration_api_interactions WHERE integration_operation_id=o.id AND phase='REQUEST' AND attempt_number=e.retry_count;
    IF req.id IS NULL THEN RAISE EXCEPTION 'b07_request_evidence_required'; END IF;
-   INSERT INTO public.integration_api_interactions(workspace_id,integration_operation_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,endpoint_path,http_method,call_id,phase,attempt_number,correlation_id,payload_encryption_key_reference,payload_encryption_key_version,started_at,response_payload_ciphertext,response_header_metadata,response_bytes,response_hash,completed_at,elapsed_ms,normalized_outcome,native_remark_category,ambiguous_outcome,reconciliation_required)
-   VALUES(o.workspace_id,o.id,'NSE_INVEST','UAT',o.category,o.safety_class,o.operation_type,o.api_key,o.contract_version,req.endpoint_path,'POST',req.call_id,'RESULT',req.attempt_number,o.correlation_id,'integration_payload_encryption_key_v1',1,req.started_at,
-    extensions.pgp_sym_encrypt_bytea(''::bytea,public.integration_payload_encryption_key('integration_payload_encryption_key_v1'),'cipher-algo=aes256, compress-algo=0'),'{}',0,extensions.digest(''::bytea,'sha256'),clock_timestamp(),0,'AMBIGUOUS','b07_expired_after_request',true,true) RETURNING id INTO recovered_id;
-   UPDATE public.integration_operations SET state='RECONCILIATION_REQUIRED',retry_allowed=false,ambiguous_outcome=true,reconciliation_required=true,business_remark_category='b07_expired_after_request',last_interaction_id=recovered_id,completed_at=clock_timestamp() WHERE id=o.id;
-   UPDATE public.event_outbox SET status='failed',claim_token=NULL,claimed_by=NULL,claim_expires_at=NULL,error_message='b07_reconciliation_required' WHERE id=e.id;
-   RETURN NULL;
+   IF o.operation_type='BANK_MANDATE_VERIFY' THEN
+    -- Verification is READ_ONLY: an uncertain transport has no provider-side
+    -- mutation risk, so close this attempt truthfully and allow a bounded retry.
+    INSERT INTO public.integration_api_interactions(workspace_id,integration_operation_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,endpoint_path,http_method,call_id,phase,attempt_number,correlation_id,payload_encryption_key_reference,payload_encryption_key_version,started_at,response_payload_ciphertext,response_header_metadata,response_bytes,response_hash,completed_at,elapsed_ms,normalized_outcome,native_remark_category,ambiguous_outcome,reconciliation_required)
+    VALUES(o.workspace_id,o.id,'NSE_INVEST','UAT',o.category,o.safety_class,o.operation_type,o.api_key,o.contract_version,req.endpoint_path,'POST',req.call_id,'RESULT',req.attempt_number,o.correlation_id,'integration_payload_encryption_key_v1',1,req.started_at,
+     extensions.pgp_sym_encrypt_bytea(''::bytea,public.integration_payload_encryption_key('integration_payload_encryption_key_v1'),'cipher-algo=aes256, compress-algo=0'),'{}',0,extensions.digest(''::bytea,'sha256'),clock_timestamp(),0,'TRANSPORT_FAILURE','b07_read_lease_expired',false,false) RETURNING id INTO recovered_id;
+    UPDATE public.integration_operations SET state='SUBMISSION_FAILED',retry_allowed=e.retry_count<3,ambiguous_outcome=false,reconciliation_required=false,business_remark_category='b07_read_lease_expired',last_interaction_id=recovered_id,completed_at=clock_timestamp() WHERE id=o.id;
+    UPDATE public.event_outbox SET status='failed',claim_token=NULL,claimed_by=NULL,claim_expires_at=NULL,error_message=CASE WHEN e.retry_count<3 THEN 'b07_read_retryable' ELSE 'b07_read_attempts_exhausted' END WHERE id=e.id;
+   ELSE
+    -- A persisted write request with lost result may have left this process.
+    -- Never resend an uncertain mutation.
+    INSERT INTO public.integration_api_interactions(workspace_id,integration_operation_id,integration_key,integration_environment,category,safety_class,operation_type,api_key,contract_version,endpoint_path,http_method,call_id,phase,attempt_number,correlation_id,payload_encryption_key_reference,payload_encryption_key_version,started_at,response_payload_ciphertext,response_header_metadata,response_bytes,response_hash,completed_at,elapsed_ms,normalized_outcome,native_remark_category,ambiguous_outcome,reconciliation_required)
+    VALUES(o.workspace_id,o.id,'NSE_INVEST','UAT',o.category,o.safety_class,o.operation_type,o.api_key,o.contract_version,req.endpoint_path,'POST',req.call_id,'RESULT',req.attempt_number,o.correlation_id,'integration_payload_encryption_key_v1',1,req.started_at,
+     extensions.pgp_sym_encrypt_bytea(''::bytea,public.integration_payload_encryption_key('integration_payload_encryption_key_v1'),'cipher-algo=aes256, compress-algo=0'),'{}',0,extensions.digest(''::bytea,'sha256'),clock_timestamp(),0,'AMBIGUOUS','b07_expired_after_request',true,true) RETURNING id INTO recovered_id;
+    UPDATE public.integration_operations SET state='RECONCILIATION_REQUIRED',retry_allowed=false,ambiguous_outcome=true,reconciliation_required=true,business_remark_category='b07_expired_after_request',last_interaction_id=recovered_id,completed_at=clock_timestamp() WHERE id=o.id;
+    UPDATE public.event_outbox SET status='failed',claim_token=NULL,claimed_by=NULL,claim_expires_at=NULL,error_message='b07_reconciliation_required' WHERE id=e.id;
+    RETURN NULL;
+   END IF;
   END IF;
   UPDATE public.integration_operations SET state='SUBMISSION_FAILED',retry_allowed=e.retry_count<3 WHERE id=o.id;
   UPDATE public.event_outbox SET status='failed',claim_token=NULL,claimed_by=NULL,claim_expires_at=NULL WHERE id=e.id;
@@ -416,11 +427,28 @@ BEGIN
  IF req.id IS NULL OR o.operation_type NOT IN ('BANK_MANDATE_WRITE','BANK_MANDATE_VERIFY') THEN RAISE EXCEPTION 'b07_request_evidence_required'; END IF;
  BEGIN payload:=convert_from(raw,'UTF8'); EXCEPTION WHEN OTHERS THEN payload:=NULL; END;
  intent_id:=CASE o.operation_type WHEN 'BANK_MANDATE_WRITE' THEN o.id ELSE o.reconciliation_target_operation_id END;
- IF p_delivery='PROVEN_NOT_SENT' THEN outcome:='PRE_TRANSMISSION_FAILURE';v_category:='b07_proven_not_sent';v_state:='SUBMISSION_FAILED';retry:=e.retry_count<3;
- ELSIF p_delivery='MAYBE_SENT' THEN outcome:='AMBIGUOUS';v_category:='b07_maybe_sent';v_state:='RECONCILIATION_REQUIRED';ambiguous:=true;
+ IF p_delivery='PROVEN_NOT_SENT' THEN
+  outcome:='PRE_TRANSMISSION_FAILURE';v_category:='b07_proven_not_sent';v_state:='SUBMISSION_FAILED';retry:=e.retry_count<3;
+ ELSIF p_delivery='MAYBE_SENT' AND o.operation_type='BANK_MANDATE_VERIFY' THEN
+  -- READ_ONLY verification can be retried safely even if the previous read may
+  -- have reached NSE; there is no provider-side business mutation to duplicate.
+  outcome:='TRANSPORT_FAILURE';v_category:='b07_read_transport_failure';v_state:='SUBMISSION_FAILED';retry:=e.retry_count<3;
+ ELSIF p_delivery='MAYBE_SENT' THEN
+  outcome:='AMBIGUOUS';v_category:='b07_maybe_sent';v_state:='RECONCILIATION_REQUIRED';ambiguous:=true;
  ELSIF o.operation_type='BANK_MANDATE_VERIFY' THEN
-  v_category:=CASE WHEN p_http_status BETWEEN 200 AND 299 THEN nse_bank_mandate.classify(intent_id,true,payload) ELSE 'INVALID' END;
-  outcome:=CASE v_category WHEN 'MATCH' THEN 'SUCCESS' ELSE 'BUSINESS_FAILURE' END;v_state:=CASE outcome WHEN 'SUCCESS' THEN 'SUCCESS' ELSE 'BUSINESS_FAILED' END;
+  IF p_http_status IN (408,429,500,502,503,504) THEN
+   outcome:='HTTP_FAILURE';v_category:='b07_read_http_retryable';v_state:='SUBMISSION_FAILED';retry:=e.retry_count<3;
+  ELSIF p_http_status NOT BETWEEN 200 AND 299 THEN
+   outcome:='HTTP_FAILURE';v_category:='b07_read_http_failure';v_state:='HTTP_FAILED';
+  ELSE
+   v_category:=nse_bank_mandate.classify(intent_id,true,payload);
+   outcome:=CASE v_category WHEN 'MATCH' THEN 'SUCCESS' ELSE 'BUSINESS_FAILURE' END;
+   v_state:=CASE outcome WHEN 'SUCCESS' THEN 'SUCCESS' ELSE 'BUSINESS_FAILED' END;
+  END IF;
+ ELSIF p_http_status IN (400,403) THEN
+  -- Match the established UCC write policy: these provider responses are
+  -- definitive request failures, not uncertain mutations.
+  outcome:='HTTP_FAILURE';v_category:='b07_http_definitive_failure';v_state:='HTTP_FAILED';
  ELSE
   outcome:=CASE WHEN p_http_status BETWEEN 200 AND 299 THEN nse_bank_mandate.classify(intent_id,false,payload) ELSE 'AMBIGUOUS' END;
   v_state:=CASE outcome WHEN 'SUCCESS' THEN 'SUCCESS' WHEN 'BUSINESS_FAILURE' THEN 'BUSINESS_FAILED' ELSE 'RECONCILIATION_REQUIRED' END;
@@ -437,7 +465,7 @@ BEGIN
  VALUES(o.workspace_id,o.id,'NSE_INVEST','UAT',o.category,o.safety_class,o.operation_type,o.api_key,o.contract_version,req.endpoint_path,'POST',p_call_id,'RESULT',req.attempt_number,o.correlation_id,'integration_payload_encryption_key_v1',1,req.started_at,
  extensions.pgp_sym_encrypt_bytea(raw,public.integration_payload_encryption_key('integration_payload_encryption_key_v1'),'cipher-algo=aes256, compress-algo=0'),p_headers,p_headers->>'content_type',octet_length(raw),extensions.digest(raw,'sha256'),p_http_status,p_http_status BETWEEN 200 AND 299,p_completed_at,greatest(0,(extract(epoch FROM p_completed_at-req.started_at)*1000)::bigint),outcome,v_category,ambiguous,ambiguous) RETURNING id INTO rid;
  UPDATE public.integration_operations op SET state=v_state,retry_allowed=retry,ambiguous_outcome=ambiguous,reconciliation_required=ambiguous,completed_at=p_completed_at,last_interaction_id=rid,business_remark_category=v_category WHERE op.id=o.id;
- UPDATE public.event_outbox SET status=CASE WHEN retry OR ambiguous THEN 'failed' ELSE 'completed' END,claim_token=NULL,claimed_by=NULL,claim_expires_at=NULL,error_message=CASE WHEN retry OR ambiguous THEN v_category ELSE NULL END,updated_at=clock_timestamp() WHERE id=e.id;
+ UPDATE public.event_outbox SET status=CASE WHEN v_state IN ('SUBMISSION_FAILED','RECONCILIATION_REQUIRED') THEN 'failed' ELSE 'completed' END,claim_token=NULL,claimed_by=NULL,claim_expires_at=NULL,error_message=CASE WHEN v_state IN ('SUBMISSION_FAILED','RECONCILIATION_REQUIRED') THEN v_category ELSE NULL END,updated_at=clock_timestamp() WHERE id=e.id;
  IF o.operation_type='BANK_MANDATE_WRITE' AND o.api_key='BANK_DEL' AND outcome='SUCCESS' THEN
   INSERT INTO nse_bank_mandate.bank_deletion_receipts(operation_id,add_operation_id,result_id)
   SELECT o.id,rel.add_operation_id,rid FROM nse_bank_mandate.bank_relationships rel JOIN nse_bank_mandate.write_intents i ON i.id=o.id
