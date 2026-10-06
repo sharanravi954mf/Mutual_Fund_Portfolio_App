@@ -54,6 +54,22 @@ write evidence and reconciliation are implemented locally. The external inputs
 above still prevent a safe real provider call. No provider validation rejection,
 success, or reconciliation evidence was fabricated to resolve a contract conflict.
 
+### Synthetic UAT operator authority
+
+The registered UAT fixture predates the current public-signup identity model and
+has no end-user Auth identity. A later additive migration therefore provides one
+private database-operator-only fixture path. It is limited to an existing
+NSE_INVEST/UAT/REGISTERED account, active verified owned bank, active investor
+membership and an unexpired uat_cases designation with exact UUID and SHA-256
+binding. The helper is explicitly revoked from PUBLIC, anon, authenticated and
+service_role; browser and workers cannot mint this authority. The frozen intent
+records authority_mode=UAT_OPERATOR and no actor_user_id; normal investor
+drafts/approvals remain unchanged.
+
+This path is for controlled synthetic NSE UAT characterization only. It does not
+stand in for production investor consent and does not relax the worker's exact
+UAT-host check, evidence-before-transport rule or no-blind-write-retry policy.
+
 ### Durable authority and transport boundaries
 
 Additive migration: `20261006105515_nse_b07_approved_write_intents.sql`.
