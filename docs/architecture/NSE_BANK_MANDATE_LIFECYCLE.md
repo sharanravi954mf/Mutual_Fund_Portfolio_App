@@ -1,8 +1,169 @@
 # B07 bank and mandate lifecycle
 
-Status: local implementation, **partial B07**. MANDATE_STATUS is implemented;
-MANDATE and CLIENTBANKDTL ADD/DEL remain blocked. Nothing is commissioned.
-Completion discovery base: `2819143d4dc064c39fed7e8ac0254fe2b3ade1b9`.
+## Operational candidate — 2026-10-06
+
+Base: `2819143d4dc064c39fed7e8ac0254fe2b3ade1b9`. Prior reviewed commit:
+`afd0af732ae43ddb34409e1c00e1b2b06e3fbfdd` (preserved). This pass adds a local
+implementation for approved B07 writes. **No write is UAT CONFIRMED.** The earlier
+review-only model and its BLOCKED rows remain immutable and cannot authorize this
+new lifecycle.
+
+| API | Completion status | Actual NSE UAT outcome in this pass |
+| --- | --- | --- |
+| MANDATE_STATUS | IMPLEMENTED | NOT ATTEMPTED; existing bounded read preserved |
+| MANDATE | BLOCKED — UAT inputs/characterization | NOT ATTEMPTED; zero provider calls |
+| BANK_ADD | BLOCKED — designated additional test bank | NOT ATTEMPTED; zero provider calls |
+| BANK_DEL | BLOCKED — designated safe created relationship | NOT ATTEMPTED; zero provider calls |
+
+### Actual external prerequisites
+
+The user authorized controlled B07 UAT mutations. That authorization is retained;
+no further generic permission to mutate NSE UAT is needed. What is still missing
+is the designated test-data/terms bundle. The retained local
+`private/ucc_fixture.json` was inspected without printing its values: it declares
+`environment=NSE_UAT`, `synthetic=true`, `status=PREPARED_NOT_SUBMITTED` and
+`submission_allowed=false`. It is not the later registered fixture. Historical
+Attempt #4 and Client Master reports identify successful DEV operations, but do
+not designate an additional bank for this B07 exercise or supply approved mandate
+amount/type/start/end dates. The agent requested those inputs; none was supplied
+in this pass. No collection sample, placeholder, unrelated bank, or historical
+provider success was substituted for that designation.
+
+Read-only DEV inspection subsequently confirmed that historical registration
+operation `9f879567-2be2-4509-9f76-ce7ac9e41857` remains SUCCESS and its integration
+account remains REGISTERED/UAT. There is exactly one verified active owned bank:
+savings, canonical default, MICR absent. The queries selected only opaque IDs,
+state, booleans and counts; no raw UCC/PAN/account or credentials. They did not
+create an NSE call or constitute fresh provider reconciliation. No additional
+owned bank exists for the planned ADD→DEL exercise.
+
+- BANK_ADD needs a designated existing UAT investor/integration account and a
+  verified owned additional test bank, with an approved explicit default choice.
+- BANK_DEL needs that controlled ADD's relationship, fresh positive non-default
+  verification and the designation establishing that this isolated test
+  relationship is safe to delete. It cannot target a pre-existing unrelated bank.
+- MANDATE needs the designated UAT bank and approved amount/type/dates/processing
+  provenance. Non-empty MICR remains blocked pending real NSE characterization
+  of `micr_no` versus `micr_code`. The implemented subset omits optional MICR and
+  requires the canonical MICR to be absent. `registration_date` is included only
+  with an explicit MEMBER processing selection and an approved valid date; it is
+  omitted for PROVIDER processing. Neither behavior is claimed UAT confirmed.
+
+There is no remaining *schema-absence* blocker: the new authority model, workers,
+write evidence and reconciliation are implemented locally. The external inputs
+above still prevent a safe real provider call. No provider validation rejection,
+success, or reconciliation evidence was fabricated to resolve a contract conflict.
+
+### Durable authority and transport boundaries
+
+Additive migration: `20261006105515_nse_b07_approved_write_intents.sql`.
+`draft_nse_bank_mandate_write` accepts opaque workspace/account/bank IDs, action,
+strict business terms and a stable request UUID. It derives UCC/account/IFSC/type
+server-side, freezes the exact encrypted request and hash, and records investor,
+actor auth/profile IDs, version and time. MANDATE gets one stable `MB`-prefixed
+20-character member reference. Replays require identical scope/action/terms.
+
+The owner can inspect `get_nse_bank_mandate_draft` (masked bank plus business
+terms), then explicitly call `approve_nse_bank_mandate_write(id, version)`.
+Approval is a separate immutable event binding the exact frozen request hash and
+actor. `revoke_nse_bank_mandate_write` records immutable revocation before send.
+Draft/approval/revocation produce sanitized audit events. Historical review
+proposals are not used as approvals. Browser roles cannot prepare, claim, read
+transport source, decrypt evidence, finish or reconcile operations.
+
+A private operator-provisioned `uat_cases` record binds the bank/account to an
+external designation UUID and SHA-256, owned Client Master/MANDATE_STATUS baseline
+RESULT IDs and an expiry of at most one day. No case is pre-provisioned by the
+migration and no client/service insert API is granted. Its designation must refer
+to actual retained operator/test-data authority; synthetic SQL test designations
+are never real UAT authority. Baselines must belong to the exact account/workspace,
+be recent at designation, and contain the exact UCC with valid report envelopes.
+Provider mandate rows referencing a deletion bank block deletion.
+
+`prepare_nse_bank_mandate_write` is service-only. Preparation and REQUEST
+persistence recheck approval/revocation, current investor link/membership, account
+UAT state, unchanged frozen bank/UCC and the designated case. DEL additionally
+requires this case's correlated native successful ADD receipt (a reconciled
+ambiguous ADD is insufficient), exact original provider bank identity, and the
+latest verification to be positive and within 15 minutes, explicit N/default
+false, no prior deletion receipt, no approved mandate
+for the bank, no canonical orders for that investor/workspace and no known
+mutating transaction/payment/systematic operations for the integration account.
+These conservative checks plus the isolated-test designation are the bounded UAT
+policy; they are not a general production dependency inventory.
+
+All writes use the existing integration tables/outbox, not a parallel job system.
+The single finite `nse-bank-mandate-worker` handles three typed write events and
+one B07 verification event. It accepts only `event_outbox_id`. Its NSE gateway
+requires exactly `https://nseinvestuat.nseindia.com` and disables redirects.
+Raw URLs, raw UCC/PAN/account substitutions and arbitrary API execution are absent.
+
+Exact REQUEST text is encrypted before HTTP; exact RESULT bytes, including invalid
+UTF-8, are encrypted before business projection. SQL independently interprets
+captured responses. HTTP 200 alone is not success. Only the narrow pre-transport
+PROVEN_NOT_SENT path can retry (maximum three claims). MAYBE_SENT, unmatched
+responses and expiry after REQUEST become RECONCILIATION_REQUIRED, with no resend.
+Expired REQUESTs receive an explicit missing-result evidence record. Persistence
+acknowledgement retries reuse bytes/IDs and never repeat HTTP. Responses expose
+fixed categories only; `evidence_recorded` is not a provider success assertion.
+
+### Reconciliation and provider relationships
+
+Service-only `prepare_nse_bank_mandate_verification(write_id, request_id)` queues
+an explicit read using frozen identity; verification is not a resend. The worker
+persists the read evidence and invokes `reconcile_nse_bank_mandate_write`.
+
+- MANDATE uses exact `memberMandateIds` and compares UCC/member reference, bank,
+  amount, type, start/end and registration date when present. Native status alone
+  never proves authority. Zero/multiple/foreign/mismatched rows remain unresolved.
+- ADD uses the documented Client Master request and compares UCC plus numbered
+  account/type/IFSC/MICR/default fields. A unique matching row records an immutable
+  `bank_relationships` projection with write/read evidence IDs. It establishes a
+  provider relationship observation, not bank payment eligibility. Canonical bank
+  records are unchanged.
+- DEL accepts only a correlated native `SUCCESS` response as the positive write
+  receipt and appends `bank_deletion_receipts`. A subsequent Client Master read
+  is retained, but no missing row resolves an ambiguous deletion. Such a write
+  requires an external positive receipt/vendor resolution; no automatic resend
+  or inference from absence is implemented.
+
+Generic integration scope/transition guards were extended only for owned B07
+verification and SQL-validated positive evidence. Existing UCC recovery rules,
+including the HTTP-failure read-reopen transition, remain intact. Dispatcher
+configuration includes the finite B07 routes; no configuration was deployed.
+
+### Validation
+
+- Focused B07 current-schema SQL: original read/review regressions plus approved
+  intent, exact evidence, replay, role/ownership, revocation, substitution denial,
+  ambiguous-write reconciliation, default/dependency deletion protection and
+  missing-result recovery. PL/pgSQL lint and real concurrent write prepare/claim
+  run in the isolated disposable container.
+- Full NSE SQL regression harness: UCC/dispatcher, B01–B07, frontend, B06 concurrency.
+- Protected manifest fmt/check: 85 files. Deno: 904 passing tests.
+- Dispatcher pytest: 63 passing tests. Manifest tests: 21. Diagnostic policy: 1.
+- Documentation, migration-history, commit-format and whitespace validators.
+
+Final local checks: both SQL harnesses passed, including the B07 write race and
+two B01–B06 regression passes; B07 PL/pgSQL lint had no findings. Protected Deno
+fmt/check passed all 85 targets and all 904 tests passed. Dispatcher pytest passed
+63 tests; manifest validation plus 21 tests and the diagnostic policy test passed.
+Documentation validation passed 54 Markdown files; the 27 frozen migration-history
+entries passed and all pre-existing migrations remained unchanged. Commit-format,
+shell syntax and whitespace checks passed. During development, the full harness
+caught the UCC HTTP-read reopen transition missing from an initial trigger copy;
+the final migration preserves the later current definition and the rerun passed. Local
+logs use `/tmp/b07-operational-*`; no sensitive request/response payloads are
+included in this document. All SQL fixtures are synthetic and disposable. No
+hosted Supabase schema/data mutation, Production/main change, push, PR, merge,
+deployment, order, payment, SIP or real-money activity occurred. No ambiguous NSE
+write was retried; no NSE write was attempted at all.
+
+## Historical discovery at reviewed commit afd0af7
+
+The sections below record the earlier review-only implementation and validation.
+Their statements about missing workflow/schema and absent mutation routes describe
+that reviewed commit, not the operational candidate above.
 
 ## Source decisions and unresolved contracts
 

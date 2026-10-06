@@ -17,14 +17,15 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
-## NSE B07 local candidate — 2026-10-06
+## NSE B07 operational local candidate — 2026-10-06
 
-MANDATE_STATUS: IMPLEMENTED. MANDATE: BLOCKED. BANK_ADD: BLOCKED. BANK_DEL: BLOCKED.
-The completion discovery preserves the three write blocks pending exact investor
-authority, mandate contract decisions and provider relationship/reconciliation
-evidence; deletion additionally requires complete dependency proof. See the
-[bounded discovery and validation](architecture/NSE_BANK_MANDATE_LIFECYCLE.md).
-No hosted mutation, commissioning or deployment was performed.
+MANDATE_STATUS: IMPLEMENTED; UAT not attempted in this pass. MANDATE, BANK_ADD
+and BANK_DEL: BLOCKED for operational completion pending designated UAT test-bank
+inputs and approved mandate terms. Their approved-intent/evidence/worker and
+reconciliation paths are now implemented locally; none is UAT CONFIRMED.
+Historical review proposals remain BLOCKED. See the
+[implementation and exact external prerequisites](architecture/NSE_BANK_MANDATE_LIFECYCLE.md).
+No hosted mutation, commissioning or deployment occurred.
 
 ## Canonical Project Documents Notice
 The following five documents are the current and authoritative records for this project:
