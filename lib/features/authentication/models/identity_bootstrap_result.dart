@@ -1,6 +1,8 @@
 import '../../investor_identity/models/user_account.dart';
 
 enum IdentityResolution {
+  reconciliationRequired,
+  verifiedContactsRequired,
   platformContext,
   advisor,
   existingLink,
@@ -12,6 +14,10 @@ enum IdentityResolution {
 
   static IdentityResolution fromDatabase(String value) {
     switch (value) {
+      case 'verified_contacts_required':
+        return IdentityResolution.verifiedContactsRequired;
+      case 'identity_reconciliation_required':
+        return IdentityResolution.reconciliationRequired;
       case 'platform_context':
         return IdentityResolution.platformContext;
       case 'advisor':

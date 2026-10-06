@@ -26,6 +26,10 @@ class FakeAuthProvider extends ChangeNotifier
   @override
   int accountGeneration = 0;
   @override
+  bool identityReconciliationRequired = false;
+  @override
+  bool verifiedContactsRequired = false;
+  @override
   bool platformContextCurrent = true;
   @override
   bool platformAssuranceMismatch = false;
@@ -255,6 +259,25 @@ void main() {
       ));
 
       expect(find.text('explorer_screen'), findsOneWidget);
+    });
+
+    testWidgets(
+        'identity conflict has actionable reconciliation rather than Explorer conversion',
+        (tester) async {
+      final auth = FakeAuthProvider(
+          isAuthenticated: true,
+          userAccount: UserAccount(
+              userId: 'user-id',
+              accountState: AccountState.linkPending,
+              onboardingCompleted: true,
+              createdAt: now,
+              updatedAt: now))
+        ..identityReconciliationRequired = true;
+      await tester.pumpWidget(MaterialApp(
+          home: Builder(builder: (context) => guard.resolve(context, auth))));
+      expect(find.textContaining('Identity review required'), findsOneWidget);
+      expect(find.text('linking_screen'), findsNothing);
+      expect(find.text('explorer_screen'), findsNothing);
     });
 
     for (final state in [

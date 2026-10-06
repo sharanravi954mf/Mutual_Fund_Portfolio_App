@@ -17,6 +17,10 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
+## MFD-led Investor Onboarding V1 local candidate — 2026-10-06
+
+Investor identity and account resolution take priority over additional B07 experimentation. The isolated local candidate adds the generic MFD Add Investor flow, canonical identity/relationship boundaries and verified signup linking. No hosted deployment, real investor mutation or NSE call is included. See [architecture and commissioning prerequisites](architecture/MFD_LED_INVESTOR_ONBOARDING_V1.md) and [validation](architecture/MFD_LED_INVESTOR_ONBOARDING_V1_VALIDATION.md).
+
 ## NSE B07 operational local candidate — 2026-10-06
 
 MANDATE_STATUS: IMPLEMENTED; UAT not attempted in this pass. MANDATE, BANK_ADD
