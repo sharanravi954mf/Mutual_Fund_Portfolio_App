@@ -15,6 +15,10 @@ INSERT INTO auth.users (id, aud, role, email, raw_app_meta_data, raw_user_meta_d
  ('c0010000-0000-4000-8000-000000000003','authenticated','authenticated','ucc-three@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
  ('c0010000-0000-4000-8000-000000000004','authenticated','authenticated','ucc-four@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
  ('c0010000-0000-4000-8000-000000000005','authenticated','authenticated','ucc-five@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now());
+-- Trusted synthetic provisioning; public signup creates only an Explorer account.
+INSERT INTO public.profiles(user_id,role)
+SELECT id,'investor' FROM auth.users WHERE id IN ('c0010000-0000-4000-8000-000000000001','c0010000-0000-4000-8000-000000000002','c0010000-0000-4000-8000-000000000003','c0010000-0000-4000-8000-000000000004','c0010000-0000-4000-8000-000000000005');
+
 UPDATE public.profiles SET
  id = ('c0020000-0000-4000-8000-' || right(user_id::text, 12))::uuid,
  role='investor', full_name='MONEYBOWL SYNTHETIC',

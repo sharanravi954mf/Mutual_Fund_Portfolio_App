@@ -742,3 +742,5 @@ The member-owned [B06.1 reference foundation](NSE_MASTER_DOWNLOAD_FOUNDATION.md)
 The [NSE B06.3 systematic product references](NSE_SYSTEMATIC_PRODUCT_MASTERS.md) register SIP/STP/SWP parsers with that shared MASTER_DOWNLOAD runtime. Immutable typed rows and structural validation remain separate from explicit reference-only CAS publication; product semantics and investor eligibility remain uncommissioned.
 
 [B06.4 NAV/SET](NSE_NAV_SET.md) registers private validators in the B06.2 runtime. NAV yields document-backed uncommissioned observations with publication blocked. SET records evidence with terminal rejected validation until its API layout is characterized; it supplies no calendar authority. Existing NAV valuation sources and precedence remain unchanged.
+
+[B07 bank and mandate lifecycle](NSE_BANK_MANDATE_LIFECYCLE.md): MANDATE_STATUS is IMPLEMENTED as a service-only evidence read. MANDATE, BANK_ADD and BANK_DEL are BLOCKED. Immutable review proposals cannot queue writes; provider observations and canonical ownership do not supply investor mutation authority. The 2026-10-06 discovery records the exact missing contracts and dependency evidence.

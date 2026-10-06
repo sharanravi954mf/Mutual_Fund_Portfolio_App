@@ -1,8 +1,8 @@
-# B07 bank and mandate lifecycle foundation
+# B07 bank and mandate lifecycle
 
 Status: local implementation, **partial B07**. MANDATE_STATUS is implemented;
 MANDATE and CLIENTBANKDTL ADD/DEL remain blocked. Nothing is commissioned.
-Fresh fetched base: `ff531db2bec12d003091eec33ffbff52bfb101c2`.
+Completion discovery base: `2819143d4dc064c39fed7e8ac0254fe2b3ade1b9`.
 
 ## Source decisions and unresolved contracts
 
@@ -12,10 +12,10 @@ B07/C031. Collection examples were inspected as data, never executed.
 
 | Contract | Exact path after `/nsemfdesk/api/` | Implementation status |
 | --- | --- | --- |
-| NSE_MANDATE_STATUS | `v2/reports/MANDATE_STATUS` | Bounded service-only read, worker, encrypted evidence, safe summary |
-| NSE_MANDATE | `v2/registration/product/MANDATE` | Blocked review proposal only; no request builder, registration worker or send route |
-| NSE_CLIENTBANKDTL ADD | `v2/registration/CLIENTBANKDTL` | Distinct blocked `BANK_ADD` proposal; no mutation queued |
-| NSE_CLIENTBANKDTL DEL | `v2/registration/CLIENTBANKDTL` | Distinct blocked `BANK_DEL` proposal; default bank rejected, all other deletes blocked |
+| MANDATE_STATUS | `v2/reports/MANDATE_STATUS` | IMPLEMENTED |
+| MANDATE | `v2/registration/product/MANDATE` | BLOCKED |
+| BANK_ADD | `v2/registration/CLIENTBANKDTL` | BLOCKED |
+| BANK_DEL | `v2/registration/CLIENTBANKDTL` | BLOCKED |
 
 The following are unresolved prerequisites, not permission inferred from provider
 acceptance or a new boolean supplied by a caller:
@@ -46,6 +46,165 @@ contract, plus resolution of the mandate wire ambiguity. Do not convert these
 proposals to approved intent by editing their state. A future additive model must
 bind actual approval, complete frozen terms, evidence provenance and revocation
 checks before enabling writes.
+
+## Completion discovery gate — 2026-10-06
+
+This pass completes the bounded discovery and block verification, not the three
+provider writes. No transport builder, send route, approval flag or schema was
+added. Fresh fetched `develop` and `origin/develop` both equalled
+`2819143d4dc064c39fed7e8ac0254fe2b3ade1b9`; canonical develop was clean.
+
+### Source precedence and provenance
+
+The retained vendor inputs live in `/home/ubuntu/nse-uat-contract`, outside the
+Git worktree. They were read as documents; no collection request, credential or
+environment was executed. Reproducible input SHA-256 values:
+
+| Input | SHA-256 |
+| --- | --- |
+| `docs/NSEMF_API_Details_V1.9.7.pdf` | `5c3c819d788e40ba28f8d2eb3a6b2faabc3a39c5e9bc658fa034cf4c26cc576a` |
+| `NSEInvest API Realease_21-05-2025.postman_collection 2.json` | `9db36cfb4bfb67b4481c9d8b462b0c534286f417e98067cd769b04e6f224f6fd` |
+
+The June 2026 v1.9.7 handbook's explicit field tables and changes take precedence
+over the May 2025 collection. Examples corroborate casing but cannot waive a
+mandatory field. An internal contradiction stays unresolved; no example becomes
+vendor confirmation. The retained coherent plan V2, section B07 and C031, is a
+planning source, not an NSE contract or investor consent artifact.
+
+A public NSE-domain search on 2026-10-06 found the
+[NSE v1.9.7 handbook](https://www.nseinvest.com/nsemfdesk/resources/upload/apidetails/NSEMF_API_Details_V1.9.7.pdf).
+Targeted searches for later 1.9.8/1.9.9 material and the two write routes found no
+new authoritative resolution. This does not establish that private/vendor
+clarifications do not exist. No newer contract was supplied or adopted.
+
+### Exact write contracts and unresolved fields (gate A/B)
+
+All three calls are POST with common NSE authentication and JSON bodies. The
+following describes source evidence, not executable request templates. A future
+MoneyBowl write should contain one frozen record although NSE documents up to 50.
+
+**MANDATE**, `/nsemfdesk/api/v2/registration/product/MANDATE`, pp72–74:
+mandatory `reg_data` array. Each record has mandatory `client_code` (VARCHAR 10),
+`amount` (DECIMAL 15,2, maximum debit), `mandate_type` (`X` physical/scan or `E`
+eNACH), `account_no` (VARCHAR 40), `ac_type` (`SB/CB/NE/NO`, VARCHAR 2),
+`ifsc_code` (VARCHAR 11), `start_date` and `end_date` (DD/MM/YYYY; start cannot be
+past). Optional MICR is NUMERIC 9: the field table says `micr_no`, while the
+handbook examples and retained collection say `micr_code`. No resolution was
+found. Optional `member_mandate_no` is VARCHAR 20 and must be unique across all
+mandate registrations when provided; it is not documented as an idempotency key
+that makes retransmission safe. The current locally unique 20-character reference
+is only a reserved proposal reference; member-wide collision handling across
+other systems is still needed before enabling registration.
+
+`registration_date` is conditionally mandatory when the member processed the
+mandate, DD/MM/YYYY, not future and not after start. These date constraints are
+known; the trusted source proving *member processed* and that processing date is
+absent. Substituting today's date or omitting it by assumption is not supported.
+The response is `reg_data[]` echoing terms plus `reg_id`, `reg_status`,
+`reg_remark`; the documented example is `REG_SUCCESS`. The two retained collection
+responses corroborate that shape, not an exhaustive native status vocabulary.
+`reg_id` and the supplied member reference are reconciliation identifiers.
+
+**BANK_ADD / BANK_DEL**, `/nsemfdesk/api/v2/registration/CLIENTBANKDTL`, pp70–71:
+mandatory `bank_dtl` array. Mandatory record keys are `client_code` (VARCHAR 20),
+`action_type` (`ADD` or `DEL`), `account_type` (Account Type Master, VARCHAR 2),
+`account_no` (VARCHAR 40), `ifsc_code` (VARCHAR 11), and `default_bank_flag`
+(`Y/N`, VARCHAR 1). `micr_no` is optional NUMERIC 9. JSON casing is corroborated by
+the handbook examples and collection. The field table's Action Type size 2 is
+inconsistent with both literal actions; the explicit ADD/DEL values are the
+supported literals, not truncated values. The ADD example omits the mandatory
+default flag; that omission is not permission to infer it. Canonical savings,
+current, nre and nro map via the existing UCC account-type mapping to SB, CB, NE,
+NO, but bank ownership cannot choose the default flag for an investor.
+
+The response is `bank_dtl[]`, echoing client/action/account/type/MICR/IFSC plus
+`status` and `error_remark`, with `SUCCESS`/`FAIL` examples. No per-write ID or
+member request reference is documented; the collection retains no responses for
+this endpoint. The response example does not echo the default flag. Correlation
+therefore needs the frozen UCC/account/type/IFSC and action, with separate read
+proof of default state; it cannot rely on a generated provider bank ID.
+
+### Authority and exact ownership (gate C/D)
+
+Inspection included the full migration sequence through this base, not only the
+B07 foundation. The later
+`20261003233928_authorization_workspace_containment.sql` replaces the review RPC:
+it first locks workspace scope and checks `can_select_order_request`, then retains
+the stricter exact-investor, active membership and verified-bank checks. The
+current actor needs an active investor link under that containment model.
+
+| Existing model | What it proves | Missing authority for these writes |
+| --- | --- | --- |
+| `investor_bank_accounts` and `set_investor_bank_account` in the UCC migration | Workspace/investor scope, encrypted account identity, verification and local default | No investor approval of provider ADD/DEL or debit amount/type/term; local default is not provider default |
+| `investor_registration_profiles`, `integration_accounts` and UCC REQUEST/RESULT evidence | Registration source and provider UCC outcome | No later bank-change/debit instruction or mandate processing provenance |
+| B01 readiness and authorization report evidence | Scoped provider observations | No local acceptance artifact binding exact mutation terms, default choice and revocation |
+| `family_delegations`, investor links and folio grants | Limited access/identity authority for their own purposes | No bank mutation or mandate-debit authority |
+| `order_requests` and order/funding/systematic observations | Order intent or bounded provider reports | No exhaustive bank dependency ledger or mandate instruction |
+| `nse_bank_mandate.intents` | Immutable owner-requested BLOCKED review, encrypted bank/UCC snapshot, local member reference | No accepted terms, consent evidence/version or approval/revocation lifecycle |
+
+For any future write, the bank and registered NSE account must share the exact
+active workspace and investor; resolve the actor through `current_user_profile_id`
+and live investor linkage/membership. Load canonical verified active bank and
+owned unambiguous UCC server-side. Freeze the exact bank identity, account type,
+IFSC/MICR decision and UCC alongside actual investor authority for the action.
+MANDATE also needs maximum amount, type, dates and member-processing provenance;
+ADD needs the explicit Y/N default choice; DEL needs the provider relationship and
+dependency proof. A caller may supply opaque owned IDs, never raw PAN/UCC/account
+substitutions. The current review snapshot does not satisfy these future terms.
+
+### Delivery evidence and positive reconciliation (gate E/F)
+
+Reuse UCC's operation/interaction/outbox lifecycle, claim leases and
+`createNseEvidenceCall`. The following is the required future write policy; it is
+not implemented for B07 mutations:
+
+| Delivery classification | Evidence and permitted transition |
+| --- | --- |
+| PROVEN_NOT_SENT | Trusted pre-transport failure proving the gateway was not invoked, or its narrow validated pre-transmission failure (`NOT_SENT` / `PRE_TRANSMISSION_FAILURE` in UCC). Only this class may retry the same approved frozen terms and reference. Missing RESULT alone is not proof. |
+| MAYBE_SENT | Gateway invoked and completion uncertain, timeout/network failure, lost acknowledgement or expired claim after REQUEST. Retain encrypted exact REQUEST and failure/recovery evidence; prohibit resend and mark RECONCILIATION_REQUIRED. |
+| SENT_WITH_RESULT | Persist exact encrypted response bytes/status and correlate with the immutable REQUEST, call/attempt IDs, hashes, byte lengths and claim. This describes delivery, not business success or authority. Uncorrelatable/malformed results remain reconciliation-required. |
+| RECONCILIATION_REQUIRED | Persist unresolved operation state and read evidence. Only sufficient positive endpoint-specific evidence can resolve it. Zero/multiple/mismatched rows cannot permit retry. |
+
+Persist exact serialized REQUEST before transport. Retry persistence with the
+same bytes/IDs; a RESULT acknowledgement retry must never invoke HTTP again.
+Do not copy read retries onto writes or assume UCC-specific HTTP dispositions
+apply to these endpoints without source evidence. Summaries, logs and audits
+retain fixed categories and opaque IDs, not account/PAN/UCC or raw diagnostics.
+
+- **MANDATE:** pp83–84 offer `MANDATE_STATUS` selectors `mandate_id`,
+  `memberMandateIds` and owned `client_code`. Its documented row includes
+  `mandateId`, `memberMandateId`, `clientCode`, `bankAccountNumber`, `amount`,
+  `mandateType`, `startDate`, `endDate`, `registrationDate`, `memberCode` and
+  `status`. This is a potential positive read for frozen principal terms, not
+  status-only reconciliation. Account type/IFSC/MICR are not present in that
+  example; exact identity sufficiency and normalization must be source-bound.
+  No frozen approved terms or such reconciliation policy exists. The current
+  read parser establishes scoped existence only and must remain unchanged.
+- **BANK_ADD:** Client Master pp203–206 exposes numbered account/type/MICR/IFSC,
+  default flags (`YES/NO` in report examples, distinct from request `Y/N`), bank
+  status and modification dates. CLIENT_DETAIL/CLIENT_AUTHORIZATION are also
+  candidate observations. An exact positive account row may demonstrate current
+  relationship state, but none supplies this write's native request identifier
+  or proves this particular ADD caused it. A baseline, exact default comparison,
+  acceptable status semantics and freshness/completeness policy are missing.
+  No automatic positive reconciliation is enabled by mere row presence.
+- **BANK_DEL:** no documented positive deletion receipt/tombstone read was found.
+  A missing bank row or empty/stale report is not proof of deletion or absence of
+  dependencies. No complete inventory covers active mandates, orders, funding
+  and external provider relationships. Every DEL remains blocked even when the
+  canonical bank is verified, owned and locally non-default.
+
+### Plan and disposition
+
+1. Preserve the implemented status read and all three immutable blocked proposals.
+2. Add per-write queue/evidence sentinels, replay coverage, worker input denial and
+   dispatcher refusal tests; retain existing read/evidence/fencing regressions.
+3. Run current-schema B01–B07 and protected manifests; document any fixture drift.
+4. Enable no write until the missing authority model, vendor decisions and read
+   sufficiency contracts above are supplied and tested in a separate change.
+
+No migration is needed for this disposition. In particular, creating a consent
+boolean or a schema named consent would not supply the missing investor artifact.
 
 ## Ownership and immutable local review proposals
 
@@ -147,10 +306,54 @@ shared local database nor connect to hosted Supabase. Fixtures are synthetic.
 Positive mutation transmission tests are intentionally absent because the write
 contracts remain blocked; tests assert that no such mutation can be queued.
 
-Local validation outcome: 867 NSE Deno tests passed (39 B07 tests), 81 fmt/check
+Foundation validation (historical): 867 NSE Deno tests passed (39 B07 tests), 81 fmt/check
 targets passed, 56 dispatcher tests passed, 21 manifest tests and the diagnostic
 policy test passed. Both focused B07 and the complete NSE current-schema SQL
 harness passed; B07 PL/pgSQL lint reported no findings. B01–B06, existing UCC,
 dispatcher, frontend and concurrency regressions passed. No UAT request, hosted
 mutation, push, PR, merge, deployment, credential or live infrastructure change
 was performed.
+
+## Completion candidate validation — 2026-10-06
+
+All required final checks passed locally. The candidate changes documentation and
+regressions only; production SQL, TypeScript workers, dispatcher routing and every
+existing migration are byte-identical to the fresh base. No migration was added.
+
+The initial unchanged B07 test failed with `mandate_status_account_scope_invalid`:
+its INSERT into `auth.users` no longer auto-created a profile after the
+Explorer-only signup migration. The full harness also exposed the dispatcher
+fixture's missing-profile foreign key. NSE and dispatcher fixtures now explicitly
+provision their synthetic profiles as database owner, just as the current frontend
+fixture does. B07 provisions explicit investor links too, and expects the newer
+containment gate's exact `not_authorized` denial. No runtime trigger, grant,
+constraint or assertion was disabled. Fixtures remain rollback-only (concurrency
+fixtures commit only inside the disposable container).
+
+| Check | Result |
+| --- | --- |
+| `bash scripts/test_nse_bank_mandate_sql.sh` | PASS: all migrations, existing B07 cases plus no-operation/event/evidence sentinels for all three proposals and their replays; no B07 PL/pgSQL lint findings; concurrent owner replay/read preparation/exclusive claim |
+| `bash scripts/test_nse_order_status_sql.sh` | PASS: generic dispatcher and UCC; two rollback passes of ORDER_STATUS, PROV_ORDERS, B01–B07 and frontend; B06 reference/master/NAV/SET and frontend concurrency; SQL lint |
+| Protected env-003 `nse-test-runner manifest-v1 fmt` | PASS, 81 files |
+| Protected env-003 `nse-test-runner manifest-v1 check` | PASS, 81 targets |
+| Protected env-003 `nse-test-runner manifest-v1 test` | PASS, 870 tests, including three new mutation-input rejection tests; zero transport/claim/evidence for those rejected calls |
+| Dispatcher `pytest tests -q` | PASS, 59 tests; three new per-write feed rejection cases prove no worker call |
+| `python3 scripts/nse_test_manifest_v1.py validate` | PASS |
+| `python3 scripts/nse_test_manifest_v1_test.py` | PASS, 21 tests |
+| `python3 scripts/nse_response_diagnostics_policy_test.py` | PASS, 1 test |
+| `python3 .github/scripts/validate_docs.py` | PASS, 54 Markdown files |
+| `python3 .github/scripts/validate_migration_history.py` | PASS, 27 frozen entries; additionally every migration unchanged against the fresh base |
+| Conventional commit and `git diff --check` | PASS |
+
+The Deno runner is
+`/opt/moneybowl-toolchains/nse-test/deno-2.9.6-env-003/nse-test-runner`.
+Dispatcher pytest used `/tmp/b061-test-venv/bin/python -m pytest tests -q` from
+`services/outbox-dispatcher` (system Python lacks pytest). Docker access required
+sandbox escalation; containers remained network-isolated. The first fmt check
+found wrapping in the new test; it was corrected and the protected check passed.
+No unresolved test failure or new SQL lint finding remains.
+
+Local logs: `/tmp/b07-completion-{baseline-sql,sql,regression,fmt,check,deno,pytest}.log`.
+These machine-local logs and retained vendor inputs are not committed. No hosted
+Supabase/Production mutation, provider UAT request, push, PR, merge or deployment
+occurred. B01–B06 regressions remain passing with the current schema.

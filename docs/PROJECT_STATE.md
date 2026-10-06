@@ -17,6 +17,15 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
+## NSE B07 local candidate — 2026-10-06
+
+MANDATE_STATUS: IMPLEMENTED. MANDATE: BLOCKED. BANK_ADD: BLOCKED. BANK_DEL: BLOCKED.
+The completion discovery preserves the three write blocks pending exact investor
+authority, mandate contract decisions and provider relationship/reconciliation
+evidence; deletion additionally requires complete dependency proof. See the
+[bounded discovery and validation](architecture/NSE_BANK_MANDATE_LIFECYCLE.md).
+No hosted mutation, commissioning or deployment was performed.
+
 ## Canonical Project Documents Notice
 The following five documents are the current and authoritative records for this project:
 - [PROJECT_STATE](PROJECT_STATE.md)
