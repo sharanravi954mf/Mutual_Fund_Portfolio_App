@@ -33,6 +33,11 @@ class ExplorerHomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Sharan Fincorp'),
         actions: [
+          IconButton(
+            tooltip: 'Refresh account access',
+            onPressed: () => context.read<AuthProvider>().refreshIdentity(),
+            icon: const Icon(Icons.refresh),
+          ),
           TextButton.icon(
             onPressed: () => context.read<AuthProvider>().signOut(),
             icon: const Icon(Icons.logout),

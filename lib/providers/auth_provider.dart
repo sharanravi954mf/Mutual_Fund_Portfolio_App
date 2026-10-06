@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../features/authentication/data/supabase_identity_repository.dart';
+import '../features/authentication/models/identity_bootstrap_result.dart';
 import '../features/authentication/services/identity_bootstrap_service.dart';
 import '../features/authentication/services/identity_verification_service.dart';
 import '../features/authentication/services/onboarding_coordinator.dart';
@@ -46,6 +47,10 @@ class AuthProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   User? _user;
   UserAccount? _userAccount;
+  bool _identityReconciliationRequired = false;
+  bool _verifiedContactsRequired = false;
+  bool get verifiedContactsRequired => _verifiedContactsRequired;
+  bool get identityReconciliationRequired => _identityReconciliationRequired;
   UserProfile? _userProfile;
   bool _isLoading = true;
   String? _errorMessage;
@@ -90,6 +95,8 @@ class AuthProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (accountChanged) {
         _accountGeneration++;
         _userAccount = null;
+        _identityReconciliationRequired = false;
+        _verifiedContactsRequired = false;
         _userProfile = null;
         _platformContext = const PlatformContext();
       }
@@ -276,6 +283,10 @@ class AuthProvider extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       _userAccount = result.account;
+      _verifiedContactsRequired =
+          result.resolution == IdentityResolution.verifiedContactsRequired;
+      _identityReconciliationRequired =
+          result.resolution == IdentityResolution.reconciliationRequired;
       await refreshPlatformContext();
       final platform = platformContext;
       if (_disposed ||
@@ -326,6 +337,8 @@ class AuthProvider extends ChangeNotifier with WidgetsBindingObserver {
           _user?.id == user.id) {
         _errorMessage = 'Unable to load your account securely.';
         _userAccount = null;
+        _identityReconciliationRequired = false;
+        _verifiedContactsRequired = false;
         _userProfile = null;
         _platformContext = const PlatformContext();
       }
@@ -431,6 +444,8 @@ class AuthProvider extends ChangeNotifier with WidgetsBindingObserver {
     _sessionGeneration++;
     _user = null;
     _userAccount = null;
+    _identityReconciliationRequired = false;
+    _verifiedContactsRequired = false;
     _userProfile = null;
     _platformContext = const PlatformContext();
     _isLoading = false;

@@ -11,6 +11,7 @@ import '../features/nse_integration/presentation/nse_integration_entry.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
+import '../features/investor_onboarding/presentation/investor_onboarding_entry.dart';
 import 'rupee_rain_background.dart';
 import '../features/investor_identity/models/user_profile.dart';
 import '../features/orders/data/supabase_order_repository.dart';
@@ -1483,6 +1484,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: Wrap(spacing: 8, runSpacing: 8, children: [
+              OutlinedButton(
+                  onPressed: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                        builder: (_) =>
+                            const InvestorOnboardingEntry(startNew: false),
+                      )),
+                  child: const Text('Onboarding drafts')),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute<void>(
+                      builder: (_) => const InvestorOnboardingEntry(),
+                    ))
+                    .then((_) => _refreshClients()),
+                icon: const Icon(Icons.person_add_alt_1),
+                label: const Text('Add Investor'),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 16),
           // Client Search Bar
           TextField(
             controller: _searchController,

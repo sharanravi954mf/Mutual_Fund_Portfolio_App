@@ -14,6 +14,7 @@ class RouteGuard {
     required this.investorBuilder,
     required this.explorerBuilder,
     required this.linkingBuilder,
+    this.verifiedContactBuilder,
   });
 
   final WidgetBuilder loginBuilder;
@@ -24,6 +25,7 @@ class RouteGuard {
   final WidgetBuilder investorBuilder;
   final WidgetBuilder explorerBuilder;
   final WidgetBuilder linkingBuilder;
+  final WidgetBuilder? verifiedContactBuilder;
 
   /// Evaluates authentication state and roles to resolve the correct screen.
   Widget resolve(BuildContext context, AuthProvider authProvider) {
@@ -49,6 +51,17 @@ class RouteGuard {
     // Independent server projection: no UserRole or MFD profile is required.
     if (authProvider.platformContext.isPlatformAdmin) {
       return platformBuilder(context);
+    }
+
+    if (authProvider.identityReconciliationRequired) {
+      return errorBuilder('Identity review required',
+          'Your verified identity needs reconciliation. Contact platform support before continuing. Your existing account is retained.');
+    }
+
+    if (authProvider.verifiedContactsRequired) {
+      return verifiedContactBuilder?.call(context) ??
+          errorBuilder('Contact verification required',
+              'Verify your mobile to finish account setup.');
     }
 
     // 4. UserProfile availability check

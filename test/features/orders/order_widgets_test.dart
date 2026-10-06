@@ -896,6 +896,10 @@ class FakeAuthProvider extends ChangeNotifier
 
   @override
   int get accountGeneration => 0;
+  @override
+  bool get identityReconciliationRequired => false;
+  @override
+  bool get verifiedContactsRequired => false;
 
   @override
   bool get platformContextCurrent => true;

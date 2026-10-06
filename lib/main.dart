@@ -1,4 +1,5 @@
 import 'features/authentication/services/auth_session_fence.dart';
+import 'features/authentication/presentation/verified_contact_screen.dart';
 import 'features/platform_administration/presentation/platform_administration_screen.dart';
 import 'package:flutter/material.dart';
 import 'features/nse_integration/presentation/nse_integration_entry.dart';
@@ -143,6 +144,7 @@ class AuthWrapper extends StatelessWidget {
       investorBuilder: (_) => const ClientDashboard(),
       explorerBuilder: (_) => const ExplorerHomeScreen(),
       linkingBuilder: (_) => const PortfolioLinkingScreen(),
+      verifiedContactBuilder: (_) => const VerifiedContactEntry(),
     ).resolve(context, authProvider);
   }
 }
