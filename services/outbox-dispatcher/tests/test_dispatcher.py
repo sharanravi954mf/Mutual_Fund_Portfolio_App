@@ -407,4 +407,48 @@ def test_mandate_status_route_uses_shared_token_and_event_only(tmp_path: Path) -
     assert str(requests[0].url).endswith("/functions/v1/nse-mandate-status-worker")
     assert json.loads(requests[0].content) == {"event_outbox_id": EVENT_ID}
     assert requests[0].headers["authorization"] == f"Bearer {NSE_TOKEN}"
-    assert not any("bank_add" in event or "bank_del" in event or "mandate_registration" in event for event in routes)
+    assert routes["integration.nse.bank_add_requested"].worker_slug == "nse-bank-mandate-worker"
+
+
+@pytest.mark.parametrize("action", ["mandate_registration", "bank_add", "bank_del"])
+def test_unapproved_b07_event_name_never_invokes_worker(tmp_path: Path, action: str) -> None:
+    env = _env(tmp_path)
+    env["OUTBOX_ROUTES_FILE"] = str(Path(__file__).parents[1] / "routes.json")
+    settings = Settings.from_env(env)
+    routes = load_routes(settings.routes_file, env)
+    requests: list[httpx.Request] = []
+    event_type = f"integration.nse.{action}_unapproved_requested"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/rest/v1/rpc/list_dispatchable_outbox_events"
+        assert event_type not in json.loads(request.content)["p_event_types"]
+        return httpx.Response(200, json=[{
+            "event_outbox_id": EVENT_ID,
+            "event_type": event_type,
+            "event_status": "pending",
+            "retry_count": 0,
+        }])
+
+    dispatcher = OutboxDispatcher(settings, routes, httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(DispatcherProtocolError, match="dispatch_candidate_route_invalid"):
+        dispatcher.run_once()
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("action", ["mandate_registration", "bank_add", "bank_del", "bank_mandate_verify"])
+def test_b07_write_routes_use_event_only_and_shared_token(tmp_path: Path, action: str) -> None:
+    env = _env(tmp_path)
+    env["OUTBOX_ROUTES_FILE"] = str(Path(__file__).parents[1] / "routes.json")
+    settings = Settings.from_env(env)
+    routes = load_routes(settings.routes_file, env)
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"outcome": "evidence_recorded"})
+    dispatcher = OutboxDispatcher(settings, routes, httpx.Client(transport=httpx.MockTransport(handler)))
+    assert dispatcher.dispatch(Candidate(EVENT_ID, f"integration.nse.{action}_requested", "pending", 0)) == "worker_accepted"
+    assert len(requests) == 1
+    assert requests[0].url.path == "/functions/v1/nse-bank-mandate-worker"
+    assert requests[0].headers["authorization"] == f"Bearer {NSE_TOKEN}"
+    assert json.loads(requests[0].content) == {"event_outbox_id": EVENT_ID}

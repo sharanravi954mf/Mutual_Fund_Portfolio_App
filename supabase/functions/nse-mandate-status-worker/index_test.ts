@@ -139,6 +139,34 @@ function setup(
   });
   return { handler, sequence, starts, finishes, sent };
 }
+for (const action of ["MANDATE", "BANK_ADD", "BANK_DEL"]) {
+  Deno.test(`blocked ${action}: read worker rejects mutation input before claim`, async () => {
+    const s = setup();
+    for (
+      const extra of [
+        { action },
+        { api: action },
+        { authority: true },
+        { account_no: "12345678902" },
+        { client_code: "SUBSTITUTED" },
+        { reg_data: [{ mandate_type: "E" }] },
+        { bank_dtl: [{ action_type: action === "BANK_DEL" ? "DEL" : "ADD" }] },
+      ]
+    ) {
+      const result = await s.handler(
+        invocation({ event_outbox_id: EVENT, ...extra }),
+      );
+      assertEquals(result.status, 400);
+      assertEquals(await result.json(), {
+        error: { code: "invalid_request_body" },
+      });
+    }
+    assertEquals(s.sequence, []);
+    assertEquals(s.starts, []);
+    assertEquals(s.finishes, []);
+    assertEquals(s.sent, []);
+  });
+}
 Deno.test("MANDATE_STATUS worker: authentication and explicit event before claim", async () => {
   const s = setup();
   assertEquals((await s.handler(new Request("http://localhost"))).status, 405);

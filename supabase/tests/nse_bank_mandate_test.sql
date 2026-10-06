@@ -5,7 +5,15 @@ SELECT 1 FROM vault.create_secret(repeat('s',40),'integration_payload_encryption
 INSERT INTO auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
  ('e0010000-0000-4000-8000-000000000001','authenticated','authenticated','client-readiness-one@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
  ('e0010000-0000-4000-8000-000000000002','authenticated','authenticated','client-readiness-two@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now());
--- Current signup creates workspace-referenced profiles. Never rewrite their IDs.
+-- Trusted synthetic provisioning; public signup creates only an Explorer account.
+INSERT INTO public.profiles(user_id,role)
+SELECT id,'investor' FROM auth.users WHERE id IN ('e0010000-0000-4000-8000-000000000001','e0010000-0000-4000-8000-000000000002');
+
+-- Explicit owned-investor links are required by current workspace containment.
+INSERT INTO public.investor_account_links(user_id,profile_id,verification_method,verified_at)
+SELECT user_id,id,'synthetic_fixture',now() FROM public.profiles
+ WHERE user_id IN ('e0010000-0000-4000-8000-000000000001','e0010000-0000-4000-8000-000000000002');
+-- Keep generated profile IDs distinct from auth IDs.
 INSERT INTO public.workspaces(id,name,slug,owner_profile_id,workspace_status)
 SELECT ('e0030000-0000-4000-8000-'||right(user_id::text,12))::uuid,'Synthetic MANDATE_STATUS',
  'client-readiness-'||right(user_id::text,1),id,'active' FROM public.profiles
@@ -256,6 +264,16 @@ BEGIN
  PERFORM pg_temp.expect_error(format('SELECT public.get_nse_mandate_status_source(%L)',op.id),'mandate_status_identity_changed');
 END $$;
 -- Owner review proposals: synthetic encrypted bank source, no NSE write path.
+-- Reject ANY enqueue/evidence insert, even if a future regression chooses an ID
+-- unrelated to the proposal. These sentinels run under the real API role below.
+CREATE FUNCTION pg_temp.reject_b07_transport() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'blocked_b07_must_not_queue:%',TG_TABLE_NAME; END $$;
+CREATE TRIGGER b07_no_operation BEFORE INSERT ON public.integration_operations
+ FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_b07_transport();
+CREATE TRIGGER b07_no_event BEFORE INSERT ON public.event_outbox
+ FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_b07_transport();
+CREATE TRIGGER b07_no_evidence BEFORE INSERT ON public.integration_api_interactions
+ FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_b07_transport();
 SELECT 1 FROM vault.create_secret(repeat('b',40),'bank_account_encryption_key_v1','synthetic');
 SELECT 1 FROM vault.create_secret(repeat('h',40),'bank_account_lookup_hmac_key_v1','synthetic');
 -- Restore identity changed by the in-flight evidence test above.
@@ -269,20 +287,30 @@ SET LOCAL ROLE authenticated;
 SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE','b0700000-0000-4000-8000-000000000001');
 SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'BANK_ADD','b0700000-0000-4000-8000-000000000002');
 SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'BANK_DEL','b0700000-0000-4000-8000-000000000003');
+SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'BANK_ADD','b0700000-0000-4000-8000-000000000002');
+SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'BANK_DEL','b0700000-0000-4000-8000-000000000003');
 SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE','b0700000-0000-4000-8000-000000000001');
 SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.default')::uuid,'BANK_DEL',gen_random_uuid())$q$,'bank_delete_default_protected');
 SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'BANK_ADD',gen_random_uuid())$q$,'bank_mandate_duplicate_intent');
 SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.default')::uuid,'MANDATE','b0700000-0000-4000-8000-000000000001')$q$,'bank_mandate_intent_conflict');
-SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000002','e0060000-0000-4000-8000-000000000002',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'bank_mandate_owner_required');
+SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000002','e0060000-0000-4000-8000-000000000002',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'not_authorized');
 SELECT set_config('request.jwt.claim.sub','e0010000-0000-4000-8000-000000000002',true);
-SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'bank_mandate_owner_required');
+SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'not_authorized');
 SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000002','e0060000-0000-4000-8000-000000000002',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'bank_mandate_verified_owned_bank_required');
 RESET ROLE;
+DROP TRIGGER b07_no_operation ON public.integration_operations;
+DROP TRIGGER b07_no_event ON public.event_outbox;
+DROP TRIGGER b07_no_evidence ON public.integration_api_interactions;
 DO $$
 DECLARE op public.integration_operations; src jsonb; i nse_bank_mandate.intents; observation jsonb; role_name text;
 BEGIN
  SELECT * INTO i FROM nse_bank_mandate.intents WHERE id='b0700000-0000-4000-8000-000000000001';
  PERFORM pg_temp.assert_true((SELECT count(*)=3 AND bool_and(state='BLOCKED') FROM nse_bank_mandate.intents),'mutations_fail_closed');
+ PERFORM pg_temp.assert_true((SELECT bool_and(block_reason=CASE action
+   WHEN 'MANDATE' THEN 'mandate_contract_and_consent_unresolved'
+   WHEN 'BANK_ADD' THEN 'bank_add_consent_and_provider_relationship_unproven'
+   WHEN 'BANK_DEL' THEN 'bank_delete_dependencies_unproven' END)
+   FROM nse_bank_mandate.intents),'each_write_retains_specific_blocker');
  PERFORM pg_temp.assert_true(NOT EXISTS(SELECT 1 FROM public.event_outbox WHERE entity_id IN(SELECT id FROM nse_bank_mandate.intents)),'no_write_events');
  PERFORM pg_temp.assert_true(NOT EXISTS(SELECT 1 FROM public.integration_operations WHERE safety_class<>'READ_ONLY' AND id IN(SELECT id FROM nse_bank_mandate.intents)),'no_write_operations');
  PERFORM pg_temp.assert_true((extensions.pgp_sym_decrypt(i.source_ciphertext,public.integration_payload_encryption_key(i.source_key_reference))::jsonb)->>'account_no'='12345678902','encrypted_owned_snapshot');
@@ -310,11 +338,11 @@ END $$;
 SELECT set_config('request.jwt.claim.sub','e0010000-0000-4000-8000-000000000001',true);
 UPDATE public.workspace_memberships SET status='inactive' WHERE workspace_id='e0030000-0000-4000-8000-000000000001';
 SET LOCAL ROLE authenticated;
-SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'bank_mandate_owner_required');
+SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'not_authorized');
 RESET ROLE;
 UPDATE public.workspace_memberships SET status='active',role='operations' WHERE workspace_id='e0030000-0000-4000-8000-000000000001';
 SET LOCAL ROLE authenticated;
-SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'bank_mandate_owner_required');
+SELECT pg_temp.expect_error($q$SELECT public.request_nse_bank_mandate_review('e0030000-0000-4000-8000-000000000001','e0060000-0000-4000-8000-000000000001',current_setting('b07.other')::uuid,'MANDATE',gen_random_uuid())$q$,'not_authorized');
 RESET ROLE;
 SELECT pg_temp.assert_true((SELECT count(*)=3 FROM public.workspace_audit_logs WHERE action='nse.bank_mandate.review_requested'),'one_audit_per_distinct_review');
 SELECT pg_temp.expect_error($q$DELETE FROM public.workspace_audit_logs WHERE action='nse.bank_mandate.review_requested'$q$,'immutable');

@@ -13,6 +13,10 @@ INSERT INTO auth.users(
   now()
 );
 
+-- Trusted synthetic provisioning; public signup creates only an Explorer account.
+INSERT INTO public.profiles(user_id,role)
+VALUES ('d0010000-0000-4000-8000-000000000001','investor');
+
 UPDATE public.profiles
 SET
   id = 'd0020000-0000-4000-8000-000000000001',

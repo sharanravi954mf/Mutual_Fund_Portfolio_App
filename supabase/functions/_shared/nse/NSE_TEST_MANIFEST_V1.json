@@ -81,7 +81,11 @@
     "supabase/functions/nse-mandate-status-worker/index.ts",
     "supabase/functions/nse-mandate-status-worker/adapters.ts",
     "supabase/functions/nse-mandate-status-worker/handler.ts",
-    "supabase/functions/nse-mandate-status-worker/index_test.ts"
+    "supabase/functions/nse-mandate-status-worker/index_test.ts",
+    "supabase/functions/nse-bank-mandate-worker/handler.ts",
+    "supabase/functions/nse-bank-mandate-worker/adapters.ts",
+    "supabase/functions/nse-bank-mandate-worker/index_test.ts",
+    "supabase/functions/nse-bank-mandate-worker/index.ts"
   ],
   "baseline_tests": [
     "supabase/functions/_shared/nse/nse_evidence_call_test.ts",
@@ -114,7 +118,8 @@
     "supabase/functions/_shared/nse/nse_systematic_master_service_test.ts",
     "supabase/functions/_shared/nse/nse_nav_set_test.ts",
     "supabase/functions/_shared/nse/nse_mandate_status_test.ts",
-    "supabase/functions/nse-mandate-status-worker/index_test.ts"
+    "supabase/functions/nse-mandate-status-worker/index_test.ts",
+    "supabase/functions/nse-bank-mandate-worker/index_test.ts"
   ],
   "endpoint_tests": {
     "nse-ucc-registration-worker": [
@@ -152,6 +157,9 @@
     ],
     "nse-mandate-status-worker": [
       "supabase/functions/nse-mandate-status-worker/index_test.ts"
+    ],
+    "nse-bank-mandate-worker": [
+      "supabase/functions/nse-bank-mandate-worker/index_test.ts"
     ]
   }
 }

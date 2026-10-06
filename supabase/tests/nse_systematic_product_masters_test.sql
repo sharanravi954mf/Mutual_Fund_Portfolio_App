@@ -4,6 +4,10 @@ SELECT 1 FROM vault.create_secret(repeat('s',40),'integration_payload_encryption
 INSERT INTO auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
  ('b0630000-0000-4000-8000-000000000001','authenticated','authenticated','b063-one@moneybowl.invalid','{}','{}',now(),now()),
  ('b0630000-0000-4000-8000-000000000002','authenticated','authenticated','b063-two@moneybowl.invalid','{}','{}',now(),now());
+-- Trusted synthetic provisioning; public signup creates only an Explorer account.
+INSERT INTO public.profiles(user_id,role)
+SELECT id,'investor' FROM auth.users WHERE id IN ('b0630000-0000-4000-8000-000000000001','b0630000-0000-4000-8000-000000000002');
+
 INSERT INTO public.workspaces(id,name,slug,owner_profile_id,workspace_status)
 SELECT ('b0630000-0000-4000-8001-'||right(user_id::text,12))::uuid,'B06 synthetic','b063-'||right(user_id::text,1),id,'active'
  FROM public.profiles WHERE user_id IN ('b0630000-0000-4000-8000-000000000001','b0630000-0000-4000-8000-000000000002');

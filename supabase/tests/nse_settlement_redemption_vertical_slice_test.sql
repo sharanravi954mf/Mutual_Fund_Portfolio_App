@@ -5,7 +5,11 @@ SELECT 1 FROM vault.create_secret(repeat('s',40),'integration_payload_encryption
 INSERT INTO auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at) VALUES
  ('f0010000-0000-4000-8000-000000000001','authenticated','authenticated','settlement-redemption-one@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now()),
  ('f0010000-0000-4000-8000-000000000002','authenticated','authenticated','settlement-redemption-two@moneybowl.invalid','{"user_role":"investor"}','{}',now(),now());
--- Current signup creates workspace-referenced profiles. Never rewrite their IDs.
+-- Trusted synthetic provisioning; public signup creates only an Explorer account.
+INSERT INTO public.profiles(user_id,role)
+SELECT id,'investor' FROM auth.users WHERE id IN ('f0010000-0000-4000-8000-000000000001','f0010000-0000-4000-8000-000000000002');
+
+-- Keep generated profile IDs distinct from auth IDs.
 INSERT INTO public.workspaces(id,name,slug,owner_profile_id,workspace_status)
 SELECT ('f0030000-0000-4000-8000-'||right(user_id::text,12))::uuid,'Synthetic SETTLEMENT_REDEMPTION',
  'settlement-redemption-'||right(user_id::text,1),id,'active' FROM public.profiles

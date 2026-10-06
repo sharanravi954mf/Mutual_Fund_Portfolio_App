@@ -248,3 +248,6 @@ verify_jwt = false
 
 [functions.nse-mandate-status-worker]
 verify_jwt = false
+
+[functions.nse-bank-mandate-worker]
+verify_jwt = false

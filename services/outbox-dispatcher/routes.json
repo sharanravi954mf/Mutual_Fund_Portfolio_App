@@ -42,5 +42,21 @@
   "integration.nse.mandate_status_requested": {
     "worker_slug": "nse-mandate-status-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.mandate_registration_requested": {
+    "worker_slug": "nse-bank-mandate-worker",
+    "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.bank_add_requested": {
+    "worker_slug": "nse-bank-mandate-worker",
+    "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.bank_del_requested": {
+    "worker_slug": "nse-bank-mandate-worker",
+    "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.bank_mandate_verify_requested": {
+    "worker_slug": "nse-bank-mandate-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }
