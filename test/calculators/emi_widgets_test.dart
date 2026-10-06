@@ -81,8 +81,8 @@ void main() {
       (tester) async {
     await mount(tester, home: const CalculatorsHomeScreen());
     expect(calculatorCatalog.map((e) => e.id),
-        ['loan-part-payment', 'emi', 'sip']);
-    expect(calculatorCatalog.map((e) => e.id).toSet().length, 3);
+        ['loan-part-payment', 'emi', 'sip', 'income-tax']);
+    expect(calculatorCatalog.map((e) => e.id).toSet().length, 4);
     expect(find.text('Loan Part Payment Calculator'), findsOneWidget);
     expect(find.text('EMI Calculator'), findsOneWidget);
     await press(tester, 'emi');

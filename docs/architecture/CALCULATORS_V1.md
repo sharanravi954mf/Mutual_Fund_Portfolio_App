@@ -8,6 +8,10 @@
 | 2 | EMI Calculator | `emi` | [EMI V1](EMI_CALCULATOR_V1.md) |
 | 3 | SIP Calculator | `sip` | [SIP V1](SIP_CALCULATOR_V1.md) |
 
+Income Tax Calculator #4 is a [blocked research candidate](INCOME_TAX_CALCULATOR_V1.md),
+not an implemented catalog entry. Its mandatory official-source verification
+gate has not passed; the three working calculators above remain unchanged.
+
 Explorer continues to open the existing Calculators hub. Each calculator has its
 own input/result, domain service, controller and screen. EMI is not a mode of Loan
 Part Payment. The only shared primitives are the immutable `AmortizationRow`
@@ -552,3 +556,54 @@ limitations are the existing input bounds and monthly constant-rate estimate:
 calendar months are illustrative, money uses double precision, and lender dates,
 daily interest, rate resets, charges and rounding may differ. No export, exact
 due-date input, persistence, tax calculation or backend functionality is added.
+
+## Income Tax Calculator research resumption — 2026-10-05
+
+The existing documentation candidate was preserved and the supplied research
+hashes verified. Gazette 275521 has now been reviewed. Static inspection of
+official AY 2026–27 ITR-2 v1.3 and the newly located v1.4 found a material active
+LTCG surcharge-relief discrepancy; see the [source register](INCOME_TAX_CALCULATOR_V1_RULES_AND_SOURCES.md#b2--active-dependency-trace-and-material-conflict-b2-mr-112a-50l).
+The required two-year research gate remains blocked. No Income Tax catalog
+entry, engine or UI was added, and the existing three calculators remain intact.
+
+## Income Tax Calculator component candidate — 2026-10-05
+
+The latest local work adds `income-tax` as the fourth catalog entry. Normal and
+Advanced share one pure Dart engine with two explicit year packs. This is an
+**incomplete, uncommitted development candidate**: calculations with unresolved
+rule dependencies return a typed not-yet-verified result and no comparison.
+The earlier documentation-only stop is historical, retained above.
+
+Existing Loan Part Payment, EMI and SIP mathematics/source and authorization
+remain unchanged. Only catalog metadata/navigation and two catalog-count
+assertions changed outside the independent income-tax area. The unchanged
+calculator privacy boundary also tests the new area. See the [current contract](INCOME_TAX_CALCULATOR_V1.md)
+and [coverage/validation](INCOME_TAX_CALCULATOR_V1_VALIDATION.md).
+
+Income-tax continuation (2026-10-05): local rule revisions2 add guided
+life/tuition/housing/NSC deductions, distinct employer NPS rows, two-year HRA
+commission, ordinary loss/interest allocation, individual post-office savings
+exemption and pure-dividend capped surcharge. Expanded independent vectors and
+actual form-control journeys cover the added branches. Full mixed-income scope
+remains incomplete; the source/validation appendices retain exact open gates.
+No feature commit or publication is authorised by this partial candidate.
+
+### Income Tax bounded V1 release contract — 2026-10-05
+
+The user explicitly replaced the earlier all-37-entry completion gate with a
+[bounded release scope](INCOME_TAX_CALCULATOR_V1_RELEASE_SCOPE.md). The
+[pending/blocked register](INCOME_TAX_CALCULATOR_V1_PENDING_AND_BLOCKED.md)
+keeps each original ID and distinguishes supported calculations from deferred
+mixed-income verification. Four named 80C/Schedule XV contributions—qualifying
+five-year bank and post-office deposits, SCSS and Sukanya—now have guided
+eligibility, amount bounds and shared Old-Regime group-cap treatment in the
+independent income-tax feature. Scheme interest is separate from principal.
+Unsupported/deferred combinations withhold both regime results rather than
+showing a partial tax total.
+
+The existing Loan Part Payment, EMI and SIP calculation source remains
+unchanged; only fourth-route catalog metadata and catalog-count assertions
+change outside the income-tax feature. Local final acceptance, independent
+professional review and hosted DEV commissioning are distinct checks; see the
+[validation record](INCOME_TAX_CALCULATOR_V1_VALIDATION.md) and
+[commissioning runbook](INCOME_TAX_CALCULATOR_V1_DEV_COMMISSIONING.md).
