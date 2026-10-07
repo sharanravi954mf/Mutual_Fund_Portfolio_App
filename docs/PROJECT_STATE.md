@@ -17,9 +17,13 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
-## MFD-led Investor Onboarding V1 local candidate — 2026-10-06
+## MFD Investor Onboarding V2 KYC-first contract — FROZEN 2026-10-07
 
-Investor identity and account resolution take priority over additional B07 experimentation. The isolated local candidate adds the generic MFD Add Investor flow, canonical identity/relationship boundaries and verified signup linking. No hosted deployment, real investor mutation or NSE call is included. See [architecture and commissioning prerequisites](architecture/MFD_LED_INVESTOR_ONBOARDING_V1.md) and [validation](architecture/MFD_LED_INVESTOR_ONBOARDING_V1_VALIDATION.md).
+The business-owner-approved canonical onboarding journey is frozen as PAN-first and KYC-first: **Add Investor → PAN → resolve/fetch → KYC Check → provider eKYC hand-off when required → only missing details → nomination → FATCA → bank → consent → UCC → post-registration actions → Ready to Transact**. Explorer/Auth-account matching remains private and uses the V1 verified-identity boundary. Semantic changes require explicit business-owner approval and a new version/ADR. See [frozen V2 contract](architecture/MFD_INVESTOR_ONBOARDING_V2_KYC_FIRST_FROZEN.md).
+
+## MFD-led Investor Onboarding V1 hosted DEV foundation — 2026-10-07
+
+The V1 generic MFD Add Investor identity/security foundation is merged and deployed to DEV at merge SHA `51f1ea4dc128db78617f3170e966afcdd25502c1`. It provides canonical investor resolution, scoped MFD relationships, encrypted drafts and verified signup/account linking. V2 freezes the product journey above this foundation; V1 remains authoritative for identity/security invariants. See [V1 architecture](architecture/MFD_LED_INVESTOR_ONBOARDING_V1.md) and [validation](architecture/MFD_LED_INVESTOR_ONBOARDING_V1_VALIDATION.md).
 
 ## NSE B07 operational local candidate — 2026-10-06
 
