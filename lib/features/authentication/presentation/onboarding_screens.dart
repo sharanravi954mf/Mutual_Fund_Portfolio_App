@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
 import '../../calculators/presentation/calculators_home_screen.dart';
+import '../../portfolio/presentation/nse_fund_search_screen.dart';
 import '../../mfd_applications/presentation/mfd_application_screens.dart';
 import '../../investor_identity/models/user_account.dart';
 import '../../investor_verification/presentation/verification_status_screen.dart';
@@ -20,12 +21,12 @@ class ExplorerHomeScreen extends StatelessWidget {
       (
         Icons.support_agent_outlined,
         'Contact Advisor',
-        'Talk to Sharan Fincorp'
+        'Talk to Sharan Fincorp',
       ),
       (
         Icons.settings_outlined,
         'Settings & Profile',
-        'Language, theme, and profile'
+        'Language, theme, and profile',
       ),
     ];
 
@@ -82,14 +83,17 @@ class ExplorerHomeScreen extends StatelessWidget {
                         .platformContext
                         .isPlatformAdmin)
                   Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                                builder: (_) => const MfdApplicantScreen())),
-                        icon: const Icon(Icons.business_outlined),
-                        label: const Text('Apply as MFD'),
-                      )),
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const MfdApplicantScreen(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.business_outlined),
+                      label: const Text('Apply as MFD'),
+                    ),
+                  ),
                 const SizedBox(height: 28),
                 Wrap(
                   spacing: 16,
@@ -105,6 +109,8 @@ class ExplorerHomeScreen extends StatelessWidget {
                                 MaterialPageRoute<void>(
                                   builder: (_) => module.$2 == 'Calculators'
                                       ? const CalculatorsHomeScreen()
+                                      : module.$2 == 'Fund Search'
+                                      ? const NseFundSearchScreen()
                                       : ExplorerModuleScreen(
                                           title: module.$2,
                                           description: module.$3,
@@ -120,9 +126,9 @@ class ExplorerHomeScreen extends StatelessWidget {
                                     const SizedBox(height: 16),
                                     Text(
                                       module.$2,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
                                     ),
                                     const SizedBox(height: 8),
                                     Text(module.$3),
@@ -206,8 +212,9 @@ class _PortfolioLinkingScreenState extends State<PortfolioLinkingScreen> {
   void _showErrorIfNeeded() {
     final message = context.read<AuthProvider>().errorMessage;
     if (message != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 

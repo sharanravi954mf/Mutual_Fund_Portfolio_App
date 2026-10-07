@@ -211,9 +211,23 @@ for (const declared of [1, 99]) {
     assertEquals(result.sha256, null);
   });
 }
+Deno.test("MASTER_DOWNLOAD bounded identity EOF without Content-Length completes", async () => {
+  const mem = memoryStore();
+  const raw = encoder.encode("a|b\n");
+  const result = await captureNseMasterDownload(
+    config,
+    scope,
+    mem.store,
+    () => Promise.resolve(new Response(raw)),
+  );
+  assertEquals(result.kind, "COMPLETE");
+  assertEquals(result.declaredBytes, null);
+  assertEquals(result.eof, true);
+  assertEquals(result.sha256, await nseMasterSha256(raw));
+  assertEquals(mem.chunks.length, 1);
+});
 for (
   const headers of [
-    {},
     { "content-length": "junk" },
     { "content-length": "4", "content-encoding": "gzip" },
     { "content-length": "1e3" },

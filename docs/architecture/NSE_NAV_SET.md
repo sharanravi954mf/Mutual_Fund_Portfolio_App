@@ -89,8 +89,7 @@ mapping used if a future publication is introduced. Merged B06.2 provides only
 `PROPOSED`/`AMBIGUOUS`/`REJECTED` crosswalk candidates; it supplies no approval
 state or authority to publish NAV.
 
-The current source remains `daily-nav-updater` (`api.mfapi.in`) and registrar
-persistence retains its existing fund mapping. Neither is changed. NSE observation
+As of the original B06.4 implementation, the current source remained the legacy `daily-nav-updater` third-party feed. On 2026-10-07 that third-party runtime source was decommissioned; the updater now fails closed. NSE NAV publication remains blocked by the same crosswalk/source-policy gate described here. NSE observation
 reads are evidence access, not authorization to use them in valuations. Before a
 future publisher can be enabled, it must define source precedence, freshness per
 valuation date, stale/future/missing-data behavior, corrections and approval;

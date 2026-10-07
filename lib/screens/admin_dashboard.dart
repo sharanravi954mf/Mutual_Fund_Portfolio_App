@@ -12,6 +12,7 @@ import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
 import 'client_detail_screen.dart';
 import '../features/investor_onboarding/presentation/investor_onboarding_entry.dart';
+import '../features/portfolio/services/fund_search_service.dart';
 import 'rupee_rain_background.dart';
 import '../features/investor_identity/models/user_profile.dart';
 import '../features/orders/data/supabase_order_repository.dart';
@@ -34,7 +35,6 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:js' as js;
-import 'package:http/http.dart' as http;
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -48,7 +48,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isSidebarExpanded = true;
   String _searchQuery = "";
   bool _isIngesting = false;
-  bool _isSyncingNAV = false;
   bool _isLoading = true;
 
   final TextEditingController _searchController = TextEditingController();
@@ -60,6 +59,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // Factsheet Management variables
   final SupabaseService _supabaseService = SupabaseService();
+  late final FundSearchService _fundSearchService =
+      FundSearchService(Supabase.instance.client);
   final InvoiceSignerJobController _invoiceSignerJobController =
       InvoiceSignerJobController(SupabaseService());
   List<Map<String, dynamic>> _fundsList = [];
@@ -388,61 +389,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  Future<void> _triggerNAVUpdateSync() async {
-    setState(() {
-      _isSyncingNAV = true;
-    });
-
-    try {
-      final client = Supabase.instance.client;
-      final response = await client.functions.invoke('daily-nav-updater');
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle_outline, color: Colors.white),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text("NAV sync complete! Response: ${response.data}",
-                    style: GoogleFonts.inter()),
-              ),
-            ],
-          ),
-          backgroundColor: const Color(0xFF00C853),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-
-      // Reload updated portfolio values
-      await _refreshClients();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.error_outline, color: Colors.white),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text("NAV sync trigger failed: $e",
-                    style: GoogleFonts.inter()),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.redAccent.shade400,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } finally {
-      setState(() {
-        _isSyncingNAV = false;
-      });
-    }
-  }
-
   void _onSearchQueryChanged(String query) {
     _debounceTimer?.cancel();
     if (query.trim().length < 3) {
@@ -481,35 +427,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      List<dynamic> results = [];
-
-      // If it is numeric, construct a virtual search result directly
-      if (isNumeric && cleanQuery.length >= 5 && cleanQuery.length <= 6) {
-        results = [
-          {
-            "schemeCode": int.parse(cleanQuery),
-            "schemeName": "Fetch Scheme Code: $cleanQuery",
-          }
-        ];
-      } else {
-        // Query search API with the ENTIRE cleanQuery
-        final response = await _supabaseService.client.functions.invoke(
-          'sign-stamp-invoice',
-          body: {
-            "action": "proxy-get",
-            "url":
-                "https://api.mfapi.in/mf/search?q=${Uri.encodeComponent(cleanQuery)}",
-          },
-        ).timeout(const Duration(seconds: 15));
-
-        if (response.status == 200 && response.data != null) {
-          results = response.data is String
-              ? jsonDecode(response.data as String)
-              : List<dynamic>.from(response.data as List);
-        } else {
-          throw Exception("Failed to search funds through proxy.");
-        }
-      }
+      final results = await _fundSearchService.search(cleanQuery);
 
       // Perform client-side case-insensitive multi-keyword filtering on name and code
       final filtered = results.where((item) {
@@ -609,25 +527,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
 
     try {
-      final response = await _supabaseService.client.functions.invoke(
-        'sign-stamp-invoice',
-        body: {
-          "action": "proxy-get",
-          "url": "https://api.mfapi.in/mf/$schemeCode",
-        },
-      ).timeout(const Duration(seconds: 20));
-
-      if (response.status == 200 && response.data != null) {
-        final Map<String, dynamic> details = response.data is String
-            ? jsonDecode(response.data as String)
-            : Map<String, dynamic>.from(response.data as Map);
-        setState(() {
-          _selectedFundDetails = details;
-          _fetchingFundDetails = false;
-        });
-      } else {
-        throw Exception("Failed to fetch fund details through proxy.");
-      }
+      final details = await _fundSearchService.loadDetails(schemeCode);
+      setState(() {
+        _selectedFundDetails = details;
+        _fetchingFundDetails = false;
+      });
     } catch (e) {
       setState(() {
         _fetchingFundDetails = false;
@@ -1772,7 +1676,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  "Queries the mfapi.in API database for all registered mutual funds to fetch today's latest Net Asset Values and updates client portfolio valuations.",
+                  "The previous third-party NAV source has been decommissioned. NSE NAV is available through MASTER_DOWNLOAD but remains disabled until its publication and crosswalk authority is commissioned.",
                   style: GoogleFonts.inter(
                       color: Colors.grey.shade400, fontSize: 13, height: 1.4),
                 ),
@@ -1780,29 +1684,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: _isSyncingNAV
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Icon(Icons.trending_up, color: Colors.white),
+                    icon: const Icon(Icons.lock_clock_outlined),
                     label: Text(
-                      _isSyncingNAV
-                          ? "Syncing NAV Prices..."
-                          : "Sync Daily NAV Prices Now",
+                      "NSE NAV commissioning pending",
                       style: GoogleFonts.outfit(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: Colors.white),
+                          fontWeight: FontWeight.bold, fontSize: 15),
                     ),
-                    onPressed: _isSyncingNAV ? null : _triggerNAVUpdateSync,
+                    onPressed: null,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF27121),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:mutual_fund_portfolio_app/providers/auth_provider.dart';
 import 'package:mutual_fund_portfolio_app/features/authentication/presentation/onboarding_screens.dart';
 import 'package:mutual_fund_portfolio_app/features/calculators/presentation/calculators_home_screen.dart';
+import 'package:mutual_fund_portfolio_app/features/portfolio/presentation/nse_fund_search_screen.dart';
 import 'route_guard_test.dart' show FakeAuthProvider;
 
 class ExplorerAuth extends FakeAuthProvider {
@@ -41,7 +42,6 @@ void main() {
 
   for (final title in [
     'Factsheets',
-    'Fund Search',
     'Learn',
     'Contact Advisor',
     'Settings & Profile'
@@ -66,6 +66,19 @@ void main() {
       expect(find.byType(ExplorerHomeScreen), findsOneWidget);
     });
   }
+
+  testWidgets('Fund Search opens the NSE SCH catalogue', (tester) async {
+    final auth = ExplorerAuth();
+    addTearDown(auth.dispose);
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+        value: auth, child: const MaterialApp(home: ExplorerHomeScreen())));
+    await tester.ensureVisible(find.text('Fund Search'));
+    await tester.tap(find.text('Fund Search'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NseFundSearchScreen), findsOneWidget);
+    expect(find.text('NSE scheme catalogue'), findsOneWidget);
+    expect(find.text('Search funds'), findsOneWidget);
+  });
 
   testWidgets('Explorer sign out stays wired to auth', (tester) async {
     final auth = ExplorerAuth();

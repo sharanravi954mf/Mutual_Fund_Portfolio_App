@@ -204,16 +204,23 @@ export async function captureNseMasterDownload(
     capture.identityEncoding = encoding === null ||
       encoding.trim().toLowerCase() === "identity";
     const length = response.headers.get("content-length");
-    if (
-      length !== null && /^(0|[1-9][0-9]{0,15})$/.test(length) &&
-      Number.isSafeInteger(Number(length))
-    ) capture.declaredBytes = Number(length);
-    // Require a comparable entity length. Automatic fetch decompression cannot
-    // establish wire integrity, and EOF alone cannot detect a clean short file.
-    if (!capture.identityEncoding || capture.declaredBytes === null) {
+    const lengthHeaderInvalid = length !== null &&
+      (!/^(0|[1-9][0-9]{0,15})$/.test(length) ||
+        !Number.isSafeInteger(Number(length)));
+    if (length !== null && !lengthHeaderInvalid) {
+      capture.declaredBytes = Number(length);
+    }
+    // NSE UAT MASTER_DOWNLOAD was observed on 2026-10-07 returning HTTP 200
+    // text/plain with identity encoding and no Content-Length. Preserve strict
+    // rejection for malformed framing/compression, but allow a bounded identity
+    // body to prove completion by reaching EOF. The 16 MiB cap still applies.
+    if (!capture.identityEncoding || lengthHeaderInvalid) {
       capture.kind = "UNVERIFIABLE";
       await response.body?.cancel();
-    } else if (capture.declaredBytes > NSE_MASTER_MAX_BYTES) {
+    } else if (
+      capture.declaredBytes !== null &&
+      capture.declaredBytes > NSE_MASTER_MAX_BYTES
+    ) {
       capture.kind = "OVERSIZE";
       await response.body?.cancel();
     } else {
@@ -225,7 +232,10 @@ export async function captureNseMasterDownload(
           capture.kind = "OVERSIZE";
           break;
         }
-        if (total + value.byteLength > capture.declaredBytes) {
+        if (
+          capture.declaredBytes !== null &&
+          total + value.byteLength > capture.declaredBytes
+        ) {
           capture.kind = "TRUNCATED";
           break;
         }
@@ -245,7 +255,10 @@ export async function captureNseMasterDownload(
       await flush();
       if (capture.kind !== "OVERSIZE" && capture.kind !== "TRUNCATED") {
         capture.eof = true;
-        if (total !== capture.declaredBytes) capture.kind = "TRUNCATED";
+        if (
+          capture.declaredBytes !== null &&
+          total !== capture.declaredBytes
+        ) capture.kind = "TRUNCATED";
         else {
           const body = new Uint8Array(total);
           let offset = 0;

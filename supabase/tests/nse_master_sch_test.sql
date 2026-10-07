@@ -8,6 +8,11 @@ INSERT INTO auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,cr
 INSERT INTO public.profiles(user_id,role)
 SELECT id,'investor' FROM auth.users WHERE id IN ('b0610000-0000-4000-8000-000000000001','b0610000-0000-4000-8000-000000000002');
 
+INSERT INTO public.user_accounts(user_id,account_state) VALUES
+ ('b0610000-0000-4000-8000-000000000001','explorer'),
+ ('b0610000-0000-4000-8000-000000000002','explorer')
+ON CONFLICT(user_id) DO NOTHING;
+
 INSERT INTO public.workspaces(id,name,slug,owner_profile_id,workspace_status)
 SELECT ('b0610000-0000-4000-8001-'||right(user_id::text,12))::uuid,'B06 synthetic','b061-'||right(user_id::text,1),id,'active'
  FROM public.profiles WHERE user_id IN ('b0610000-0000-4000-8000-000000000001','b0610000-0000-4000-8000-000000000002');
@@ -246,6 +251,14 @@ DO $$ BEGIN
 END $$;
 RESET ROLE;
 SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub','b0610000-0000-4000-8000-000000000002')::text,true);
+DO $$ DECLARE projected jsonb; BEGIN
+ projected:=public.search_nse_schemes('Synthetic',25);
+ IF NOT (projected->>'source'='NSE_INVEST_SCH' AND projected->>'available'='true') THEN RAISE EXCEPTION 'browser_sch_projection_unavailable'; END IF;
+ IF NOT jsonb_array_length(projected->'items')>0 THEN RAISE EXCEPTION 'browser_sch_projection_empty'; END IF;
+ IF NOT ((projected->'items'->0 ? 'scheme_code') AND (projected->'items'->0 ? 'amc_code') AND (projected->'items'->0 ? 'rta_agent_code')) THEN RAISE EXCEPTION 'browser_sch_projection_missing_codes'; END IF;
+ IF projected::text LIKE '%workspace_id%' OR projected::text LIKE '%connection_id%' THEN RAISE EXCEPTION 'browser_sch_projection_scope_leak'; END IF;
+END $$;
 DO $$ DECLARE persona text; BEGIN
  FOREACH persona IN ARRAY ARRAY['platform_admin','family_guest','inactive_member','operations','unrelated_advisor','cross_workspace'] LOOP
   PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub','b0610000-0000-4000-8000-000000000002','app_metadata',jsonb_build_object('role',persona))::text,true);

@@ -107,7 +107,9 @@ BEGIN
  PERFORM pg_temp.err(format('SELECT public.finish_nse_master_download(%L,%L,%L,200,%L,4,true,true,%L)', 'b0610000-0000-4000-8001-000000000002',d,'COMPLETE','TEXT',encode(extensions.digest(b,'sha256'),'hex')),'download_unavailable');
  PERFORM pg_temp.err(format('SELECT pg_temp.stage(%L)',d),'not_stageable');
  PERFORM pg_temp.err(format('SELECT public.finish_nse_master_download(%L,%L,%L,200,%L,999,true,true,%L)', 'b0610000-0000-4000-8001-000000000001',d,'COMPLETE','TEXT',encode(extensions.digest(b,'sha256'),'hex')),'incomplete_evidence');
- PERFORM pg_temp.err(format('SELECT public.finish_nse_master_download(%L,%L,%L,200,%L,NULL,true,true,%L)', 'b0610000-0000-4000-8001-000000000001',d,'COMPLETE','TEXT',encode(extensions.digest(b,'sha256'),'hex')),'incomplete_evidence');
+ d2:=pg_temp.begin_download(); PERFORM pg_temp.append_chunk(d2,0,b);
+ r:=public.finish_nse_master_download('b0610000-0000-4000-8001-000000000001',d2,'COMPLETE',200,'TEXT',NULL,true,true,encode(extensions.digest(b,'sha256'),'hex'));
+ PERFORM pg_temp.ok(r->>'capture_kind'='COMPLETE' AND (SELECT declared_bytes IS NULL AND eof FROM nse_reference.results WHERE download_id=d2),'bounded_eof_complete_without_declared_length');
  PERFORM pg_temp.err(format('SELECT public.finish_nse_master_download(%L,%L,%L,200,%L,4,false,true,%L)', 'b0610000-0000-4000-8001-000000000001',d,'COMPLETE','TEXT',encode(extensions.digest(b,'sha256'),'hex')),'incomplete_evidence');
  PERFORM pg_temp.err(format('SELECT public.finish_nse_master_download(%L,%L,%L,200,%L,4,true,false,%L)', 'b0610000-0000-4000-8001-000000000001',d,'COMPLETE','TEXT',encode(extensions.digest(b,'sha256'),'hex')),'incomplete_evidence');
  PERFORM pg_temp.err(format('SELECT pg_temp.finish(%L,%L::bytea)',d,convert_to('bad!','UTF8')),'incomplete_evidence');
