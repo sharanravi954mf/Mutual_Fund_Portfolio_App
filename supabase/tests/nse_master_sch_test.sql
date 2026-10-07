@@ -67,6 +67,8 @@ DO $$ DECLARE e uuid; t uuid:=gen_random_uuid(); key uuid:=gen_random_uuid(); c 
  before_rows bigint; rec record; role_name text; persona text; fn regprocedure; fields text[];
 BEGIN
  PERFORM pg_temp.ok(nse_reference.sch_header_v1()='UNIQUE SR NO|SCHEME CODE|RTA SCHEME CODE|AMC SCHEME CODE|ISIN|AMC CODE|SCHEME TYPE|PLAN TYPE|SCHEME NAME|PURCHASE ALLOWED|PURCHASE TRANSACTION MODE|NEW PURCHASE MIN AMOUNT|ADDITIONAL PURCHASE MIN AMOUNT|ADDITIONAL PURCHASE MAX AMOUNT|PURCHASE AMOUNT MULTIPLIER|PURCHASE CUTOFF TIME|REDEMPTION ALLOWED|REDEMPTION TRANSACTION MODE|REDEMPTION MIN QTY|REDEMPTION QTY MULTIPLIER|REDEMPTION MAX QTY|REDEMPTION MIN AMOUNT|REDEMPTION MAX AMOUNT|REDEMPTION AMOUNT MULTIPLIER|REDEMPTION CUTOFF TIME|RTA AGENT CODE|AMC ACTIVE FLAG|DIV REINVEST FLAG|SIP ALLOWED|STP ENABLED|SWP ENABLED|SWITCH ALLOWED|SETTLEMENT TYPE|AMC IND|FACE VALUE|SCHEME START DATE|MATURITY DATE|EXIT LOAD FLAG|EXIT LOAD|LOCK IN PERIOD_FLAG|LOCK IN PERIOD|CHANNEL PARTNER CODE|REOPENING DATE|OPEN/CLOSE ENDED SCHEME','source_pinned_44_column_header');
+ PERFORM pg_temp.ok((SELECT parser_version='SCH_OBSERVED_44_V2' AND function_name='validate_sch_v2' FROM nse_reference.validators WHERE file_type='SCH'),'sch_v2_registry');
+ PERFORM pg_temp.err($q$UPDATE nse_reference.validators SET parser_version='BROKEN' WHERE file_type='SCH'$q$,'nse_reference_immutable');
  e:=pg_temp.queue(key);
  PERFORM pg_temp.ok(pg_temp.queue(key)=e,'prepare_ack_idempotent');
  PERFORM pg_temp.ok((SELECT count(*)=1 FROM nse_reference.jobs),'one_job');
@@ -100,7 +102,7 @@ BEGIN
  PERFORM pg_temp.ok((SELECT count(*)=1 FROM nse_reference.sch_rows WHERE snapshot_id=s),'typed_row');
  PERFORM pg_temp.ok((SELECT rta_scheme_code='RTA-A' AND amc_scheme_code='AMC-A' AND plan_type='NATIVE-PLAN' AND dividend_reinvestment_flag='unknown' FROM nse_reference.sch_rows WHERE snapshot_id=s),'codes_separate_flags_native');
  PERFORM pg_temp.ok((SELECT source_namespace='NSE_SCH' AND scheme_code='NSE-A' FROM nse_reference.scheme_identities),'explicit_nse_identity');
- PERFORM pg_temp.ok((SELECT publication_gate='BLOCKED' AND row_count=1 AND rejected_rows=0 AND parser_version='SCH_OBSERVED_44_V1' FROM nse_reference.validations WHERE snapshot_id=s),'receipt_not_publication');
+ PERFORM pg_temp.ok((SELECT publication_gate='BLOCKED' AND row_count=1 AND rejected_rows=0 AND parser_version='SCH_OBSERVED_44_V2' FROM nse_reference.validations WHERE snapshot_id=s),'receipt_not_publication');
  PERFORM pg_temp.ok((SELECT v.source_sha256=r.response_sha256 FROM nse_reference.validations v JOIN nse_reference.snapshots s ON s.id=v.snapshot_id JOIN nse_reference.results r ON r.download_id=s.download_id WHERE v.snapshot_id=prior),'source_digest_lineage');
  PERFORM pg_temp.ok((SELECT count(*)=0 FROM nse_reference.scheme_crosswalk_candidates),'no_invented_crosswalk');
  PERFORM pg_temp.ok((SELECT current_nav=99 AND fund_house='DIFFERENT AMC' FROM public.mutual_funds WHERE scheme_code='NSE-A'),'coincidental_code_never_overwrites');
@@ -119,11 +121,15 @@ BEGIN
  PERFORM pg_temp.ok((SELECT count(*)=1 FROM nse_reference.scheme_identities),'same_source_code_identity');
  PERFORM pg_temp.ok((SELECT previous_snapshot_id=prior AND version=2 FROM nse_reference.snapshots WHERE id=(r->>'snapshot_id')::uuid),'immutable_versions');
  body:=pg_temp.sch_file();
+ r:=pg_temp.run_file(left(body,length(body)-1));
+ PERFORM pg_temp.ok(r->>'outcome'='STAGED_VALIDATED','terminal_eof_lf_profile');
+ r:=pg_temp.run_file(replace(left(body,length(body)-1),E'\n',E'\r\n'));
+ PERFORM pg_temp.ok(r->>'outcome'='STAGED_VALIDATED','terminal_eof_crlf_profile');
  FOREACH bad IN ARRAY ARRAY[
   replace(body,'UNIQUE SR NO','UNIQUE NO'),replace(body,'SCHEME CODE|RTA SCHEME CODE','RTA SCHEME CODE|SCHEME CODE'),
   replace(body,'OPEN/CLOSE ENDED SCHEME','UNKNOWN'),
   nse_reference.sch_header_v1()||E'\n',
-  left(body,length(body)-1),body||E'\n',body||'partial',
+  body||E'\n',body||'partial',
   body||pg_temp.sch_row()||E'\n',body||pg_temp.sch_row('NSE-B','1')||E'\n',body||pg_temp.sch_row('NSE-A','2')||E'\n',
   replace(body,'NSE-A',''),replace(body,'NSE-A',' NSE-A'),replace(body,'AMC-ONE',''),
   replace(body,'INF000000001','bad-isin'),replace(body,'Synthetic Scheme',''),

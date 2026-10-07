@@ -213,3 +213,13 @@ length equality whenever the header is supplied. See
 Fund Search now has a narrow authenticated projection over the latest validated SCH
 snapshot. Raw reference tables remain private and SCH fields remain reference evidence,
 not automatic eKYC-code, registrar, transaction-eligibility or NAV authority.
+
+## 2026-10-07 terminal EOF parser V2
+
+Current UAT SCH evidence established a framing difference not covered by V1: NSE
+uses CRLF between records but may terminate the final record directly at EOF. The
+complete retained response was 4,084,985 bytes with 15,352 44-column records.
+`SCH_OBSERVED_44_V2` preserves the V1 schema/identity rules and accepts either one
+terminal line ending or direct EOF after the last record. Historical V1 receipts are
+not rewritten. Future SCH jobs use V2; the browser catalogue accepts both validated
+V1 and V2 snapshots.

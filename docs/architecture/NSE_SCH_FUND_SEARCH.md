@@ -81,3 +81,22 @@ new snapshot/version. Fund Search resolves the latest validated UAT SCH snapshot
 each query, so a later commissioned refresh can become visible without rewriting old
 reference evidence. Scheduling cadence is a separate operational decision and is not
 introduced by this slice.
+
+## 2026-10-07 SCH terminal-EOF compatibility
+
+A second real DEV UAT SCH capture completed with HTTP 200 `text/plain`, identity
+encoding, EOF and 4,084,985 captured bytes. The exact retained file used the pinned
+44-column header and 15,352 non-empty records, with consistent CRLF separators, but
+NSE did **not** emit a CRLF after the final record. The existing
+`SCH_OBSERVED_44_V1` validator therefore rejected the snapshot solely because V1
+required one terminal newline. Read-only characterization of the retained evidence
+confirmed the header matches after CRLF normalization, every row has 44 columns,
+the existing core field/length checks pass, and scheme/serial identities are unique.
+
+`SCH_OBSERVED_44_V2` changes only that framing rule: after consistent LF/CRLF
+normalization it accepts either one terminal LF or immediate EOF after the final
+record. Double terminal newlines, blank records, mixed/bare line endings, controls,
+quotes, embedded BOM, schema changes, malformed rows and duplicate identities remain
+rejected exactly as before. Historical V1 validation receipts are untouched; the
+private validator registry is advanced atomically to V2 for future SCH snapshots and
+then remains immutable. Browser Fund Search can read validated V1 or V2 snapshots.
