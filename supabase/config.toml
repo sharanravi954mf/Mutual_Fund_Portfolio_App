@@ -251,3 +251,6 @@ verify_jwt = false
 
 [functions.nse-bank-mandate-worker]
 verify_jwt = false
+
+[functions.nse-onboarding-kyc-worker]
+verify_jwt = false

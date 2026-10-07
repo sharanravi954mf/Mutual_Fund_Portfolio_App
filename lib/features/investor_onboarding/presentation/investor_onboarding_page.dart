@@ -4,9 +4,13 @@ import 'investor_onboarding_controller.dart';
 
 class InvestorOnboardingPage extends StatefulWidget {
   const InvestorOnboardingPage(
-      {required this.controller, this.startNew = false, super.key});
+      {required this.controller,
+      this.startNew = false,
+      this.providerKyc = false,
+      this.alreadyLoaded = false,
+      super.key});
   final InvestorOnboardingController controller;
-  final bool startNew;
+  final bool startNew, providerKyc, alreadyLoaded;
   @override
   State<InvestorOnboardingPage> createState() => _InvestorOnboardingPageState();
 }
@@ -17,6 +21,7 @@ class _InvestorOnboardingPageState extends State<InvestorOnboardingPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.alreadyLoaded) return;
     c.load().then((_) {
       if (mounted && widget.startNew && c.phase == OnboardingPhase.directory) {
         c.start();
@@ -72,6 +77,13 @@ class _InvestorOnboardingPageState extends State<InvestorOnboardingPage> {
               'An active approved MFD workspace is required to add investors.')
         ];
       case OnboardingPhase.directory:
+        if (widget.providerKyc) {
+          return [
+            OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Return to KYC'))
+          ];
+        }
         return _directory();
       case OnboardingPhase.editing:
         return _editor(context);
@@ -135,11 +147,15 @@ class _InvestorOnboardingPageState extends State<InvestorOnboardingPage> {
       const SizedBox(height: 16),
       Text(entry.key, style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 16),
-      for (final f in entry.value)
+      for (final f in entry.value.where((f) =>
+          !widget.providerKyc ||
+          !['kyc_method', 'kyc_status', 'ckyc_number'].contains(f.key)))
         Padding(padding: const EdgeInsets.only(bottom: 16), child: _field(f)),
-      if (section == 2)
+      if (section == 2 && !widget.providerKyc)
         const Text(
             'Reported KYC status is captured for review. It does not verify KYC. Joint holdings require additional provider support.'),
+      if (section == 2 && widget.providerKyc)
+        const Text('KYC type and CKYC require authoritative provider data.'),
       if (section == 4)
         const Text(
             'Record the investor’s actual consent and nomination choice. Nominee opt-in can be captured, but the existing NSE adapter currently supports opt-out only.'),
@@ -215,7 +231,9 @@ class _InvestorOnboardingPageState extends State<InvestorOnboardingPage> {
         const SizedBox(height: 16),
         for (final group in onboardingSections.entries) ...[
           Text(group.key, style: Theme.of(context).textTheme.titleMedium),
-          for (final f in group.value)
+          for (final f in group.value.where((f) =>
+              !widget.providerKyc ||
+              !['kyc_method', 'kyc_status', 'ckyc_number'].contains(f.key)))
             if ((c.fields[f.key] ?? '').isNotEmpty ||
                 (f.secret && c.current != null))
               Padding(
@@ -273,7 +291,8 @@ class _InvestorOnboardingPageState extends State<InvestorOnboardingPage> {
               style: Theme.of(context).textTheme.titleMedium)),
       const SizedBox(height: 16),
       Text('MFD relationship: ${OnboardingCase.label(item.relationship)}'),
-      Text('Account linkage: ${OnboardingCase.label(item.accountLink)}'),
+      if (!widget.providerKyc)
+        Text('Account linkage: ${OnboardingCase.label(item.accountLink)}'),
       Text('KYC: ${OnboardingCase.label(item.kycState)}'),
       Text('UCC: ${OnboardingCase.label(item.uccState)}'),
       Text('NSE registration: ${OnboardingCase.label(item.nseState)}'),
@@ -308,7 +327,11 @@ class _InvestorOnboardingPageState extends State<InvestorOnboardingPage> {
                     },
               child: const Text('Continue details')),
         OutlinedButton(
-            onPressed: c.busy ? null : c.load,
+            onPressed: c.busy
+                ? null
+                : (widget.providerKyc
+                    ? () => Navigator.of(context).pop()
+                    : c.load),
             child: const Text('Back to investors')),
         OutlinedButton(
             onPressed: c.busy ? null : () => c.resume(item.id),

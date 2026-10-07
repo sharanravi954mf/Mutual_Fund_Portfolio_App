@@ -1,4 +1,5 @@
 # Project Control Center (PROJECT_STATE)
+
 Target Repository Path: docs/PROJECT_STATE.md
 
 ## Project Overview
@@ -20,6 +21,8 @@ Target Repository Path: docs/PROJECT_STATE.md
 ## MFD Investor Onboarding V2 KYC-first contract — FROZEN 2026-10-07
 
 The business-owner-approved canonical onboarding journey is frozen as PAN-first and KYC-first: **Add Investor → PAN → resolve/fetch → KYC Check → provider eKYC hand-off when required → only missing details → nomination → FATCA → bank → consent → UCC → post-registration actions → Ready to Transact**. Explorer/Auth-account matching remains private and uses the V1 verified-identity boundary. Semantic changes require explicit business-owner approval and a new version/ADR. See [frozen V2 contract](architecture/MFD_INVESTOR_ONBOARDING_V2_KYC_FIRST_FROZEN.md).
+
+V2-A PAN-first KYC orchestration is a DEV/local candidate; provider completion is not commissioned. See the [implementation and validation record](architecture/MFD_INVESTOR_ONBOARDING_V2A_IMPLEMENTATION_VALIDATION.md).
 
 ## MFD-led Investor Onboarding V1 hosted DEV foundation — 2026-10-07
 
