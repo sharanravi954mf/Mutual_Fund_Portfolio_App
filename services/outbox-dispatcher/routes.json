@@ -58,5 +58,13 @@
   "integration.nse.bank_mandate_verify_requested": {
     "worker_slug": "nse-bank-mandate-worker",
     "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.onboarding_kyc_check_requested": {
+    "worker_slug": "nse-onboarding-kyc-worker",
+    "token_env": "NSE_WORKER_TOKEN"
+  },
+  "integration.nse.ekyc_registration_requested": {
+    "worker_slug": "nse-onboarding-kyc-worker",
+    "token_env": "NSE_WORKER_TOKEN"
   }
 }

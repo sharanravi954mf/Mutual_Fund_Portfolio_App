@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
-import '../data/investor_onboarding_repository.dart';
-import 'investor_onboarding_controller.dart';
-import 'investor_onboarding_page.dart';
+import '../data/onboarding_kyc_repository.dart';
+import 'onboarding_kyc_controller.dart';
+import 'onboarding_kyc_page.dart';
 
 class InvestorOnboardingEntry extends StatelessWidget {
   const InvestorOnboardingEntry({this.startNew = true, super.key});
@@ -16,12 +16,12 @@ class InvestorOnboardingEntry extends StatelessWidget {
     }
     return ChangeNotifierProvider(
       key: ValueKey(auth.user!.id),
-      create: (_) => InvestorOnboardingController(
-          SupabaseInvestorOnboardingRepository(auth.client)),
+      create: (_) =>
+          OnboardingKycController(SupabaseOnboardingKycRepository(auth.client)),
       child: Builder(
-          builder: (context) => InvestorOnboardingPage(
+          builder: (context) => OnboardingKycPage(
               startNew: startNew,
-              controller: context.read<InvestorOnboardingController>())),
+              controller: context.read<OnboardingKycController>())),
     );
   }
 }
