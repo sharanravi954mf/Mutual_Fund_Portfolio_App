@@ -183,6 +183,9 @@ DO $$ BEGIN
  PERFORM pg_temp.perform_call('ab400000-0000-0000-0000-000000000090','{"response_status":"S","report_data_total":0,"report_data":[],"error_remark":"No record(s) found."}');
 END $$;
 SET LOCAL ROLE authenticated;
+\if :{?ekyc_amc_selector_test}
+\i :ekyc_amc_selector_test
+\endif
 DO $$ BEGIN PERFORM public.request_onboarding_kyc('ab400000-0000-0000-0000-000000000090',gen_random_uuid(),'EKYC',NULL,NULL,'TEST'); END $$;
 RESET ROLE;
 DO $$ BEGIN

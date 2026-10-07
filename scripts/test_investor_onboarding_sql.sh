@@ -10,7 +10,8 @@ for attempt in {1..60}; do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
-psql_local() { docker exec -i "$container" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
+psql_local() { docker exec -i "$container" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 -v ekyc_amc_selector_test=/tmp/nse_ekyc_amcs_selector.sql "$@"; }
+docker cp "$repo_root/supabase/tests/fixtures/nse_ekyc_amcs_selector.sql" "$container:/tmp/nse_ekyc_amcs_selector.sql"
 docker exec -i "$container" psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 < "$repo_root/supabase/tests/fixtures/nse_local_platform.sql"
 for migration in "$repo_root"/supabase/migrations/*.sql; do
   if [[ "${migration##*/}" == 20261003233928_authorization_workspace_containment.sql ]]; then
@@ -19,6 +20,7 @@ for migration in "$repo_root"/supabase/migrations/*.sql; do
   echo "Applying ${migration##*/}"
   psql_local < "$migration"
 done
+python3 "$repo_root/scripts/test_nse_ekyc_amcs_config.py" "$container"
 for test in onboarding_kyc_test.sql nse_order_status_vertical_slice_test.sql nse_prov_orders_vertical_slice_test.sql nse_order_funding_vertical_slice_test.sql nse_settlement_redemption_vertical_slice_test.sql nse_sip_xsip_reports_vertical_slice_test.sql nse_stp_swp_reports_vertical_slice_test.sql nse_response_diagnostics_test.sql nse_master_reference_foundation_test.sql nse_master_sch_test.sql nse_systematic_product_masters_test.sql nse_nav_set_test.sql nse_nav_set_runtime_test.sql generic_outbox_dispatcher_test.sql mfd_led_investor_onboarding_test.sql nse_ucc_vertical_slice_test.sql nse_client_readiness_vertical_slice_test.sql nse_bank_mandate_test.sql nse_bank_mandate_write_test.sql mfd_application_approval_v1_test.sql platform_admin_authority_v1_test.sql fixtures/authorization_containment_history_after.sql authorization_containment_test.sql email_signup_identity_test.sql nse_frontend_integration_v1_test.sql issue_114_workspace_authorization_rpc_test.sql issue_114_gmail_oauth_provisioning_test.sql issue_30_order_requests_rls_test.sql issue_89_sell_switch_order_intent_test.sql issue_95_order_folio_projection_rpc_test.sql; do
   echo "Testing $test"
   psql_local < "$repo_root/supabase/tests/$test"
