@@ -3,6 +3,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'onboarding_kyc_controller.dart';
 import 'investor_onboarding_controller.dart';
 import 'investor_onboarding_page.dart';
+import 'dev_onboarding_preview_gate.dart';
+import 'dev_onboarding_preview_page.dart';
 
 class OnboardingKycPage extends StatefulWidget {
   const OnboardingKycPage(
@@ -199,6 +201,21 @@ class _OnboardingKycPageState extends State<OnboardingKycPage> {
                       mode: LaunchMode.externalApplication,
                       webOnlyWindowName: '_blank'))),
         button('Refresh KYC Status', () => c.act('REFRESH')),
+        if (DevOnboardingPreviewGate.enabled) ...[
+          const SizedBox(height: 24),
+          const Text(
+              'This is a development preview using test data. Your investor\'s KYC remains pending. No details entered here are submitted or saved to the investor.'),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: OutlinedButton(
+              onPressed: c.busy
+                  ? null
+                  : () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => const DevOnboardingPreviewPage())),
+              child: const Text('Preview remaining onboarding (DEV)'),
+            ),
+          ),
+        ],
       ] else if (state == 'KYC_COMPLIANT') ...[
         const Text('KYC compliant'),
         button('Continue to remaining details', details),
