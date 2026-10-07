@@ -1,0 +1,219 @@
+{
+  "purpose": "Read-only SCH observations, not an EKYCREG mapper or approved SCH-to-AMC crosswalk.",
+  "observed_on": "2026-10-07",
+  "environment": "MoneyBowl DEV / NSE UAT",
+  "snapshot": {
+    "id": "d1e227cc-3ca8-4f38-bc86-3aedf8eaa397",
+    "version": 2,
+    "created_at": "2026-10-07T18:19:56.887709Z",
+    "parser": "SCH_OBSERVED_44_V2",
+    "status": "STAGED_VALIDATED",
+    "validation_scope": "STRUCTURE_AND_IDENTITY_ONLY",
+    "http_status": 200,
+    "media_type": "TEXT",
+    "capture_kind": "COMPLETE",
+    "captured_bytes": 4084985,
+    "row_count": 15352,
+    "rejected_rows": 0,
+    "response_sha256": "87cd63a822b8ce99d7d47508fa896180d6ec93c0ab315f126bd56df00ea30e3a"
+  },
+  "grouping_caveat": "faq_code groups recognizably named SCH observations for comparison with independently verified FAQ entries only. ABSL and SIF groups are shown separately; no corporate lineage, eKYC eligibility, registrar mapping or provider support is inferred.",
+  "query": "with latest as (\nselect s.id from nse_reference.snapshots s join nse_reference.validations v on v.snapshot_id=s.id\njoin nse_reference.connections c on c.id=s.connection_id join public.workspaces w on w.id=s.workspace_id\nwhere s.file_type='SCH' and v.status='STAGED_VALIDATED' and c.environment='UAT' and c.enabled and w.workspace_status='active'\norder by s.version desc,s.created_at desc,s.id desc limit 1),\nobservations as (\nselect r.*,case\nwhen r.amc_code in ('ABSL_MF','BIRLAMF_SIF','BIRLASUNLIFEMUTUALFUND_MF') then 'B'\nwhen r.amc_code in ('BANDHANMF_SIF','BANDHANMUTUALFUND_MF') then 'G'\nwhen r.amc_code in ('KOTAKMAHINDRAMF','KOTAKMF_SIF') then 'K'\nwhen r.amc_code='HDFCMUTUALFUND_MF' then 'H'\nwhen r.amc_code='CANARAROBECOMUTUALFUND_MF' then 'CR'\nwhen r.amc_code in ('HSBCMF_SIF','HSBCMUTUALFUND_MF') then 'O'\nwhen r.amc_code in ('UNIONMF_SIF','UNIONMUTUALFUND_MF') then 'UK'\nend as faq_code\nfrom nse_reference.sch_rows r join latest on latest.id=r.snapshot_id)\nselect faq_code,amc_code,count(*) as scheme_count,\narray_agg(distinct rta_agent_code order by rta_agent_code) as rta_agent_codes,\narray_agg(distinct native_fields[27] order by native_fields[27]) as amc_active_flags,\narray_agg(distinct amc_scheme_code order by amc_scheme_code) as amc_scheme_codes,\narray_agg(distinct rta_scheme_code order by rta_scheme_code) as rta_scheme_codes,\ncount(*) filter(where amc_scheme_code=faq_code) as amc_scheme_equal_faq_code_rows,\ncount(*) filter(where rta_scheme_code=faq_code) as rta_scheme_equal_faq_code_rows\nfrom observations where faq_code is not null group by faq_code,amc_code order by faq_code,amc_code;",
+  "rows": [
+    {
+      "faq_code": "B",
+      "amc_code": "ABSL_MF",
+      "scheme_count": 248,
+      "rta_agent_codes": [
+        "KARVY"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["100A", "100C", "101A", "103A", "103C", "104A", "104C", "1055", "1056", "1058", "1059", "1061", "1062", "109A", "110A", "110B", "110C", "112A", "112C", "113A", "119A", "120A", "121A", "123A", "123C", "124A", "124C", "126A", "127A", "129A", "132DD", "132G", "132WD", "134A", "135A", "139A", "140A", "141B", "142N", "151ID", "151IG", "151IW", "151RD", "152ID", "152IG", "152IW", "241D", "297D", "297G", "297RD", "301D", "301G", "301Q", "301QD", "301R", "303F", "303FD", "303G", "303M", "303MD", "303WD", "313G", "313M", "313MD", "313MP", "321A", "321G", "321M", "321MD", "321Q", "321QD", "373", "373DP", "374", "402AG", "403Q", "403QD", "44NRD", "48N", "59A", "59B", "59C", "69A", "69C", "70A", "70C", "79A", "79C", "88A", "88C", "916D", "95A", "A", "AD", "AG", "B241D", "B241RD", "B297D", "B301QD", "B303FD", "B303MD", "B313MD", "B321MD", "B321QD", "B403QD", "B43G", "B916D", "B916DR", "B916G", "BA", "L0HGF"],
+      "rta_scheme_codes": ["100A", "100C", "101A", "103A", "103C", "104A", "104C", "1055", "1056", "1058", "1059", "1061", "1062", "109A", "110A", "110B", "110C", "112A", "112C", "114A", "119A", "120A", "121A", "123A", "123C", "124A", "124C", "12547", "126A", "127A", "129A", "132DD", "132G", "132WD", "134A", "135A", "139A", "140A", "141B", "142N", "151ID", "151IG", "151IW", "151RD", "152ID", "152IG", "152IW", "241D", "241RD", "297D", "297G", "297RD", "301D", "301G", "301Q", "301QD", "301R", "303F", "303FD", "303G", "303M", "303MD", "303WD", "313G", "313M", "313MD", "313MP", "321A", "321G", "321M", "321MD", "321Q", "321QD", "373", "373DP", "373N", "374", "402AG", "403Q", "403QD", "43N", "44NRD", "48N", "59A", "59B", "59C", "69A", "69C", "70A", "70C", "79A", "79C", "88A", "88C", "916D", "916DR", "916G", "95A", "A", "AD", "AG"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "B",
+      "amc_code": "BIRLAMF_SIF",
+      "scheme_count": 6,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["2000A", "2000B", "2000C", "2001B", "2002B"],
+      "rta_scheme_codes": ["2000A", "2000B", "2000C", "2001B", "2002B"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "B",
+      "amc_code": "BIRLASUNLIFEMUTUALFUND_MF",
+      "scheme_count": 591,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["02", "02D", "02G", "100B", "101B", "103B", "103C", "104B", "1054", "1057", "105G", "1060", "106D", "106DP", "109B", "111A", "111B", "112A", "112B", "112C", "113A", "113B", "115A", "115B", "116A", "116B", "117A", "117B", "117C", "1180A", "1180B", "1180C", "119B", "120B", "121B", "123A", "123B", "124A", "124B", "124C", "125A", "125B", "126B", "127B", "128A", "128B", "129B", "131A", "131B", "131DD", "131WD", "132WD", "134B", "135B", "136A", "136B", "137A", "137B", "1382A", "1382B", "1387A", "1387B", "1387C", "1388A", "1388B", "1388C", "138A", "138B", "1390A", "1390B", "1390C", "1395A", "1395B", "1395C", "1396A", "1396B", "1396C", "1398A", "1398B", "1398C", "1399A", "1399B", "1399C", "139B", "1400A", "1400B", "1400C", "1401A", "1401B", "1401C", "1402A", "1402B", "1402C", "1403A", "1403B", "1403C", "1404A", "1404B", "1404C", "1405A", "1405B", "1405C", "1406A", "1406B", "1407A", "1407B", "1407C", "1408A", "1408B", "1408C", "1409A", "1409B", "1409C", "140B", "1410A", "1410B", "1410C", "1411A", "1411B", "1411C", "1412A", "1412B", "1412C", "1414A", "1414B", "1417A", "1417B", "1418A", "1418B", "1419A", "1419B", "1420A", "1420B", "1421A", "1421B", "1422A", "1422B", "1423A", "1423B", "1424A", "1424B", "1425A", "1425B", "1426A", "1426B", "1427A", "1427B", "1428A", "1428B", "1429A", "1429B", "1430A", "1430B", "1431A", "1431B", "1432A", "1432B", "1433A", "1433B", "1434A", "1434B", "1435A", "1435B", "1436A", "1436B", "1437A", "1437B", "1438A", "1438B", "1439A", "1439B", "1440A", "1440B", "1441A", "1441B", "1442A", "1443A", "1443B", "1444A", "1444B", "1445A", "1445B", "1446A", "1446B", "1448A", "1448B", "1449A", "1449B", "15", "150WD", "151ID", "151IW", "151RD", "151WD", "151WZ", "152ID", "152WD", "153D", "153DD", "153G", "153RD", "153WD", "157DD", "157G", "157MD", "157WD", "158ON", "15D", "16", "179", "2", "201D", "201G", "201RD", "205DD", "205RD", "205RG", "221D", "221G", "221RD", "249A", "249B", "249C", "250A", "250B", "250C", "251D", "251G", "251RD", "261D", "261G", "261RD", "291D", "291G", "291RD", "292D", "292G", "292RD", "293D", "293G", "293RD", "295D", "295DR", "295G", "296D", "301D", "301R", "303Q", "32", "321A", "341G", "341Q", "341QD", "341WD", "37", "373", "373DP", "373N", "37A", "37D", "380A", "380B", "380C", "380D", "402IG", "41A", "41B", "41C", "42A", "42B", "42C", "44N", "44NRD", "45N", "46N", "47N", "51", "52", "52D", "55A", "55B", "55C", "56A", "56B", "56C", "57A", "57B", "57C", "58A", "58B", "58C", "60A", "60B", "60C", "65", "66A", "66B", "67A", "67B", "67C", "68A", "68B", "68C", "69B", "70BB", "71A", "71B", "79B", "83NFD", "85IFR", "85NDD", "85NIF", "85NIG", "85NIM", "85NIR", "88A", "88B", "90A", "90B", "91", "91DD", "92", "95B", "99", "B", "B15", "B201D", "B205RD", "B221D", "B241G", "B261D", "B291D", "B291G", "B292D", "B292G", "B296D", "B296G", "B296RD", "B303QD", "B341QD", "B37", "BSL153G-LQ"],
+      "rta_scheme_codes": ["02", "02D", "02G", "100B", "101B", "103B", "103C", "104B", "1054", "1057", "105G", "1060", "106D", "106DP", "109B", "111A", "111B", "112A", "112B", "112C", "113A", "113B", "114B", "115A", "115B", "116A", "116B", "117A", "117B", "117C", "1180A", "1180B", "1180C", "119B", "120B", "121B", "123A", "123B", "124A", "124B", "124C", "125A", "125B", "126B", "127B", "128A", "128B", "129B", "131A", "131B", "131DD", "131WD", "132WD", "134B", "135B", "136A", "136B", "137A", "137B", "1381A", "1381B", "1381C", "1382A", "1382B", "1387A", "1387B", "1387C", "1388A", "1388B", "1388C", "138A", "138B", "1390A", "1390B", "1390C", "1395A", "1395B", "1395C", "1396A", "1396B", "1396C", "1398A", "1398B", "1398C", "1399A", "1399B", "1399C", "139B", "1400A", "1400B", "1400C", "1401A", "1401B", "1401C", "1402A", "1402B", "1402C", "1403A", "1403B", "1403C", "1404A", "1404B", "1404C", "1405A", "1405B", "1405C", "1406A", "1406B", "1407A", "1407B", "1407C", "1408A", "1408B", "1408C", "1409A", "1409B", "1409C", "140B", "1410A", "1410B", "1410C", "1411A", "1411B", "1411C", "1412A", "1412B", "1412C", "1414A", "1414B", "1417A", "1417B", "1418A", "1418B", "1419A", "1419B", "1420A", "1420B", "1421A", "1421B", "1422A", "1422B", "1423A", "1423B", "1424A", "1424B", "1425A", "1425B", "1426A", "1426B", "1427A", "1427B", "1428A", "1428B", "1429A", "1429B", "1430A", "1430B", "1431A", "1431B", "1432A", "1432B", "1433A", "1433B", "1434A", "1434B", "1435A", "1435B", "1436A", "1436B", "1437A", "1437B", "1438A", "1438B", "1439A", "1439B", "1440A", "1440B", "1441A", "1441B", "1442A", "1443A", "1443B", "1444A", "1444B", "1445A", "1445B", "1446A", "1446B", "15", "150WD", "151ID", "151IW", "151RD", "151WD", "151WZ", "152ID", "152WD", "153D", "153DD", "153G", "153RD", "153WD", "157DD", "157G", "157MD", "157ME", "157WD", "158ON", "15D", "16", "179", "2", "201D", "201G", "201RD", "205DD", "205RD", "205RG", "221D", "221G", "221RD", "241G", "249A", "249B", "249C", "250A", "250B", "250C", "251D", "251G", "251RD", "261D", "261G", "261RD", "291D", "291G", "291RD", "292D", "292G", "292RD", "293D", "293G", "293RD", "295D", "295DR", "295G", "296D", "296G", "296RD", "301D", "301R", "303Q", "303QD", "32", "321A", "341G", "341Q", "341QD", "341WD", "37", "373", "373DP", "373N", "37A", "37D", "380A", "380B", "380C", "380D", "402IG", "41A", "41B", "41C", "42A", "42B", "42C", "44N", "44NRD", "45N", "46N", "47N", "51", "52", "52D", "55A", "55B", "55C", "56A", "56B", "56C", "57A", "57B", "57C", "58A", "58B", "58C", "60A", "60B", "60C", "65", "66A", "66B", "67A", "67B", "67C", "68A", "68B", "68C", "69B", "70BB", "71A", "71B", "79B", "83NFD", "85IFR", "85NDD", "85NIF", "85NIG", "85NIM", "85NIR", "88A", "88B", "90A", "90B", "91", "91DD", "92", "95B", "99", "B1448A", "B1448B", "B1449A", "B1449B"],
+      "amc_scheme_equal_faq_code_rows": 3,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "CR",
+      "amc_code": "CANARAROBECOMUTUALFUND_MF",
+      "scheme_count": 193,
+      "rta_agent_codes": [
+        "KARVY"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["BADP", "BAGP", "BFDP", "BFGP", "BPDP", "BPGP", "CFDP", "CFDPR", "CFGP", "CGOALP-GR", "CYDP", "CYGP", "CYQP", "DBDPD", "DBDPR", "DBGPG", "DVDP", "DVDPR", "DVGP", "EQDP", "EQDPR", "EQGP", "ETDP", "ETGP", "ETRGG", "FEDP", "FEGP", "FRDDR", "FRDMD", "FRDMR", "FRDPD", "FRDPR", "FRDWD", "FRDWR", "FRGPG", "GBDP", "GBDPR", "GBOE", "GLDPD", "GLDPR", "GLGPG", "IFDPD", "IFDPR", "IFGPG", "INDP", "INDPR", "INGP", "LCDP", "LCDPR", "LCGP", "LISDR", "LISGG", "LISMD", "LISMR", "LISWD", "LISWR", "MADP", "MAGP", "MDDP", "MDGP", "MFDP", "MFGP", "MIDP", "MIDPR", "MIGP", "MIQP", "MIQPR", "MNDP", "MNGP", "MODPD", "MODPR", "MOGPG", "OFDD", "OFGP", "SCDP", "SCGP", "TAAD", "TASDR", "TASGG", "TASMD", "TASMR", "TASWD", "TASWR", "VFDP", "VFGP"],
+      "rta_scheme_codes": ["BADP", "BAGP", "BFDP", "BFGP", "BPDP", "BPGP", "CFDP", "CFGP", "CGOAL-GR", "CYDP", "CYGP", "CYQP", "DBDP", "DBGP", "DVDP", "DVGP", "EQDP", "EQGP", "ETDP", "ETGP", "ETRGG", "FEDP", "FEGP", "FRDD", "FRDM", "FRDP", "FRDW", "FRGP", "GBDP", "GBOE", "GLDP", "GLGP", "IFDP", "IFGP", "INDP", "INGP", "LCDP", "LCGP", "LISD", "LISG", "LISM", "LISW", "MADP", "MAGP", "MDDP", "MDGP", "MFDP", "MFGP", "MIDP", "MIGP", "MIQP", "MNDP", "MNGP", "MODP", "MOGP", "OFDD", "OFGP", "SCDP", "SCGP", "TAAD", "TASD", "TASG", "TASM", "TASW", "VFDP", "VFGP"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "G",
+      "amc_code": "BANDHANMF_SIF",
+      "scheme_count": 46,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["A01", "A02R", "A03R", "A04", "A04R", "A05", "A05R", "A06", "A06R", "A07", "A07R", "A08", "A08R", "A09", "A09R", "B01", "B02", "B02R", "B03", "B03R", "B04", "B04R", "B05", "B05R", "B06", "B06R", "B07", "B07R", "B08", "B08R", "B09", "B09R"],
+      "rta_scheme_codes": ["A01", "A02R", "A03R", "A04", "A04R", "A05", "A05R", "A06", "A06R", "A07", "A07R", "A08", "A08R", "A09", "A09R", "B01", "B02", "B02R", "B03", "B03R", "B04", "B04R", "B05", "B05R", "B06", "B06R", "B07", "B07R", "B08", "B08R", "B09", "B09R"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "G",
+      "amc_code": "BANDHANMUTUALFUND_MF",
+      "scheme_count": 1002,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["11", "11R", "12", "12R", "1447", "1448", "1449", "1450", "1474", "1475", "1476", "1477", "1478", "1479", "1480", "1481", "1482", "1483", "1484", "1485", "1486", "1487", "1488", "1489", "1490", "1491", "1492", "1493", "1494", "1495", "1496", "1497", "1498", "1499", "1500", "1501", "1502", "1503", "1504", "1505", "1506", "1507", "1508", "1509", "1510", "1511", "1512", "1513", "1514", "1515", "1516", "1517", "1518", "1519", "1520", "1521", "1522", "1523", "1524", "1525", "1526", "1527", "1528", "1529", "1530", "1531", "1532", "1533", "1534", "1535", "1536", "1537", "1538", "1539", "1540", "1541", "1542", "1543", "1544", "1545", "201", "202", "202R", "203", "204", "204R", "205", "206", "206R", "207", "208", "208R", "209", "210", "210R", "215", "216", "216R", "217", "218", "218R", "219", "223", "224", "224R", "227", "228", "237", "238", "239", "240", "241", "242", "242R", "243", "244", "244R", "257", "258", "258R", "259", "259R", "264", "264R", "265", "266", "266R", "272", "272R", "273", "273R", "274", "274R", "276", "276R", "278", "279", "280", "281", "281R", "282", "283", "284", "285", "289", "290", "290R", "291", "291R", "292", "292R", "293", "293R", "295", "295R", "296", "296R", "297", "297R", "298", "298R", "299", "300", "300R", "301", "301R", "302", "302R", "303", "304", "304R", "305", "305R", "306", "306R", "307", "307R", "308", "308R", "311", "312", "312R", "313", "314", "314R", "315", "315R", "316", "316R", "317", "317R", "324", "325", "325R", "326", "326R", "327", "328", "328R", "329", "329R", "330", "331", "331R", "332", "332P", "335", "336", "337", "338", "338R", "339", "339R", "340", "341", "342", "343", "344", "345", "345R", "346", "346R", "347", "347R", "348", "348R", "349", "350", "350R", "351", "352", "352R", "353", "354", "355", "356", "356R", "357", "358", "358R", "359", "360", "360R", "361", "362", "362R", "363", "364", "364R", "365", "366", "366R", "367", "368", "368R", "371", "372", "372R", "373", "374", "374R", "375", "376", "376R", "377", "378", "378R", "379", "380", "380R", "381", "382", "382R", "383", "384", "384R", "385", "386", "387", "388", "388R", "389", "390", "390R", "391", "392", "392R", "395", "396", "396R", "397", "398", "398R", "399", "400", "401", "402", "403", "403R", "404", "405", "406", "407", "408", "409", "412", "413", "414", "414R", "415", "416", "417", "418", "419", "419R", "420", "421", "422", "423", "423R", "51", "52", "52R", "53", "53R", "54", "54R", "65", "66", "67", "67P", "68", "68R", "82", "83", "83R", "86", "87", "87R", "994", "995", "D383", "D384R", "D385", "D386", "D387", "D388R", "D389", "D390R", "DAB", "DABR", "DHB", "DHBR", "DQB", "DQBR", "F271", "F271R", "FCCD", "FCCG", "FCCM", "FCCMR", "FCCW", "FRD", "FRG", "FRM", "FRMR", "FRW", "G", "G202", "G206", "G208", "G210", "G216", "G218", "GAB", "GABR", "GHB", "GHBR", "GQB", "GQBR", "GSG", "GSM", "GSMR", "GSQ", "GSQR", "GSW", "MDG", "MND", "MTD", "MTDR", "MTF", "MTG", "MTM", "MTMR", "SGD", "SSA", "SSAR", "SSD", "SSDR", "SSG", "SSH", "SSHR", "STD", "STDR", "STF", "STG"],
+      "rta_scheme_codes": ["11", "11R", "12", "12R", "1447", "1448", "1449", "1450", "1457", "1458", "1459", "1460", "1461", "1462", "1463", "1464", "1465", "1466", "1467", "1474", "1475", "1476", "1477", "1478", "1479", "1480", "1481", "1482", "1483", "1484", "1485", "1486", "1487", "1488", "1489", "1490", "1491", "1492", "1493", "1494", "1495", "1496", "1497", "1498", "1499", "1500", "1501", "1502", "1503", "1504", "1505", "1506", "1507", "1508", "1509", "1510", "1511", "1512", "1513", "1514", "1515", "1516", "1517", "1518", "1519", "1520", "1521", "1522", "1523", "1524", "1525", "1526", "1527", "1528", "1529", "1530", "1531", "1532", "1533", "1534", "1535", "1536", "1537", "1538", "1539", "1540", "1541", "1542", "1543", "1544", "1545", "201", "202", "202R", "203", "204", "204R", "205", "206", "206R", "207", "208", "208R", "209", "210", "210R", "215", "216", "216R", "217", "218", "218R", "219", "223", "224", "224R", "227", "228", "237", "238", "238R", "239", "240", "240R", "241", "242", "242R", "243", "244", "244R", "257", "258", "258R", "259", "259R", "264", "264R", "265", "266", "266R", "272", "272R", "273", "273R", "274", "274R", "276", "276R", "278", "279", "280", "281", "281R", "282", "283", "284", "285", "289", "290", "290R", "291", "291R", "292", "292R", "293", "293R", "295", "295R", "296", "296R", "297", "297R", "298", "298R", "299", "300", "300R", "301", "301R", "302", "302R", "303", "304", "304R", "305", "305R", "306", "306R", "307", "307R", "308", "308R", "311", "312", "312R", "313", "314", "314R", "315", "315R", "316", "316R", "317", "317R", "324", "325", "325R", "326", "326R", "327", "328", "328R", "329", "329R", "330", "331", "331R", "332", "332P", "335", "336", "337", "338", "338R", "339", "339R", "340", "341", "342", "343", "344", "345", "345R", "346", "346R", "347", "347R", "348", "348R", "349", "350", "350R", "351", "352", "352R", "353", "354", "355", "356", "356R", "357", "358", "358R", "359", "360", "360R", "361", "362", "362R", "363", "364", "364R", "365", "366", "366R", "367", "368", "368R", "371", "372", "372R", "373", "374", "374R", "375", "376", "376R", "377", "378", "378R", "379", "380", "380R", "381", "382", "382R", "383", "384", "384R", "385", "386", "387", "388", "388R", "389", "390", "390R", "391", "392", "392R", "395", "396", "396R", "397", "398", "398R", "399", "400", "401", "402", "403", "403R", "404", "405", "406", "407", "408", "409", "412", "413", "414", "414R", "415", "416", "417", "418", "419", "419R", "420", "421", "422", "423", "423R", "51", "52", "52R", "53", "53R", "54", "54R", "65", "66", "67", "67P", "68", "68R", "82", "83", "83R", "86", "87", "87R", "994", "995", "D383", "D384R", "D385", "D386", "D387", "D388R", "D389", "D390R", "DAB", "DABR", "DHB", "DHBR", "DQB", "DQBR", "F271", "F271R", "FCCD", "FCCG", "FCCM", "FCCMR", "FCCW", "FRD", "FRG", "FRM", "FRMR", "FRW", "GAB", "GABR", "GHB", "GHBR", "GQB", "GQBR", "GSG", "GSM", "GSMR", "GSQ", "GSQR", "GSW", "MDG", "MND", "MTD", "MTDR", "MTF", "MTFR", "MTG", "MTM", "MTMR", "SGD", "SSA", "SSAR", "SSD", "SSDR", "SSG", "SSH", "SSHR", "STD", "STDR", "STF", "STFR", "STG"],
+      "amc_scheme_equal_faq_code_rows": 13,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "H",
+      "amc_code": "HDFCMUTUALFUND_MF",
+      "scheme_count": 651,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["01", "01D", "02", "1", "100RG", "11", "11D", "11N", "11ND", "12", "2", "200RG", "21", "21D", "22", "22T", "27", "27D", "28", "28D", "29", "29D", "29ND", "29NDD", "29RT", "30", "31", "31D", "32", "41", "41D", "44", "51N", "51RN", "53", "53N", "54", "55N", "56N", "57", "57N", "58", "58D", "59", "60", "60D", "61", "61D", "62", "AARDP", "AARDR", "AARGR", "ACDPD", "ACDPR", "ACGPG", "AFRDQ", "AFRG", "AFRQD", "AFWDM", "AFWDQ", "AFWG", "AFWMR", "AFWQR", "BFD", "BFDD", "BFG", "BFRDP", "BFRDR", "BFRGR", "CDNDR", "CDNRR", "CDODR", "CDOGR", "CDORR", "CGIL", "CORD", "CORDR", "CORG", "DYRDP", "DYRDR", "DYRGR", "ETFFT", "ETFML", "ETFRG", "GFD", "GFDD", "GFDPD", "GFDPR", "GFG", "GFGPG", "GFOF", "GLD", "GLDR", "GLG", "GLRGG", "GLRMD", "GLRMR", "GLRQD", "GLRQR", "GSD", "GSDR", "GSG", "HARDP", "HARDR", "HARGR", "HBPDR", "HBPGR", "HBPRR", "HBRDP", "HBRDR", "HBRGR", "HBSRG", "HCBRG", "HCRDP", "HCRDR", "HCRGR", "HDFCGF", "HDRDP", "HDRDR", "HDRGR", "HDWRG", "HERDP", "HERDR", "HERGR", "HFRDP", "HFRDR", "HFRGR", "HGARG", "HGJRG", "HGPRG", "HGSRG", "HIBRG", "HIDRG", "HIRDP", "HIRDR", "HIRGR", "HJRGR", "HLDRD", "HLDRG", "HLDRR", "HLMRG", "HLVRG", "HMCRD", "HMCRG", "HMCRR", "HMRDP", "HMRDR", "HMRGR", "HMURG", "HNARG", "HNERG", "HNIRG", "HNMRG", "HNQRG", "HNRDP", "HNRDR", "HNRGR", "HNSRG", "HO1DR", "HO1GR", "HODRR", "HPBE", "HPRDP", "HPRDR", "HPRGR", "HRDHR", "HRERP", "HRHRP", "HRIRG", "HRRDP", "HRRDR", "HRRGR", "HSRGR", "HTRDP", "HTRDR", "HTRGR", "IFD", "IFDR", "IFG", "IFN", "IFNR", "ILG", "INFD", "INFDR", "INFG", "INNP", "INPP", "INSP", "IPRDP", "IPRDR", "IPRGR", "ISD", "ISDD", "ISDM", "ISDMD", "ISDR", "ISG", "ISWD", "ISWDD", "ISWDM", "ISWG", "ISWMR", "LFDDN", "LFDM", "LFDMN", "LFDMR", "LFDN", "LFDRN", "LFG", "LFGN", "LFPG", "LFPPG", "LFRN", "LTED", "LTEDR", "LTEG", "MAGPG", "MAQDD", "MAQDR", "MC1RG", "MCOD", "MCOG", "MILMD", "MILQD", "MILTG", "MILTM", "MILTQ", "MISMD", "MISQD", "MISTG", "MISTM", "MISTQ", "MTND", "MTNDR", "MTOD", "MTODR", "MTOG", "MULD", "MULDR", "MULG", "MYD05", "MYD5R", "MYG05", "NEWRG", "NGSRG", "NJSRG", "NNIRG", "PRED", "PREDD", "PREG", "SC2RG", "SLFRG", "SP5RG", "STD", "STDR", "STG", "STND", "STNDR", "STOD", "STODR", "STOG", "STON", "STONR", "TPD", "TPDR", "TPG", "USRDD", "USRDM", "USRRM", "USRWD", "USTGR"],
+      "rta_scheme_codes": ["01", "01D", "02", "1", "100RG", "11", "11D", "11N", "11ND", "12", "2", "200RG", "21", "21D", "22", "22T", "27", "27D", "28", "28D", "29", "29D", "29ND", "29NDD", "29RT", "30", "31", "31D", "32", "41", "41D", "44", "51N", "51RN", "53", "53N", "54", "55N", "56N", "57", "57N", "58", "58D", "59", "60", "60D", "61", "61D", "62", "AARDP", "AARDR", "AARGR", "ACDPD", "ACDPR", "ACGPG", "AFRDQ", "AFRG", "AFRQD", "AFWDM", "AFWDQ", "AFWG", "AFWMR", "AFWQR", "BFD", "BFDD", "BFG", "BFRDP", "BFRDR", "BFRGR", "CDNDR", "CDNRR", "CDODR", "CDOGR", "CDORR", "CGI", "CGIL", "CORD", "CORDR", "CORG", "DYRDP", "DYRDR", "DYRGR", "ETFFT", "ETFML", "ETFRG", "GFD", "GFDD", "GFDPD", "GFDPR", "GFG", "GFGPG", "GFOF", "GLD", "GLDR", "GLG", "GLRGG", "GLRMD", "GLRMR", "GLRQD", "GLRQR", "GSD", "GSDR", "GSG", "HARDP", "HARDR", "HARGR", "HBPDR", "HBPGR", "HBPRR", "HBRDP", "HBRDR", "HBRGR", "HBSRG", "HCBRG", "HCRDP", "HCRDR", "HCRGR", "HDRDP", "HDRDR", "HDRGR", "HDWRG", "HERDP", "HERDR", "HERGR", "HFRDP", "HFRDR", "HFRGR", "HGARG", "HGJRG", "HGPRG", "HGSRG", "HIBRG", "HIDRG", "HIRDP", "HIRDR", "HIRGR", "HJRGR", "HLDRD", "HLDRG", "HLDRR", "HLMRG", "HLVRG", "HMCRD", "HMCRG", "HMCRR", "HMRDP", "HMRDR", "HMRGR", "HMURG", "HNARG", "HNERG", "HNIRG", "HNMRG", "HNQRG", "HNRDP", "HNRDR", "HNRGR", "HNSRG", "HO1DR", "HO1GR", "HODRR", "HPBE", "HPRDP", "HPRDR", "HPRGR", "HRDHR", "HRERP", "HRHRP", "HRIRG", "HRRDP", "HRRDR", "HRRGR", "HSRGR", "HTRDP", "HTRDR", "HTRGR", "IFD", "IFDR", "IFG", "IFN", "IFNR", "ILG", "INFD", "INFDR", "INFG", "INNP", "INPP", "INSP", "IPRDP", "IPRDR", "IPRGR", "ISD", "ISDD", "ISDM", "ISDMD", "ISDR", "ISG", "ISWD", "ISWDD", "ISWDM", "ISWG", "ISWMR", "LFDDN", "LFDM", "LFDMN", "LFDMR", "LFDN", "LFDRN", "LFG", "LFGN", "LFPG", "LFPGN", "LFPPG", "LFRN", "LTED", "LTEDR", "LTEG", "MAGPG", "MAQDD", "MAQDR", "MC1RG", "MCOD", "MCODR", "MCOG", "MILMD", "MILQD", "MILTG", "MILTM", "MILTQ", "MISMD", "MISQD", "MISTG", "MISTM", "MISTQ", "MTND", "MTNDR", "MTOD", "MTODR", "MTOG", "MULD", "MULDR", "MULG", "MYD05", "MYD5R", "MYG05", "NEWRG", "NGSRG", "NJSRG", "NNIRG", "PRED", "PREDD", "PREG", "SC2RG", "SLFRG", "SP5RG", "STD", "STDR", "STG", "STND", "STNDR", "STOD", "STODR", "STOG", "STON", "STONR", "TPD", "TPDR", "TPG", "USRDD", "USRDM", "USRRM", "USRWD", "USTGR"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "K",
+      "amc_code": "KOTAKMAHINDRAMF",
+      "scheme_count": 807,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["01", "02", "03", "03DP", "03G", "04", "04DP", "04G", "05D", "05DP", "05G", "06", "06DP", "06G", "10", "102", "104", "105", "11", "111", "111DP", "112", "112DP", "114", "114DP", "115", "117", "118", "1199", "11DP", "12", "1200", "120P0", "124", "1284", "1285", "128P5", "1291", "1292", "1293", "1294", "1295", "1296", "1297", "1298", "1299", "129P2", "129P4", "129P6", "129P8", "12DP", "13", "1300", "1301", "1302", "130P0", "130P2", "133", "133DP", "134", "134DP", "135", "139", "143", "144", "145", "153", "153DP", "154DP", "17", "178", "178DP", "179", "17DP", "18", "180", "180DP", "189", "189DP", "190", "194", "194DP", "195", "195DP", "197", "200", "205G", "205MD", "205MP", "208G", "208MD", "208MP", "20ND", "252", "255", "255DP", "35", "36", "36DP", "41", "42", "42DP", "46", "47", "471", "473", "476", "477", "478", "479", "47DP", "48", "480", "482", "484", "484DP", "485", "486", "487", "488", "488DP", "491", "492", "492DP", "50", "50DP", "639", "640", "640DP", "641", "641DP", "642", "642DP", "BCDPR", "BCGPG", "BFDPR", "BFGPG", "BSDPR", "BSGPG", "DADPR", "DAGPG", "EFDPR", "EFGPG", "GFDPR", "GFGPG", "K04", "K104", "K107", "K108", "K114", "K114DP", "K1155", "K1156", "K115P6", "K117", "K117DP", "K118", "K118DP", "K1195", "K1196", "K1197", "K1198", "K119P6", "K119P8", "K1201", "K1202", "K1205", "K1206", "K120P0", "K120P2", "K120P6", "K1215", "K1216", "K1219", "K121P6", "K1220", "K1227", "K1228", "K1229", "K122P0", "K122P8", "K123", "K1230", "K1231", "K1232", "K1233", "K1234", "K1235", "K1236", "K1237", "K1238", "K1239", "K123P0", "K123P2", "K123P4", "K123P6", "K123P8", "K1240", "K1241", "K1242", "K1243", "K1244", "K1245", "K1246", "K1247", "K1248", "K1249", "K124P0", "K124P2", "K124P4", "K124P6", "K124P8", "K1250", "K1251", "K1252", "K1253", "K1254", "K1255", "K1256", "K1257", "K1258", "K1259", "K125P0", "K125P2", "K125P4", "K125P6", "K125P8", "K1260", "K1261", "K1262", "K1263", "K1264", "K1265", "K1266", "K1267", "K1268", "K1269", "K126P0", "K126P2", "K126P4", "K126P6", "K126P8", "K1270", "K1271", "K1272", "K1273", "K1274", "K1275", "K1276", "K1277", "K1278", "K1279", "K127P0", "K127P2", "K127P4", "K127P7", "K127P9", "K1280", "K1281", "K1282", "K1283", "K1286", "K1287", "K1288", "K1289", "K128P1", "K128P3", "K128P8", "K1290", "K129P0", "K133", "K133DP", "K168", "K178", "K178DP", "K265", "K266", "K266DP", "K267", "K268", "K268DP", "K269", "K270", "K270DP", "K274", "K275", "K275DP", "K276", "K277", "K277DP", "K280", "K281", "K281DP", "K283", "K284", "K284DP", "K286", "K287", "K287DP", "K288", "K289", "K289DP", "K290", "K291", "K292", "K292DP", "K293", "K294", "K294DP", "K295", "K296", "K296DP", "K297", "K298", "K298DP", "K299", "K300", "K300DP", "K421", "K422", "K423", "K424", "K424DP", "K425", "K428", "K431", "K470", "K471", "K484", "K486", "K488", "K489", "K490", "K490DP", "K491", "K492", "K492DP", "K493", "K494", "K495", "K495DP", "K496", "K497", "K497DP", "K498", "K499", "K499DP", "P03D", "P03DP", "P06D", "PEDPR", "PEGPG"],
+      "rta_scheme_codes": ["01", "02", "03", "03DP", "03G", "04", "04DP", "04G", "05D", "05DP", "05G", "06", "06DP", "06G", "10", "102", "104", "105", "107", "108", "11", "111", "111DP", "112", "112DP", "114", "114DP", "115", "1155", "1156", "115P6", "117", "117DP", "118", "118DP", "1195", "1196", "1197", "1198", "1199", "119P6", "119P8", "11DP", "12", "1200", "1201", "1202", "1205", "1206", "120P0", "120P2", "120P6", "1215", "1216", "1219", "121P6", "1220", "1227", "1228", "1229", "122P0", "122P8", "123", "1230", "1231", "1232", "1233", "1234", "1235", "1236", "1237", "1238", "1239", "123P0", "123P2", "123P4", "123P6", "123P8", "124", "1240", "1241", "1242", "1243", "1244", "1245", "1246", "1247", "1248", "1249", "124P0", "124P2", "124P4", "124P6", "124P8", "1250", "1251", "1252", "1253", "1254", "1255", "1256", "1257", "1258", "1259", "125P0", "125P2", "125P4", "125P6", "125P8", "1260", "1261", "1262", "1263", "1264", "1265", "1266", "1267", "1268", "1269", "126P0", "126P2", "126P4", "126P6", "126P8", "1270", "1271", "1272", "1273", "1274", "1275", "1276", "1277", "1278", "1279", "127P0", "127P2", "127P4", "127P7", "127P9", "1280", "1281", "1282", "1283", "1284", "1285", "1286", "1287", "1288", "1289", "128P1", "128P3", "128P5", "128P8", "1290", "1291", "1292", "1293", "1294", "1295", "1296", "1297", "1298", "1299", "129P0", "129P2", "129P4", "129P6", "129P8", "12DP", "13", "1300", "1301", "1302", "130P0", "130P2", "133", "133DP", "134", "134DP", "135", "139", "143", "144", "145", "153", "153DP", "154DP", "168", "17", "178", "178DP", "179", "17DP", "18", "180", "180DP", "189", "189DP", "190", "194", "194DP", "195", "195DP", "197", "200", "200DP", "205G", "205MD", "205MP", "208G", "208MD", "208MP", "20ND", "20NDP", "252", "255", "255DP", "265", "266", "266DP", "267", "268", "268DP", "269", "270", "270DP", "274", "275", "275DP", "276", "277", "277DP", "280", "281", "281DP", "283", "284", "284DP", "286", "287", "287DP", "288", "289", "289DP", "290", "291", "292", "292DP", "293", "294", "294DP", "295", "296", "296DP", "297", "298", "298DP", "299", "300", "300DP", "35", "36", "36DP", "41", "42", "421", "422", "423", "424", "424DP", "425", "428", "42DP", "431", "46", "47", "470", "471", "473", "476", "476DP", "477", "478", "478DP", "479", "47DP", "48", "480", "482", "484", "484DP", "485", "486", "486DP", "487", "488", "488DP", "489", "490", "490DP", "491", "492", "492DP", "493", "494", "495", "495DP", "496", "497", "497DP", "498", "499", "499DP", "50", "50DP", "639", "640", "640DP", "641", "641DP", "642", "642DP", "BCDP", "BCGP", "BFDP", "BFGP", "BSDP", "BSGP", "DADP", "DAGP", "EFDP", "EFGP", "GFDP", "GFGP", "P03D", "P03DP", "P06D", "PEDP", "PEGP"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "K",
+      "amc_code": "KOTAKMF_SIF",
+      "scheme_count": 4,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["ILS1", "ILS2", "ILSP2"],
+      "rta_scheme_codes": ["ILS1", "ILS2", "ILSP2"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "O",
+      "amc_code": "HSBCMF_SIF",
+      "scheme_count": 7,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["RHARD", "RHARP", "RHLRD", "RHLRG", "RHLRP"],
+      "rta_scheme_codes": ["RHARD", "RHARP", "RHLRD", "RHLRG", "RHLRP"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "O",
+      "amc_code": "HSBCMUTUALFUND_MF",
+      "scheme_count": 478,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["01", "01AD", "01AP", "01P", "02", "07", "09", "09P", "125", "126", "127", "127P", "128", "131", "131AD", "131AP", "131P", "132", "132P", "133", "134", "16", "16P", "17", "227", "227P", "228", "231", "231P", "241", "241P", "242", "242P", "243", "415", "415P", "416", "43", "43P", "44", "APDD", "APDDP", "APDG", "BFD", "BFDP", "BFG", "CAD", "CAG", "CAIDD", "CAPDD", "CAPG", "CAPMD", "CAPMP", "CAPWD", "CAPWP", "CAWD", "CXD", "CXDP", "CXG", "EFD", "EFDP", "EFG", "EMFD", "EMFDP", "EMFG", "EOID", "EOIDP", "EOIG", "FCADP", "FCPAD", "FCPED", "FCPEG", "FCPEP", "FCPMD", "FCPMG", "FCPMP", "FDRG", "FDRHD", "FDRHP", "FDRMD", "FDRMP", "FDRQD", "FDRQP", "FED", "FEDP", "FEG", "FIVFD", "FIVFG", "FIVFP", "FSIAD", "FSIAP", "FSID", "FSIG", "FSIP", "FTAFD", "FTAFG", "HCIRD", "HCIRG", "HCIRP", "HCORD", "HCORG", "HCORP", "HEORD", "HEORG", "HEORP", "HFSRD", "HFSRG", "HFSRP", "HGETG", "HGFRD", "HGFRG", "HGFRP", "HMARD", "HMARG", "HMARP", "HMCRD", "HMCRG", "HMCRP", "HNOMD", "HNOWP", "IID", "IIDP", "IIG", "LARG", "LARMD", "LARMP", "LARQD", "LARQP", "LBCFD", "LBCFG", "LBCFP", "LEBFD", "LEBFG", "LEBFP", "LFSDD", "LFSG", "LFSMD", "LFSMP", "LFSWD", "LMED", "LMEDP", "LMEG", "LNIFD", "LNIFP", "LNIGR", "LNNFD", "LNNFP", "LNNGR", "LPRDD", "LPRWD", "LRCAD", "LRCAP", "LRCBD", "LRCBG", "LRCBP", "LT07", "MIPSG", "MIPSM", "MIPSQ", "MISMP", "MISQP", "MSCD", "MSCDP", "MSCG", "MSGD", "MSGDP", "MSGG", "MSMD", "MSMDP", "MSMG", "NODD", "NOG", "NOMDP", "NOWD", "O", "SDODD", "SDOG", "SDOMD", "SDOMP", "SDOWD", "STIAD", "STIAP", "STIID", "STIIG", "STIIP"],
+      "rta_scheme_codes": ["01", "01AD", "01AP", "01P", "02", "07", "09", "09P", "125", "126", "127", "127P", "128", "131", "131AD", "131AP", "131P", "132", "132P", "133", "134", "16", "16P", "17", "227", "227P", "228", "231", "231P", "241", "241P", "242", "242P", "243", "415", "415P", "416", "43", "43P", "44", "APDD", "APDDP", "APDG", "BFD", "BFDP", "BFG", "CAD", "CAG", "CAIDD", "CAPDD", "CAPG", "CAPMD", "CAPMP", "CAPWD", "CAPWP", "CAWD", "CXD", "CXDP", "CXG", "EFD", "EFDP", "EFG", "EMFD", "EMFDP", "EMFG", "EOID", "EOIDP", "EOIG", "FCADP", "FCPAD", "FCPED", "FCPEG", "FCPEP", "FCPMD", "FCPMG", "FCPMP", "FDRG", "FDRHD", "FDRHP", "FDRMD", "FDRMP", "FDRQD", "FDRQP", "FED", "FEDP", "FEG", "FIVFD", "FIVFG", "FIVFP", "FSIAD", "FSIAP", "FSID", "FSIG", "FSIP", "FTAFD", "FTAFG", "HCIRD", "HCIRG", "HCIRP", "HCORD", "HCORG", "HCORP", "HEORD", "HEORG", "HEORP", "HFSRD", "HFSRG", "HFSRP", "HGETG", "HGFRD", "HGFRG", "HGFRP", "HMARD", "HMARG", "HMARP", "HMCRD", "HMCRG", "HMCRP", "HNOMD", "IID", "IIDP", "IIG", "LARG", "LARMD", "LARMP", "LARQD", "LARQP", "LBCFD", "LBCFG", "LBCFP", "LEBFD", "LEBFG", "LEBFP", "LFSDD", "LFSG", "LFSMD", "LFSMP", "LFSWD", "LMED", "LMEDP", "LMEG", "LNIFD", "LNIFP", "LNIGR", "LNNFD", "LNNFP", "LNNGR", "LPRDD", "LPRWD", "LRCAD", "LRCAP", "LRCBD", "LRCBG", "LRCBP", "MIPSG", "MIPSM", "MIPSQ", "MISMP", "MISQP", "MSCD", "MSCDP", "MSCG", "MSGD", "MSGDP", "MSGG", "MSMD", "MSMDP", "MSMG", "NODD", "NOG", "NOMD", "NOMDP", "NOWD", "NOWDP", "SDODD", "SDOG", "SDOMD", "SDOMP", "SDOWD", "STIAD", "STIAP", "STIID", "STIIG", "STIIP"],
+      "amc_scheme_equal_faq_code_rows": 15,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "UK",
+      "amc_code": "UNIONMF_SIF",
+      "scheme_count": 3,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["ELSRG", "ELSRP", "ELSRR"],
+      "rta_scheme_codes": ["ELSRG", "ELSRP", "ELSRR"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    },
+    {
+      "faq_code": "UK",
+      "amc_code": "UNIONMUTUALFUND_MF",
+      "scheme_count": 236,
+      "rta_agent_codes": [
+        "CAMS"
+      ],
+      "amc_active_flags": [
+        "Y"
+      ],
+      "amc_scheme_codes": ["AFDP", "AFDR", "AFG", "AMRDP", "AMRDR", "AMRG", "BCRDP", "BCRDR", "BCRG", "CBG", "CBP", "CBR", "CFRDP", "CFRG", "CORDP", "CORDR", "CORGR", "CP7G", "CP7P", "CP8G", "CP8P", "DBDP", "DBDR", "DBG", "DERDP", "DERDR", "DERG", "EFDP", "EFDR", "EFGR", "ESFG", "ESFP", "ESFR", "FFDP", "FFDR", "FFGR", "FLFG", "FLFP", "FLFR", "GFRDP", "GFRDR", "GFRG", "GRADP", "GRADR", "GRG", "GRHDP", "GRHDR", "HERDP", "HERDR", "HERG", "IARDP", "IARDR", "IARG", "IORDP", "IORDR", "IORG", "LDDR", "LFDP", "LFDR", "LGR", "LMDP", "LMDR", "LMRDP", "LMRDR", "LMRG", "LORDP", "LORDR", "LORG", "LWDR", "MARDP", "MARDR", "MARG", "MCRDP", "MCRDR", "MCRG", "MDDRR", "MFRDP", "MFRDR", "MFRG", "MGR", "MMDPR", "MMDRR", "MWDRR", "ODDPD", "ODDRD", "ODDRR", "OFDPR", "OFDRD", "OFDRR", "OGRR", "OMDPR", "OMDRR", "OWDRR", "PFG", "PFP", "PFR", "RFRDP", "RFRG", "SDRDP", "SDRDR", "SDRG", "SMFG", "SMFP", "SMFR", "TSDP", "TSG", "UGETF", "VDG", "VDP", "VDR"],
+      "rta_scheme_codes": ["AFDP", "AFDR", "AFG", "AMRDP", "AMRDR", "AMRG", "BCRDP", "BCRDR", "BCRG", "CBG", "CBP", "CBR", "CFRDP", "CFRG", "CORDP", "CORDR", "CORGR", "CP7G", "CP7P", "CP8G", "CP8P", "DBDP", "DBDR", "DBG", "DERDP", "DERDR", "DERG", "EFDP", "EFDR", "EFGR", "ESFG", "ESFP", "ESFR", "FFDP", "FFDR", "FFGR", "FLFG", "FLFP", "FLFR", "GFRDP", "GFRDR", "GFRG", "GRADP", "GRADR", "GRG", "GRHDP", "GRHDR", "HERDP", "HERDR", "HERG", "IARDP", "IARDR", "IARG", "IORDP", "IORDR", "IORG", "LDDR", "LFDP", "LFDR", "LGR", "LMDP", "LMDR", "LMRDP", "LMRDR", "LMRG", "LORDP", "LORDR", "LORG", "LWDR", "MARDP", "MARDR", "MARG", "MCRDP", "MCRDR", "MCRG", "MDDRR", "MFRDP", "MFRDR", "MFRG", "MGR", "MMDPR", "MMDRR", "MWDRR", "ODDPD", "ODDRD", "ODDRR", "OFDPR", "OFDRD", "OFDRR", "OGRR", "OMDPR", "OMDRR", "OWDRR", "PFG", "PFP", "PFR", "RFRDP", "RFRG", "SDRDP", "SDRDR", "SDRG", "SMFG", "SMFP", "SMFR", "TSDP", "TSG", "UGETF", "VDG", "VDP", "VDR"],
+      "amc_scheme_equal_faq_code_rows": 0,
+      "rta_scheme_equal_faq_code_rows": 0
+    }
+  ]
+}
