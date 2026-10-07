@@ -199,3 +199,17 @@ at hosted infrastructure. Full comparison receipts are
 `/tmp/b062-verified-sql.log`, `/tmp/b062-extra-checks.log` and `/tmp/b062-deno.log`.
 The final focused SCH run, including the independent source-header assertion, is
 in `/tmp/b062-final-issue_33_order_auto_approval_concurrency_test.sh.log`.
+
+## 2026-10-07 UAT commissioning update
+
+A live DEV UAT SCH request returned HTTP 200 `text/plain`, identity encoding and no
+Content-Length. The prior transport policy correctly retained that attempt as
+`UNVERIFIABLE`; it did not read or publish a prefix. A reviewed additive compatibility
+change now accepts bounded identity-encoded EOF without Content-Length while retaining
+the 16 MiB cap, chunk and whole-body digests, malformed/framing rejection and exact
+length equality whenever the header is supplied. See
+[NSE_SCH_FUND_SEARCH.md](NSE_SCH_FUND_SEARCH.md).
+
+Fund Search now has a narrow authenticated projection over the latest validated SCH
+snapshot. Raw reference tables remain private and SCH fields remain reference evidence,
+not automatic eKYC-code, registrar, transaction-eligibility or NAV authority.

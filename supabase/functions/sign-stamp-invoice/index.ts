@@ -19,15 +19,6 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
-function isAllowedFundApiUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" && parsed.hostname === "api.mfapi.in";
-  } catch {
-    return false;
-  }
-}
-
 async function invoiceSignerAuthorizationFailure(
   req: Request,
 ): Promise<Response | null> {
@@ -155,45 +146,8 @@ serve(async (req) => {
       stampH = 60,
       sigW = 120,
       sigH = 50,
-      url,
       action,          
     } = await req.json();
-
-    if (action === "proxy-get") {
-      const authorization = await requireAuthenticated(req);
-      if ("failure" in authorization) {
-        return new Response(
-          JSON.stringify({ error: authorization.failure.message }),
-          {
-            status: authorization.failure.status,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-
-      if (!url) {
-        return new Response(
-          JSON.stringify({ error: "Missing target url for proxy" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (!isAllowedFundApiUrl(url)) {
-        return new Response(
-          JSON.stringify({ error: "Unsupported fund data source." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-
-      console.log("Proxying approved mutual-fund data request.");
-      const res = await fetch(url);
-      const resText = await res.text();
-      return new Response(resText, {
-        headers: { 
-          ...corsHeaders, 
-          "Content-Type": "application/json" 
-        }
-      });
-    }
 
     const authorizationFailure = await invoiceSignerAuthorizationFailure(req);
     if (authorizationFailure != null) return authorizationFailure;
