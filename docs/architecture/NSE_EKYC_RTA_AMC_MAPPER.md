@@ -1,5 +1,11 @@
 # NSE eKYC RTA-AMC mapper: evidence and unresolved source discrepancy
 
+> **Current decision: Phase B limited DEV allowlist approved.** The product owner
+> authorized the seven explicitly published FAQ pairs after reviewing Phase A.
+> See [Phase B implementation](#phase-b-limited-dev-allowlist). The original Phase A
+> record below is preserved as history; its completeness stop condition no longer
+> blocks these seven pairs. It still applies to unverified additions such as AXF/T.
+
 ## Decision: Phase A complete; Phase B stopped
 
 The official NSE FAQ independently proves the seven named relationships below.
@@ -296,3 +302,176 @@ Because Phase B was stopped, no seed tests were added or claimed. Deno, Flutter,
 analyzer and build checks were not run: no executable source, test, dependency,
 migration, schema, grant or RLS policy changed. The existing suites above were run
 as regression evidence; their success does not resolve the provider discrepancy.
+
+## Phase B: limited DEV allowlist
+
+### Product-owner decision and base
+
+The product owner explicitly approved **only** the seven pairs published in the
+official NSE FAQ dated **31 July 2025**, p5, Q1.18. This overrides the previous
+requirement to prove that the seven comprise NSE's complete current list. It does
+not resolve the `AXF`/`T` examples or authorize either of those codes, any inferred
+code, provider registration, hosted deployment or Production activation.
+
+The fresh Phase B fetch found `origin/develop` unchanged at
+`b74bab8c922aba17bd6ae0463d20b148c4ba6e94`. Canonical develop and the existing
+candidate were clean. Evidence commit `fe96de43a72f13d99329293c86ea5f5b55519b8a`
+is the candidate's direct parent for this implementation. No concurrent onboarding
+or mapper changes needed reconciliation. Phase B continues the same branch/worktree.
+The original SCH evidence JSON is unchanged.
+
+### Source-controlled DEV configuration
+
+The [configuration](../../supabase/operations/nse_ekyc_amcs_dev.sql) inserts exactly:
+
+| Code | Exact label |
+| --- | --- |
+| B | Aditya Birla |
+| K | Kotak Mahindra |
+| H | HDFC Mutual Fund |
+| G | Bandhan Mutual Fund |
+| CR | Canara Robeco Mutual Fund |
+| O | HSBC Asset Management |
+| UK | Union Asset Management |
+
+Each entry's `source_reference` is the official FAQ URL with `#page=5`; the full
+title, update date, question, PDF hash and retrieval provenance remain in Phase A
+above. Labels are not expanded to inferred legal names. `AXF`, `T`, lowercase or
+padded variants, SCH fields and all other unapproved codes remain unsupported.
+
+The existing `moneybowl_onboarding.ekyc_amcs` table is used without schema, grant,
+RLS, function or API changes. The script is deliberately **outside** both
+`supabase/migrations` and `supabase/seed.sql`. There is no automatic seed migration:
+merging/promoting code or applying the normal migration chain inserts no selector
+rows in any environment. This is the smallest additive configuration option that
+preserves separate Production commissioning without inventing a new environment
+schema or changing the onboarding runtime.
+
+Execution requires an already-authorized privileged database connection and a
+required `project_ref` psql variable. Only the known DEV reference
+`rskryngwzyuzmiwtriyy` or the regression-only `LOCAL_DISPOSABLE` attestation is
+accepted. Missing, empty or other references fail closed. This variable is **operator
+attestation**, not an independent detection of the connected database; the operator
+must verify the connection's project in Dashboard before executing. It grants no
+database privilege. Authenticated callers cannot bypass table ACLs by supplying it.
+
+One transaction locks the catalog against concurrent writers, with a five-second
+lock timeout, then checks every existing entry. Unknown codes, mismatched labels
+or mismatched source references abort with `ekyc_amc_catalog_conflict` before any
+insert. No entry is deleted or updated. Missing approved rows are inserted with
+`active=true`; exact existing rows are left untouched. Reapplication is idempotent,
+and an existing `active=false` remains false, including under serialized concurrent
+configuration. The final receipt contains only code/label/source/active values.
+
+Here `active=true` means **enabled by MoneyBowl's product owner for this limited DEV
+selector**, not independently verified current support at NSE. No universal current
+AMC availability, accepted registration for every code, or completed KYC is claimed.
+The operation remains a provider mutation subject to the unchanged V2-A safeguards.
+
+### Existing runtime and frontend preserved
+
+Inspection reconfirmed that `get_onboarding_kyc` exposes only active rows, ordered
+by label, and only in the eKYC-details states after case authorization.
+`request_onboarding_kyc` checks the exact selected code and `active` before freezing
+the existing four-field encrypted request. The page/dropdown already uses that
+projection, displays the label and submits the code. No frontend defect requiring
+a rewrite was established; repository, controller, page and worker are unchanged.
+
+```text
+Add Investor → PAN → Check KYC → KYC_NOT_AVAILABLE
+  → missing Email/Mobile + explicit approved AMC choice
+  → Proceed to eKYC → existing EKYCREG operation → authorized link
+```
+
+There is no SCH-to-eKYC conversion, new public write API, fake UCC, altered PAN
+resolution, account-linkage change, KYC-status assertion, new mutation retry or
+provider call. One fresh registration per case and the protected link boundary
+remain intact. Configuration itself prepares no provider operation.
+
+### Phase B maintenance and commissioning
+
+1. Review this candidate and authorize **hosted DEV configuration separately**.
+   This task applies the file only in disposable local test databases.
+2. Independently verify that the privileged connection targets the known DEV
+   project, review the existing catalog read-only, and retain the reviewed commit
+   and approval reference. Stop on conflicting/unapproved rows; never clear or
+   rewrite them merely to make this script pass.
+3. Through the reviewed DEV operational change process, run the exact versioned
+   file using the authorized connection and
+   `psql -X -v ON_ERROR_STOP=1 -v project_ref=rskryngwzyuzmiwtriyy -f supabase/operations/nse_ekyc_amcs_dev.sql`.
+   Connection authentication is supplied through the existing protected operator
+   environment, never committed or passed as a secret in documentation.
+4. Inspect the safe receipt and confirm seven exact entries. Newly inserted entries
+   are active; a previously inactive entry requires a separate reviewed decision
+   and must not be automatically reactivated. Check authorized MFD display at the
+   existing eKYC stage without pressing Proceed to eKYC.
+5. Actual EKYCREG UAT testing requires **separate explicit authorization** and
+   legitimate investor facts. Preserve encrypted request/result evidence and
+   reconcile any ambiguous send. Configuring a mapping is not a successful provider
+   registration and does not validate the full provider completion flow.
+6. Future code/label changes require authoritative NSE pair evidence, explicit scope
+   approval, a versioned configuration change and focused regression tests. Keep
+   original provenance and historical operation evidence. Do not broaden from SCH
+   or the unresolved examples. Deactivation/reactivation requires an explicit
+   reviewed change; this insert-only script never performs either.
+7. **Production requires independent approval and commissioning.** This DEV file
+   must not be wired into CI deployment, migrations or seeds, copied into a
+   Production rollout, or run with a false DEV attestation. Production promotion
+   alone leaves the selector untouched. No Production endpoint/runtime change is
+   part of this candidate.
+
+No hosted selector was activated and no NSE provider API was invoked during Phase B.
+Frozen onboarding and existing EKYCREG request semantics were not changed.
+
+### Phase B validation
+
+| Command | Phase B result |
+| --- | --- |
+| `bash scripts/test_investor_onboarding_sql.sh` | PASS, exit 0: 30 new configuration checks, new selector fixture, 30 existing SQL files, onboarding lint, six concurrency scripts and MFA inspection |
+| `bash scripts/test_nse_order_status_sql.sh` | PASS, exit 0: 34 SQL executions, reference/facade lint and four NSE concurrency scripts |
+| `python3 .github/scripts/validate_docs.py` | PASS: 60 Markdown files, links/structure/anchors |
+| `python3 .github/scripts/validate_migration_history.py` | PASS: frozen history unchanged; no migration added or edited |
+| `python3 -m unittest discover -s .github/scripts -p test_validate_commits.py` | PASS: five tests |
+| `python3 .github/scripts/validate_commits.py 'feat(nse): add approved DEV eKYC AMC configuration'` | PASS: local commit subject |
+| `bash -n scripts/test_investor_onboarding_sql.sh` | PASS |
+| `git diff --check` and `git diff --cached --check` | PASS |
+
+The [configuration regression](../../scripts/test_nse_ekyc_amcs_config.py) runs the
+actual versioned script inside the harness's proven network-disabled tmpfs database.
+It independently asserts the exact seven FAQ pairs and source, Bandhan's capital G,
+duplicate rejection, exact replay, preserved inactivity, atomic conflict rejection
+for labels/sources/extra codes, required DEV attestation, denied browser execution,
+two concurrent applications, unchanged onboarding function definitions, and zero
+provider operations from configuration. Fixtures are local only; no API role is
+granted new privileges to make a test pass.
+
+The [selector fixture](../../supabase/tests/fixtures/nse_ekyc_amcs_selector.sql)
+reuses the existing linked synthetic case without introducing PAN/contact literals.
+It exercises the actual authenticated RPCs, exact active label-ordered projection,
+unrelated-MFD denial, direct browser SELECT/INSERT/UPDATE/DELETE denial, unchanged
+RLS/policies/role privileges, inactive hiding/rejection, and rejection of `AXF`, `T`,
+unknown, padded/lowercase and SCH identifiers. Bandhan prepares exactly one encrypted
+four-field request with `amcCode=G`; retries reuse it. No worker is run and no eKYC
+transport/evidence result is fabricated by this fixture. Its savepoints restore
+all changes before the existing V2-A link/retry/security tests continue.
+
+The standard onboarding harness always enables these new tests. The optional psql
+include variable lets the existing standalone onboarding SQL test retain its
+original synthetic-only setup when run by other harnesses. No existing assertion
+was removed, weakened or skipped. All five existing KYC races passed: check/check,
+save/check, initiate/initiate, refresh/initiate and assignment revocation.
+
+Final local receipts are `/tmp/nse-ekyc-mapper-phaseb-onboarding-final.log` and
+`/tmp/nse-ekyc-mapper-phaseb-nse.log`. Existing synthetic contact output was filtered
+before writing receipts, with shell `pipefail` preserving test exit codes. Both
+receipts have zero ERROR/FAIL lines and zero PAN/email-shaped values. Python syntax
+was checked with `ast.parse`. Phase A evidence and all migrations, Flutter code,
+Edge Functions, frozen architecture and SCH/Fund Search/NAV runtime files are
+unchanged against the evidence commit.
+
+Deno and Flutter tests, analyzer and builds were omitted because no TypeScript,
+Dart, frontend contract, dependency or build configuration changed. The selector
+data contract consumed by the unchanged dropdown is tested through its real SQL
+projection. No provider API, hosted mutation or deployment was performed. The
+successful local tests establish configuration/security behavior, not current
+NSE availability or successful eKYC completion for any AMC.
