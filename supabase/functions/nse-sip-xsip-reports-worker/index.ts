@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import { loadNseUatWorkflowConfig } from "../_shared/nse/nse_config.ts";
 import {
   createSipXsipReportsGateway,
   createSipXsipReportsPersistence,
@@ -14,6 +14,6 @@ const supabase = createClient(
 const handler = createNseSipXsipReportsHandler({
   internalToken: Deno.env.get("NSE_WORKER_TOKEN") ?? "",
   persistence: createSipXsipReportsPersistence(supabase),
-  gateway: createSipXsipReportsGateway(loadNseConfig()),
+  gateway: createSipXsipReportsGateway(await loadNseUatWorkflowConfig()),
 });
 Deno.serve(handler);

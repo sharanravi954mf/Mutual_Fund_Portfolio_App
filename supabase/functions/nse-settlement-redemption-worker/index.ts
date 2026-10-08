@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import { loadNseUatWorkflowConfig } from "../_shared/nse/nse_config.ts";
 import {
   createSettlementRedemptionGateway,
   createSettlementRedemptionPersistence,
@@ -14,6 +14,6 @@ const supabase = createClient(
 const handler = createNseSettlementRedemptionHandler({
   internalToken: Deno.env.get("NSE_WORKER_TOKEN") ?? "",
   persistence: createSettlementRedemptionPersistence(supabase),
-  gateway: createSettlementRedemptionGateway(loadNseConfig()),
+  gateway: createSettlementRedemptionGateway(await loadNseUatWorkflowConfig()),
 });
 Deno.serve(handler);

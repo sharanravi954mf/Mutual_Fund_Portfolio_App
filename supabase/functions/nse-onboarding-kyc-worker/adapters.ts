@@ -1,3 +1,4 @@
+import { assertNseUatWorkflow } from "../_shared/nse/nse_runtime.ts";
 import { NseClient } from "../_shared/nse/nse_client.ts";
 import type { NseConfig } from "../_shared/nse/nse_types.ts";
 import type { Claim, Result } from "./handler.ts";
@@ -6,6 +7,7 @@ export function createOnboardingTransport(
   fetcher: typeof fetch = fetch,
 ) {
   // This slice cannot be pointed at Production, even by a mistaken runtime setting.
+  assertNseUatWorkflow(config);
   const base = new URL(config.baseUrl);
   if (
     base.protocol !== "https:" ||

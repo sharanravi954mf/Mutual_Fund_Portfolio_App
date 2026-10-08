@@ -1,3 +1,4 @@
+import { assertNseOrigin, permitsNseRequest } from "./nse_runtime.ts";
 import { createNseBasicAuthorization } from "./nse_auth.ts";
 import type {
   NseConfig,
@@ -155,6 +156,10 @@ export class NseClient {
   }
 
   async request(options: NseRequestOptions): Promise<NseResponse> {
+    if (!permitsNseRequest(this.#config, options.method, options.path)) {
+      throw new NseClientError("nse_request_invalid");
+    }
+    assertNseOrigin(this.#config.environment, this.#config.baseUrl);
     const timeoutMs = positiveBoundedInteger(
       options.timeoutMs,
       defaultTimeoutMs,
@@ -181,6 +186,7 @@ export class NseClient {
       try {
         response = await this.#fetch(endpoint, {
           method: options.method,
+          redirect: "error",
           headers,
           body,
           signal: controller.signal,

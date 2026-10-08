@@ -314,7 +314,9 @@ Deno.test("PROV_ORDERS gateway uses exact report endpoint, existing auth, and on
   let calls = 0;
   const gateway = createProvOrdersGateway(
     {
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
@@ -325,7 +327,7 @@ Deno.test("PROV_ORDERS gateway uses exact report endpoint, existing auth, and on
       calls++;
       assertEquals(
         String(_url),
-        "https://example.invalid/nsemfdesk/api/v2/reports/PROV_ORDERS",
+        "https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/PROV_ORDERS",
       );
       assertEquals(init?.method, "POST");
       assertEquals(init?.redirect, "error");

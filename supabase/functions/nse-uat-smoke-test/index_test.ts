@@ -103,3 +103,63 @@ Deno.test("NSE UAT smoke test maps NSE failures without provider details", async
     error: { code: "nse_http_error" },
   });
 });
+
+Deno.test("QA certification probe needs its own token and explicit approval; caller cannot select writes", async () => {
+  const { loadNseConfig } = await import("../_shared/nse/nse_config.ts");
+  const { createConfiguredNseSmokeTestHandler } = await import("./handler.ts");
+  for (const allowedReadApis of ["[]", '["MASTER_DOWNLOAD"]']) {
+    const values: Record<string, string> = {
+      MONEYBOWL_ENV: "QA",
+      MONEYBOWL_SUPABASE_URL: "https://qa-synthetic.supabase.co",
+      SUPABASE_URL: "https://qa-synthetic.supabase.co",
+      NSE_URL: "https://www.nseinvest.com",
+      NSE_CREDENTIAL_PROVIDER: "edge-secrets",
+      NSE_ALLOWED_READ_APIS: allowedReadApis,
+      NSE_LOGIN_USER_ID: "synthetic-login",
+      NSE_API_KEY_MEMBER: "synthetic-key",
+      NSE_API_SECRET_USER: "synthetic-secret",
+      NSE_MEMBER_CODE: "synthetic-member",
+    };
+    const config = await loadNseConfig((key) => values[key]);
+    let sends = 0;
+    const handler = createConfiguredNseSmokeTestHandler(
+      config,
+      "synthetic-qa-token",
+      (_url, init) => {
+        sends++;
+        assertEquals(
+          String(_url),
+          "https://www.nseinvest.com/nsemfdesk/api/v2/reports/MASTER_DOWNLOAD",
+        );
+        assertEquals(init?.method, "POST");
+        assertEquals(init?.body, '{"file_type":"NAV"}');
+        assertEquals(init?.redirect, "error");
+        return Promise.resolve(
+          new Response("synthetic-secret", {
+            headers: { "content-type": "synthetic-secret" },
+          }),
+        );
+      },
+    );
+    assertEquals((await handler(request("dev-token"))).status, 403);
+    assertEquals(sends, 0);
+    const response = await handler(
+      new Request("http://localhost/nse-uat-smoke-test", {
+        method: "POST",
+        headers: { "X-NSE-Smoke-Token": "synthetic-qa-token" },
+        body: JSON.stringify({
+          path: "/nsemfdesk/api/v1/EKYC/EKYCREG",
+          file_type: "SCH",
+        }),
+      }),
+    );
+    if (allowedReadApis === "[]") {
+      assertEquals(response.status, 502);
+      assertEquals(sends, 0);
+    } else {
+      assertEquals(response.status, 200);
+      assertEquals(sends, 1);
+    }
+    assertFalse((await response.text()).includes("synthetic-secret"));
+  }
+});

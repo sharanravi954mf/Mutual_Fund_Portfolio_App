@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import { loadNseUatWorkflowConfig } from "../_shared/nse/nse_config.ts";
 import {
   createStpSwpReportsGateway,
   createStpSwpReportsPersistence,
@@ -14,6 +14,6 @@ const supabase = createClient(
 const handler = createNseStpSwpReportsHandler({
   internalToken: Deno.env.get("NSE_WORKER_TOKEN") ?? "",
   persistence: createStpSwpReportsPersistence(supabase),
-  gateway: createStpSwpReportsGateway(loadNseConfig()),
+  gateway: createStpSwpReportsGateway(await loadNseUatWorkflowConfig()),
 });
 Deno.serve(handler);

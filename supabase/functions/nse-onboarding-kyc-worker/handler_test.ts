@@ -104,6 +104,8 @@ Deno.test("claim recovery owns replay; terminal claim does not submit", async ()
   assertEquals(calls, []);
 });
 const config = {
+  environment: "DEV" as const,
+  allowedReadApis: [],
   baseUrl: "https://nseinvestuat.nseindia.com",
   loginUserId: "synthetic",
   apiKeyMember: "synthetic",

@@ -1,7 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import { loadNseUatWorkflowConfig } from "../_shared/nse/nse_config.ts";
 import { base64, createOnboardingTransport } from "./adapters.ts";
 import { type Claim, createOnboardingKycHandler } from "./handler.ts";
+const nseConfig = await loadNseUatWorkflowConfig();
 const client = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
@@ -29,5 +30,5 @@ Deno.serve(createOnboardingKycHandler({
       p_transmission: result.transmission,
     }),
   // A new transport per operation keeps the send fence independent across concurrent requests.
-  submit: (c) => createOnboardingTransport(loadNseConfig())(c),
+  submit: (c) => createOnboardingTransport(nseConfig)(c),
 }));

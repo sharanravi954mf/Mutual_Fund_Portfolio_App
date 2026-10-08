@@ -8,7 +8,9 @@ import { NseClient, NseClientError } from "./nse_client.ts";
 import type { NseConfig } from "./nse_types.ts";
 
 const config: NseConfig = {
-  baseUrl: "https://nse-uat.example.test",
+  environment: "DEV" as const,
+  allowedReadApis: [],
+  baseUrl: "https://nseinvestuat.nseindia.com",
   loginUserId: "test-login-user",
   apiKeyMember: "test-api-key-member",
   apiSecretUser: "test-api-secret-user",
@@ -39,7 +41,7 @@ Deno.test("NSE client applies fresh authentication without globally forcing Acce
 
   assertEquals(
     requests[0].url,
-    "https://nse-uat.example.test/nsemfdesk/api/v2/reports/MASTER_DOWNLOAD",
+    "https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/MASTER_DOWNLOAD",
   );
   assertEquals(requests[0].headers.get("accept-language"), "en-US");
   assertEquals(
@@ -216,4 +218,98 @@ Deno.test("NSE client transmits the exact pre-serialized UCC body and audits res
       "cookie",
     ),
   );
+});
+
+// The same client policy is applied to calls from every adapter, before auth/fetch.
+for (const environment of ["QA", "PROD"] as const) {
+  Deno.test(`${environment}: only explicitly approved certification reads reach the network`, async () => {
+    let sends = 0;
+    const client = new NseClient({
+      ...config,
+      environment,
+      baseUrl: "https://www.nseinvest.com",
+      allowedReadApis: ["ORDER_STATUS"],
+    }, (_url, init) => {
+      sends++;
+      assertEquals(init?.redirect, "error");
+      return Promise.resolve(new Response("{}"));
+    });
+    await client.request({
+      method: "POST",
+      path: "/nsemfdesk/api/v2/reports/ORDER_STATUS",
+      jsonBody: {},
+    });
+    assertEquals(sends, 1);
+    for (
+      const path of [
+        "/nsemfdesk/api/v2/registration/CLIENTCOMMON183",
+        "/nsemfdesk/api/v1/EKYC/EKYCREG",
+        "/nsemfdesk/api/v2/registration/CLIENTBANKDTL",
+        "/nsemfdesk/api/v2/registration/product/MANDATE",
+        "/nsemfdesk/api/v2/reports/MASTER_DOWNLOAD",
+        "/nsemfdesk/api/v2/reports/ORDER_STATUS?write=true",
+        "/nsemfdesk/api/v2/reports/ORDER_STATUS#fragment",
+        "/nsemfdesk/api/v2/reports/../registration/CLIENTCOMMON183",
+        "/nsemfdesk/api/v2/reports/%4fRDER_STATUS",
+        "//nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/ORDER_STATUS",
+        "https://www.nseinvest.com/nsemfdesk/api/v2/reports/ORDER_STATUS",
+        "/nsemfdesk/api/v2/reports/ORDER_STATUS/",
+      ]
+    ) {
+      const error = await assertRejects(
+        () => client.request({ method: "POST", path }),
+        NseClientError,
+      );
+      assertEquals(error.code, "nse_request_invalid");
+    }
+    for (const method of ["GET", "PUT", "DELETE", "PATCH"]) {
+      await assertRejects(
+        () =>
+          client.request({
+            method,
+            path: "/nsemfdesk/api/v2/reports/ORDER_STATUS",
+          }),
+        NseClientError,
+      );
+    }
+    assertEquals(sends, 1);
+  });
+  Deno.test(`${environment}: empty approval list denies all network calls`, async () => {
+    let sends = 0;
+    const client = new NseClient({
+      ...config,
+      environment,
+      baseUrl: "https://www.nseinvest.com",
+      allowedReadApis: [],
+    }, () => {
+      sends++;
+      return Promise.resolve(new Response("{}"));
+    });
+    await assertRejects(
+      () =>
+        client.request({
+          method: "POST",
+          path: "/nsemfdesk/api/v2/reports/ORDER_STATUS",
+        }),
+      NseClientError,
+    );
+    assertEquals(sends, 0);
+  });
+}
+Deno.test("directly constructed cross-environment config cannot bypass origin policy", async () => {
+  let sends = 0;
+  const client = new NseClient({
+    ...config,
+    baseUrl: "https://www.nseinvest.com",
+  }, () => {
+    sends++;
+    return Promise.resolve(new Response("{}"));
+  });
+  await assertRejects(() =>
+    client.request({
+      method: "POST",
+      path: "/nsemfdesk/api/v2/reports/ORDER_STATUS",
+    })
+  );
+  assertEquals(sends, 0);
 });

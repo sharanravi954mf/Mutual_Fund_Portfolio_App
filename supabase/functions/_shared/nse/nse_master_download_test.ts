@@ -21,7 +21,9 @@ import {
 import { createNseMasterEvidenceStore } from "./nse_master_evidence.ts";
 import { NseClient } from "./nse_client.ts";
 const config = {
-  baseUrl: "https://nse.example.test",
+  environment: "DEV" as const,
+  allowedReadApis: [],
+  baseUrl: "https://nseinvestuat.nseindia.com",
   memberCode: "05418",
   loginUserId: "SYNTHETIC_LOGIN",
   apiKeyMember: "SYNTHETIC_KEY",
@@ -423,4 +425,33 @@ Deno.test("MASTER_DOWNLOAD separate capture does not weaken bounded report clien
       }),
     Error,
   );
+});
+
+Deno.test("QA/PROD streaming download cannot write UAT evidence or invoke the network", async () => {
+  for (const environment of ["QA", "PROD"] as const) {
+    const mem = memoryStore();
+    let begins = 0;
+    let sends = 0;
+    mem.store.begin = () => {
+      begins++;
+      throw new Error("must not persist");
+    };
+    await assertRejects(() =>
+      captureNseMasterDownload(
+        {
+          ...config,
+          environment,
+          baseUrl: "https://www.nseinvest.com",
+          allowedReadApis: ["MASTER_DOWNLOAD"],
+        },
+        scope,
+        mem.store,
+        () => {
+          sends++;
+          throw new Error("must not send");
+        },
+      ), NseMasterError);
+    assertEquals(begins, 0);
+    assertEquals(sends, 0);
+  }
 });

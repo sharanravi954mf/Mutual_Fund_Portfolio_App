@@ -744,3 +744,14 @@ The [NSE B06.3 systematic product references](NSE_SYSTEMATIC_PRODUCT_MASTERS.md)
 [B06.4 NAV/SET](NSE_NAV_SET.md) registers private validators in the B06.2 runtime. NAV yields document-backed uncommissioned observations with publication blocked. SET records evidence with terminal rejected validation until its API layout is characterized; it supplies no calendar authority. Existing NAV valuation sources and precedence remain unchanged.
 
 [B07 bank and mandate lifecycle](NSE_BANK_MANDATE_LIFECYCLE.md) preserves MANDATE_STATUS and adds a separate immutable draft/approval/revocation model for UAT writes. Server-derived encrypted terms feed the existing operation/evidence/outbox framework and finite worker routes. Positive scoped reads create provider relationship observations; native deletion receipts remain separate from canonical banks. Ambiguous writes cannot resend. Private operator designation and current owner authority gate every send. Actual UAT confirmation is blocked pending designated test-bank inputs and approved mandate terms; Production is unsupported by this candidate.
+
+
+## MONEYBOWL-M1 runtime environment foundation (local candidate)
+
+The [M1 runtime configuration contract](MONEYBOWL_M1_RUNTIME_CONFIGURATION.md)
+defines canonical DEV/QA/PROD backend settings, strict NSE origin policy, explicit
+Edge Secrets resolution and independent project binding. Flutter remains a public
+build-time configuration consumer. M1 enables only explicitly approved stateless
+NAV certification outside DEV; existing persisted investor workflows remain
+UAT-bound until additive environment/evidence commissioning. No deployment,
+Vault credential migration, dispatcher migration or QA pipeline is included.
