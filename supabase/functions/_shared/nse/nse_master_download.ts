@@ -1,3 +1,4 @@
+import { assertNseOrigin, assertNseUatWorkflow } from "./nse_runtime.ts";
 import { createNseBasicAuthorization } from "./nse_auth.ts";
 import type { NseConfig, NseFetch } from "./nse_types.ts";
 
@@ -120,6 +121,12 @@ export async function captureNseMasterDownload(
   store: NseMasterEvidenceStore,
   fetcher: NseFetch = fetch,
 ): Promise<NseMasterCapture> {
+  try {
+    assertNseUatWorkflow(config);
+    assertNseOrigin(config.environment, config.baseUrl);
+  } catch {
+    throw new NseMasterError("nse_reference_runtime_binding_mismatch");
+  }
   const requestBody = nseMasterRequest(scope.fileType);
   const base = new URL(config.baseUrl);
   if (

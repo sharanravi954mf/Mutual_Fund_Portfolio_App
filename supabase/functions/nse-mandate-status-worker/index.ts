@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import { loadNseUatWorkflowConfig } from "../_shared/nse/nse_config.ts";
 import {
   createMandateStatusGateway,
   createMandateStatusPersistence,
@@ -14,6 +14,6 @@ const supabase = createClient(
 const handler = createNseMandateStatusHandler({
   internalToken: Deno.env.get("NSE_WORKER_TOKEN") ?? "",
   persistence: createMandateStatusPersistence(supabase),
-  gateway: createMandateStatusGateway(loadNseConfig()),
+  gateway: createMandateStatusGateway(await loadNseUatWorkflowConfig()),
 });
 Deno.serve(handler);

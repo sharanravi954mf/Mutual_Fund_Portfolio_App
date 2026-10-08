@@ -260,7 +260,9 @@ Deno.test("ORDER_STATUS gateway uses exact report endpoint, existing auth, and o
   let calls = 0;
   const gateway = createOrderStatusGateway(
     {
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
@@ -271,7 +273,7 @@ Deno.test("ORDER_STATUS gateway uses exact report endpoint, existing auth, and o
       calls++;
       assertEquals(
         String(_url),
-        "https://example.invalid/nsemfdesk/api/v2/reports/ORDER_STATUS",
+        "https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/ORDER_STATUS",
       );
       assertEquals(init?.method, "POST");
       assertEquals(init?.redirect, "error");

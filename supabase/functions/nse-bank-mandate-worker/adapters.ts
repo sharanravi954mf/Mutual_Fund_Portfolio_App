@@ -1,3 +1,4 @@
+import { assertNseUatWorkflow } from "../_shared/nse/nse_runtime.ts";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { NseClient, NseClientError } from "../_shared/nse/nse_client.ts";
 import type { NseConfig } from "../_shared/nse/nse_types.ts";
@@ -45,6 +46,7 @@ export function persistence(client: SupabaseClient): Persistence {
   };
 }
 export function gateway(config: NseConfig, fetcher: typeof fetch = fetch) {
+  assertNseUatWorkflow(config);
   // This candidate has no Production transport capability or redirect allowance.
   if (config.baseUrl !== "https://nseinvestuat.nseindia.com") {
     throw new Error("b07_uat_configuration_required");

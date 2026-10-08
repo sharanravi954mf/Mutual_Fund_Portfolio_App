@@ -222,6 +222,8 @@ for (const action of ["MANDATE", "BANK_ADD", "BANK_DEL"] as const) {
   });
 }
 const config = {
+  environment: "DEV" as const,
+  allowedReadApis: [],
   baseUrl: "https://nseinvestuat.nseindia.com",
   loginUserId: "test",
   apiKeyMember: "test",

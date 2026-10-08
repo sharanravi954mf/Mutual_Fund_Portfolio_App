@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { NseClient } from "../_shared/nse/nse_client.ts";
-import { loadNseConfig } from "../_shared/nse/nse_config.ts";
+import { loadNseUatWorkflowConfig } from "../_shared/nse/nse_config.ts";
 import { createNseUccGateway, createUccPersistence } from "./adapters.ts";
 import { createNseUccWorkerHandler } from "./handler.ts";
 
@@ -13,7 +13,7 @@ const internalToken = Deno.env.get("NSE_WORKER_TOKEN") ??
 const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
-const nseClient = new NseClient(loadNseConfig());
+const nseClient = new NseClient(await loadNseUatWorkflowConfig());
 
 serve(createNseUccWorkerHandler({
   internalToken,

@@ -13,7 +13,9 @@ import type {
 const eventId = "b0620000-0000-4000-8000-000000000001";
 const token = "b0620000-0000-4000-8000-000000000002";
 const config = {
-  baseUrl: "https://nse.example.test",
+  environment: "DEV" as const,
+  allowedReadApis: [],
+  baseUrl: "https://nseinvestuat.nseindia.com",
   memberCode: "05418",
   loginUserId: "SYNTHETIC",
   apiKeyMember: "SYNTHETIC",

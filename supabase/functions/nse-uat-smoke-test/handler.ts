@@ -1,9 +1,14 @@
-import { NseClientError } from "../_shared/nse/nse_client.ts";
+import { NseClient, NseClientError } from "../_shared/nse/nse_client.ts";
 import { NseConfigError } from "../_shared/nse/nse_config.ts";
-import type { NseResponse } from "../_shared/nse/nse_types.ts";
+import type {
+  NseConfig,
+  NseFetch,
+  NseResponse,
+} from "../_shared/nse/nse_types.ts";
 
 export type NseUatSmokeTestDependencies = {
   smokeTestToken: string;
+  includePreview?: boolean;
   execute: () => Promise<NseResponse>;
 };
 
@@ -65,8 +70,12 @@ export function createNseUatSmokeTestHandler(
         success: true,
         nseStatus: result.status,
         responseBytes: result.body.byteLength,
-        contentType: safeContentType(result.headers),
-        preview: safePreview(result.body),
+        contentType: dependencies.includePreview === false
+          ? "application/octet-stream"
+          : safeContentType(result.headers),
+        preview: dependencies.includePreview === false
+          ? ""
+          : safePreview(result.body),
       });
     } catch (error) {
       if (error instanceof NseConfigError) {
@@ -93,4 +102,23 @@ export function createNseUatSmokeTestHandler(
       }, 500);
     }
   };
+}
+
+/** Historical route name retained; QA/PROD permit only the approved stateless NAV probe. */
+export function createConfiguredNseSmokeTestHandler(
+  config: NseConfig,
+  smokeTestToken: string,
+  fetcher: NseFetch = fetch,
+): (request: Request) => Promise<Response> {
+  const client = new NseClient(config, fetcher);
+  return createNseUatSmokeTestHandler({
+    smokeTestToken,
+    includePreview: config.environment === "DEV",
+    execute: () =>
+      client.request({
+        method: "POST",
+        path: "/nsemfdesk/api/v2/reports/MASTER_DOWNLOAD",
+        jsonBody: { file_type: "NAV" },
+      }),
+  });
 }

@@ -303,7 +303,9 @@ Deno.test("ORDER_FUNDING gateway uses exact report endpoint, existing auth, and 
   let calls = 0;
   const gateway = createOrderFundingGateway(
     {
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
@@ -314,7 +316,7 @@ Deno.test("ORDER_FUNDING gateway uses exact report endpoint, existing auth, and 
       calls++;
       assertEquals(
         String(_url),
-        "https://example.invalid/nsemfdesk/api/v2/reports/order_lifecycle",
+        "https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/order_lifecycle",
       );
       assertEquals(init?.method, "POST");
       assertEquals(init?.redirect, "error");
@@ -394,7 +396,9 @@ for (
 ) {
   Deno.test(`${api} gateway: exact path and bounded response failures`, async () => {
     const config = {
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
@@ -408,7 +412,7 @@ for (
         calls++;
         assertEquals(
           String(_url),
-          `https://example.invalid/nsemfdesk/api/v2/reports/${path}`,
+          `https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/${path}`,
         );
         assertEquals(init?.method, "POST");
         assertEquals(init?.body, "{}");
@@ -434,7 +438,9 @@ Deno.test("B02 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL
     ]
   ) {
     const gateway = createOrderFundingGateway({
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",

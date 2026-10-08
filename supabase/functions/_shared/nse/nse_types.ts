@@ -1,11 +1,14 @@
-export type NseConfig = Readonly<{
-  baseUrl: string;
-  loginUserId: string;
-  apiKeyMember: string;
-  apiSecretUser: string;
-  memberCode: string;
-  userAgent: string;
-}>;
+import type { NseRuntimePolicy } from "./nse_runtime.ts";
+export type NseConfig =
+  & NseRuntimePolicy
+  & Readonly<{
+    baseUrl: string;
+    loginUserId: string;
+    apiKeyMember: string;
+    apiSecretUser: string;
+    memberCode: string;
+    userAgent: string;
+  }>;
 
 export type NseRequestOptions = {
   method: string;

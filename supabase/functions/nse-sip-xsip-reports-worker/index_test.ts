@@ -336,7 +336,9 @@ Deno.test("SIP_XSIP_REPORTS gateway uses exact report endpoint, existing auth, a
   let calls = 0;
   const gateway = createSipXsipReportsGateway(
     {
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
@@ -347,7 +349,7 @@ Deno.test("SIP_XSIP_REPORTS gateway uses exact report endpoint, existing auth, a
       calls++;
       assertEquals(
         String(_url),
-        "https://example.invalid/nsemfdesk/api/v2/reports/SIP_REG_REPORT",
+        "https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/SIP_REG_REPORT",
       );
       assertEquals(init?.method, "POST");
       assertEquals(init?.redirect, "error");
@@ -432,7 +434,9 @@ for (
 ) {
   Deno.test(`${api} gateway: exact path and bounded response failures`, async () => {
     const config = {
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
@@ -446,7 +450,7 @@ for (
         calls++;
         assertEquals(
           String(_url),
-          `https://example.invalid/nsemfdesk/api/v2/reports/${path}`,
+          `https://nseinvestuat.nseindia.com/nsemfdesk/api/v2/reports/${path}`,
         );
         assertEquals(init?.method, "POST");
         assertEquals(init?.body, "{}");
@@ -472,7 +476,9 @@ Deno.test("B04 exact bounded bytes survive BOM, malformed UTF-8 and embedded NUL
     ]
   ) {
     const gateway = createSipXsipReportsGateway({
-      baseUrl: "https://example.invalid",
+      environment: "DEV" as const,
+      allowedReadApis: [],
+      baseUrl: "https://nseinvestuat.nseindia.com",
       loginUserId: "synthetic",
       apiKeyMember: "synthetic",
       apiSecretUser: "synthetic",
