@@ -18,6 +18,14 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
+## MONEYBOWL-M2 native dispatcher — local candidate 2026-10-09
+
+Supabase-native authenticated notifications, bounded Edge dispatch and Cron recovery
+are implemented for review, disabled by default. The 17 routes, worker claims,
+evidence and UAT boundaries remain intact. Oracle remains unchanged and active;
+DEV cutover and private QA commissioning are separate. See the
+[M2 architecture and runbook](architecture/MONEYBOWL_M2_NATIVE_OUTBOX_DISPATCHER.md).
+
 ## MONEYBOWL-M1 runtime configuration — local candidate 2026-10-08
 
 Canonical backend DEV/QA/PROD configuration, explicit Edge Secrets selection,

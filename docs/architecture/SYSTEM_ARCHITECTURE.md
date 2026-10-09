@@ -755,3 +755,10 @@ build-time configuration consumer. M1 enables only explicitly approved stateless
 NAV certification outside DEV; existing persisted investor workflows remain
 UAT-bound until additive environment/evidence commissioning. No deployment,
 Vault credential migration, dispatcher migration or QA pipeline is included.
+
+## MONEYBOWL-M2 native dispatcher (local candidate)
+
+A disabled-by-default Supabase Edge dispatcher receives project-signed pg_net
+notifications and bounded Cron recovery, preserving all 17 routes and worker-owned
+claims/evidence. Oracle cutover and environment-aware QA workflows require separate
+commissioning. See [M2 contracts and runbooks](MONEYBOWL_M2_NATIVE_OUTBOX_DISPATCHER.md).
