@@ -9,7 +9,7 @@ export type RpcResult<T = unknown> = {
 };
 
 export type RpcClient = {
-  rpc: (fn: string, args: Record<string, unknown>) => Promise<RpcResult>;
+  rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<RpcResult>;
 };
 
 export type AuthClient = {

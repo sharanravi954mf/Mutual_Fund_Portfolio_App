@@ -9,6 +9,17 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 local implementation candidate — 2026-10-09
+
+- Added shared promotion/release contracts, immutable frontend host adapter,
+  independently verified deployment evidence contract, QA-disabled workflows,
+  synthetic concurrency/failure tests and private commissioning runbook.
+- Extended quality checks to QA; corrected safe PR-title shell handling and the
+  documentation Python version input. A one-line RPC `PromiseLike` type correction
+  lets the expanded Edge entrypoint gate check the existing Supabase client contract.
+- No publication or deployment. Full-stack DEV/QA commissioning remains blocked;
+  see [M4 status and ownership](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
 ## Unreleased
 
 ### Documentation

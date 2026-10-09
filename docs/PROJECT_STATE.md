@@ -18,6 +18,17 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
+## MONEYBOWL-M4 environment promotion — local review candidate 2026-10-09
+
+Versioned deployment contracts, feature/PR CI, read-only DEV/QA release observation,
+immutable frontend activation and synthetic failure tests are implemented locally.
+Full environment automation remains blocked on private deployment-owner evidence,
+DEV host installation and service-owner commissioning. QA is disabled and has no
+project. No live infrastructure changed. The M4 task's supplied live context reports
+DEV native dispatch active and Oracle dispatch retired; older local-candidate entries
+below are historical, not authorization to restore Oracle. See the
+[M4 architecture and runbook](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
 ## MONEYBOWL-M2 native dispatcher — local candidate 2026-10-09
 
 Supabase-native authenticated notifications, bounded Edge dispatch and Cron recovery
