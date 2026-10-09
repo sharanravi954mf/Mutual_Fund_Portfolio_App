@@ -1,0 +1,11 @@
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "environment": "DEV",
+  "project_ref": "abcdefghijklmnopqrst",
+  "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "actor": "authorized-owner",
+  "ticket": "MONEYBOWL-M2A-DEV",
+  "expires_at": "2000-01-01T00:00:00Z",
+  "oracle_retired": false,
+  "backlog_authorized": false
+}

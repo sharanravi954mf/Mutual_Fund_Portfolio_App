@@ -1,0 +1,8 @@
+{
+  "environment": "DEV",
+  "project_ref": "abcdefghijklmnopqrst",
+  "project_url": "https://abcdefghijklmnopqrst.supabase.co",
+  "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "actor": "authorized-owner",
+  "ticket": "MONEYBOWL-M2A-DEV"
+}

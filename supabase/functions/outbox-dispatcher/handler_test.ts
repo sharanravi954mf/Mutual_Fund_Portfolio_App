@@ -490,3 +490,59 @@ Deno.test("slow request stream is cancelled at the body deadline", async () => {
   );
   assert(r.status === 400 && cancelled && h.calls.length === 0);
 });
+
+for (const environment of ["DEV", "QA", "PROD"]) {
+  for (
+    const mode of [
+      "disabled",
+      "observe",
+      ...(environment === "DEV" ? ["active"] : []),
+    ]
+  ) {
+    Deno.test(`commission readiness ${environment}/${mode} never accesses DB or workers`, async () => {
+      const h = harness({ env: settings(environment, mode) });
+      const n = notification({
+        kind: "readiness",
+        event_outbox_id: null,
+        environment,
+        project_url:
+          `https://synthetic-${environment.toLowerCase()}.supabase.co`,
+      });
+      const first = await h.handler(await request(n));
+      assert(first.status === 200);
+      const body = await first.json();
+      assert(body.code === "outbox_ready" && body.mode === mode);
+      assert(JSON.stringify(body.routes) === JSON.stringify(ROUTES));
+      assert(!JSON.stringify(body).includes(key));
+      assert((await h.handler(await request(n))).status === 200);
+      assert(h.calls.length === 0 && h.logs.length === 0);
+    });
+  }
+}
+Deno.test("commission readiness rejects invalid, missing and stale authentication", async () => {
+  const h = harness();
+  const n = notification({ kind: "readiness", event_outbox_id: null });
+  assert((await h.handler(await request(n, "wrong-key"))).status === 401);
+  const missing = await request(n);
+  missing.headers.delete("X-Outbox-Signature");
+  assert((await h.handler(missing)).status === 401);
+  assert(
+    (await h.handler(await request({ ...n, issued_at: 1 }))).status === 400,
+  );
+  assert(h.calls.length === 0 && h.logs.length === 0);
+});
+Deno.test("commission readiness signature cannot authorize recovery", async () => {
+  const h = harness();
+  const n = notification({ kind: "readiness", event_outbox_id: null });
+  const signed = await request(n);
+  const changedPath = new Request(
+    "https://synthetic-dev.supabase.co/functions/v1/outbox-dispatcher/recovery",
+    {
+      method: "POST",
+      headers: signed.headers,
+      body: JSON.stringify(n),
+    },
+  );
+  assert((await h.handler(changedPath)).status === 400);
+  assert(h.calls.length === 0 && h.logs.length === 0);
+});

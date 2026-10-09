@@ -9,7 +9,7 @@ export type Notification = {
   issued_at: number;
   environment: string;
   project_url: string;
-  kind: "event" | "recovery";
+  kind: "event" | "recovery" | "readiness";
   event_outbox_id: string | null;
   hop: number;
 };
@@ -139,6 +139,9 @@ export function createHandler(config: Config, deps: {
       : path === "/outbox-dispatcher/recovery" ||
           path === "/functions/v1/outbox-dispatcher/recovery"
       ? "recovery"
+      : path === "/outbox-dispatcher/readiness" ||
+          path === "/functions/v1/outbox-dispatcher/readiness"
+      ? "readiness"
       : null;
     if (!kind || new URL(req.url).search) {
       return response(404, "outbox_path_invalid");
@@ -190,6 +193,16 @@ export function createHandler(config: Config, deps: {
       }
     } catch {
       return response(400, "outbox_notification_invalid");
+    }
+    // Authenticated, side-effect-free commissioning: no RPC, admission or worker.
+    // Readiness replays within the HMAC window are harmless; recovery retains M2 receipts.
+    if (kind === "readiness") {
+      return response(200, "outbox_ready", {
+        mode: config.mode,
+        environment: config.environment,
+        project_url: config.origin,
+        routes: ROUTES,
+      });
     }
     if (config.mode === "disabled") return response(503, "outbox_disabled");
     try {

@@ -39,3 +39,27 @@ UPDATE moneybowl_dispatch.control SET mode='disabled',environment=NULL,project_u
 DELETE FROM moneybowl_dispatch.receipts WHERE request_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 SQL
 printf 'Concurrent duplicate/recovery admission: 1 admitted, 1 busy\n'
+# Concurrent routine reconciliation must converge on one inactive job.
+sql > "$scratch/schedule-first" <<'SQL' &
+BEGIN;
+SELECT moneybowl_dispatch.provision_recovery();
+SELECT pg_sleep(1);
+COMMIT;
+SQL
+schedule_pid=$!
+sql > "$scratch/schedule-second" <<'SQL'
+SELECT moneybowl_dispatch.provision_recovery();
+SQL
+wait "$schedule_pid"
+sql <<'SQL'
+DO $$ BEGIN
+ IF (SELECT count(*) FROM cron.job WHERE jobname='moneybowl-outbox-recovery')<>1
+  OR EXISTS(SELECT 1 FROM cron.job WHERE jobname='moneybowl-outbox-recovery' AND active) THEN
+  RAISE EXCEPTION 'concurrent_schedule_not_idempotent';
+ END IF;
+ IF (SELECT mode FROM moneybowl_dispatch.control WHERE singleton)<>'disabled' THEN
+  RAISE EXCEPTION 'schedule_activated_dispatch';
+ END IF;
+END $$;
+SQL
+printf 'Concurrent recovery provisioning: one inactive job; dispatcher disabled\n'

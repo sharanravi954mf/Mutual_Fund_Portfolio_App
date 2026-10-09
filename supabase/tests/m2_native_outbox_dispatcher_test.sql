@@ -188,7 +188,7 @@ DO $$
 DECLARE fn record; role_name text;
 BEGIN
   IF (SELECT mode FROM moneybowl_dispatch.control) <> 'disabled' THEN RAISE EXCEPTION 'enabled_by_migration'; END IF;
-  FOR fn IN SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+  FOR fn IN SELECT p.oid,p.prorettype FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
     WHERE n.nspname='moneybowl_dispatch' OR p.proname IN ('admit_outbox_dispatch','authorize_outbox_dispatch','finish_outbox_dispatch')
   LOOP
     FOREACH role_name IN ARRAY ARRAY['anon','authenticated'] LOOP
@@ -286,6 +286,9 @@ RESET ROLE;
 -- transaction semantics; real platform post-commit behavior is a commissioning check.
 CREATE SCHEMA IF NOT EXISTS net;
 CREATE TABLE moneybowl_dispatch.test_notifications(id bigint GENERATED ALWAYS AS IDENTITY, url text, body jsonb, headers jsonb);
+-- The M2A runner uses the extension owner to replace pg_net; the M2 notifier
+-- still executes as postgres, exactly as hosted. Keep this fixture owned by it.
+ALTER TABLE moneybowl_dispatch.test_notifications OWNER TO postgres;
 CREATE OR REPLACE FUNCTION net.http_post(url text, body jsonb DEFAULT '{}', params jsonb DEFAULT '{}',
   headers jsonb DEFAULT '{"Content-Type":"application/json"}', timeout_milliseconds integer DEFAULT 1000)
 RETURNS bigint LANGUAGE plpgsql AS $$ DECLARE result bigint; BEGIN
@@ -357,12 +360,14 @@ RESET ROLE;
 -- Advisory/lint validation of new functions; transition relation exists only inside trigger.
 CREATE EXTENSION IF NOT EXISTS plpgsql_check WITH SCHEMA extensions;
 DO $$ DECLARE fn record; finding record; BEGIN
-  FOR fn IN SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+  FOR fn IN SELECT p.oid,p.prorettype FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
     JOIN pg_language l ON l.oid=p.prolang WHERE l.lanname='plpgsql' AND
     ((n.nspname='moneybowl_dispatch' AND p.proname<>'on_insert') OR
      (n.nspname='public' AND p.proname IN ('admit_outbox_dispatch','authorize_outbox_dispatch','finish_outbox_dispatch','list_dispatchable_outbox_events')))
   LOOP
-    FOR finding IN SELECT * FROM extensions.plpgsql_check_function_tb(fn.oid::regprocedure,fatal_errors:=false) LOOP
+    FOR finding IN SELECT * FROM extensions.plpgsql_check_function_tb(fn.oid::regprocedure,
+      CASE WHEN fn.prorettype='trigger'::regtype THEN 'moneybowl_dispatch.commission_audit'::regclass ELSE 0::regclass END,
+      fatal_errors:=false) LOOP
       IF finding.level='error' THEN RAISE EXCEPTION 'm2_lint_failed:%:%',fn.oid::regprocedure,finding.message; END IF;
     END LOOP;
   END LOOP;

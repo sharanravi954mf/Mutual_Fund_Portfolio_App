@@ -436,3 +436,9 @@ Modified:
 Oracle source, routes, route-contract bytes, Compose and service/reconciler code
 are unchanged. No worker, claim, evidence, financial payload or state-machine
 implementation is modified.
+
+## M2A commissioning automation
+
+The [M2A candidate](MONEYBOWL_M2A_COMMISSIONING.md) replaces routine operator SQL with
+reviewed migration provisioning and a private commissioning controller. Its rollout
+requires separate review; M2 financial routing and worker safety contracts remain unchanged.
