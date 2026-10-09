@@ -30,8 +30,15 @@ done
 psql_local < "$repo_root/supabase/tests/fixtures/m2_feed_parity.sql"
 for test in "$repo_root"/supabase/tests/generic_outbox_dispatcher_test.sql \
   "$repo_root"/supabase/tests/m2_native_outbox_dispatcher_test.sql \
+  "$repo_root"/supabase/tests/m2a_commissioning_test.sql \
   "$repo_root"/supabase/tests/nse*_test.sql "$repo_root"/supabase/tests/onboarding_kyc_test.sql; do
   printf 'Testing %s\n' "${test##*/}"
-  psql_local < "$test"
+  if [[ "$test" == *m2_native_outbox_dispatcher_test.sql ]]; then
+    # pg_net is now installed: only its extension owner can replace the test transport.
+    # The regression retains its explicit SET ROLE checks for actual API roles.
+    docker exec -i "$container" psql -X -U supabase_admin -d postgres -v ON_ERROR_STOP=1 < "$test"
+  else
+    psql_local < "$test"
+  fi
 done
 bash "$repo_root/scripts/test_m2_outbox_concurrency.sh" "$container"

@@ -7,6 +7,10 @@ on:
       - ".github/workflows/outbox-dispatcher.yml"
       - "services/outbox-dispatcher/**"
       - "scripts/generate_outbox_routes.py"
+      - "tools/commissioning/**"
+      - "supabase/migrations/*m2a_dispatcher_commissioning.sql"
+      - "supabase/tests/m2a_commissioning_test.sql"
+      - "docs/architecture/MONEYBOWL_M2A_COMMISSIONING.md"
       - "scripts/test_m2_outbox*.sh"
       - "supabase/tests/fixtures/m2_feed_parity.sql"
       - "supabase/functions/outbox-dispatcher/**"
@@ -25,6 +29,10 @@ on:
       - ".github/workflows/outbox-dispatcher.yml"
       - "services/outbox-dispatcher/**"
       - "scripts/generate_outbox_routes.py"
+      - "tools/commissioning/**"
+      - "supabase/migrations/*m2a_dispatcher_commissioning.sql"
+      - "supabase/tests/m2a_commissioning_test.sql"
+      - "docs/architecture/MONEYBOWL_M2A_COMMISSIONING.md"
       - "scripts/test_m2_outbox*.sh"
       - "supabase/tests/fixtures/m2_feed_parity.sql"
       - "supabase/functions/outbox-dispatcher/**"
@@ -75,6 +83,8 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.9.6
+      - name: Test commissioning controller without credentials or network
+        run: python3 -m unittest discover -s tools/commissioning -v
       - name: Verify canonical route artifacts
         run: python3 scripts/generate_outbox_routes.py --check
       - name: Format and type check native dispatcher
