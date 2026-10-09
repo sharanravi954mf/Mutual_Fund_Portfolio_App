@@ -254,3 +254,7 @@ verify_jwt = false
 
 [functions.nse-onboarding-kyc-worker]
 verify_jwt = false
+
+# Project-local HMAC authentication is mandatory in the handler.
+[functions.outbox-dispatcher]
+verify_jwt = false

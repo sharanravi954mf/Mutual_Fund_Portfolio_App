@@ -2,20 +2,36 @@ name: Outbox Dispatcher Validation
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, qa]
     paths:
       - ".github/workflows/outbox-dispatcher.yml"
       - "services/outbox-dispatcher/**"
+      - "scripts/generate_outbox_routes.py"
+      - "scripts/test_m2_outbox*.sh"
+      - "supabase/tests/fixtures/m2_feed_parity.sql"
+      - "supabase/functions/outbox-dispatcher/**"
+      - "supabase/functions/_shared/nse/**"
+      - "supabase/config.toml"
+      - "supabase/migrations/*m2_native_outbox_dispatcher.sql"
+      - "supabase/tests/m2_native_outbox_dispatcher_test.sql"
       - "scripts/test_outbox_compose.py"
       - "services/ingestion-support/compose.hosted.yaml"
       - "services/ingestion-support/.env.hosted.example"
       - "supabase/migrations/*generic_outbox_dispatcher.sql"
       - "supabase/tests/generic_outbox_dispatcher_test.sql"
   push:
-    branches: [develop]
+    branches: [develop, qa]
     paths:
       - ".github/workflows/outbox-dispatcher.yml"
       - "services/outbox-dispatcher/**"
+      - "scripts/generate_outbox_routes.py"
+      - "scripts/test_m2_outbox*.sh"
+      - "supabase/tests/fixtures/m2_feed_parity.sql"
+      - "supabase/functions/outbox-dispatcher/**"
+      - "supabase/functions/_shared/nse/**"
+      - "supabase/config.toml"
+      - "supabase/migrations/*m2_native_outbox_dispatcher.sql"
+      - "supabase/tests/m2_native_outbox_dispatcher_test.sql"
       - "scripts/test_outbox_compose.py"
       - "services/ingestion-support/compose.hosted.yaml"
       - "services/ingestion-support/.env.hosted.example"
@@ -49,3 +65,27 @@ jobs:
           python services/outbox-dispatcher/deploy/reconcile.py --validate-routes services/outbox-dispatcher/routes.json
           bash -n services/outbox-dispatcher/deploy/bootstrap.sh
           python scripts/test_outbox_compose.py
+
+  native-dispatcher:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.6
+      - name: Verify canonical route artifacts
+        run: python3 scripts/generate_outbox_routes.py --check
+      - name: Format and type check native dispatcher
+        run: |
+          deno fmt --check supabase/functions/outbox-dispatcher
+          deno check supabase/functions/outbox-dispatcher/index.ts
+      - name: Test native dispatcher without network or secrets
+        run: deno test --deny-net --deny-env supabase/functions/outbox-dispatcher
+      - name: Run NSE worker safety regressions with mocked transports
+        run: deno test --deny-net --deny-env supabase/functions/_shared/nse supabase/functions/nse*-worker supabase/functions/nse-uat-smoke-test
+      - name: Validate immutable migration history
+        run: python3 .github/scripts/validate_migration_history.py
+      - name: Rebuild isolated database and test dispatch contracts
+        run: bash scripts/test_m2_outbox_sql.sh
