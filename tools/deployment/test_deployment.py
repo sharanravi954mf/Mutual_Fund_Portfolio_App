@@ -13,7 +13,7 @@ from unittest.mock import patch
 from contract import (DEV_PROJECT, REPOSITORY, Rejected, immutable_history, load_policy,
                       manifest, promotion, public_defines, push_event, target)
 from host import digest_tree, flutter_builder, locked_deploy, run
-from observe import observe, read_json
+from observe import Pending, observe, read_json
 
 A, B, C = 'a' * 40, 'b' * 40, 'c' * 40
 NOW = 1000
@@ -191,7 +191,7 @@ class ObserverTests(unittest.TestCase):
         calls = []
         def fail(url):
             calls.append(url)
-            raise Rejected('transient_read_failed')
+            raise Pending('transient_read_failed')
         result = self.check(reader=fail)
         self.assertEqual(result['state'], 'failed')
         self.assertEqual(len(calls), 2)

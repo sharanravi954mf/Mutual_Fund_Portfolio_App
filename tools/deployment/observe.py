@@ -4,13 +4,18 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from contract import Rejected, git, load_policy, manifest, push_event, require, target
+from contract import Rejected, git, load_policy, manifest, push_event, require, target, revision
+
+
+class Pending(Rejected):
+    """An authenticated, correctly bound deployment is still propagating."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -30,11 +35,17 @@ def read_json(url):
             require(len(data) <= 262144, 'evidence_too_large')
             return json.loads(data)
     except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise Pending('evidence_not_published') from None
         if error.code in (408, 429, 500, 502, 503, 504):
-            raise Rejected('transient_read_failed') from None
+            raise Pending('transient_read_failed') from None
         raise Rejected('evidence_http_rejected') from None
-    except (urllib.error.URLError, TimeoutError):
-        raise Rejected('transient_read_failed') from None
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, ssl.SSLError):
+            raise Rejected('evidence_tls_rejected') from None
+        raise Pending('transient_read_failed') from None
+    except TimeoutError:
+        raise Pending('transient_read_failed') from None
     except (ValueError, UnicodeError):
         raise Rejected('invalid_evidence') from None
 
@@ -55,11 +66,17 @@ def read_digest(url):
                 digest.update(block)
             return digest.hexdigest()
     except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise Pending('evidence_not_published') from None
         if error.code in (408, 429, 500, 502, 503, 504):
-            raise Rejected('transient_read_failed') from None
+            raise Pending('transient_read_failed') from None
         raise Rejected('evidence_http_rejected') from None
-    except (urllib.error.URLError, TimeoutError):
-        raise Rejected('transient_read_failed') from None
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, ssl.SSLError):
+            raise Rejected('evidence_tls_rejected') from None
+        raise Pending('transient_read_failed') from None
+    except TimeoutError:
+        raise Pending('transient_read_failed') from None
 
 
 def identity(data, env, sha, policy):
@@ -71,6 +88,7 @@ def identity(data, env, sha, policy):
 
 def verify_receipt(data, env, sha, expected, policy, now):
     identity(data, env, sha, policy)
+    require(data.get('state') != 'failed', 'owner_reported_failure')
     require(data.get('schema_version') == 1, 'receipt_schema_invalid')
     observed = data.get('observed_at')
     require(type(observed) in (int, float) and 0 <= now - observed <= 300, 'receipt_expired')
@@ -84,18 +102,41 @@ def verify_receipt(data, env, sha, expected, policy, now):
                            'readiness_authenticated': True}, 'dispatcher_invariants_unverified')
     components = data.get('components', {})
     require(set(components) == set(expected), 'component_inventory_mismatch')
+    pending = False
     for name, digest in expected.items():
         item = components[name]
+        require(isinstance(item, dict), 'invalid_component_evidence')
+        if item.get('state') in ('pending', 'deploying'):
+            require(set(item) == {'state'}, 'invalid_pending_evidence')
+            pending = True
+            continue
         require(item.get('state') == 'deployed', 'component_not_deployed')
         require(item.get('source_digest') == digest and item.get('healthy') is True, 'component_unverified')
         require(item.get('proof') == {'migrations': 'applied_history', 'edge_functions': 'downloaded_bundle',
                                      'ingestion_support': 'running_image'}[name], 'component_proof_missing')
+    if pending:
+        raise Pending('components_pending')
     return True
 
 
+def superseded(report):
+    report.update(state='superseded', reason='branch_advanced', backend='superseded',
+                  frontend='superseded', services='superseded',
+                  post_deployment='not_passed', environment_release='not_verified')
+    return report
+
+
+def ancestor(repo, old, new):
+    try:
+        git(repo, 'merge-base', '--is-ancestor', revision(old), revision(new))
+        return True
+    except Rejected:
+        return False
+
+
 def observe(event, env, policy, expected, latest, read, frontend_url, evidence_url,
-            attempts=30, pause=time.sleep, now=time.time, read_asset=read_digest):
-    report = {'schema_version': 1, 'environment': env if env in ('dev', 'qa') else 'invalid',
+            attempts=30, pause=time.sleep, now=time.time, read_asset=read_digest, is_ancestor=lambda old, new: False):
+    report = {'schema_version': 1, 'observed_at': now(), 'environment': env if env in ('dev', 'qa') else 'invalid',
               'state': 'failed', 'code_validated': 'not_observed', 'deployment': 'not_observed',
               'backend': 'unknown', 'frontend': 'unknown', 'services': 'unknown',
               'post_deployment': 'not_passed', 'environment_release': 'not_verified'}
@@ -106,21 +147,24 @@ def observe(event, env, policy, expected, latest, read, frontend_url, evidence_u
         sha = push_event(event, env, policy)
         report['git_commit'] = sha
         if latest() != sha:
-            report.update(state='superseded', reason='branch_advanced')
-            return report
+            return superseded(report)
         report['deployment'] = 'detected'
         require(frontend_url and evidence_url, 'owner_evidence_not_commissioned')
         last_error = 'deployment_timeout'
         for attempt in range(attempts):
             if latest() != sha:
-                report.update(state='superseded', reason='branch_advanced')
-                return report
+                return superseded(report)
             try:
-                receipt = read(evidence_url + '?revision=' + sha)
+                receipt = read(evidence_url.rstrip('/') + '/' + sha + '.json')
                 verify_receipt(receipt, env, sha, expected, policy, now())
                 report.update(backend='deployed', services='deployed')
                 front = read(frontend_url.rstrip('/') + '/deployment.json?revision=' + sha)
-                identity(front, env, sha, policy)
+                require(isinstance(front, dict), 'invalid_evidence')
+                served = revision(front.get('git_commit'))
+                identity(front, env, served, policy)
+                if served != sha:
+                    require(is_ancestor(served, sha), 'identity_mismatch')
+                    raise Pending('frontend_pending')
                 require(front.get('schema_version') == 1 and
                         isinstance(front.get('artifact_digest'), str) and
                         re.fullmatch(r'[0-9a-f]{64}', front['artifact_digest']) is not None, 'frontend_digest_missing')
@@ -134,18 +178,20 @@ def observe(event, env, policy, expected, latest, read, frontend_url, evidence_u
                 health = read(frontend_url.rstrip('/') + '/release-health.json?revision=' + sha)
                 require(health == {'git_commit': sha, 'healthy': True}, 'frontend_health_failed')
                 if latest() != sha:
-                    report.update(state='superseded', reason='branch_advanced')
-                    return report
-                report.update(state='pass', post_deployment='passed', environment_release='verified')
+                    return superseded(report)
+                report.update(state='pass', observed_at=now(), post_deployment='passed', environment_release='verified')
                 return report
             except Rejected as error:
                 last_error = str(error)
                 # Retry only bounded, read-only observation, never deployment operations.
-                if last_error not in ('transient_read_failed', 'identity_mismatch', 'receipt_expired'):
+                if not isinstance(error, Pending):
                     raise
                 if attempt + 1 < attempts:
                     pause(10)
-        raise Rejected(last_error)
+        if latest() != sha:
+            return superseded(report)
+        report['last_observation'] = last_error
+        raise Rejected('deployment_timeout')
     except Rejected as error:
         report['reason'] = str(error)
     except Exception:
@@ -170,7 +216,8 @@ def main():
             branch = target(args.environment, policy)['branch']
             return git('.', 'ls-remote', '--exit-code', 'origin', 'refs/heads/' + branch).decode().split()[0]
         report = observe(event, args.environment, policy, expected, latest, read_json,
-                         os.environ.get('M4_FRONTEND_ORIGIN'), os.environ.get('M4_EVIDENCE_URL'))
+                         os.environ.get('M4_FRONTEND_ORIGIN'), os.environ.get('M4_EVIDENCE_URL'),
+                         is_ancestor=lambda old, new: ancestor('.', old, new))
     except Rejected as error:
         report = {'state': 'failed', 'reason': str(error), 'environment_release': 'not_verified'}
     except Exception:

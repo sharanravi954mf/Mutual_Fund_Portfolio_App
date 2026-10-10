@@ -1,0 +1,13 @@
+{
+  "commissioned": false,
+  "environment": "dev",
+  "project_ref": "rskryngwzyuzmiwtriyy",
+  "repository": "/private/evidence-source",
+  "state_root": "/private/evidence-owner-state",
+  "report_root": "/private/published-backend-measurements",
+  "release_status_root": "/private/published-release-status",
+  "service_evidence_origin": "https://service-evidence.example.invalid/dev",
+  "frontend_origin": "https://frontend.example.invalid",
+  "supabase_cli": "/opt/supabase-2.115.0",
+  "supabase_cli_sha256": "REPLACE_WITH_REVIEWED_BINARY_SHA256"
+}

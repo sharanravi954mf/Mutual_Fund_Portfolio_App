@@ -127,3 +127,77 @@ platform override's TypeScript-only PromiseLike interface correction; it changes
 JavaScript behavior, authorization or RPC calls. The canonical develop checkout
 remains at the original SHA and clean. M4 is a reviewable local implementation,
 **not commissioned full-stack deployment automation**.
+
+## Review corrections — 2026-10-10
+
+Continued the existing candidate `d8eb4b9f02ae85e22903b6cc77d15e345d3d4ed4`
+in the same isolated worktree/branch. Did not recreate M4, update canonical develop,
+fetch a different base or publish anything. The sections above describe the original
+candidate; this correction implements the previously missing private evidence and
+service owners. Their live commissioning is still blocked.
+
+Existing-file baseline, recorded before these edits:
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -v`
+passed 56 tests; the equivalent commissioning command passed 34. New owner tests
+are not baseline evidence. Temporary logs for this execution are under
+`/tmp/moneybowl-m4-review/`; this versioned record is the durable result summary.
+
+| Command executed for this correction | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -v` | Final 108 passed, zero failed (56 existing plus 52 new); repeated after implementation changes |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -v` | 34 passed; baseline and final |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_validate_commits.py'` | 5 passed |
+| `env -u INGESTION_SUPPORT_BASE_URL PYTHONDONTWRITEBYTECODE=1 /tmp/moneybowl-m4-venv/bin/python -m pytest -vv` from `services/ingestion-support` | 194 passed, 1 live smoke test intentionally skipped; local harness permission enabled, hosted URL unset |
+| `PYTHONDONTWRITEBYTECODE=1 /tmp/b061-test-venv/bin/python -m pytest -q` from `services/outbox-dispatcher` | 63 passed; compatibility tests only, no dispatcher execution |
+| `/opt/moneybowl-toolchains/deno/2.9.6/aarch64-unknown-linux-gnu/deno test --deny-net --deny-env supabase/functions/outbox-dispatcher` | 88 passed, zero failed; includes HMAC readiness and bounded recovery tests |
+| `python3 tools/deployment/edge_entries.py > /tmp/moneybowl-m4-review/edge-entries.txt` then `while IFS= read -r entry; do /opt/moneybowl-toolchains/deno/2.9.6/aarch64-unknown-linux-gnu/deno check "$entry" \|\| exit 1; done < /tmp/moneybowl-m4-review/edge-entries.txt` | All 20 integration-declared entrypoints passed |
+| `python3 scripts/generate_outbox_routes.py --check` | All 17 canonical routes match |
+| `python3 .github/scripts/validate_migration_history.py` | All 27 frozen migrations unchanged |
+| `python3 .github/scripts/validate_docs.py` | Documentation/link audit passed |
+| `/tmp/moneybowl-m4-actionlint/actionlint -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml` | Passed with the previously documented narrow linter-version exception; no workflow edits in this correction |
+| `PYTHONPYCACHEPREFIX=/tmp/moneybowl-m4-review/pycache python3 -m py_compile tools/deployment/*.py` | Passed; cache outside source |
+| `python3 .github/scripts/validate_commits.py 'feat: complete private release owners and propagation verification'` | Passed |
+| `git diff d8eb4b9 -- supabase/migrations supabase/functions tools/commissioning services lib` | Empty: no changes to financial, migration, application or service runtime source |
+| `git diff --check` and `git diff --cached --check` | Passed |
+
+The final suites above total **492 passing tests, one intentional live-test skip**.
+The original candidate's full Flutter and SQL runs are historical evidence, not new
+executions in this correction. Those sources were unchanged. No Docker build, push,
+Compose deployment, systemd installation, hosted DB query, receipt endpoint probe or
+financial request was executed. CLI version/help and public vendor documentation
+were inspected without project credentials.
+
+During implementation, an initial synthetic full-sequence fixture used an expired
+service timestamp; the fixture was corrected to use the real freshness contract.
+An added check against all declared repository imports caught a parser matching a
+field named `effective_from`; the verifier was corrected to tokenize imports without
+matching prose/comments/strings. Final tests include the actual declared local import
+graph and computed-import denial. These resolved failures are not hidden as passes.
+
+New security/failure coverage includes delayed receipts, HTTP 404 and transient
+reads, partial components, immediate unauthorized/TLS/malformed/mismatched denial,
+bounded timeout, branch advancement, actual stored migration content, incomplete or
+changed function exports, unstable snapshots, project/mode/Cron/route mismatch,
+expired or missing service evidence, and removal/replacement of stale success reports.
+Private owner tests reject uncommissioned DEV, QA and Production targets before Docker
+access, secret build contexts, inherited backend process credentials, unsafe config
+permissions/paths, unapproved API operations, unsafe downloads, forged image provenance,
+multiple API containers, changed single-worker command, wrong daemon, infrastructure
+changes, enabled legacy restart owners, invalid running configuration and rollback.
+Concurrent owner calls build/activate only once; duplicate calls remeasure; failed
+builds do not activate; failed activation does not produce evidence or blind restart
+of a same-image unhealthy service. A fully mocked sequence runs service deployment,
+independent backend measurement and frontend verification before final PASS.
+
+These are synthetic interface tests, not real Management API/CLI export or Docker
+integration tests. Read-only schema/Cron permissions, historical migration statements,
+actual function export layout, Compose/plugin compatibility, private registry/image
+provenance adoption and TLS endpoint ownership need independent private provisioning
+and validation. The source is ready for independent security review; it is not
+security-approved or end-to-end commissioned. See the updated
+[precise commissioning dependencies and status matrix](MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
+QA remains disabled with no project, credential or branch provisioned. No Production
+access, live DEV changes, secret-value access/disclosure, M2A lifecycle operation,
+financial activation or legacy Oracle restart occurred. The canonical checkout remains
+clean at `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`.

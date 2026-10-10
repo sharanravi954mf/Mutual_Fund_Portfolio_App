@@ -1,6 +1,6 @@
 # MONEYBOWL M4 — unified environment promotion
 
-Status: implemented local review candidate; **end-to-end commissioning BLOCKED**.
+Status: corrected local review candidate, 2026-10-10; **end-to-end commissioning BLOCKED**.
 No hosted deployment was performed. Base `origin/develop` was fetched and verified
 at `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`. The canonical checkout was left intact.
 The user's commissioning context supersedes older M1/M2/M2A local-candidate notes:
@@ -21,7 +21,9 @@ flowchart TD
   Reconcile[Private host reconciliation timer] --> Flutter
   Develop --> Observer[Read-only M4 release observer]
   Supabase --> Proof[Independently measured owner evidence]
-  Services[Existing private service owner] --> Proof
+  Services[Private ingestion reconciliation timer] --> Proof
+  EvidenceTimer[Independent evidence timer] --> Proof
+  Proof --> PrivateReport[Recurring full release verification]
   Flutter --> Identity[Public deployment identity and asset hashes]
   Proof --> Observer
   Identity --> Observer
@@ -36,7 +38,8 @@ flowchart TD
 | --- | --- | --- | --- |
 | Migrations, declared Edge Functions, declared Storage | Existing private Supabase GitHub integration on `develop` | Future separately owned Supabase integration on `qa` | Observe only; no CLI deployments or admin credentials in Actions |
 | Flutter web | Existing Oracle webhook/spool and `deploy-develop.sh` | Future independent QA hosting runner | Versioned host adapter replaces the called deploy implementation after installation review; no second webhook consumer |
-| Ingestion support API, ClamAV, Caddy | Existing Oracle private Compose owner; automatic release owner not established by inspected files | Future private QA service owner | Immutable API override generator; running-service evidence mandatory; no automatic service restart installed |
+| Ingestion support API | Private existing Compose owner plus versioned reconciliation adapter | Future private QA service owner | Exact-source build, registry digest, API-only activation, measured verification; installation pending |
+| ClamAV and Caddy | Existing Oracle infrastructure owner | Independent QA infrastructure owner | Existing running configuration/images verified and preserved; infrastructure changes require separate review |
 | NSE financial dispatch | M2 native dispatcher inside Supabase | Disabled; independent schema/evidence commissioning needed | No lifecycle operations; preserve active DEV; Oracle dispatcher remains retired |
 | Director and host infrastructure | Separate owners | Separate owners | Outside application release; never deployed by M4 |
 
@@ -44,8 +47,8 @@ The ingestion application source, Dockerfile, dependencies, Compose files and
 Caddyfile are one hashed component. ClamAV/Caddy images and configuration are thus
 included in compatibility evidence; an unchanged API alone is insufficient when
 that component changes. The retired `services/outbox-dispatcher` is tested for
-compatibility but is deliberately never a deployable component. There is no
-claim that ingestion changes deploy automatically today.
+compatibility but is deliberately never a deployable component. The automatic ingestion owner is implemented locally; there is no
+claim that it is installed or deploying today.
 
 ## Exact Actions trigger graph
 
@@ -121,35 +124,85 @@ The observer requires a fresh HTTPS owner receipt (maximum age five minutes) for
 exact environment, project, branch and full merged SHA. Receipt URLs are repository
 owner-controlled public configuration, served by the independent private verification
 owner. Redirects, proxies, unbounded JSON and credentials in URLs are rejected.
-Only bounded transient or not-yet-current **reads** are retried (30 observations,
+HTTP 404, safe transient transport/408/429/5xx reads, explicit pending components,
+and a correctly bound frontend at a proven ancestor may be retried. HTTP 401/403,
+untrusted TLS, malformed/mismatched evidence and owner failures are permanent.
+Only bounded **reads** are retried (30 observations,
 ten-second interval, per-request ten-second timeout; workflow capped at 25 minutes).
 Migrations, financial operations and deployment writes are never retried by the observer.
 
-The backend evidence producer is **not commissioned or implemented against the live
-integration**. M4 defines and tests its consumer contract. A JSON document assembled
-from the requested SHA is not proof. Before enabling an endpoint the private owner
-must implement and independently validate all of the following measurements:
+The independent [evidence owner](../../tools/deployment/evidence_owner.py) and
+[Supabase measurement transport](../../tools/deployment/supabase_reader.py) are now
+implemented and synthetically tested. They are **not installed, provisioned or live
+certified**. The deployment integration remains the sole Supabase writer. The owner:
 
-- Confirm actual project identity and integration source revision through trusted
-  integration records; bind those records to the exact promoted revision.
-- Inspect applied migration history and stored migration content against all source
-  migration files, rejecting failed, missing, edited or unexplained extra migrations.
-- Download/inspect actual deployed bundles and deployment configuration for every
-  declared function, including shared imports, then compare against reviewed source.
-  Readiness responses or an integration check merely named “success” are insufficient.
-- Inspect the actual running ingestion image digest, immutable build provenance,
-  selected source paths, Compose/Caddy/ClamAV configuration and non-mutating readiness.
-  Image labels alone are not provenance. No provider or financial requests are health probes.
-- Confirm M1 project/NSE origin binding and policy, DEV dispatcher commissioning state
-  unchanged, one canonical recovery job, and Oracle retirement. QA must prove disabled
-  financial operation policy; use no M2A bootstrap/activation/rollback for routine releases.
+1. Fetches current `develop` into its own mirror; extracts that exact revision into
+   a temporary source tree. A requested SHA or CI result supplies expectations only.
+2. Reads actual migration versions and stored statements through the Management API's
+   read-only query endpoint. Requires the complete source history, no extra versions,
+   and equal tokenized SQL (comments/whitespace/separators ignored; literals and dollar
+   bodies preserved). Missing versions are pending; absent statements, changed content
+   or unexplained migrations fail. There is no history repair or migration execution.
+3. Lists deployed function IDs, versions, status and JWT configuration. Downloads each
+   declared function with the pinned Supabase CLI `functions download --use-api` into
+   an isolated temporary HOME. Compares actual exported local module bytes and their
+   import closure to Git. Extra functions, changed configuration, incomplete exports,
+   import maps/computed imports or source mismatches fail. Missing/deploying functions
+   remain pending. Re-reads the metadata and migration snapshots before certifying.
+4. Reads only the private project/control identity and canonical Cron projection;
+   calls HMAC-authenticated dispatcher **readiness**. Requires the exact project,
+   DEV active mode, 17 canonical routes and one active 15-minute recovery Cron.
+   The expected NSE origin is supported by the measured dispatcher/runtime source
+   and authenticated readiness validation; it is not a new provider/financial probe.
+5. Requires a fresh, independently controlled service-owner receipt with actual
+   image ID, registry digest, source provenance and measured Oracle retirement.
+   Missing service evidence cannot manufacture a retirement claim. Rechecks the
+   current branch and publishes sanitized `<sha>.json` atomically.
 
-An unchanged component may retain an older physical deployment only when independent
-measurement proves identical source content and compatibility with this requested
-revision. The receipt's `git_commit` describes the release being verified; it must
-never be represented as the component's physical deployment SHA. The integration
-owner must retain actual deployment IDs, migration records and image provenance in
-private audit storage and bind their measurements to this receipt.
+The receipt includes a digest of the actual migration/metadata snapshot, not raw SQL,
+function bodies, environment values or credentials. Source digests are emitted only
+following the comparisons above. Unavailable evidence yields 404 or explicit pending
+components; unauthorized/malformed/unverifiable measurements yield a bound failure.
+A mismatch is not retried within the observer as propagation. The next private timer
+cycle remeasures actual state, allowing independent owners to finish convergence.
+This may produce a failed Actions observation while an older backend is still serving;
+only a later successful measurement can replace that conclusion for the new snapshot.
+
+An unchanged Supabase component may retain an older physical deployment when actual
+content matches the approved revision. `git_commit` means the release whose content
+was measured, **not** an invented provider deployment SHA. Actual migration records
+and function metadata remain the provider's authoritative audit records. The owner
+hashes their measured snapshot; private audit retention can archive these records
+under separately reviewed data policy. The receipt does not assert that a provider
+exposes a trustworthy Git SHA when it does not.
+
+Measurement prerequisites are deliberately fail-closed:
+
+- A privately provisioned, project-scoped Management read capability must permit
+  `edge_functions_read` and `database_read`, including the exact migration history,
+  `moneybowl_dispatch.commission_identity`, `moneybowl_dispatch.control`, and the
+  canonical `cron.job` projection in `supabase_reader.py`. The documented read-only
+  endpoint is beta and runs as `supabase_read_only_user`. Private-schema permissions,
+  RLS and Cron visibility may prevent these measurements on existing DEV. **No grants,
+  administrator fallback or bypass are installed here.** If direct read-only access
+  cannot be commissioned safely, review a minimal private measurement projection and
+  adapter change independently. Do not substitute the write-capable query endpoint.
+- Verify the pinned CLI's real exported module layout/content on the private project.
+  Synthetic exports do not establish actual bundle round-trip compatibility. Any
+  normalization/unsupported import map requires a reviewed verifier extension, never
+  accepting only an entrypoint hash. Remote dependencies retain the Supabase platform
+  resolver and approved source pinning trust boundary; they are not independently
+  downloaded or execution-attested by this adapter.
+- Applied migration statements must actually be retained. Missing historical content
+  requires independent provider/audit evidence and a separately reviewed adapter;
+  never stamp Git's requested content into history and call it measurement.
+- The readiness HMAC capability is provisioned only to the private evidence owner via
+  systemd credentials. Its installed code signs only `kind=readiness`. The key's wider
+  signing authority makes this owner a privileged trust boundary: no PR execution,
+  shared Actions runner, public build or mutable application controller may receive it.
+
+Primary contracts: [read-only Management query](https://supabase.com/docs/reference/api/v1-read-only-query)
+and [deployed function inventory](https://supabase.com/docs/reference/api/v1-list-all-functions).
 
 The exact receipt JSON shape is exercised in
 [synthetic tests](../../tools/deployment/test_deployment.py). Required fields:
@@ -184,7 +237,10 @@ environment release verified. Only `state=pass` means environment PASS. `superse
 exits successfully as an observer completion but always retains
 `environment_release=not_verified`; it is not deployment success. Partial deployment
 may exist after failure and is reported by stage. No status is synthesized from CI.
-The Actions summary and 30-day JSON artifact are the consolidated record; setup or
+The Actions summary and 30-day JSON artifact record that observation; the private
+evidence timer publishes an independent timestamped full-release report after later
+convergence. Old snapshots are not current health proof; verify freshness and branch
+identity before relying on either. The original Actions result is not rewritten; setup or
 observer termination produces an explicit failure fallback. Infrastructure cancellation
 may prevent artifact upload; a cancelled job is never evidence of deployment.
 
@@ -194,7 +250,7 @@ may prevent artifact upload; a cancelled job is never evidence of deployment.
 | --- | --- | --- |
 | `tools/deployment/environments.json` | Reviewed source | Environment branch/project/financial policy; QA disabled |
 | `M4_DEV_FRONTEND_ORIGIN` | Repository public variable | Exact HTTPS DEV frontend origin |
-| `M4_DEV_EVIDENCE_URL` | Repository public variable | Independent read-only receipt endpoint; no query/credentials |
+| `M4_DEV_EVIDENCE_URL` | Repository public variable | Independent HTTPS backend receipt base directory; append `/<sha>.json`, no query/credentials |
 | `M4_QA_FRONTEND_ORIGIN`, `M4_QA_EVIDENCE_URL` | Future owner public variables | Future public or sanitized QA evidence; not credentials |
 | Host config `environment`, `host_authority`, `repository`, `release_root`, `flutter`, `public_defines`, `frontend_origin` | Private environment host | Explicit deployment paths/ownership; never source shell env files |
 | `MONEYBOWL_ENV` | Public Flutter JSON | `dev` or `qa`; frontend Production convention remains `prod` but unsupported here |
@@ -235,19 +291,69 @@ One-time DEV installation is a **separate authorized host change**, not executed
    drives the same latest-revision adapter and lock, not another webhook consumer.
    It is necessary because the old spool moves failed batches out of its queue and
    does not itself retry; it also covers lost deliveries and busy-branch exhaustion.
-6. Commission the existing ingestion deployment owner separately. Use
-   `service_manifest.py` to generate a JSON Compose override for an approved immutable
-   `registry/path@sha256:<64hex>` image, exact revision, environment and one API replica.
-   Build provenance must bind the image to the reviewed source. Apply through that
-   owner's existing Compose project and private configuration using `--no-build` and
-   the explicit `api` service. Preserve volumes and Caddy/ClamAV ownership. Never
-   enable `outbox-dispatch` profiles. Generator success means **manifest prepared**,
-   not deployment. No new service deployment command runs in Actions or the host adapter.
-7. Commission and certify the evidence producer described above; set only the public
-   observer variables. Verify an approved merge through every deployed component,
-   public assets, receipts and final Actions report. Exercise failed build, missing
-   integration evidence, duplicate delivery and rapid successive merges in a safe
-   host staging area. Record the complete live receipt before declaring DEV commissioned.
+6. Stage the [ingestion owner](../../tools/deployment/ingestion_owner.py) separately
+   using the [disabled example](../../tools/deployment/ingestion-owner.example.json).
+   Inventory the existing Compose project, private `.env`, data volumes, daemon ID,
+   Caddy/ClamAV containers, legacy dispatcher container names and masked restart units.
+   Bind an unlabelled legacy API image to its independently verified original revision
+   and image ID. Do not infer that revision from the next requested release.
+   Pin Docker/systemctl binaries by SHA-256; pin/review the Compose plugin installation
+   too (plugin byte pinning is an installation responsibility). Privately provision
+   registry auth and exact registry repository. This owner has Docker socket access,
+   a root-equivalent capability; isolate it from app users and shared Actions.
+7. Review the ingestion [service](../../tools/deployment/moneybowl-ingestion-owner.service)
+   and [timer](../../tools/deployment/moneybowl-ingestion-owner.timer). They converge
+   the latest branch every 60 seconds after completion, through one private flock.
+   Build the exact archived service source with no private context or build args,
+   capture Docker's image ID, push to the private registry and bind its immutable
+   repository digest in the private ledger. Verify image labels **and** that ledger.
+   Generate the existing immutable override; execute only Compose `up` for `api`
+   with `--no-deps --no-build --pull never --scale api=1 --wait`. There is no `down`,
+   orphan removal, volume deletion, legacy dispatch profile, or dependency restart.
+   API readiness is non-financial. Verify running image/configuration, the exact
+   single-worker command and absent entrypoint override, one API container,
+   unchanged Caddy/ClamAV IDs/images/config hashes and retirement before publishing.
+   Source changes to Compose/Caddy fail for separate infrastructure review, rather
+   than pretending undeployed infrastructure changes succeeded. Preserve all data.
+8. Stage the [evidence configuration](../../tools/deployment/evidence-owner.example.json),
+   [service](../../tools/deployment/moneybowl-evidence-owner.service) and
+   [timer](../../tools/deployment/moneybowl-evidence-owner.timer) in its own private
+   measurement environment. Provision the capabilities listed above, read-only Git
+   mirror and pinned Supabase CLI 2.115.0 binary. The ingestion and evidence owners
+   use separate mirrors/state/locks; neither shares credentials with the frontend.
+   Example configurations remain `commissioned: false`; private reviewed configs
+   need `true` plus the already reviewed DEV-only policy.
+9. Set config files to 0600 and keep installed code, parent directories, credential
+   directories, private state/ledger and source mirrors writable only by their owners.
+   Symlinked config/working roots and roots inside the application repository fail.
+   Serve only sanitized backend/service/final-status directories over independently
+   controlled TLS with `Cache-Control: no-store`. Give the web server read access to
+   these report directories only; keep provenance, temporary output and credentials
+   private. Atomic files use 0644 inside those protected directories. Do not put
+   receipts in a frontend-writable release root. Mirror authentication must be
+   read-only and host-owned; public source tests use only disposable local Git.
+10. Configure service receipt base URL in the private evidence config, frontend
+    origin and separate final-status root. Set Actions' public DEV variables only
+    after authentic endpoint ownership is independently established. All backend and
+    service URLs resolve as `<base>/<full-sha>.json`. Missing files must return real
+    404, not an HTML fallback or stale cached success. The evidence timer also runs
+    full frontend/asset checks and writes `<release_status_root>/<sha>.json` after
+    measurement. Monitor this independent report as well as Actions.
+11. Safely stage duplicate calls, failed build, invalid receipts, stale revisions and
+    rapid merges. With separate deployment authorization, verify one approved merge
+    across the existing Supabase integration, frontend adapter, ingestion owner and
+    both reporting paths. Retain exact live receipts and branch/revision identity.
+    No timer or service in this procedure was installed or executed against DEV here.
+
+Automatic convergence after commissioning is: approved branch update independently
+reaches the existing Supabase integration and webhook; the frontend timer covers lost
+spool deliveries; the ingestion timer fetches the latest approved branch; the evidence
+timer waits by remeasurement and publishes full status after all components match.
+No new webhook consumer exists. Shared Actions only observes; it cannot operate any
+private owner. A finite Actions timeout remains failed even if a later timer verifies
+the release. The later timestamped private result is separate evidence, with
+`code_validated=not_observed`; it never rewrites CI or fabricates an approval check.
+Repository branch rules remain the authority that makes a branch revision approved.
 
 ## Races, failures, recovery and rollback
 
@@ -314,17 +420,18 @@ No QA administrator credential is needed to run synthetic tests or the shared wo
 | Capability | Implemented | Locally tested | Already live evidence | Pending |
 | --- | --- | --- | --- | --- |
 | Feature/PR CI and QA compatibility | Yes | Synthetic and repository regressions | Not published | Review, publication, required branch checks |
-| Existing DEV Supabase deployment | Existing integration retained | Migration and Edge regressions | User-supplied working DEV context | Independent revision attestor and live M4 release certification |
+| Existing DEV Supabase deployment | Existing integration retained; independent measurement adapter implemented | Mock API/export comparisons and repository regressions | User-supplied working integration; no M4 receipt | Private read permissions, export compatibility, HMAC readiness capability, installation and live certification |
 | Existing DEV Flutter/webhook | Existing working scripts inspected read-only | New adapter filesystem/process tests | User-supplied existing deployment context | Reviewed wrapper/timer installation and public identity upgrade |
-| Ingestion service promotion | Immutable override generator | Generator and existing service regressions | Repository records hosted DEV service | Automatic private service owner, provenance and receipt producer |
-| Consolidated status | Observer/workflow implemented | Positive, negative and timeout tests | None from this implementation | Trustworthy receipt endpoint and full live verification |
+| Ingestion service promotion | Immutable manifest, private build/deploy/verify adapter and timer examples | Mock Docker/provenance/race/failure tests; 194 service tests | Repository records hosted DEV service; new adapter not installed | Registry, baseline/daemon binding, private config, controlled installation and real verification |
+| Consolidated status | Bounded observer plus independent recurring backend/full-release evidence owner | Delayed/partial/404/permanent/race tests and synthetic full sequence | None from this implementation | Private measurement capabilities, receipt hosting, timer installation and full live verification |
 | QA deployment framework | Shared code, disabled policy | Synthetic isolated QA success/denial | No QA environment | All independent private commissioning |
 | Financial state preservation | No mutation interfaces in M4 | Existing M1/M2/M2A safety/SQL tests | User reports DEV active, one Cron, Oracle retired | Live release preservation measurement by private owner |
 
-No local test is hosted deployment evidence. “M4 implementation readiness” remains
-BLOCKED for the operational objective until the deployment owners and independent
-verification are commissioned. Code may be reviewed as a local implementation
-candidate without claiming the zero-command full-stack path is complete.
+Local implementation is ready for independent security review, not security-approved.
+End-to-end live commissioning remains **BLOCKED** by the explicit private prerequisites
+above. No local test is hosted deployment evidence or establishes operational completion.
+The Management read permissions, deployed export format, actual Docker/Compose behavior,
+real endpoint ownership and Actions execution remain unverified runtime assumptions.
 
 Current references: [Supabase integration ownership and scope](https://supabase.com/docs/guides/deployment/branching/github-integration)
 and [GitHub concurrency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).

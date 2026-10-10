@@ -9,6 +9,17 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 review corrections — 2026-10-10
+
+- Corrected bounded deployment propagation observation; permanent invalid evidence
+  and timeouts never become PASS.
+- Implemented private read-only Supabase evidence production, controlled ingestion
+  image deployment/verification and recurring independent full-release reporting.
+- Added synthetic owner transport, provenance, concurrency and security coverage.
+  No private capabilities provisioned, services installed or live deployments made.
+  Independent security review and end-to-end live commissioning remain separate;
+  see [M4 runbook and status matrix](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
 ## M4 local implementation candidate — 2026-10-09
 
 - Added shared promotion/release contracts, immutable frontend host adapter,
