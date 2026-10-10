@@ -150,7 +150,7 @@ certified**. The deployment integration remains the sole Supabase writer. The ow
    import maps/computed imports or source mismatches fail. Missing/deploying functions
    remain pending. Re-reads the metadata and migration snapshots before certifying.
 4. Reads only the private project/control identity and canonical Cron projection;
-   calls HMAC-authenticated dispatcher **readiness**. Requires the exact project,
+   calls dispatcher **readiness** with a separately provisioned readiness-only HMAC key. Requires the exact project,
    DEV active mode, 17 canonical routes and one active 15-minute recovery Cron.
    The expected NSE origin is supported by the measured dispatcher/runtime source
    and authenticated readiness validation; it is not a new provider/financial probe.
@@ -196,10 +196,54 @@ Measurement prerequisites are deliberately fail-closed:
 - Applied migration statements must actually be retained. Missing historical content
   requires independent provider/audit evidence and a separately reviewed adapter;
   never stamp Git's requested content into history and call it measurement.
-- The readiness HMAC capability is provisioned only to the private evidence owner via
-  systemd credentials. Its installed code signs only `kind=readiness`. The key's wider
-  signing authority makes this owner a privileged trust boundary: no PR execution,
-  shared Actions runner, public build or mutable application controller may receive it.
+- `OUTBOX_READINESS_KEY` is a separate, independently generated readiness-only
+  credential. M4 never receives `OUTBOX_NOTIFICATION_KEY`, the database service-role
+  key or the worker token. The new key is optional at dispatcher startup: leaving it
+  absent preserves existing M2/M2A operation; dedicated M4 authentication fails closed.
+  When configured it must be 32–4096 printable non-space ASCII characters, distinct
+  from all three existing credentials. Invalid or reused configured values fail
+  dispatcher configuration, so never provision a blank/example placeholder.
+  The property is non-enumerable and never included in diagnostics.
+
+## Readiness-only authentication and private commissioning
+
+Legacy M2/M2A readiness, event and recovery signatures retain `x-outbox-signature`
+and the unchanged canonical signing input. M4 exclusively sends
+`x-outbox-readiness-signature`, signing `moneybowl-readiness-v1|` followed by the
+same canonical readiness envelope. This header is accepted only on the two explicit
+readiness route aliases. Mixed headers fail; no fallback to legacy signing occurs.
+Even fresh, otherwise valid event/recovery envelopes signed with the compromised
+readiness key fail under either header/signing scheme. Successful readiness returns
+before any RPC, admission, continuation or worker request.
+
+Before enabling evidence production, separately authorize and review these steps:
+
+1. Publish/deploy the reviewed dispatcher code through its existing Supabase owner.
+   Deployment alone does not need the new secret or change DEV mode, Cron, routes,
+   Vault notification key, or M2A commissioning state. Do not bootstrap, activate,
+   roll back or rotate dispatch as part of this change.
+2. Generate a new independent random readiness secret in the private commissioning
+   environment (at least 32 random bytes, encoded as hex, is suitable). Provision
+   it as the DEV Edge secret `OUTBOX_READINESS_KEY` and as the evidence service's
+   `LoadCredential=readiness-only-key:/private/credentials/m4-readiness-only-key`.
+   Use the environment owner's reviewed secret-management process. Do not retrieve,
+   copy, derive from or redistribute any existing notification/worker/database key.
+   No credential goes to Git, Actions, Flutter, receipts or logs. Supabase's
+   [Edge secret configuration](https://supabase.com/docs/guides/functions/secrets)
+   is the provider interface; no provisioning command is run by M4.
+3. Do not carry forward the former `readiness-key` credential file or service mapping.
+   This controller reads only `readiness-only-key` and fails if it is absent or
+   malformed; it never falls back to a notification credential or environment variable.
+   Independently verify the evidence environment has no notification signing secret.
+   Any cleanup of an earlier installation requires separate owner authorization.
+4. Keep evidence production disabled until its separate Management read capability,
+   actual export/history measurements and dedicated readiness response are verified.
+   Confirm readiness returns the existing DEV active mode/project/17 routes and the
+   independent read-only Cron measurement is unchanged. The negative financial-path
+   tests are synthetic: commissioning does not need event/recovery or financial probes.
+5. Enable the private owner/timer only through the separately reviewed installation
+   procedure below. Archive sanitized measurement evidence, not credentials. QA needs
+   its own independently provisioned key and remains disabled in this implementation.
 
 Primary contracts: [read-only Management query](https://supabase.com/docs/reference/api/v1-read-only-query)
 and [deployed function inventory](https://supabase.com/docs/reference/api/v1-list-all-functions).
@@ -294,7 +338,7 @@ One-time DEV installation is a **separate authorized host change**, not executed
 6. Stage the [ingestion owner](../../tools/deployment/ingestion_owner.py) separately
    using the [disabled example](../../tools/deployment/ingestion-owner.example.json).
    Inventory the existing Compose project, private `.env`, data volumes, daemon ID,
-   Caddy/ClamAV containers, legacy dispatcher container names and masked restart units.
+   Caddy/ClamAV containers, the fixed DEV retirement inventory below and its independently verified full container ID.
    Bind an unlabelled legacy API image to its independently verified original revision
    and image ID. Do not infer that revision from the next requested release.
    Pin Docker/systemctl binaries by SHA-256; pin/review the Compose plugin installation
@@ -354,6 +398,37 @@ private owner. A finite Actions timeout remains failed even if a later timer ver
 the release. The later timestamped private result is separate evidence, with
 `code_validated=not_observed`; it never rewrites CI or fabricates an approval check.
 Repository branch rules remain the authority that makes a branch revision approved.
+
+## DEV Oracle retirement boundary
+
+The private ingestion owner requires this exact versioned inventory; config omissions
+or substitutions cannot waive it. The example remains uncommissioned and requires
+`retired_container_id` to be independently bound to the actual 64-hex stopped object.
+No live object was inspected to prepare that example.
+
+| Artifact | Required measured state |
+| --- | --- |
+| `moneybowl-ingestion-support-outbox-dispatcher-1` | Same full container ID; `Status=exited`, PID zero, Running/Restarting/Paused/Dead false, Docker restart policy `no`, expected Compose project/service labels |
+| `moneybowl-outbox-dispatcher-reconcile.service` | Persistent unit-file state `masked`, load state `masked`, active state `inactive`, substate `dead` |
+| `moneybowl-outbox-dispatcher-reconcile@.service` | Persistent unit-file state `masked`; all discovered concrete instances also persistently masked and inactive/dead |
+| `moneybowl-outbox-dispatcher-reconcile.timer` | Unit-file state `disabled`, load state `loaded`, active state `inactive`, substate `dead` |
+
+The checks use only Docker inspect/list and systemctl list/show operations. Missing
+containers/units, temporary masks (`masked-runtime`), failed/active/unknown states,
+duplicate/missing properties, unexpected dispatcher containers or reconciliation
+units, and command errors fail closed. The template is checked as a unit file;
+loaded instances and instance-specific files are enumerated so a masked template
+cannot hide a still-running or unmasked instance. A masked timer is not substituted
+for the commissioned disabled/inactive timer contract.
+
+Retirement gates run before building, before activation and before publishing success.
+Application activation selects only `api` with `--no-deps`; no retirement remediation,
+systemd mutation or dispatcher start command exists in this owner. A failing final
+measurement withholds PASS without restarting or rolling back dispatch. These are
+snapshots, not protection against a privileged host actor changing state between
+checks. Independent host ownership and commissioning remain necessary. QA retirement
+ownership is not inferred from DEV: the concrete Docker adapter rejects QA until a
+separate reviewed retirement inventory/verification contract is implemented.
 
 ## Races, failures, recovery and rollback
 
@@ -420,7 +495,7 @@ No QA administrator credential is needed to run synthetic tests or the shared wo
 | Capability | Implemented | Locally tested | Already live evidence | Pending |
 | --- | --- | --- | --- | --- |
 | Feature/PR CI and QA compatibility | Yes | Synthetic and repository regressions | Not published | Review, publication, required branch checks |
-| Existing DEV Supabase deployment | Existing integration retained; independent measurement adapter implemented | Mock API/export comparisons and repository regressions | User-supplied working integration; no M4 receipt | Private read permissions, export compatibility, HMAC readiness capability, installation and live certification |
+| Existing DEV Supabase deployment | Existing integration retained; independent measurement adapter implemented | Mock API/export comparisons and repository regressions | User-supplied working integration; no M4 receipt | Private read permissions, export compatibility, Independent readiness-only key, installation and live certification |
 | Existing DEV Flutter/webhook | Existing working scripts inspected read-only | New adapter filesystem/process tests | User-supplied existing deployment context | Reviewed wrapper/timer installation and public identity upgrade |
 | Ingestion service promotion | Immutable manifest, private build/deploy/verify adapter and timer examples | Mock Docker/provenance/race/failure tests; 194 service tests | Repository records hosted DEV service; new adapter not installed | Registry, baseline/daemon binding, private config, controlled installation and real verification |
 | Consolidated status | Bounded observer plus independent recurring backend/full-release evidence owner | Delayed/partial/404/permanent/race tests and synthetic full sequence | None from this implementation | Private measurement capabilities, receipt hosting, timer installation and full live verification |

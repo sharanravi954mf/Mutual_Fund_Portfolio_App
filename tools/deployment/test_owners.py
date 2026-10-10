@@ -12,7 +12,8 @@ from unittest.mock import patch
 from contract import DEV_PROJECT, Rejected, load_policy, manifest
 from evidence_owner import (dispatcher_measurement, function_index, measure, produce,
                             publish_release, sql_tokens, verify_files, verify_migrations, module_specifiers)
-from ingestion_owner import API_COMMAND, DockerOwner, reconcile
+from ingestion_owner import (API_COMMAND, DEV_RECONCILER, DEV_RETIRED_CONTAINER,
+                             DEV_RETIRED_SERVICES, DEV_RETIRED_TIMER, DockerOwner, reconcile)
 from observe import Pending, observe, read_json
 from owner_common import Command, binding, envelope, private_config
 from supabase_reader import CONTROL, MIGRATIONS, SupabaseReader
@@ -354,6 +355,21 @@ class IngestionTests(SourceFixture):
         self.assertTrue(all(r['state'] == 'deployed' for r in results))
         self.assertEqual(self.docker.calls.count('build'), 1); self.assertEqual(self.docker.calls.count('activate'), 1)
 
+    def test_retirement_failure_at_each_gate_blocks_success(self):
+        for gate in (1, 2, 3):
+            self.config['state_root'] = str(self.root / ('state-gate-' + str(gate)))
+            self.docker = FakeDocker(); count = 0
+            def infrastructure(source):
+                nonlocal count
+                count += 1
+                if count == gate: raise Rejected('legacy_restart_owner_enabled')
+                return copy.deepcopy(self.docker.before)
+            with patch.object(self.docker, 'infrastructure', side_effect=infrastructure):
+                with self.assertRaisesRegex(Rejected, 'legacy_restart_owner_enabled'): self.run_owner()
+            self.assertEqual(self.docker.calls.count('activate'), 1 if gate == 3 else 0)
+            report = json.loads((Path(self.config['report_root']) / (self.sha + '.json')).read_text())
+            self.assertEqual(report['state'], 'failed')
+
     def test_complete_synthetic_sequence_to_independent_full_status(self):
         self.run_owner()
         def service_read(sha): return json.loads((Path(self.config['report_root']) / (sha + '.json')).read_text())
@@ -413,6 +429,8 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(url.endswith('/outbox-dispatcher/readiness'))
         self.assertEqual(body['kind'], 'readiness'); self.assertIsNone(body['event_outbox_id'])
         self.assertNotIn('Authorization', headers)
+        self.assertIn('x-outbox-readiness-signature', headers)
+        self.assertNotIn('x-outbox-signature', headers)
         with self.assertRaises(Rejected): reader.readiness('PROD')
 
     def test_function_download_is_explicit_project_read_with_private_temp_output(self):
@@ -446,8 +464,9 @@ class TransportTests(unittest.TestCase):
     def docker(self, command):
         return DockerOwner(dict(compose_project='moneybowl-ingestion-support', image_repository='registry.invalid/api',
                                  compose_root='/synthetic/compose', compose_env='/synthetic/private.env',
-                                 docker_socket='unix:///var/run/docker.sock', retired_containers=['old-dispatcher'],
-                                 retired_units=['old-dispatcher.service']), command=command)
+                                 docker_socket='unix:///var/run/docker.sock', environment='dev',
+                                 retired_containers=[DEV_RETIRED_CONTAINER], retired_container_id='c' * 64,
+                                 retired_services=DEV_RETIRED_SERVICES.copy(), retired_timers=[DEV_RETIRED_TIMER]), command=command)
 
     def test_only_api_is_selected_and_environment_is_not_printed(self):
         calls = []
@@ -530,15 +549,145 @@ class TransportTests(unittest.TestCase):
              patch.object(owner, 'config_hash', return_value='correct'):
             with self.assertRaisesRegex(Rejected, 'running_configuration_drift'): owner.verified(proof, '/synthetic')
 
-    def test_retired_container_restart_policy_and_units_are_checked(self):
-        owner = self.docker(lambda argv, **kw: b'old-dispatcher\n' if '{{.Names}}' in argv else b'')
-        with patch.object(owner, 'container', return_value={'state': {'Running': False}, 'restart': 'always'}):
-            with self.assertRaisesRegex(Rejected, 'legacy_dispatcher_not_retired'): owner.retirement()
-        def command(argv, **kw):
-            if 'show' in argv: return b'LoadState=loaded\nActiveState=inactive\nUnitFileState=enabled\n'
-            return b''
-        owner = self.docker(command)
+    def retirement_fixture(self):
+        state = {
+            'container': dict(id='c' * 64, restart='no', state=dict(Status='exited', Pid=0,
+                              Running=False, Restarting=False, Paused=False, Dead=False),
+                              labels={'com.docker.compose.project': 'moneybowl-ingestion-support',
+                                      'com.docker.compose.service': 'outbox-dispatcher'}),
+            'files': {**{unit: 'masked' for unit in DEV_RETIRED_SERVICES}, DEV_RETIRED_TIMER: 'disabled'},
+            'units': {unit: dict(Id=unit, LoadState='loaded' if unit == DEV_RETIRED_TIMER else 'masked',
+                                ActiveState='inactive', SubState='dead',
+                                UnitFileState='disabled' if unit == DEV_RETIRED_TIMER else 'masked')
+                      for unit in (DEV_RETIRED_SERVICES[0], DEV_RETIRED_TIMER)},
+            'ids': ['c' * 64], 'loaded': [], 'calls': [],
+        }
+        def command(argv, **kwargs):
+            state['calls'].append(argv)
+            if 'inspect' in argv:
+                if state['container'] is None: raise Rejected('owner_command_failed')
+                return json.dumps(state['container']).encode()
+            if 'ps' in argv: return ' '.join(state['ids']).encode()
+            if 'list-unit-files' in argv:
+                return state.get('files_raw', ''.join(f'{unit} {value} -\n' for unit, value in state['files'].items())).encode()
+            if 'list-units' in argv:
+                return ''.join(f'{unit} loaded inactive dead synthetic\n' for unit in state['loaded']).encode()
+            if 'show' in argv:
+                unit = argv[argv.index('show') + 1]
+                return state.get('show_raw', ''.join(f'{k}={v}\n' for k, v in state['units'][unit].items())).encode()
+            raise AssertionError('unexpected command')
+        return self.docker(command), state
+
+    def test_explicit_dev_retirement_inventory_is_measured_with_reads_only(self):
+        owner, state = self.retirement_fixture()
+        self.assertEqual(owner.retirement(), 'retired')
+        self.assertFalse(any(set(argv) & {'start', 'stop', 'restart', 'disable', 'mask', 'update', 'up'}
+                             for argv in state['calls']))
+        self.assertTrue(any('list-unit-files' in argv for argv in state['calls']))
+
+    def test_retirement_inventory_cannot_omit_or_substitute_known_dev_owners(self):
+        for key, value in (('retired_containers', []), ('retired_services', DEV_RETIRED_SERVICES[:1]),
+                           ('retired_timers', []), ('retired_container_id', ''), ('environment', 'qa')):
+            owner, state = self.retirement_fixture(); owner.config[key] = value
+            with self.subTest(key=key), self.assertRaises(Rejected): owner.retirement()
+            self.assertEqual(state['calls'], [])
+
+    def test_missing_replaced_running_or_restartable_dispatcher_fails(self):
+        for field, value in [('container', None), ('id', 'd' * 64), ('restart', 'always'),
+                             ('Running', True), ('Restarting', True), ('Paused', True), ('Dead', True),
+                             ('Status', 'created'), ('Pid', 55)]:
+            owner, state = self.retirement_fixture()
+            if field == 'container': state['container'] = value
+            elif field in ('id', 'restart'): state['container'][field] = value
+            else: state['container']['state'][field] = value
+            with self.subTest(field=field), self.assertRaises(Rejected): owner.retirement()
+
+    def test_unexpected_dispatcher_and_missing_measurement_fail(self):
+        owner, state = self.retirement_fixture(); state['ids'].append('d' * 64)
+        with self.assertRaisesRegex(Rejected, 'unexpected_legacy_dispatcher'): owner.retirement()
+        owner, state = self.retirement_fixture(); del state['container']['state']['Restarting']
+        with self.assertRaisesRegex(Rejected, 'legacy_dispatcher_not_retired'): owner.retirement()
+
+    def test_both_reconciliation_services_must_be_persistently_masked(self):
+        for unit in DEV_RETIRED_SERVICES:
+            for value in ('enabled', 'disabled', 'masked-runtime', 'not-found'):
+                owner, state = self.retirement_fixture(); state['files'][unit] = value
+                with self.subTest(unit=unit, value=value), self.assertRaises(Rejected): owner.retirement()
+            owner, state = self.retirement_fixture(); del state['files'][unit]
+            with self.assertRaisesRegex(Rejected, 'retirement_units_unverifiable'): owner.retirement()
+
+    def test_timer_must_be_disabled_loaded_and_inactive(self):
+        for value in ('enabled', 'enabled-runtime', 'masked', 'masked-runtime', 'static'):
+            owner, state = self.retirement_fixture(); state['files'][DEV_RETIRED_TIMER] = value
+            with self.subTest(value=value), self.assertRaises(Rejected): owner.retirement()
+        for key, value in [('ActiveState', 'active'), ('ActiveState', 'failed'), ('LoadState', 'not-found'),
+                           ('SubState', 'waiting'), ('UnitFileState', 'enabled'), ('Id', 'other.timer')]:
+            owner, state = self.retirement_fixture(); state['units'][DEV_RETIRED_TIMER][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(Rejected): owner.retirement()
+
+    def test_active_instance_cannot_hide_behind_masked_template(self):
+        owner, state = self.retirement_fixture(); unit = DEV_RECONCILER + '@' + A + '.service'
+        state['loaded'].append(unit)
+        state['units'][unit] = dict(Id=unit, LoadState='masked', ActiveState='active',
+                                   SubState='running', UnitFileState='masked')
         with self.assertRaisesRegex(Rejected, 'legacy_restart_owner_enabled'): owner.retirement()
+        state['units'][unit].update(ActiveState='inactive', SubState='dead')
+        self.assertEqual(owner.retirement(), 'retired')
+        state['files'][unit] = 'enabled'
+        with self.assertRaisesRegex(Rejected, 'legacy_restart_owner_enabled'): owner.retirement()
+
+    def test_retirement_malformed_duplicate_or_missing_unit_properties_fail(self):
+        for raw in ('', 'ActiveState=inactive\n', 'broken',
+                    'ActiveState=inactive\nActiveState=inactive\n'):
+            owner, state = self.retirement_fixture(); state['show_raw'] = raw
+            with self.subTest(raw=raw), self.assertRaises(Rejected): owner.retirement()
+        for raw in ('', 'broken', DEV_RETIRED_SERVICES[0] + ' masked\n' + DEV_RETIRED_SERVICES[0] + ' masked\n'):
+            owner, state = self.retirement_fixture(); state['files_raw'] = raw
+            with self.subTest(raw=raw), self.assertRaises(Rejected): owner.retirement()
+        owner, state = self.retirement_fixture(); state['files'][DEV_RECONCILER + '-unknown.service'] = 'masked'
+        with self.assertRaisesRegex(Rejected, 'unexpected_retirement_unit'): owner.retirement()
+
+    def test_missing_or_invalid_readiness_only_credential_never_reads_or_falls_back(self):
+        for secret in (None, '', 'short', ' ' * 32, 'é' * 32, 'x' * 32 + '\n', 'x' * 4097):
+            calls = []
+            with self.subTest(secret_type=type(secret).__name__), self.assertRaisesRegex(Rejected, 'readiness_only_capability_missing'):
+                SupabaseReader({'project_ref': DEV_PROJECT}, 'synthetic-token', secret,
+                               request=lambda *a: calls.append(a), command=lambda *a, **k: b'')
+            self.assertEqual(calls, [])
+        reader = SupabaseReader({'project_ref': DEV_PROJECT}, 'synthetic-token', 'k' * 32,
+                                request=lambda *a: (_ for _ in ()).throw(Rejected('measurement_http_rejected')),
+                                command=lambda *a, **k: b'')
+        with self.assertRaisesRegex(Rejected, 'measurement_http_rejected'): reader.readiness('DEV')
+
+    def test_evidence_cli_will_not_load_legacy_readiness_credential(self):
+        import contextlib
+        import io
+        from evidence_owner import main
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'measurement-token').write_text('synthetic-token')
+            (Path(tmp) / 'readiness-key').write_text('synthetic-old-key-must-not-be-read')
+            config = dict(environment='dev', project_ref=DEV_PROJECT, commissioned=True,
+                          frontend_origin='https://frontend.invalid', release_status_root=tmp)
+            output = io.StringIO()
+            with patch('sys.argv', ['evidence_owner.py', '--config', '/synthetic']), \
+                 patch('evidence_owner.private_config', return_value=config), \
+                 patch.dict(os.environ, {'CREDENTIALS_DIRECTORY': tmp}), \
+                 patch('evidence_owner.SupabaseReader') as reader, contextlib.redirect_stdout(output):
+                self.assertEqual(main(), 1)
+            reader.assert_not_called()
+            self.assertEqual(json.loads(output.getvalue())['state'], 'failed')
+            self.assertNotIn('synthetic-old-key', output.getvalue())
+
+    def test_readiness_owner_matches_edge_domain_separated_vector(self):
+        calls = []
+        reader = SupabaseReader({'project_ref': DEV_PROJECT}, 'synthetic-token', 'k' * 32,
+                                request=lambda *a: calls.append(a), command=lambda *a, **k: b'')
+        with patch('supabase_reader.uuid.uuid4', return_value='33333333-3333-4333-8333-333333333333'), \
+             patch('supabase_reader.time.time', return_value=1000):
+            reader.readiness('DEV')
+        self.assertEqual(calls[0][2]['x-outbox-readiness-signature'],
+                         '156cd5aeea895b571b37508ae3f10ca69652006ed91e3153a16509dbb76f18c8')
+        self.assertNotIn('x-outbox-signature', calls[0][2])
 
 
 if __name__ == '__main__':

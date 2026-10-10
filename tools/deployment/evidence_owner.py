@@ -312,7 +312,7 @@ def main():
         credentials = Path(os.environ.get('CREDENTIALS_DIRECTORY', '/nonexistent/m4-credentials'))
         require(credentials.is_absolute() and credentials.is_dir(), 'measurement_credentials_not_provisioned')
         reader = SupabaseReader(config, (credentials / 'measurement-token').read_text().strip(),
-                                (credentials / 'readiness-key').read_text().strip())
+                                (credentials / 'readiness-only-key').read_text().removesuffix('\n'))
         result = owner_cycle(config, load_policy(), reader,
                          lambda sha: read_json(config['service_evidence_origin'].rstrip('/') + '/' + sha + '.json'),
                          lambda: latest(config['repository'], p['branch']))

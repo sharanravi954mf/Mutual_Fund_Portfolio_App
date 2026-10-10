@@ -33,7 +33,8 @@ class SupabaseReader:
         self.project = config['project_ref']
         require(re.fullmatch('[a-z]{20}', self.project), 'invalid_project')
         require(isinstance(token, str) and token and '\n' not in token and '\r' not in token, 'measurement_token_missing')
-        require(isinstance(readiness_key, str) and 32 <= len(readiness_key) <= 4096, 'readiness_capability_missing')
+        require(isinstance(readiness_key, str) and re.fullmatch(r'[\x21-\x7e]{32,4096}', readiness_key),
+                'readiness_only_capability_missing')
         self.token, self.key = token, readiness_key
         self.cli = pinned_executable(config, 'supabase_cli') if command is None else '/opt/supabase'
         self.command = command
@@ -106,8 +107,8 @@ class SupabaseReader:
         payload = dict(version=1, request_id=str(uuid.uuid4()), issued_at=int(time.time()),
                        environment=environment, project_url=origin, kind='readiness',
                        event_outbox_id=None, hop=0)
-        message = '|'.join(str(payload[name]) for name in ('version', 'request_id', 'issued_at',
+        message = 'moneybowl-readiness-v1|' + '|'.join(str(payload[name]) for name in ('version', 'request_id', 'issued_at',
                             'environment', 'project_url', 'kind')) + '|-|0'
         signature = hmac.new(self.key.encode(), message.encode(), hashlib.sha256).hexdigest()
         return self.request(origin + '/functions/v1/outbox-dispatcher/readiness', payload,
-                            {'Content-Type': 'application/json', 'x-outbox-signature': signature})
+                            {'Content-Type': 'application/json', 'x-outbox-readiness-signature': signature})

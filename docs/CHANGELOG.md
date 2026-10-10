@@ -9,6 +9,18 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 final security boundary correction — 2026-10-10
+
+- Separated M4 readiness authentication from financial notification authority with
+  an optional independent Edge key, a dedicated header and signing domain. Existing
+  M2/M2A authentication remains compatible; M4 has no legacy-key fallback.
+- Made DEV Oracle retirement verification require the original stopped container,
+  persistent regular/template service masks and a disabled/inactive timer, including
+  loaded instance checks. Added negative boundary tests and commissioning instructions.
+- Local correction only: no live credential access/provisioning or infrastructure
+  changes. End-to-end M4 commissioning remains blocked; see the
+  [M4 runbook](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
 ## M4 review corrections — 2026-10-10
 
 - Corrected bounded deployment propagation observation; permanent invalid evidence

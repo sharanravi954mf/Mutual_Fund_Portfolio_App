@@ -17,6 +17,10 @@ from service_manifest import service_manifest
 
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
 INFRA_FILES = ('compose.yaml', 'compose.hosted.yaml', 'Caddyfile')
+DEV_RETIRED_CONTAINER = 'moneybowl-ingestion-support-outbox-dispatcher-1'
+DEV_RECONCILER = 'moneybowl-outbox-dispatcher-reconcile'
+DEV_RETIRED_SERVICES = [DEV_RECONCILER + '.service', DEV_RECONCILER + '@.service']
+DEV_RETIRED_TIMER = DEV_RECONCILER + '.timer'
 API_COMMAND = ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8080',
                '--no-access-log', '--workers', '1']
 
@@ -53,27 +57,67 @@ class DockerOwner:
         return result
 
     def retirement(self):
-        names = self.command(self.base + ['ps', '--all', '--format', '{{.Names}}']).decode().splitlines()
-        required = self.config['retired_containers']
-        units = self.config['retired_units']
-        require(required and units, 'retirement_inventory_missing')
-        for name in required:
-            require(re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9_.-]*', name), 'invalid_retirement_inventory')
-            if name in names:
-                old = self.container(name)
-                require(old['state']['Running'] is False and old['restart'] == 'no', 'legacy_dispatcher_not_retired')
-        # Discover additional Compose legacy dispatchers, not just the commissioned names.
-        ids = self.command(self.base + ['ps', '--all', '--quiet', '--filter',
+        # The commissioned DEV inventory cannot be weakened by omitting a config entry.
+        require(self.config.get('environment') == 'dev', 'retirement_environment_not_commissioned')
+        require(self.config.get('retired_containers') == [DEV_RETIRED_CONTAINER]
+                and self.config.get('retired_services') == DEV_RETIRED_SERVICES
+                and self.config.get('retired_timers') == [DEV_RETIRED_TIMER], 'retirement_inventory_invalid')
+        expected_id = self.config.get('retired_container_id', '')
+        require(isinstance(expected_id, str) and re.fullmatch('[0-9a-f]{64}', expected_id),
+                'retirement_container_binding_missing')
+        # Inspect the required object directly: absent is unverifiable, not retired.
+        old = self.container(DEV_RETIRED_CONTAINER)
+        state = old.get('state', {})
+        require(old.get('id') == expected_id and old.get('restart') == 'no'
+                and state.get('Status') == 'exited' and state.get('Pid') == 0
+                and all(state.get(flag) is False for flag in ('Running', 'Restarting', 'Paused', 'Dead')),
+                'legacy_dispatcher_not_retired')
+        labels = old.get('labels', {})
+        require(labels.get('com.docker.compose.project') == 'moneybowl-ingestion-support'
+                and labels.get('com.docker.compose.service') == 'outbox-dispatcher', 'retirement_container_mismatch')
+        ids = self.command(self.base + ['ps', '--all', '--no-trunc', '--quiet', '--filter',
                             'label=com.docker.compose.service=outbox-dispatcher']).decode().split()
-        for value in ids:
-            old = self.container(value)
-            require(old['state']['Running'] is False and old['restart'] == 'no', 'legacy_dispatcher_not_retired')
-        for unit in units:
-            require(re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.@-]*\.(service|timer)', unit), 'invalid_retirement_inventory')
-            raw = self.command([self.systemctl, 'show', unit, '--property=LoadState,ActiveState,UnitFileState']).decode()
-            fields = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
-            require(fields.get('ActiveState') in ('inactive', 'failed') and
-                    (fields.get('LoadState') == 'not-found' or fields.get('UnitFileState') in ('masked', 'masked-runtime')),
+        require(ids == [expected_id], 'unexpected_legacy_dispatcher')
+
+        # Templates are unit files, not executable units. Inspect persistent file state,
+        # then inspect every concrete loaded instance so a template mask cannot hide one.
+        raw = self.command([self.systemctl, 'list-unit-files', '--no-legend', '--no-pager',
+                            DEV_RECONCILER + '*']).decode()
+        files = {}
+        for line in raw.splitlines():
+            parts = line.split()
+            require(len(parts) in (2, 3) and parts[0] not in files, 'retirement_units_unverifiable')
+            files[parts[0]] = parts[1]
+        required = set(DEV_RETIRED_SERVICES + [DEV_RETIRED_TIMER])
+        require(required <= files.keys(), 'retirement_units_unverifiable')
+        instance = re.compile(re.escape(DEV_RECONCILER) + r'@[a-zA-Z0-9_.-]+\.service')
+        for unit, enabled in files.items():
+            require(unit in required or instance.fullmatch(unit), 'unexpected_retirement_unit')
+            require(enabled == ('disabled' if unit == DEV_RETIRED_TIMER else 'masked'),
+                    'legacy_restart_owner_enabled')
+        raw = self.command([self.systemctl, 'list-units', '--all', '--plain', '--no-legend',
+                            '--no-pager', DEV_RECONCILER + '*']).decode()
+        loaded = set()
+        for line in raw.splitlines():
+            parts = line.split()
+            require(len(parts) >= 4 and parts[0] not in loaded, 'retirement_units_unverifiable')
+            unit = parts[0]
+            require(unit in (DEV_RETIRED_SERVICES[0], DEV_RETIRED_TIMER) or instance.fullmatch(unit),
+                    'unexpected_retirement_unit')
+            loaded.add(unit)
+        concrete = (files.keys() | loaded) - {DEV_RETIRED_SERVICES[1]}
+        for unit in sorted(concrete):
+            raw = self.command([self.systemctl, 'show', unit,
+                                '--property=Id,LoadState,ActiveState,SubState,UnitFileState']).decode()
+            fields = {}
+            for line in raw.splitlines():
+                key, separator, value = line.partition('=')
+                require(separator and key not in fields, 'retirement_units_unverifiable')
+                fields[key] = value
+            timer = unit == DEV_RETIRED_TIMER
+            require(fields == dict(Id=unit, LoadState='loaded' if timer else 'masked',
+                                   ActiveState='inactive', SubState='dead',
+                                   UnitFileState='disabled' if timer else 'masked'),
                     'legacy_restart_owner_enabled')
         return 'retired'
 

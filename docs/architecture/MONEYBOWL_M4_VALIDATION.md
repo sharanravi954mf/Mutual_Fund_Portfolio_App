@@ -201,3 +201,69 @@ QA remains disabled with no project, credential or branch provisioned. No Produc
 access, live DEV changes, secret-value access/disclosure, M2A lifecycle operation,
 financial activation or legacy Oracle restart occurred. The canonical checkout remains
 clean at `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`.
+
+## Final security boundary correction — 2026-10-10
+
+Continued reviewed candidate `617c6c7d27399357f0cbb184ae90d05c8beb766a` in the
+same isolated worktree. Before editing, the existing M4 suite passed 108 tests,
+commissioning passed 34, and the dispatcher suite passed 88. Only generated Python
+bytecode caches were initially untracked; no source edits were present.
+
+The first finding was authority sharing: a holder of the evidence owner's former
+key could sign a fresh financial notification, not merely replay readiness. The
+fix introduces optional `OUTBOX_READINESS_KEY`, a readiness-only header and signing
+domain, confines it to the side-effect-free handler branch, and removes legacy-key
+loading from the M4 owner. Config rejects reuse of notification/database/worker keys.
+The second finding accepted incomplete or temporary retirement state. The fix binds
+explicit DEV inventory and the original container ID, requires persistent service
+masks and the disabled/inactive timer, and checks concrete template instances.
+
+Ordered verification and executed commands (`deno` resolves to the absolute 2.9.6
+executable listed above; all fixtures are synthetic):
+
+| Gate / command | Result |
+| --- | --- |
+| `deno fmt supabase/functions/outbox-dispatcher/config.ts supabase/functions/outbox-dispatcher/handler.ts supabase/functions/outbox-dispatcher/handler_test.ts` | Three changed TypeScript files formatted |
+| `deno check supabase/functions/outbox-dispatcher/index.ts` | Passed |
+| `deno test --deny-net --deny-env --filter 'readiness' supabase/functions/outbox-dispatcher` | 17 passed, 78 filtered; includes seven new boundary/compatibility tests |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -q` | Final 119 passed, zero failed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -q` | 34 passed, zero failed |
+| `deno test --deny-net --deny-env supabase/functions/outbox-dispatcher supabase/functions/_shared/nse supabase/functions/nse*-worker supabase/functions/nse-uat-smoke-test` | 1,076 passed, zero failed; includes all 95 native dispatcher tests |
+| `PYTHONDONTWRITEBYTECODE=1 /tmp/b061-test-venv/bin/python -m pytest -q` in `services/outbox-dispatcher` | 63 passed; compatibility tests only |
+| `python3 tools/deployment/edge_entries.py`, each returned entry checked with `deno check` using a Python subprocess loop with `check=True` | All 20 declared Edge entrypoints passed |
+| `python3 scripts/generate_outbox_routes.py --check` | All 17 routes unchanged |
+| `python3 .github/scripts/validate_migration_history.py` | 27 frozen migration files unchanged; no migration edits |
+| `/tmp/moneybowl-m4-actionlint/actionlint -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml` | Passed with the existing documented linter schema exception |
+| `python3 .github/scripts/validate_docs.py` | Passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_validate_commits.py'` | 5 passed |
+| `python3 .github/scripts/validate_commits.py 'fix: isolate readiness authority and enforce dispatcher retirement'` | Passed |
+| `git diff --check` and `git diff --cached --check` | Passed |
+
+The independently repeated read-only candidate review found no concrete surviving
+bypass or compatibility regression and ran `PYTHONDONTWRITEBYTECODE=1 python3 -B
+-m unittest test_owners.TransportTests -v` from `tools/deployment`: 25 passed.
+One new multi-gate test initially reused a provenance ledger with a fresh mock Docker
+instance; its isolated fixture state was corrected. No production assertion was weakened.
+
+The new tests sign fully valid fresh event/recovery envelopes with the readiness-only
+key, under both headers/signing schemes and both route aliases. Every attempt fails
+without RPC, worker or log calls. Mixed headers, wrong/missing credentials, stale
+bodies and path confusion also fail. Legacy readiness and financial notifications
+still work with the new secret present or absent. Python and Edge verify the same
+fixed domain-separated HMAC vector. M4 refuses the former credential filename.
+
+Retirement tests exercise missing/replaced/running/restarting containers, restart
+policy changes, incomplete inventory, temporary/absent service masks, enabled or
+active timers, active template instances, malformed or duplicate properties and
+unexpected owners. Each deployment measurement gate withholds success on failure.
+All Docker/systemd interactions in these tests are mocked; no real command ran.
+
+No live credentials were read, logged, copied, rotated or provisioned. No deployment,
+service restart, financial operation, M2A lifecycle operation, QA/Production access,
+push, PR, merge or repository-setting change occurred. No SQL, Cron, routes, event
+leases, encrypted evidence, PROVEN_NOT_SENT/MAYBE_SENT logic or worker code changed.
+SQL/Docker integration and Flutter suites were not rerun because their sources are
+unchanged and this task prohibits infrastructure mutation. Actual Oracle output,
+private inventory bindings, new readiness credential provisioning and complete live
+release verification remain commissioning prerequisites. Local security fixes are
+verified; **live M4 commissioning remains BLOCKED**.

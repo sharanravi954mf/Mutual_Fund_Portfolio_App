@@ -23,6 +23,8 @@ Target Repository Path: docs/PROJECT_STATE.md
 Versioned deployment contracts, feature/PR CI, read-only DEV/QA release observation,
 immutable frontend activation, private Supabase measurement and ingestion deployment
 owners, recurring release verification and synthetic failure tests are implemented locally.
+The final security correction separates readiness-only authority from financial signing
+and enforces the explicit DEV Oracle retirement inventory. Both await live commissioning.
 Full environment automation remains blocked on private measurement provisioning,
 DEV host installation and service-owner commissioning. QA is disabled and has no
 project. No live infrastructure changed. The M4 task's supplied live context reports

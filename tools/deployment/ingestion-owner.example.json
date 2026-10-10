@@ -17,12 +17,17 @@
   "initial_revision": "REPLACE_WITH_INDEPENDENTLY_VERIFIED_LEGACY_SOURCE_SHA",
   "initial_image_id": "REPLACE_WITH_ACTUAL_LEGACY_IMAGE_ID",
   "retired_containers": [
-    "REPLACE_WITH_INVENTORIED_LEGACY_CONTAINER"
-  ],
-  "retired_units": [
-    "REPLACE_WITH_MASKED_LEGACY_RESTART_OWNER.service"
+    "moneybowl-ingestion-support-outbox-dispatcher-1"
   ],
   "docker_socket": "unix:///var/run/docker.sock",
   "daemon_id": "REPLACE_WITH_INDEPENDENTLY_BOUND_DEV_DAEMON_ID",
-  "service_origin": "https://ingestion.example.invalid"
+  "service_origin": "https://ingestion.example.invalid",
+  "retired_services": [
+    "moneybowl-outbox-dispatcher-reconcile.service",
+    "moneybowl-outbox-dispatcher-reconcile@.service"
+  ],
+  "retired_timers": [
+    "moneybowl-outbox-dispatcher-reconcile.timer"
+  ],
+  "retired_container_id": "REPLACE_WITH_INDEPENDENTLY_VERIFIED_STOPPED_CONTAINER_ID"
 }
