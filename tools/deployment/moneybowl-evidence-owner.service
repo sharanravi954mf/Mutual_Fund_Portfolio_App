@@ -1,0 +1,17 @@
+[Unit]
+Description=Independently measure DEV backend and complete environment release
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=moneybowl-evidence
+# Provision these credentials ONLY in the independent private evidence environment.
+LoadCredential=measurement-token:/private/credentials/m4-measurement-token
+# Independently provision OUTBOX_READINESS_KEY; NEVER supply OUTBOX_NOTIFICATION_KEY.
+LoadCredential=readiness-only-key:/private/credentials/m4-readiness-only-key
+ExecStart=/usr/bin/python3 /opt/moneybowl-deployment/evidence_owner.py --config /etc/moneybowl-deployment/evidence.json
+TimeoutStartSec=45min
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

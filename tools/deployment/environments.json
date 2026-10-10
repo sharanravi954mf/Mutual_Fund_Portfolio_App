@@ -1,0 +1,18 @@
+{
+  "dev": {
+    "branch": "develop",
+    "project_ref": "rskryngwzyuzmiwtriyy",
+    "deployment_enabled": true,
+    "host_authority": "oracle-dev",
+    "financial_policy": "preserve",
+    "nse_origin": "https://nseinvestuat.nseindia.com"
+  },
+  "qa": {
+    "branch": "qa",
+    "project_ref": null,
+    "deployment_enabled": false,
+    "host_authority": "qa-private",
+    "financial_policy": "disabled",
+    "nse_origin": "https://www.nseinvest.com"
+  }
+}

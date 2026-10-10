@@ -2,10 +2,10 @@ name: Commit Quality Validation
 
 on:
   push:
-    branches: [ main, develop, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
+    branches: [ main, develop, qa, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
   pull_request:
     types: [ opened, edited, synchronize, reopened ]
-    branches: [ main, develop, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
+    branches: [ main, develop, qa, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
 
 jobs:
   validate-commits:
@@ -28,7 +28,9 @@ jobs:
     # Run check on PR Title if triggered by pull_request
     - name: Validate Pull Request Title
       if: github.event_name == 'pull_request'
-      run: python3 .github/scripts/validate_commits.py "${{ github.event.pull_request.title }}"
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+      run: python3 .github/scripts/validate_commits.py "$PR_TITLE"
 
     # Run check on recent commits if triggered by push
     - name: Validate Push Commit Messages

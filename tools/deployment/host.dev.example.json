@@ -1,0 +1,9 @@
+{
+  "environment": "dev",
+  "host_authority": "oracle-dev",
+  "repository": "/private/moneybowl-source",
+  "release_root": "/srv/moneybowl-web-dev",
+  "flutter": "/opt/flutter/bin/flutter",
+  "public_defines": "/private/flutter-public-dev.json",
+  "frontend_origin": "https://dev.example.invalid"
+}

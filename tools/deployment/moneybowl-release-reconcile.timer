@@ -1,0 +1,10 @@
+[Unit]
+Description=Recover missed or failed MoneyBowl frontend releases
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

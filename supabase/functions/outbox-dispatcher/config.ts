@@ -29,6 +29,15 @@ export function resolveConfig(read: NseEnvironmentReader) {
       workerToken: secret("NSE_WORKER_TOKEN"),
     };
     if (new Set(Object.values(keys)).size !== 3) throw Error();
+    // Optional during rollout; never reuse dispatch, database or worker authority.
+    const readinessKey = read("OUTBOX_READINESS_KEY") === undefined
+      ? undefined
+      : secret("OUTBOX_READINESS_KEY");
+    if (
+      readinessKey !== undefined && Object.values(keys).includes(readinessKey)
+    ) {
+      throw Error();
+    }
     // Avoid incidental credential disclosure through JSON/log inspection.
     return Object.freeze(Object.defineProperties(
       {
@@ -37,7 +46,7 @@ export function resolveConfig(read: NseEnvironmentReader) {
         mode: mode as Mode,
       },
       Object.fromEntries(
-        Object.entries(keys).map((
+        Object.entries({ ...keys, readinessKey }).map((
           [key, value],
         ) => [key, { value, enumerable: false }]),
       ),
@@ -48,6 +57,7 @@ export function resolveConfig(read: NseEnvironmentReader) {
       readonly signingKey: string;
       readonly databaseKey: string;
       readonly workerToken: string;
+      readonly readinessKey: string | undefined;
     });
   } catch {
     throw new Error("outbox_configuration_invalid");

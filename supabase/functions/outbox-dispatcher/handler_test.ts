@@ -4,6 +4,7 @@ import {
   type Notification,
   sign,
   signingInput,
+  signReadiness,
 } from "./handler.ts";
 import { ROUTES } from "./routes.generated.ts";
 
@@ -545,4 +546,157 @@ Deno.test("commission readiness signature cannot authorize recovery", async () =
   );
   assert((await h.handler(changedPath)).status === 400);
   assert(h.calls.length === 0 && h.logs.length === 0);
+});
+
+const readinessKey = "synthetic-readiness-only-".repeat(3);
+async function readinessRequest(n: Notification, secret = readinessKey) {
+  const req = await request(n, secret);
+  req.headers.delete("x-outbox-signature");
+  req.headers.set(
+    "x-outbox-readiness-signature",
+    await signReadiness(n, secret),
+  );
+  return req;
+}
+Deno.test("readiness-only capability is optional, private and side-effect-free", async () => {
+  for (const configured of [false, true]) {
+    const env = settings();
+    if (configured) env.OUTBOX_READINESS_KEY = readinessKey;
+    const h = harness({ env });
+    const n = notification({ kind: "readiness", event_outbox_id: null });
+    assert(
+      (await h.handler(await readinessRequest(n))).status ===
+        (configured ? 200 : 401),
+    );
+    assert(
+      (await h.handler(await request(n))).status === 200,
+      "legacy M2A readiness broken",
+    );
+    assert(h.calls.length === 0 && h.logs.length === 0);
+    assert(!JSON.stringify(h.config).includes(readinessKey));
+  }
+});
+Deno.test("existing financial authentication works before and after readiness provisioning", async () => {
+  for (const configured of [false, true]) {
+    const env = settings();
+    if (configured) env.OUTBOX_READINESS_KEY = readinessKey;
+    for (const kind of ["event", "recovery"] as const) {
+      const h = harness({ env });
+      const n = notification({
+        kind,
+        event_outbox_id: kind === "event" ? id : null,
+      });
+      assert((await h.handler(await request(n))).status === 200);
+      assert(h.calls.length > 0);
+    }
+  }
+});
+for (const kind of ["event", "recovery"] as const) {
+  Deno.test(`compromised readiness key cannot sign fresh ${kind} authority on either route alias`, async () => {
+    const h = harness({
+      env: { ...settings(), OUTBOX_READINESS_KEY: readinessKey },
+    });
+    const n = notification({
+      kind,
+      event_outbox_id: kind === "event" ? id : null,
+    });
+    for (
+      const prefix of [
+        "/outbox-dispatcher/",
+        "/functions/v1/outbox-dispatcher/",
+      ]
+    ) {
+      for (const signer of [sign, signReadiness]) {
+        for (
+          const header of ["x-outbox-signature", "x-outbox-readiness-signature"]
+        ) {
+          const req = new Request(h.config.origin + prefix + kind, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              [header]: await signer(n, readinessKey),
+            },
+            body: JSON.stringify(n),
+          });
+          assert((await h.handler(req)).status === 401);
+        }
+      }
+    }
+    assert(h.calls.length === 0 && h.logs.length === 0);
+  });
+}
+Deno.test("readiness auth rejects mixed headers, wrong key, stale body and path confusion", async () => {
+  const h = harness({
+    env: { ...settings(), OUTBOX_READINESS_KEY: readinessKey },
+  });
+  const n = notification({ kind: "readiness", event_outbox_id: null });
+  const mixed = await readinessRequest(n);
+  mixed.headers.set("x-outbox-signature", await sign(n, key));
+  assert((await h.handler(mixed)).status === 401);
+  assert((await h.handler(await readinessRequest(n, key))).status === 401);
+  assert(
+    (await h.handler(await readinessRequest({ ...n, issued_at: 0 }))).status ===
+      400,
+  );
+  for (
+    const path of [
+      "event",
+      "recovery",
+      "%72eadiness",
+      "readiness/",
+      "readiness?kind=event",
+    ]
+  ) {
+    const signed = await readinessRequest(n);
+    const req = new Request(h.config.origin + "/outbox-dispatcher/" + path, {
+      method: "POST",
+      headers: signed.headers,
+      body: JSON.stringify(n),
+    });
+    assert([401, 404].includes((await h.handler(req)).status));
+  }
+  const missing = await readinessRequest(n);
+  missing.headers.delete("x-outbox-readiness-signature");
+  assert((await h.handler(missing)).status === 401);
+  const malformed = await readinessRequest(n);
+  malformed.headers.set("x-outbox-readiness-signature", "invalid");
+  assert((await h.handler(malformed)).status === 401);
+  assert(h.calls.length === 0 && h.logs.length === 0);
+});
+Deno.test("readiness secret rejects malformed values and any financial credential reuse", () => {
+  const env = settings();
+  for (
+    const value of [
+      "",
+      "short",
+      " ".repeat(32),
+      "é".repeat(32),
+      key,
+      env.SUPABASE_SERVICE_ROLE_KEY,
+      env.NSE_WORKER_TOKEN,
+    ]
+  ) {
+    try {
+      resolveConfig((name) => ({ ...env, OUTBOX_READINESS_KEY: value })[name]);
+      throw Error("accepted");
+    } catch (error) {
+      assert(
+        error instanceof Error &&
+          error.message === "outbox_configuration_invalid",
+      );
+    }
+  }
+});
+Deno.test("readiness HMAC matches independent Python owner vector with domain separation", async () => {
+  const n = notification({
+    kind: "readiness",
+    event_outbox_id: null,
+    project_url: "https://rskryngwzyuzmiwtriyy.supabase.co",
+  });
+  const signature = await signReadiness(n, "k".repeat(32));
+  assert(
+    signature ===
+      "156cd5aeea895b571b37508ae3f10ca69652006ed91e3153a16509dbb76f18c8",
+  );
+  assert(signature !== await sign(n, "k".repeat(32)));
 });
