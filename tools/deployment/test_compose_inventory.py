@@ -1,8 +1,11 @@
 """Synthetic four/five-layer DEV stack. Never invokes Docker or reads host config."""
 import copy
+import io
+import itertools
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -83,12 +86,18 @@ class ComposeInventoryTests(SourceFixture):
         self.config['compose_resources'] = {kind: {name: inventory.digest(value) for name,value in objects.items()}
                                            for kind,objects in self.objects.items()}
         self.config['compose_model_sha256'] = inventory.digest(self.model)
+        self.resolved_model = copy.deepcopy(self.model)
+        self.resolved_payload = None
+        # Compose 5.5.0 includes dependency images; JSON keeps named service entries.
+        self.dependency_images = {name: [self.model['services'][name]['image']] for name in self.names}
+        self.dependency_images['caddy'] = [self.model['services'][name]['image']
+                                           for name in ('clamav', 'caddy', 'github-webhook')]
+        self.dependency_images['api'].append(self.model['services']['clamav']['image'])
         self.calls = []; self.extra_ids = []; self.change_override_service = None; self.up_failure = False
         self.owner = DockerOwner(self.config, command=self.command)
         # Engine object decoding and retirement transport have their own tests; use stable metadata here.
         self.owner.container = lambda id: copy.deepcopy(next(v for v in self.live.values() if v['id']==id))
         self.owner.retirement = lambda: 'retired'
-        self.owner.image = lambda ref: copy.deepcopy(self.images[ref])
         ready = patch('ingestion_owner.read_json', return_value={'status': 'ready'})
         ready.start(); self.addCleanup(ready.stop)
 
@@ -101,9 +110,14 @@ class ComposeInventoryTests(SourceFixture):
             return ' '.join(ids).encode()
         if 'config' in argv:
             if '--format' in argv:
-                self.assertIn('--no-interpolate', argv); self.assertIn('--no-env-resolution', argv)
-                self.assertEqual(argv[argv.index('--env-file')+1], '/dev/null')
-                return json.dumps(self.model).encode()
+                self.assertIn('--no-env-resolution', argv)
+                if '--no-interpolate' in argv:
+                    self.assertEqual(argv[argv.index('--env-file')+1], '/dev/null')
+                    return json.dumps(self.model).encode()
+                self.assertEqual(argv[argv.index('--env-file')+1], self.config['compose_env'])
+                self.assertIn(argv[-1], self.names)
+                return (self.resolved_payload if self.resolved_payload is not None
+                        else json.dumps(self.resolved_model).encode())
             if '--hash' in argv:
                 service=argv[-1]; override=argv[argv.index('config')-1]
                 h=self.hashes[service]
@@ -111,8 +125,11 @@ class ComposeInventoryTests(SourceFixture):
                     if service=='api': h=inventory.sha256(Path(override).read_bytes())
                     if service==self.change_override_service: h='f'*64
                 return f'{service} {h}'.encode()
-            if '--images' in argv: return self.model['services'][argv[-1]]['image'].encode()
+            if '--images' in argv: return '\n'.join(self.dependency_images[argv[-1]]).encode()
         if 'inspect' in argv:
+            if 'image' in argv:
+                if argv[-1] not in self.images: raise Rejected('owner_command_failed')
+                return json.dumps(self.images[argv[-1]]).encode()
             kind='network' if 'network' in argv else 'volume'
             return json.dumps(self.objects[kind][argv[-1]]).encode()
         if 'up' in argv:
@@ -137,6 +154,129 @@ class ComposeInventoryTests(SourceFixture):
 
     def assert_no_up(self): self.assertFalse(any('up' in argv for argv in self.calls))
 
+    def test_dependency_inclusive_caddy_images_match_own_service(self):
+        refs = self.command(self.owner.prefix + ['config', '--images', 'caddy']).decode().split()
+        self.assertEqual(len(refs), 3)
+        self.assertNotEqual(refs[0], self.model['services']['caddy']['image'])
+        self.calls.clear()
+        for order in itertools.permutations(refs):
+            self.dependency_images['caddy'] = list(order)
+            with self.subTest(order=order):
+                self.assertIn('caddy', self.owner.infrastructure(self.repo))
+        self.assertFalse(any('--images' in argv for argv in self.calls))
+        self.assert_no_up()
+
+    def test_dependency_cannot_hide_changed_caddy_image(self):
+        old = self.resolved_model['services']['caddy']['image']
+        changed = 'registry.invalid/changed-caddy:review-required'
+        self.images[changed] = {**self.images[old], 'id': 'sha256:' + 'f'*64}
+        self.resolved_model['services']['caddy']['image'] = changed
+        self.resolved_model['services']['clamav']['image'] = old
+        self.dependency_images['caddy'] = [old, changed, self.dependency_images['github-webhook'][0]]
+        self.assertIn(old, self.command(self.owner.prefix + ['config', '--images', 'caddy']).decode().split())
+        self.assertEqual(self.owner.compose_image('caddy'), changed)
+        with self.assertRaisesRegex(Rejected, '^support_image_drift$'):
+            self.owner.infrastructure(self.repo)
+        self.assert_no_up()
+
+    def test_single_image_services_resolve_their_own_images(self):
+        for service in ('clamav', 'github-webhook', 'm3b-receiver', 'm3b-ingress-adapter'):
+            with self.subTest(service=service):
+                refs = self.command(self.owner.prefix + ['config', '--images', service]).decode().split()
+                self.assertEqual(len(refs), 1)
+                ref = self.owner.compose_image(service)
+                self.assertEqual(ref, refs[0])
+                self.assertEqual(self.owner.image(ref)['id'], self.live[service]['image'])
+        self.owner.infrastructure(self.repo)
+        self.assert_no_up()
+
+    def test_service_specific_image_is_required(self):
+        for services in ({}, {'caddy': {}}, {'renamed-caddy': self.resolved_model['services']['caddy']}):
+            self.resolved_payload = json.dumps({'name': self.config['compose_project'], 'services': services}).encode()
+            with self.subTest(services=services), self.assertRaisesRegex(Rejected, '^compose_image_unverifiable$'):
+                self.owner.infrastructure(self.repo)
+        self.assert_no_up()
+
+    def test_malformed_or_ambiguous_image_resolution_is_rejected(self):
+        project = self.config['compose_project']
+        ref = self.resolved_model['services']['caddy']['image']
+        malformed = [b'{', b'\xff', b'[]', b'null', b'{}', b'{"services":NaN}',
+                     json.dumps({'name': 'wrong-project', 'services': {'caddy': {'image': ref}}}).encode()]
+        for services in (None, [], {'caddy': None}, {'caddy': []}, {'caddy': 'caddy:latest'}):
+            malformed.append(json.dumps({'name': project, 'services': services}).encode())
+        for image in (None, False, 123, [], {}, '', 'caddy:latest clamav:latest', 'caddy:latest\n',
+                      '${CADDY_IMAGE}', '--help', 'https://user:synthetic-password@registry.invalid/caddy',
+                      'caddy@sha256:bad', 'caddy:tag:extra'):
+            malformed.append(json.dumps({'name': project, 'services': {'caddy': {'image': image}}}).encode())
+        for services in ('{"caddy":{"image":"caddy:one","image":"caddy:two"}}',
+                         '{"caddy":{"image":"caddy:one"},"caddy":{"image":"caddy:two"}}'):
+            malformed.append(('{"name":"' + project + '","services":' + services + '}').encode())
+        malformed.append(('{"name":"' + project + '","services":{},"services":{}}').encode())
+        for payload in malformed:
+            self.resolved_payload = payload
+            with self.subTest(payload=payload), self.assertRaisesRegex(Rejected, '^compose_image_unverifiable$'):
+                self.owner.infrastructure(self.repo)
+        self.assertFalse(any('image' in argv and 'inspect' in argv for argv in self.calls))
+        self.assert_no_up()
+
+    def test_interpolation_uses_resolved_service_reference(self):
+        ref = self.resolved_model['services']['caddy']['image']
+        self.model['services']['caddy']['image'] = '${CADDY_IMAGE:?required}'
+        self.config['compose_model_sha256'] = inventory.digest(self.model)
+        self.owner.infrastructure(self.repo)
+        self.assertEqual(self.owner.compose_image('caddy'), ref)
+        argv = self.calls[-1]
+        self.assertEqual(argv, self.owner.prefix + ['config', '--format', 'json', '--no-env-resolution', 'caddy'])
+        self.assert_no_up()
+
+    def test_resolved_private_fields_are_not_retained_or_reported(self):
+        marker = 'synthetic-private-value-never-report'
+        self.resolved_model['services']['caddy'].update(environment={'PRIVATE': marker}, volumes=[marker])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            ref = self.owner.compose_image('caddy')
+            snapshot = self.owner.infrastructure(self.repo)
+            self.resolved_payload = ('{"' + marker).encode()
+            with self.assertRaises(Rejected) as error:
+                self.owner.compose_image('caddy')
+        self.assertEqual(ref, self.model['services']['caddy']['image'])
+        self.assertNotIn(marker, json.dumps(snapshot))
+        self.assertNotIn(marker, json.dumps(self.owner.config))
+        self.assertEqual(str(error.exception), 'compose_image_unverifiable')
+        self.assertEqual(stdout.getvalue() + stderr.getvalue(), '')
+        self.assert_no_up()
+
+    def test_own_image_must_exist_locally_and_keep_approved_id(self):
+        ref = self.resolved_model['services']['caddy']['image']
+        image = self.images.pop(ref)
+        with self.assertRaisesRegex(Rejected, '^owner_command_failed$'):
+            self.owner.infrastructure(self.repo)
+        self.images[ref] = {**image, 'id': 'sha256:' + 'f'*64}
+        with self.assertRaisesRegex(Rejected, '^support_image_drift$'):
+            self.owner.infrastructure(self.repo)
+        self.images[ref]['id'] = 'malformed'
+        with self.assertRaisesRegex(Rejected, '^invalid_image_id$'):
+            self.owner.infrastructure(self.repo)
+        self.assert_no_up()
+
+    def test_image_resolution_command_failure_stays_closed(self):
+        command = self.owner.command
+        def unavailable(argv, **kwargs):
+            if '--format' in argv and 'json' in argv and '--no-interpolate' not in argv:
+                raise Rejected('owner_command_failed')
+            return command(argv, **kwargs)
+        with patch.object(self.owner, 'command', side_effect=unavailable):
+            with self.assertRaisesRegex(Rejected, '^owner_command_failed$'):
+                self.owner.infrastructure(self.repo)
+        self.assert_no_up()
+
+    def test_image_resolution_rejects_unapproved_services(self):
+        for service in ('outbox-dispatcher', 'unexpected-service', 'caddy api'):
+            with self.subTest(service=service), self.assertRaisesRegex(Rejected, '^service_not_allowlisted$'):
+                self.owner.compose_image(service)
+        self.assertEqual(self.calls, [])
+        self.assert_no_up()
+
     def test_five_layers_preserve_all_existing_owners_and_resources(self):
         before=self.owner.infrastructure(self.repo)
         override,proof=self.approved_override();self.owner.prepare_activation(override,proof)
@@ -159,7 +299,7 @@ class ComposeInventoryTests(SourceFixture):
         self.config['compose_model_sha256']=inventory.digest(self.model)
         self.owner=DockerOwner(self.config,command=self.command)
         self.owner.container=lambda id:copy.deepcopy(next(v for v in self.live.values() if v['id']==id))
-        self.owner.image=lambda ref:copy.deepcopy(self.images[ref]);self.owner.retirement=lambda:'retired'
+        self.owner.retirement=lambda:'retired'
         self.assertIn('m3b-receiver',self.owner.infrastructure(self.repo));self.assert_no_up()
 
     def test_wrong_order_paths_authority_or_uncommissioned_inventory(self):

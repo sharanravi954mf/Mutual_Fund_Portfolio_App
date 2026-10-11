@@ -9,6 +9,16 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 Compose compatibility fix 002 — 2026-10-11
+
+- Resolve each support service's own image from named Compose JSON configuration;
+  dependency-inclusive image lists can neither reject an approved Caddy image nor
+  hide replacement behind a dependency's image. Exact running image-ID checks remain.
+- Added realistic dependency, malformed evidence and private-output regressions.
+  Read-only host projection checks passed for public image references; private
+  interpolation and full DEV commissioning remain pending. No deployment occurred.
+  See the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
 ## M4 DEV commissioning remediation 001 — 2026-10-11
 
 - Bound ingestion deployment to approved ordered DEV Compose layers, per-service

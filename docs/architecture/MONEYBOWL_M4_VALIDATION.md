@@ -496,3 +496,86 @@ for all six application containers and the retired dispatcher, unchanged hashes 
 all five live Compose layer files, both persistent masks, and the disabled/inactive
 retirement timer. Remote feature/develop references and canonical checkout remained
 at their preflight SHAs before the local commit.
+
+## Compose compatibility fix 002 — 2026-10-11
+
+Starting local and freshly fetched remote feature SHA:
+`acd2f1c60f1ec13b58ebcfd7afb0044ed8b23949`. Both checkouts were clean;
+canonical/fetched develop remained `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`
+and was verified as an ancestor. Work stayed in the existing M4 feature worktree.
+Existing-file baseline: 147 M4, 34 commissioning and 5 commit-quality tests passed,
+plus 17-route parity, 27 frozen migration files and documentation validation.
+
+### Defect and correction
+
+Installed Docker Compose 5.5.0 returns dependency images from `config --images
+SERVICE`: Caddy returned three, API two, and ClamAV/webhook/M3B receiver one each.
+The old fixture returned just the requested image. Updating it to return three
+caused the new Caddy success test to fail with `support_image_drift` before the
+production change, reproducing the independent finding.
+
+The owner now reads `config --format json --no-env-resolution SERVICE` and selects
+exactly `services[SERVICE].image`. Actual JSON includes other named services too;
+their order and image membership are irrelevant. Only the requested reference is
+returned, inspected locally and compared to the already approved running image ID.
+Missing/duplicate keys, wrong project, malformed JSON or references, unresolved
+interpolation, missing local images and changed IDs fail closed. No image is pulled.
+All inventory, container/hash/resource, retirement, provenance and API-only guards
+remain in place. The harness now exercises the production image-inspect decoder too.
+
+Compose interpolation still requires the independently commissioned owner's private
+inputs. Service env-file resolution is disabled. Rendered output is transient private
+input, never a report/artifact; the command transport discards stderr and the parser
+returns only the image reference or a fixed error code. Synthetic private fields and
+malformed-output tests verify they do not escape through diagnostics or snapshots.
+
+### Executed checks
+
+Commands ran from the feature worktree. Focused tests are a subset of the full suite;
+they are not counted twice. Final unit counts: **196 passed, zero failed, zero skipped**.
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/deployment python3 -m unittest test_compose_inventory.ComposeInventoryTests.test_dependency_inclusive_caddy_images_match_own_service -v` | Initially 1 error reproducing the defect; after correction 1 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -p test_compose_inventory.py -v` | 38 passed, including 10 new tests |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -q` | 157 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -q` | 34 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_validate_commits.py' -q` | 5 passed |
+| `python3 scripts/generate_outbox_routes.py --check` | 17 canonical mappings match |
+| `python3 .github/scripts/validate_migration_history.py` | 27 frozen files unchanged |
+| `PYTHONPYCACHEPREFIX=/tmp/m4-compose-fix-002/compile-cache python3 -m py_compile tools/deployment/ingestion_owner.py tools/deployment/test_compose_inventory.py` | Passed; production/test imports also exercised by the unit suites |
+| `python3 .github/scripts/validate_docs.py` | Passed |
+| `python3 .github/scripts/validate_commits.py 'fix: resolve Compose support images by service identity'` and `python3 .github/scripts/validate_commits.py` | Passed |
+| `git diff --check` and `git diff --cached --check` | Passed |
+| `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/deployment python3 /tmp/m4-compose-fix-002/verify_projection.py` | Read-only host projection and synthetic CLI interpolation checks passed, as bounded below |
+
+### Read-only host evidence and limits
+
+All five required live Compose layers were read in their existing order; their file
+hashes match the remediation 001 observations. Host queries used `--env-file /dev/null`,
+`--no-interpolate --no-env-resolution`, an empty Docker auth path and a sanitized process
+environment. No `.env`, container `Config.Env` or registry credentials were read.
+Only image metadata and structural findings were exposed, never raw Compose output.
+
+The temporary projection harness fed this credential-free CLI output into the actual
+production resolver using a synthetic owner fixture. Caddy, ClamAV and webhook
+references resolved to local image IDs matching their unique running containers.
+Both M3B image expressions remained unresolved and were correctly rejected. A separate
+small synthetic Compose file proved actual public-variable interpolation and a
+three-image dependency list work with the resolver. No full owner, build or activation
+entrypoint was invoked; the synthetic fixture is not approval of host ownership.
+
+The original retired Oracle container remains exited with PID zero and restart `no`;
+both reconciliation service files remain persistently masked to `/dev/null` and the
+timer remains disabled/inactive/dead. Root storage remains about 93% used with 3.3 GiB
+free. No builds, cleanup, deployments, service changes, secret access, financial
+operations, QA/Production changes or remote publication occurred. Heavyweight SQL
+containers and builds were deliberately outside this isolated correction's checks.
+
+**Ready for independent code review; live M4 commissioning remains blocked.**
+Credential-resolved Compose hashes/image interpolation and full ownership verification
+still require the authorized private owner, approved inventory and controlled
+installation. Existing capacity, legacy API provenance/initial-binding, registry,
+readiness-only credential and independent evidence prerequisites remain unchanged in
+the [commissioning record](MONEYBOWL_M4_DEV_REMEDIATION_001.md). Local synthetic success
+and structural host compatibility are not a verified unattended environment release.

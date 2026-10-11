@@ -17,6 +17,11 @@ from service_manifest import service_manifest
 import compose_inventory as inventory
 
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
+IMAGE_REFERENCE = re.compile(
+    r'(?:[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?/)?'
+    r'[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*'
+    r'(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*'
+    r'(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[0-9a-f]{64})?')
 DEV_RETIRED_CONTAINER = 'moneybowl-ingestion-support-outbox-dispatcher-1'
 DEV_RECONCILER = 'moneybowl-outbox-dispatcher-reconcile'
 DEV_RETIRED_SERVICES = [DEV_RECONCILER + '.service', DEV_RECONCILER + '@.service']
@@ -143,6 +148,38 @@ class DockerOwner:
         require(len(parts) == 2 and parts[0] == service and re.fullmatch('[0-9a-f]{64}', parts[1]), 'compose_hash_unverifiable')
         return parts[1]
 
+    def compose_image(self, service):
+        """Return only this service's resolved reference, never dependency image lists."""
+        require(service in inventory.services(self.config), 'service_not_allowlisted')
+
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                require(key not in result, 'compose_image_unverifiable')
+                result[key] = value
+            return result
+
+        def invalid_constant(value):
+            raise ValueError
+
+        # Interpolation uses the commissioned owner's private inputs. Do not load
+        # service env files or retain/report the rest of the rendered configuration.
+        # Command discards stderr and never includes child output in exceptions.
+        raw = self.command(self.prefix + ['config', '--format', 'json', '--no-env-resolution', service])
+        try:
+            model = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+            require(isinstance(model, dict) and model.get('name') == self.config['compose_project'],
+                    'compose_image_unverifiable')
+            services = model.get('services')
+            require(isinstance(services, dict) and isinstance(services.get(service), dict),
+                    'compose_image_unverifiable')
+            ref = services[service].get('image')
+            require(isinstance(ref, str) and len(ref) <= 512 and IMAGE_REFERENCE.fullmatch(ref),
+                    'compose_image_unverifiable')
+            return ref
+        except (ValueError, UnicodeError, RecursionError):
+            raise Rejected('compose_image_unverifiable') from None
+
     def infrastructure(self, source):
         require(self.command(self.base + ['info', '--format', '{{.ID}}']).decode().strip() == self.config['daemon_id'],
                 'wrong_docker_daemon')
@@ -191,9 +228,8 @@ class DockerOwner:
             inventory.recorded_files(self.config, service, value['labels'].get('com.docker.compose.project.config_files'))
             require(value['labels'].get('com.docker.compose.config-hash') == approved.get('config_hash')
                     == self.config_hash(service), 'running_configuration_drift')
-            refs = self.command(self.prefix + ['config', '--images', service]).decode().split()
             # Existing non-API tags are never pulled/redeployed; approved local IDs remain authoritative.
-            require(len(refs) == 1 and self.image(refs[0])['id'] == value['image'], 'support_image_drift')
+            require(self.image(self.compose_image(service))['id'] == value['image'], 'support_image_drift')
             snapshot[service] = value
         require(set(all_ids) == expected_ids and len(all_ids) == len(expected_ids), 'unexpected_project_container')
         snapshot['resources'] = self.resources(model)
