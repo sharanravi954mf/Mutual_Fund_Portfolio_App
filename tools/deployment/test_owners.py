@@ -3,12 +3,14 @@ import copy
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import compose_inventory as inventory
 from contract import DEV_PROJECT, Rejected, load_policy, manifest
@@ -20,6 +22,68 @@ from observe import Pending, observe, read_json
 from owner_common import Command, binding, envelope, private_config
 from supabase_reader import CONTROL, MIGRATIONS, SupabaseReader
 from test_deployment import A, B, NOW, EXPECTED, event, frontend, policy, receipt
+
+
+class SystemdConfigTests(unittest.TestCase):
+    def credential(self, *, path=None, environment=None, mode=0o440, uid=0, gid=0,
+                   parent_mode=0o550, parent_uid=0, ancestor_mode=0o755,
+                   readonly=True, readable=True, writable=False, resolved=None,
+                   symlink=False, directory_file=False, missing_mount=False):
+        path = Path(path or '/run/credentials/m4-test.service/owner-config')
+        info = SimpleNamespace(st_uid=uid, st_gid=gid,
+                               st_mode=(stat.S_IFDIR if directory_file else stat.S_IFREG) | mode)
+        def metadata(p):
+            if p == path:
+                return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777) if symlink else info
+            return SimpleNamespace(st_uid=parent_uid if p == path.parent else 0, st_gid=0,
+                                   st_mode=stat.S_IFDIR | (parent_mode if p == path.parent else ancestor_mode))
+        def access(p, flags):
+            return readable if flags == os.R_OK else writable
+        with patch.dict(os.environ, environment if environment is not None else
+                        {'CREDENTIALS_DIRECTORY': str(path.parent)}, clear=True), \
+             patch.object(Path, 'stat', metadata), patch.object(Path, 'lstat', metadata), \
+             patch.object(Path, 'resolve', lambda p: Path(resolved) if p == path and resolved else p), \
+             patch.object(Path, 'read_text', return_value='{"repository":"/var/lib/m4/source.git"}') as read, \
+             patch('owner_common.os.statvfs', side_effect=OSError if missing_mount else None,
+                   return_value=SimpleNamespace(f_flag=os.ST_RDONLY if readonly else 0)), \
+             patch('owner_common.os.access', side_effect=access):
+            try:
+                return private_config(path)
+            except Rejected:
+                read.assert_not_called()
+                raise
+
+    def test_systemd_acl_credential_on_sealed_mount_is_private(self):
+        self.assertEqual(self.credential(), {'repository': '/var/lib/m4/source.git'})
+
+    def test_group_readable_file_elsewhere_is_not_a_credential(self):
+        for path in ('/tmp/m4.service/owner-config', '/run/credentials/m4.service/other',
+                     '/run/credentials/m4/owner-config', '/run/credentials/a/b.service/owner-config'):
+            with self.subTest(path=path), self.assertRaises(Rejected): self.credential(path=path)
+
+    def test_credential_environment_cannot_approve_arbitrary_file(self):
+        for environment in ({}, {'CREDENTIALS_DIRECTORY': '/tmp'},
+                            {'CREDENTIALS_DIRECTORY': '/run/credentials/other.service'}):
+            with self.subTest(environment=environment), self.assertRaises(Rejected):
+                self.credential(environment=environment)
+
+    def test_credential_requires_root_and_exact_file_mode(self):
+        for changes in ({'uid': 1000}, {'gid': 1000}, {'mode': 0o444}, {'mode': 0o640},
+                        {'mode': 0o460}, {'mode': 0o2440}, {'directory_file': True}):
+            with self.subTest(changes=changes), self.assertRaises(Rejected): self.credential(**changes)
+
+    def test_credential_requires_protected_root_ancestry(self):
+        for changes in ({'parent_mode': 0o750}, {'parent_mode': 0o570}, {'parent_uid': 1000},
+                        {'ancestor_mode': 0o775}, {'ancestor_mode': 0o777}):
+            with self.subTest(changes=changes), self.assertRaises(Rejected): self.credential(**changes)
+
+    def test_credential_requires_readonly_filesystem_and_effective_access(self):
+        for changes in ({'readonly': False}, {'readable': False}, {'writable': True}, {'missing_mount': True}):
+            with self.subTest(changes=changes), self.assertRaises(Rejected): self.credential(**changes)
+
+    def test_credential_rejects_links_and_noncanonical_paths(self):
+        for changes in ({'symlink': True}, {'resolved': '/tmp/owner-config'}):
+            with self.subTest(changes=changes), self.assertRaises(Rejected): self.credential(**changes)
 
 
 class WaitTests(unittest.TestCase):

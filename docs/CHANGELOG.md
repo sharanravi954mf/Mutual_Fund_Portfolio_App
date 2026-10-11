@@ -9,6 +9,19 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV commissioning — systemd credential compatibility — 2026-10-11
+
+- Actual isolated systemd execution reproduced rejection of `LoadCredential`
+  configuration: Ubuntu systemd 255 exposes root-owned `0440` files through an ACL
+  on a read-only credential mount, rather than ordinary `0600` files.
+- Accept only the canonical `owner-config` file in the unit's protected runtime
+  credential directory, with exact root ownership/modes and read-only filesystem
+  checks. Ordinary group-readable configuration remains rejected.
+- Added positive and negative regressions and exercised the corrected check with
+  isolated installed identities. This local correction is not installed as the
+  active controller or published. DEV release commissioning remains blocked; see
+  the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
 ## M4 DEV commissioning preparation — inspection correction — 2026-10-11
 
 - Fixed a missing outer JSON brace in the private ingestion owner's Docker container

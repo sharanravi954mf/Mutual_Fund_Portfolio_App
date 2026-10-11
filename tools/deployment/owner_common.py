@@ -5,6 +5,8 @@ import hashlib
 import io
 import json
 import os
+import re
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -75,10 +77,37 @@ def source_tree(repo, sha):
         yield Path(tmp)
 
 
+def systemd_private_config(path, info):
+    """Accept systemd's root-owned ACL credential only on its sealed runtime mount."""
+    directory = Path(os.environ.get('CREDENTIALS_DIRECTORY', '/nonexistent'))
+    if (path.name != 'owner-config' or path.parent != directory or
+            directory.parent != Path('/run/credentials') or
+            not re.fullmatch(r'[A-Za-z0-9_.@-]+\.service', directory.name)):
+        return False
+    if (info.st_uid != 0 or info.st_gid != 0 or
+            stat.S_IMODE(info.st_mode) != 0o440 or not stat.S_ISREG(info.st_mode)):
+        return False
+    try:
+        if path.resolve() != path:
+            return False
+        for parent in (directory, directory.parent, Path('/run')):
+            metadata = parent.lstat()
+            if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or
+                    metadata.st_gid != 0 or metadata.st_mode & 0o022):
+                return False
+        return (stat.S_IMODE(directory.lstat().st_mode) == 0o550 and
+                bool(os.statvfs(path).f_flag & os.ST_RDONLY) and
+                os.access(path, os.R_OK) and not os.access(path, os.W_OK))
+    except OSError:
+        return False
+
+
 def private_config(path):
     path = Path(path)
     require(path.is_absolute() and not path.is_symlink(), 'owner_config_path_invalid')
-    require(path.stat().st_uid in (0, os.getuid()) and path.stat().st_mode & 0o077 == 0,
+    info = path.stat()
+    require((info.st_uid in (0, os.getuid()) and info.st_mode & 0o077 == 0) or
+            systemd_private_config(path, info),
             'owner_config_permissions_invalid')
     value = json.loads(path.read_text())
     repo = Path(value['repository']).resolve()

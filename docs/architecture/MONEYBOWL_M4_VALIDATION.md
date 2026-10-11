@@ -636,3 +636,64 @@ No synthetic receipt or requested SHA has been substituted for live evidence.
 No live file, container, systemd unit, credential, Supabase project/financial state,
 QA/Production, Director data or GitHub setting changed. No publication/merge occurred.
 This narrow correction is local pending independent review; **DEV is not commissioned**.
+
+## Consolidated DEV commissioning — systemd credential correction — 2026-10-11
+
+Starting published/reviewed feature: `535050e0bb6afcd4c019fee6d85015d2172a7672`.
+Fresh GitHub inspection found all required CI successful, PR #207 still draft and
+unmerged, and develop unchanged at `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`.
+These hosted checks cover the starting commit, not this subsequent local correction.
+
+Authorized installation created the three locked non-login identities and protected
+disabled controller sources/configuration at the starting SHA. A real transient
+systemd test, without network or Docker access, then failed with
+`owner_config_permissions_invalid`. Direct metadata measurement proved systemd 255
+provides a root:root `0440` credential inside a root:root `0550` directory on a
+read-only mount. Its per-user ACL provides read access without granting write access.
+The existing ordinary-file `0600` check rejected that legitimate credential.
+
+The correction retains ordinary private-file validation and adds one narrow case:
+`owner-config` under the exact `CREDENTIALS_DIRECTORY`, directly beneath
+`/run/credentials/<unit>.service`. It requires canonical paths, regular file type,
+root:root ownership, exact file/directory modes, protected root ancestry, a read-only
+filesystem, effective read access and no write access. Environment variables alone
+cannot approve an arbitrary file. No financial authentication or environment policy
+changes. Seven regression tests exercise positive acceptance and negative paths,
+ownership, permissions, symlinks, mount availability and effective access.
+
+Root-protected acceptance copies loaded the corrected configuration through actual
+systemd credentials and then rejected both disabled owners before any transport.
+The ingestion acceptance uses an explicitly synthetic accessible `compose_root`;
+the actual `/home/ubuntu` is `0750` and remains inaccessible to the new identity.
+No home permission was widened. The evidence test uses its actual disabled config.
+Transient test setup initially used a literal `%d` argument (escaped by systemd-run)
+and an overly restrictive test `ProtectHome`; these harness failures were diagnosed
+separately from the reproduced source defect. No live owner was enabled.
+
+| Command / check | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -q` | Starting baseline 158 passed; corrected suite 165 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -p test_owners.py -k SystemdConfigTests -v` | 7 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -q` | 34 passed |
+| `python3 scripts/generate_outbox_routes.py --check` | 17 mappings unchanged |
+| `python3 .github/scripts/validate_migration_history.py` | 27 frozen files unchanged |
+
+Protected measurement failed before producing a baseline because required M3B
+interpolation inputs are absent from the supplied `.env`; observations were not
+converted into approvals. Mirrors now retain real develop ancestry and the archived
+M3B object; the repository is currently public, so anonymous HTTPS provides fetch
+access without installing a write credential. A pinned official Supabase CLI, public
+DEV build settings, empty independent receipt roots, shared build lock and a fresh
+local readiness-only key were installed. The key is not provisioned to Edge and no
+scoped measurement token is present. The deployed Edge code lacks readiness-only
+support. Supabase read-only inspection confirms active DEV dispatch and one active
+15-minute recovery Cron; it does not commission the private evidence owner.
+
+Original application container identities and Oracle retirement remain verified.
+No API replacement, frontend handoff, Caddy mutation, owner timer enablement, hosted
+deployment, QA/Production change or merge occurred. Receipt URLs still require
+independent ingress commissioning. API provenance/recovery, approved registry and
+Compose inputs, protected Flutter SDK, build headroom, read-only measurement and
+independent review remain gates. The corrected source is local for review; installed
+controller sources remain at the previously reviewed starting SHA. Exact private
+operation evidence is in `/home/ubuntu/moneybowl-m4-dev-execution-20261011`.
