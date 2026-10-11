@@ -1,6 +1,10 @@
 # MONEYBOWL M4 — unified environment promotion
 
-Status: corrected local review candidate, 2026-10-10; **end-to-end commissioning BLOCKED**.
+Status: DEV compatibility remediation candidate, 2026-10-11; **end-to-end commissioning BLOCKED**.
+The [DEV remediation record](MONEYBOWL_M4_DEV_REMEDIATION_001.md) contains actual
+read-only Oracle discovery, the four/five-layer compatibility contract, capacity
+remediation and the precise remaining private commissioning gates. It supersedes
+earlier assumptions below about two-layer Compose ownership and a missing frontend timer.
 No hosted deployment was performed. Base `origin/develop` was fetched and verified
 at `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`. The canonical checkout was left intact.
 The user's commissioning context supersedes older M1/M2/M2A local-candidate notes:
@@ -39,7 +43,7 @@ flowchart TD
 | Migrations, declared Edge Functions, declared Storage | Existing private Supabase GitHub integration on `develop` | Future separately owned Supabase integration on `qa` | Observe only; no CLI deployments or admin credentials in Actions |
 | Flutter web | Existing Oracle webhook/spool and `deploy-develop.sh` | Future independent QA hosting runner | Versioned host adapter replaces the called deploy implementation after installation review; no second webhook consumer |
 | Ingestion support API | Private existing Compose owner plus versioned reconciliation adapter | Future private QA service owner | Exact-source build, registry digest, API-only activation, measured verification; installation pending |
-| ClamAV and Caddy | Existing Oracle infrastructure owner | Independent QA infrastructure owner | Existing running configuration/images verified and preserved; infrastructure changes require separate review |
+| ClamAV, Caddy, existing webhook and M3B ingress/receiver | Existing Oracle infrastructure, Flutter and Director/M3B owners | Independent QA infrastructure owners | Explicit layers and per-service/resource identities verified and preserved; only API may be deployed |
 | NSE financial dispatch | M2 native dispatcher inside Supabase | Disabled; independent schema/evidence commissioning needed | No lifecycle operations; preserve active DEV; Oracle dispatcher remains retired |
 | Director and host infrastructure | Separate owners | Separate owners | Outside application release; never deployed by M4 |
 
@@ -337,12 +341,17 @@ One-time DEV installation is a **separate authorized host change**, not executed
    does not itself retry; it also covers lost deliveries and busy-branch exhaustion.
 6. Stage the [ingestion owner](../../tools/deployment/ingestion_owner.py) separately
    using the [disabled example](../../tools/deployment/ingestion-owner.example.json).
-   Inventory the existing Compose project, private `.env`, data volumes, daemon ID,
-   Caddy/ClamAV containers, the fixed DEV retirement inventory below and its independently verified full container ID.
-   Bind an unlabelled legacy API image to its independently verified original revision
-   and image ID. Do not infer that revision from the next requested release.
-   Pin Docker/systemctl binaries by SHA-256; pin/review the Compose plugin installation
-   too (plugin byte pinning is an installation responsibility). Privately provision
+   Approve the ordered four-layer inventory plus the fifth M3B ingress layer found
+   on actual DEV, private resolved service hashes, runtime projections, mounted public
+   artifacts and named resource identities using the remediation record. The relocated
+   M3B file must match its archived Git object; do not recreate the obsolete path.
+   Bind the fixed retirement inventory below and its independently verified container ID.
+   Unlabelled API adoption now requires a protected authoritative historical build
+   record, not bare initial SHA/image fields. Current DEV lacks this provenance and
+   needs archive recovery or a separately authorized initial replacement.
+   Pin Docker/systemctl and the actual discovered Compose plugin binaries by SHA-256.
+   Resolve capacity first: builds/activation reject less than max(12 GiB, 20%) free
+   space or max(100,000, 20%) free inodes. Privately provision
    registry auth and exact registry repository. This owner has Docker socket access,
    a root-equivalent capability; isolate it from app users and shared Actions.
 7. Review the ingestion [service](../../tools/deployment/moneybowl-ingestion-owner.service)
@@ -356,7 +365,9 @@ One-time DEV installation is a **separate authorized host change**, not executed
    orphan removal, volume deletion, legacy dispatch profile, or dependency restart.
    API readiness is non-financial. Verify running image/configuration, the exact
    single-worker command and absent entrypoint override, one API container,
-   unchanged Caddy/ClamAV IDs/images/config hashes and retirement before publishing.
+   unchanged Caddy/ClamAV/webhook/M3B IDs, images, configuration, networking/storage
+   relationships and retirement before publishing. A one-use API activation guard
+   rechecks compatible host state and the exact approved override before `up`.
    Source changes to Compose/Caddy fail for separate infrastructure review, rather
    than pretending undeployed infrastructure changes succeeded. Preserve all data.
 8. Stage the [evidence configuration](../../tools/deployment/evidence-owner.example.json),
@@ -388,6 +399,11 @@ One-time DEV installation is a **separate authorized host change**, not executed
     across the existing Supabase integration, frontend adapter, ingestion owner and
     both reporting paths. Retain exact live receipts and branch/revision identity.
     No timer or service in this procedure was installed or executed against DEV here.
+
+Actual DEV already has an enabled 15-minute `moneybowl-flutter-web-reconcile.timer`.
+Adapt that existing owner and spool dispatch together; do not install the example
+frontend reconcile timer alongside it. The owner migration and any interval change
+need a separate host review, with one lock and one deployment implementation.
 
 Automatic convergence after commissioning is: approved branch update independently
 reaches the existing Supabase integration and webhook; the frontend timer covers lost
@@ -494,10 +510,10 @@ No QA administrator credential is needed to run synthetic tests or the shared wo
 
 | Capability | Implemented | Locally tested | Already live evidence | Pending |
 | --- | --- | --- | --- | --- |
-| Feature/PR CI and QA compatibility | Yes | Synthetic and repository regressions | Not published | Review, publication, required branch checks |
+| Feature/PR CI and QA compatibility | Yes | Synthetic and repository regressions | PR #207 exists; this remediation not published | Independent review/publication of this correction, fresh CI and branch rules |
 | Existing DEV Supabase deployment | Existing integration retained; independent measurement adapter implemented | Mock API/export comparisons and repository regressions | User-supplied working integration; no M4 receipt | Private read permissions, export compatibility, Independent readiness-only key, installation and live certification |
-| Existing DEV Flutter/webhook | Existing working scripts inspected read-only | New adapter filesystem/process tests | User-supplied existing deployment context | Reviewed wrapper/timer installation and public identity upgrade |
-| Ingestion service promotion | Immutable manifest, private build/deploy/verify adapter and timer examples | Mock Docker/provenance/race/failure tests; 194 service tests | Repository records hosted DEV service; new adapter not installed | Registry, baseline/daemon binding, private config, controlled installation and real verification |
+| Existing DEV Flutter/webhook | Existing scripts, spool consumer and 15-minute timer inspected read-only | Adapter filesystem/process tests | Existing current release `8993ce1...` and active timer observed | Reviewed migration of existing wrapper/timer to dedicated owner; no duplicate scheduler |
+| Ingestion service promotion | Explicit four/five-layer inventory, API-only guard, capacity checks and immutable image owner | Mock Docker/provenance/race/failure tests; service regressions | Six application containers inspected read-only; new adapter not installed | Capacity, layer approvals, resolved hashes, legacy source proof/initial replacement, registry, private users/config and controlled installation |
 | Consolidated status | Bounded observer plus independent recurring backend/full-release evidence owner | Delayed/partial/404/permanent/race tests and synthetic full sequence | None from this implementation | Private measurement capabilities, receipt hosting, timer installation and full live verification |
 | QA deployment framework | Shared code, disabled policy | Synthetic isolated QA success/denial | No QA environment | All independent private commissioning |
 | Financial state preservation | No mutation interfaces in M4 | Existing M1/M2/M2A safety/SQL tests | User reports DEV active, one Cron, Oracle retired | Live release preservation measurement by private owner |

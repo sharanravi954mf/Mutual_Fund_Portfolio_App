@@ -18,7 +18,7 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
-## MONEYBOWL-M4 environment promotion — local review candidate 2026-10-10
+## MONEYBOWL-M4 environment promotion — local review candidate 2026-10-11
 
 Versioned deployment contracts, feature/PR CI, read-only DEV/QA release observation,
 immutable frontend activation, private Supabase measurement and ingestion deployment
@@ -31,6 +31,12 @@ project. No live infrastructure changed. The M4 task's supplied live context rep
 DEV native dispatch active and Oracle dispatch retired; older local-candidate entries
 below are historical, not authorization to restore Oracle. See the
 [M4 architecture and runbook](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+DEV remediation 001 now binds the real four/five-layer Compose architecture and
+rejects low-capacity builds. Read-only discovery verified M3B relocation and Oracle
+retirement; resolved private configuration hashes, legacy API source provenance,
+capacity remediation and owner provisioning remain blocked. The existing Flutter
+reconciliation timer must be adapted without duplicating ownership. See the
+[discovery, capacity plan and commissioning gates](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md).
 
 ## MONEYBOWL-M2 native dispatcher — local candidate 2026-10-09
 

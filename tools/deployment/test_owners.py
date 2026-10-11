@@ -9,6 +9,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
+import compose_inventory as inventory
 from contract import DEV_PROJECT, Rejected, load_policy, manifest
 from evidence_owner import (dispatcher_measurement, function_index, measure, produce,
                             publish_release, sql_tokens, verify_files, verify_migrations, module_specifiers)
@@ -259,6 +260,8 @@ class FakeDocker:
         self.live = None; self.calls = []; self.provenance = None
         self.fail_build = False; self.fail_activate = False; self.bad_health = False
         self.before = {'caddy': {'id': 'caddy-old'}, 'clamav': {'id': 'clamav-old'}}
+    def capacity(self): self.calls.append('capacity')
+    def prepare_activation(self, override, provenance): self.calls.append('prepare_activation')
     def infrastructure(self, source): self.calls.append('infrastructure'); return copy.deepcopy(self.before)
     def current(self): return copy.deepcopy(self.live)
     def build(self, source, sha, digest):
@@ -332,7 +335,11 @@ class IngestionTests(SourceFixture):
     def test_legacy_image_needs_independent_initial_binding(self):
         self.docker.live = dict(image='sha256:' + 'f' * 64, labels={})
         with self.assertRaises(Rejected): self.run_owner()
-        self.config.update(initial_revision=self.sha, initial_image_id='sha256:' + 'e' * 64)
+        proof = self.root / 'historical.json'
+        proof.write_text(json.dumps(dict(kind='historical-build-record', authority='synthetic-builder',
+                                         image_id='sha256:' + 'e' * 64, git_commit=self.sha)))
+        proof.chmod(0o600)
+        self.config['initial_provenance'] = dict(path=str(proof), sha256=inventory.sha256(proof.read_bytes()))
         with self.assertRaisesRegex(Rejected, 'initial_image_binding_mismatch'): self.run_owner()
 
     def test_uncommissioned_owner_and_qa_never_call_docker(self):
@@ -463,7 +470,9 @@ class TransportTests(unittest.TestCase):
 
     def docker(self, command):
         return DockerOwner(dict(compose_project='moneybowl-ingestion-support', image_repository='registry.invalid/api',
-                                 compose_root='/synthetic/compose', compose_env='/synthetic/private.env',
+                                 compose_root=inventory.DEV_ROOT, compose_env='/synthetic/private.env',
+                                 compose_layers=[dict(role=r, path=p, authority=a, sha256='a'*64, approval='synthetic')
+                                                 for r,p,a in inventory.DEV_LAYERS[:4]],
                                  docker_socket='unix:///var/run/docker.sock', environment='dev',
                                  retired_containers=[DEV_RETIRED_CONTAINER], retired_container_id='c' * 64,
                                  retired_services=DEV_RETIRED_SERVICES.copy(), retired_timers=[DEV_RETIRED_TIMER]), command=command)
@@ -471,7 +480,16 @@ class TransportTests(unittest.TestCase):
     def test_only_api_is_selected_and_environment_is_not_printed(self):
         calls = []
         owner = self.docker(lambda argv, **kw: calls.append(argv) or b'')
-        owner.activate('/synthetic/override.json')
+        with self.assertRaisesRegex(Rejected, 'api_activation_not_prepared'):
+            owner.activate('/synthetic/override.json')
+        self.assertEqual(calls, [])
+        with tempfile.TemporaryDirectory() as tmp:
+            override = Path(tmp) / 'override.json'; override.write_text('{}')
+            owner._source = Path(tmp)
+            owner._activation = (str(override), inventory.sha256(override.read_bytes()), {}, None)
+            with patch.object(owner, 'capacity'), patch.object(owner, 'infrastructure', return_value={}), \
+                 patch.object(owner, 'current', return_value=None):
+                owner.activate(override)
         args = calls[0]
         self.assertEqual(args[-1], 'api'); self.assertIn('--no-deps', args); self.assertIn('--no-build', args)
         self.assertIn('--wait', args); self.assertIn('unix:///var/run/docker.sock', args)
@@ -496,6 +514,7 @@ class TransportTests(unittest.TestCase):
                 Path(argv[argv.index('--iidfile') + 1]).write_text(image_id)
             return b''
         owner = self.docker(command)
+        capacity_patch = patch.object(owner, 'capacity'); capacity_patch.start(); self.addCleanup(capacity_patch.stop)
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp); context = source / 'services/ingestion-support'; context.mkdir(parents=True)
             with patch.object(owner, 'image', return_value={'id': image_id, 'digests': [ref]}):
@@ -530,7 +549,14 @@ class TransportTests(unittest.TestCase):
             source = Path(tmp); (source / 'services/ingestion-support').mkdir(parents=True)
             (source / 'services/ingestion-support/compose.yaml').write_text('reviewed')
             owner.root = source; (source / 'compose.yaml').write_text('drift')
-            with self.assertRaisesRegex(Rejected, 'infrastructure_change_requires_commissioning'): owner.infrastructure(source)
+            layers = [dict(role=r, path=str(source / Path(p).name), authority=a, sha256='a'*64, approval='synthetic')
+                      for r,p,a in inventory.DEV_LAYERS[:4]]
+            layers[0]['sha256'] = inventory.sha256(b'drift')
+            layers[0].update(uid=(source / 'compose.yaml').stat().st_uid,
+                             mode=(source / 'compose.yaml').stat().st_mode & 0o777)
+            owner.config['compose_layers'] = layers
+            with patch('compose_inventory.layout', return_value=layers):
+                with self.assertRaisesRegex(Rejected, 'infrastructure_change_requires_commissioning'): owner.infrastructure(source)
 
     def test_multiworker_or_wrong_container_owner_rejected(self):
         owner = self.docker(lambda *a, **k: b'one two')
@@ -551,7 +577,7 @@ class TransportTests(unittest.TestCase):
 
     def retirement_fixture(self):
         state = {
-            'container': dict(id='c' * 64, restart='no', state=dict(Status='exited', Pid=0,
+            'container': dict(id='c' * 64, restart='no', mounts=[], networks={}, state=dict(Status='exited', Pid=0,
                               Running=False, Restarting=False, Paused=False, Dead=False),
                               labels={'com.docker.compose.project': 'moneybowl-ingestion-support',
                                       'com.docker.compose.service': 'outbox-dispatcher'}),

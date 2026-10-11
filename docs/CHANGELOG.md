@@ -9,6 +9,17 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV commissioning remediation 001 — 2026-10-11
+
+- Bound ingestion deployment to approved ordered DEV Compose layers, per-service
+  ownership, runtime relationships, resource identities and historical M3B provenance.
+- Added a prepared API-only activation guard, independently recorded legacy image
+  binding, Compose plugin pinning and conservative disk/inode preflight rejection.
+- Recorded read-only Oracle discovery, the existing Flutter timer, unresolved private
+  commissioning dependencies and a ranked capacity plan. No installation, deployment,
+  cleanup or financial operation occurred. See the
+  [remediation record](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md).
+
 ## M4 PR #207 CI correction — 2026-10-11
 
 - Track the validated root Flutter lockfile while retaining enforced dependency

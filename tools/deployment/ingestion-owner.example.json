@@ -5,17 +5,15 @@
   "repository": "/private/ingestion-source",
   "state_root": "/private/ingestion-owner-state",
   "report_root": "/private/published-service-measurements",
-  "compose_root": "/private/existing-ingestion-compose",
+  "compose_root": "/home/ubuntu/moneybowl/services/ingestion-support",
   "compose_project": "moneybowl-ingestion-support",
-  "compose_env": "/private/existing-ingestion-compose/.env",
+  "compose_env": "/home/ubuntu/moneybowl/services/ingestion-support/.env",
   "docker": "/usr/bin/docker",
   "docker_sha256": "REPLACE_WITH_REVIEWED_BINARY_SHA256",
   "systemctl": "/usr/bin/systemctl",
   "systemctl_sha256": "REPLACE_WITH_REVIEWED_BINARY_SHA256",
   "docker_config": "/private/ingestion-registry-auth",
   "image_repository": "registry.example.invalid/moneybowl-ingestion-dev",
-  "initial_revision": "REPLACE_WITH_INDEPENDENTLY_VERIFIED_LEGACY_SOURCE_SHA",
-  "initial_image_id": "REPLACE_WITH_ACTUAL_LEGACY_IMAGE_ID",
   "retired_containers": [
     "moneybowl-ingestion-support-outbox-dispatcher-1"
   ],
@@ -29,5 +27,137 @@
   "retired_timers": [
     "moneybowl-outbox-dispatcher-reconcile.timer"
   ],
-  "retired_container_id": "REPLACE_WITH_INDEPENDENTLY_VERIFIED_STOPPED_CONTAINER_ID"
+  "retired_container_id": "REPLACE_WITH_INDEPENDENTLY_VERIFIED_STOPPED_CONTAINER_ID",
+  "docker_data_root": "/var/lib/docker",
+  "compose_plugin": "/usr/libexec/docker/cli-plugins/docker-compose",
+  "compose_plugin_sha256": "REPLACE_WITH_REVIEWED_BINARY_SHA256",
+  "initial_provenance": {
+    "path": "/private/independently-verified-historical-build.json",
+    "sha256": "REPLACE_WITH_VERIFIED_RECORD_SHA256"
+  },
+  "compose_layers": [
+    {
+      "role": "base",
+      "path": "/home/ubuntu/moneybowl/services/ingestion-support/compose.yaml",
+      "authority": "ingestion",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "uid": null,
+      "mode": null
+    },
+    {
+      "role": "hosted",
+      "path": "/home/ubuntu/moneybowl/services/ingestion-support/compose.hosted.yaml",
+      "authority": "ingestion",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "uid": null,
+      "mode": null
+    },
+    {
+      "role": "flutter",
+      "path": "/home/ubuntu/moneybowl-runtime/flutter-web-dev/compose.web-dev.yaml",
+      "authority": "flutter",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "uid": null,
+      "mode": null
+    },
+    {
+      "role": "m3b",
+      "path": "/home/ubuntu/moneybowl-runtime/m3b/compose.m3b.yaml",
+      "authority": "director-m3b",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "origin": {
+        "revision": "3eefd7cffec7fcd273250e014f03175e1d5c1c3b",
+        "path": "services/ingestion-support/compose.m3b.yaml"
+      },
+      "uid": null,
+      "mode": null
+    },
+    {
+      "role": "m3b-ingress",
+      "path": "/home/ubuntu/moneybowl-runtime/m3b/compose.m3b-ingress-adapter.yaml",
+      "authority": "director-m3b",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "uid": null,
+      "mode": null
+    }
+  ],
+  "compose_artifacts": [
+    {
+      "path": "/home/ubuntu/moneybowl-runtime/flutter-web-dev/Caddyfile",
+      "authority": "flutter",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "uid": null,
+      "mode": null
+    },
+    {
+      "path": "/home/ubuntu/moneybowl-runtime/github-webhook-container/receiver.py",
+      "authority": "flutter",
+      "sha256": "REPLACE_WITH_REVIEWED_FILE_SHA256",
+      "approval": "REPLACE_WITH_OWNER_REVIEW_RECORD",
+      "uid": null,
+      "mode": null
+    }
+  ],
+  "compose_model_sha256": "REPLACE_WITH_APPROVED_UNRESOLVED_MODEL_SHA256",
+  "compose_services": {
+    "api": {
+      "container_id": "REPLACE_WITH_VERIFIED_CONTAINER_ID",
+      "image_id": "REPLACE_WITH_VERIFIED_IMAGE_ID",
+      "config_hash": "REPLACE_WITH_VERIFIED_EFFECTIVE_SERVICE_HASH",
+      "runtime_sha256": "REPLACE_WITH_REVIEWED_RUNTIME_PROJECTION_SHA256",
+      "recorded_files": "REPLACE_WITH_EXACT_APPROVED_HISTORICAL_FILE_LABEL"
+    },
+    "caddy": {
+      "container_id": "REPLACE_WITH_VERIFIED_CONTAINER_ID",
+      "image_id": "REPLACE_WITH_VERIFIED_IMAGE_ID",
+      "config_hash": "REPLACE_WITH_VERIFIED_EFFECTIVE_SERVICE_HASH",
+      "runtime_sha256": "REPLACE_WITH_REVIEWED_RUNTIME_PROJECTION_SHA256",
+      "recorded_files": "REPLACE_WITH_EXACT_APPROVED_HISTORICAL_FILE_LABEL"
+    },
+    "clamav": {
+      "container_id": "REPLACE_WITH_VERIFIED_CONTAINER_ID",
+      "image_id": "REPLACE_WITH_VERIFIED_IMAGE_ID",
+      "config_hash": "REPLACE_WITH_VERIFIED_EFFECTIVE_SERVICE_HASH",
+      "runtime_sha256": "REPLACE_WITH_REVIEWED_RUNTIME_PROJECTION_SHA256",
+      "recorded_files": "REPLACE_WITH_EXACT_APPROVED_HISTORICAL_FILE_LABEL"
+    },
+    "github-webhook": {
+      "container_id": "REPLACE_WITH_VERIFIED_CONTAINER_ID",
+      "image_id": "REPLACE_WITH_VERIFIED_IMAGE_ID",
+      "config_hash": "REPLACE_WITH_VERIFIED_EFFECTIVE_SERVICE_HASH",
+      "runtime_sha256": "REPLACE_WITH_REVIEWED_RUNTIME_PROJECTION_SHA256",
+      "recorded_files": "REPLACE_WITH_EXACT_APPROVED_HISTORICAL_FILE_LABEL"
+    },
+    "m3b-ingress-adapter": {
+      "container_id": "REPLACE_WITH_VERIFIED_CONTAINER_ID",
+      "image_id": "REPLACE_WITH_VERIFIED_IMAGE_ID",
+      "config_hash": "REPLACE_WITH_VERIFIED_EFFECTIVE_SERVICE_HASH",
+      "runtime_sha256": "REPLACE_WITH_REVIEWED_RUNTIME_PROJECTION_SHA256",
+      "recorded_files": "REPLACE_WITH_EXACT_APPROVED_HISTORICAL_FILE_LABEL"
+    },
+    "m3b-receiver": {
+      "container_id": "REPLACE_WITH_VERIFIED_CONTAINER_ID",
+      "image_id": "REPLACE_WITH_VERIFIED_IMAGE_ID",
+      "config_hash": "REPLACE_WITH_VERIFIED_EFFECTIVE_SERVICE_HASH",
+      "runtime_sha256": "REPLACE_WITH_REVIEWED_RUNTIME_PROJECTION_SHA256",
+      "recorded_files": "REPLACE_WITH_EXACT_APPROVED_HISTORICAL_FILE_LABEL"
+    }
+  },
+  "compose_resources": {
+    "network": {
+      "moneybowl-ingestion-support_ingestion_internal": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256",
+      "moneybowl_m3b_private": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256"
+    },
+    "volume": {
+      "moneybowl-ingestion-support_caddy_config": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256",
+      "moneybowl-ingestion-support_caddy_data": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256",
+      "moneybowl-ingestion-support_clamav_db": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256"
+    }
+  }
 }

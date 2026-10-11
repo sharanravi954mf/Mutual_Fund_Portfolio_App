@@ -426,3 +426,73 @@ ARM64 tests are not a successful GitHub-hosted amd64 run. There are no outstandi
 local test blockers; registry availability and the hosted run remain external
 verification requirements. **M4 end-to-end live commissioning remains blocked and
 outside this CI correction.**
+
+## DEV commissioning remediation 001 — 2026-10-11
+
+Started at clean local/remote feature candidate
+`744ded1d7650fdcbd5415baa83def3eab07774af`, with canonical and fetched develop
+unchanged at `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`. Before editing, the existing
+M4 suite passed 119 tests, commissioning passed 34, route parity passed 17, and frozen
+migration validation passed 27. No new test is counted as baseline.
+
+Read-only host discovery and its limits are recorded in
+[DEV remediation 001](MONEYBOWL_M4_DEV_REMEDIATION_001.md). Docker access used only
+inspect/list/info/system-df and credential-free unresolved Compose rendering. No
+build, up/down, pull/push, container execution or systemd mutation command ran.
+An attempted resolved Compose check was rejected by automatic approval review because
+it would read live `.env`; it was replaced with `/dev/null`, no interpolation and no
+env-file resolution. Actual resolved hash certification remains blocked, not passed.
+Initial discovery also encountered an absent optional Engine Health field and YAML
+`!reset`; optional-health handling and a safe parser for structural metadata resolved
+those read-only tooling issues. A template unit cannot be queried as a concrete
+systemd invocation; persistent masks were verified with unit-file states and symlinks.
+
+Commands below ran in the feature worktree unless a service directory is stated.
+Temporary logs/metadata are under `/tmp/m4-remediation-001/`; only sanitized findings,
+not raw host inventory or private configuration, are committed.
+
+| Command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -q` | 147 passed, zero failed; 119 existing plus 28 new |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -q` | 34 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_validate_commits.py' -q` | 5 passed |
+| `env -u INGESTION_SUPPORT_BASE_URL PYTHONDONTWRITEBYTECODE=1 /tmp/moneybowl-m4-venv/bin/python -m pytest -vv` in `services/ingestion-support` | 194 passed, 1 existing live smoke skipped; local harness sockets authorized, hosted URL unset |
+| `PYTHONDONTWRITEBYTECODE=1 /tmp/b061-test-venv/bin/python -m pytest -q` in `services/outbox-dispatcher` | 63 passed; no dispatcher process started |
+| `/opt/moneybowl-toolchains/deno/2.9.6/aarch64-unknown-linux-gnu/deno test --deny-net --deny-env supabase/functions/outbox-dispatcher supabase/functions/_shared/nse supabase/functions/nse*-worker supabase/functions/nse-uat-smoke-test` | 1,076 passed, zero failed |
+| `python3 tools/deployment/edge_entries.py` and a checked Python subprocess loop invoking the pinned `deno check` for every returned entry | All 20 declared entrypoints passed |
+| `python3 scripts/generate_outbox_routes.py --check` | All 17 canonical mappings match |
+| `python3 .github/scripts/validate_migration_history.py` | All 27 frozen files unchanged |
+| `/tmp/moneybowl-m4-actionlint/actionlint -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml` | Passed with the existing documented actionlint 1.7.12 schema limitation; workflows unchanged |
+| `PYTHONPYCACHEPREFIX=/tmp/m4-remediation-001/compile-cache python3 -m py_compile tools/deployment/*.py` | Passed |
+| `python3 .github/scripts/validate_docs.py` | Passed |
+| `python3 .github/scripts/validate_commits.py 'fix: bind ingestion deployment to commissioned DEV infrastructure'` | Passed |
+| `git diff --check` and `git diff --cached --check` | Passed |
+
+Final unit/service counts: **1,519 passed, zero failed, one existing live smoke skip**.
+One intermediate run failed because the old mocked retirement container lacked the
+newly projected mounts/networks fields. Its synthetic shape was updated; all original
+retirement assertions remain. No test was disabled or weakened. New tests cover
+four/five layers, historical relocation/missing files, order, authority, paths, byte
+substitution, links, project/container ownership, model/resource/runtime drift,
+health/HTTP readiness, one worker, unexpected/profiled financial services, API-only
+override guards, failed activation, unknown legacy provenance and forged labels,
+real-adapter concurrent duplicate reconciliation, capacity/inodes, and QA/Production
+denial. Existing tests retain stale-branch, build-failure and superseded-report checks.
+
+All deployment transports in regression tests were mocked; no live model hashes or
+legacy source proofs were invented. Separately, the new capacity function was invoked
+read-only with state `/tmp/m4-remediation-001` and Docker root `/var/lib/docker`, and
+correctly returned `insufficient_build_capacity` on this host. The complete M4 owner
+was never run against live DEV. Flutter builds and real SQL/Docker builds were not
+rerun: their sources are unchanged, capacity is insufficient and no such deployment
+or large build is authorized here. Historical results above are not new executions.
+
+No migration, application/worker source, workflow, live Compose file, credential,
+financial evidence, Cron or Director data changed. No cleanup, sudo, publication,
+QA/Production access or live deployment occurred. The implementation is reviewable;
+actual installation and unattended end-to-end release verification remain blocked.
+Final read-only comparison confirmed unchanged IDs/images/states/restart policies
+for all six application containers and the retired dispatcher, unchanged hashes for
+all five live Compose layer files, both persistent masks, and the disabled/inactive
+retirement timer. Remote feature/develop references and canonical checkout remained
+at their preflight SHAs before the local commit.
