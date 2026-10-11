@@ -267,3 +267,162 @@ unchanged and this task prohibits infrastructure mutation. Actual Oracle output,
 private inventory bindings, new readiness credential provisioning and complete live
 release verification remain commissioning prerequisites. Local security fixes are
 verified; **live M4 commissioning remains BLOCKED**.
+
+## PR #207 CI correction — 2026-10-11
+
+Continued candidate `7f6f31e0addcc9d02e6e5e8188e572fde2913bdb` in the existing
+feature worktree. The worktree was clean, remote feature HEAD matched, and an explicit
+fetch confirmed `origin/develop=8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`.
+Canonical develop was not changed. Read-only GitHub metadata confirmed
+[PR #207](https://github.com/sharanravi954mf/Mutual_Fund_Portfolio_App/pull/207)
+and [run 38087054932](https://github.com/sharanravi954mf/Mutual_Fund_Portfolio_App/actions/runs/38087054932)
+refer to that candidate: Flutter dependency resolution and the SQL container step
+failed, contracts passed, and deployment observation was skipped.
+
+### Root causes and minimal correction
+
+The root `pubspec.lock` existed only as an ignored local file. A fresh clone reproduced
+`Cannot do --enforce-lockfile without an existing pubspec.lock` (exit 1). The correction
+tracks the existing validated 109-package resolution. `.gitignore` retains its general
+lockfile rule and adds only `!/pubspec.lock`; nested lockfiles, `.env`, build products
+and caches remain ignored. No dependency constraints or versions were upgraded.
+Flutter remains 3.44.6 / Dart 3.12.2, and Actions retains `--enforce-lockfile`.
+
+The lockfile SHA-256 is
+`d98f1cb477419371fbc8e37ca7ac7c10bc4400b9031dd0178370aaa5fcbebd80`.
+Offline enforcement in the original worktree and online enforcement in a fresh
+candidate clone with an empty package cache both left it byte-identical. The latter
+had no prior `.dart_tool` or build output and used a clean process environment with
+only HOME, PUB_CACHE and PATH. The source manifest remains unchanged. Availability
+of newer packages and discontinued `js` are informational, not resolution failures.
+
+The SQL failure occurred at the public ECR image acquisition step, before a database
+or test ran. Only `scripts/test_m2_outbox_sql.sh` changes its image reference. Both
+existing workflows call this script, so neither needs a new credential or workflow
+change. The disposable container, `--network none`, tmpfs data, EXIT cleanup,
+`set -euo pipefail`, migration order, fixtures, role checks, assertions and concurrency
+checks remain unchanged.
+
+### Independently verified image identity
+
+Selected repository: `docker.io/supabase/postgres`, Supabase image release
+`17.6.1.155`; the executable reports **PostgreSQL 17.6**.
+Pinned multi-platform index:
+
+```text
+sha256:3866d94d8426927e8db3f1c5d790752292bfbe27b5f1f46e199ae1b7d3c1710b
+```
+
+| Platform | Manifest digest | Image configuration digest |
+| --- | --- | --- |
+| linux/amd64 | `sha256:3e2a7ab48783077d0122dc72ed5174afb543110c38266c845716c51d130658e4` | `sha256:56da3fb43b03aca9b8fa264c156177dd204f722e9500e8d80008f5c9f7b82985` |
+| linux/arm64 | `sha256:9c09909e66c4da304b3fa280216670408ed76c7587d6c3887e3ed016cd5993da` | `sha256:af17d7a082c3a98b7902018fb68eaf9ac28c10b09cabdcea1d92f5f1903535b5` |
+
+Anonymous HTTPS Registry API reads independently resolved both Docker Hub and ECR's
+`17.6.1.155` tags. SHA-256 was computed over returned index/manifest/configuration bytes
+and checked against digest references and response digest headers. Both registries
+returned the **same index, architecture manifests, configuration digests and ordered
+layer digests**. This is content equivalence, not an assumption based on equal tags.
+The subsequent Docker Hub pull used the immutable index and no registry credentials.
+The local runtime is ARM64; amd64 compatibility was verified from the index and image
+configuration, not by executing an x86_64 container on Oracle.
+
+The [Supabase publisher image](https://hub.docker.com/r/supabase/postgres) is used,
+not a generic PostgreSQL replacement. A disposable `--network none --rm` image probe
+confirmed PostgreSQL 17.6 and the required `pgcrypto`, `uuid-ossp`, `pg_cron`, `pg_net`
+and `supabase_vault` control files using `pg_config --sharedir`. The initial probe's
+assumed Debian-style extension path was wrong; querying the image's own PostgreSQL
+configuration resolved that probe, without changing the image or SQL requirements.
+Actual extension installation and SQL behavior are exercised by the full suite.
+
+Registry assumptions: anonymous Docker Hub HTTPS/blob access and the publisher's
+retention of this digest are required. Pinning prevents tag drift, not outages or
+future registry quotas. A pull failure stays a failed CI job; there is no fallback to
+another version, image, mocks or skipped tests. No Docker Hub login/secrets are added.
+A synthetic Docker-command failure returned exit 125, invoked cleanup, and made zero
+SQL calls. Successful local ARM64 tests cannot certify future GitHub-hosted amd64
+network availability or execution; fresh PR CI remains required after publication.
+
+### Baseline and final local execution
+
+Before edits, the existing M4 (119), commissioning (34), route (17) and frozen
+migration (27) checks passed. The original ECR script also completed all 92 migrations,
+21 SQL regression files, feed parity and both concurrency checks before its image
+reference was edited. These are existing-file baseline results, not new tests.
+After the change, the entire real SQL suite passed again using the pinned Docker Hub
+image. Both image references resolve to the same local ARM64 image identity; a
+name-filtered Docker listing confirmed no `moneybowl-m2-test-*` containers remained.
+
+Flutter commands below ran in `/tmp/moneybowl-m4-ci-207/clean-checkout`, a fresh local
+clone of the reviewed source with only the candidate root lockfile added. Every
+Flutter command used this exact sanitized prefix, with an initially empty package cache:
+
+```sh
+env -i HOME=/tmp/moneybowl-m4-ci-207/flutter-home \
+  PUB_CACHE=/tmp/moneybowl-m4-ci-207/pub-cache \
+  PATH=/home/ubuntu/.local/share/flutter-moneybowl/bin:/usr/bin:/bin
+```
+
+Other commands ran in the feature worktree unless a service directory is stated.
+`deno` and `actionlint` resolve to the exact tool paths recorded above. Logs and
+temporary registry/bundle verification programs are under `/tmp/moneybowl-m4-ci-207/`;
+this versioned table is the durable result record.
+
+| Command | Final result |
+| --- | --- |
+| `flutter pub get --enforce-lockfile` | Passed online from a fresh checkout/cache; lock SHA-256 unchanged |
+| `flutter analyze --no-fatal-warnings --no-fatal-infos` | Exit 0; 91 existing warnings/information, no errors |
+| `flutter test --reporter expanded` | 3,017 passed, zero failed |
+| `flutter build web --release --dart-define=MONEYBOWL_ENV=qa --dart-define=SUPABASE_URL=https://abcdefghijklmnopqrst.supabase.co --dart-define=SUPABASE_ANON_KEY=sb_publishable_synthetic_ci_only_0000 --dart-define=NSE_CONSOLE_ENABLED=false --dart-define=MONEYBOWL_DEV_ONBOARDING_PREVIEW=false` | Passed; existing Wasm dry-run and Cupertino font warnings |
+| `python3 /tmp/moneybowl-m4-ci-207/audit_bundle.py` | 33 web files checked; synthetic QA URL/key present, no backend credential-pattern matches |
+| `python3 /tmp/moneybowl-m4-ci-207/verify_image.py` | Anonymous registry index/manifest/config digest verification and cross-registry content comparison passed for amd64 and arm64 |
+| `DOCKER_CONFIG=/tmp/moneybowl-m4-ci-207/docker-config docker pull docker.io/supabase/postgres:17.6.1.155@sha256:3866d94d8426927e8db3f1c5d790752292bfbe27b5f1f46e199ae1b7d3c1710b` | Passed with empty Docker client configuration; no registry login |
+| `DOCKER_CONFIG=/tmp/moneybowl-m4-ci-207/docker-config bash scripts/test_m2_outbox_sql.sh` | Exit 0; 92 migrations, 21 SQL regression files, feed parity, SQL authorization and both concurrency checks actually executed |
+| `bash -n scripts/test_m2_outbox_sql.sh` | Passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -q` | 119 passed, including owner/observer, readiness isolation, retirement, QA-disabled and fail-closed security tests |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -q` | 34 passed |
+| `deno test --deny-net --deny-env --ignore=supabase/functions/_shared/authorization_test.ts supabase/functions` | 1,229 passed; includes native dispatcher and all NSE workers |
+| `env -u SUPABASE_URL -u SUPABASE_ANON_KEY -u SUPABASE_SERVICE_ROLE_KEY deno test --deny-net --allow-env=SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_SERVICE_ROLE_KEY supabase/functions/_shared/authorization_test.ts` | 1 passed, synthetic environment only |
+| `python3 tools/deployment/edge_entries.py`, followed by `deno check` for every returned entry with checked subprocess exit codes | All 20 declared Edge entrypoints passed |
+| `PYTHONDONTWRITEBYTECODE=1 /tmp/b061-test-venv/bin/python -m pytest -q` in `services/outbox-dispatcher` | 63 passed; compatibility tests, no dispatcher process started |
+| `env -u INGESTION_SUPPORT_BASE_URL PYTHONDONTWRITEBYTECODE=1 /tmp/moneybowl-m4-venv/bin/python -m pytest -vv` in `services/ingestion-support` | 194 passed, 1 existing hosted Compose smoke skipped because no live URL was provided |
+| `python3 scripts/generate_outbox_routes.py --check` | All 17 mappings match |
+| `python3 .github/scripts/validate_migration_history.py` | All 27 frozen files unchanged |
+| `/tmp/moneybowl-m4-actionlint/actionlint -ignore 'unexpected key "queue" for "concurrency" section' .github/workflows/*.yml` | Passed with the previously documented actionlint 1.7.12 schema limitation; workflows unchanged |
+| `python3 .github/scripts/validate_docs.py` | Passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_validate_commits.py' -q` | 5 passed |
+| `python3 .github/scripts/validate_commits.py 'fix: make M4 Flutter and SQL CI reproducible'` and `python3 .github/scripts/validate_commits.py` | Proposed correction message and existing feature commit messages passed |
+| `git diff --check` and `git diff --cached --check` | Passed |
+
+The final unit/service suites total **4,662 passed, zero failed, one existing live
+smoke skip**, separate from the successful real SQL regressions. No test was deleted,
+weakened or newly skipped. Synthetic pull-failure coverage is supplemental: it does
+not substitute for the completed database suite. Docker access and Flutter/local
+service test sockets required execution permission outside the restricted harness;
+successful reruns above resolve those environment restrictions.
+
+Artifact inspection checked private-key material, secret Supabase keys, backend-role
+JWTs and common provider credential formats without reading live credential stores.
+An initial additional hostname-absence assertion found the existing public DEV host
+comparison in `mfa_repository.dart`'s MFA issuer display label. That is neither a
+credential nor the configured Supabase endpoint; the credential audit and synthetic
+configuration checks passed. No application code was changed to remove that label.
+No pattern scan alone can identify arbitrary opaque secrets; the fresh source checkout,
+empty inherited process environment and public-only build inputs provide the boundary.
+
+### Scope and readiness
+
+Only `.gitignore`, root `pubspec.lock`, the SQL script image reference and these two
+documentation files changed. Dependency versions, workflows, assertions, financial
+business logic, migrations, M4 owners, readiness-key separation and QA-disabled
+configuration are unchanged. No live credentials were read, printed or committed.
+No hosted DB, live DEV application infrastructure, financial operation, QA/Production,
+GitHub setting, push, PR update or deployment pipeline was mutated or triggered.
+Only authorized disposable test containers ran; Oracle's retired dispatcher, active
+native dispatcher and recovery Cron were untouched.
+
+The correction is ready for independent review and fresh GitHub CI. Successful local
+ARM64 tests are not a successful GitHub-hosted amd64 run. There are no outstanding
+local test blockers; registry availability and the hosted run remain external
+verification requirements. **M4 end-to-end live commissioning remains blocked and
+outside this CI correction.**

@@ -9,6 +9,16 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 PR #207 CI correction — 2026-10-11
+
+- Track the validated root Flutter lockfile while retaining enforced dependency
+  resolution and Flutter 3.44.6 / Dart 3.12.2.
+- Pin the disposable M2 SQL test image to the verified official Docker Hub
+  multi-platform digest for the same Supabase PostgreSQL 17.6.1.155 contents.
+  Network isolation, cleanup and all database/CI assertions remain unchanged.
+- Local correction only; fresh GitHub-hosted CI and live M4 commissioning remain
+  separate. See the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
 ## M4 final security boundary correction — 2026-10-10
 
 - Separated M4 readiness authentication from financial notification authority with
