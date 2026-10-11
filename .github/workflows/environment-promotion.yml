@@ -85,7 +85,7 @@ jobs:
       - name: Service compatibility regressions
         run: |
           python3 -m pip install -r services/outbox-dispatcher/requirements-dev.txt
-          python3 -m pytest services/outbox-dispatcher
+          (cd services/outbox-dispatcher && python3 -m pytest)
           python3 -m pip install -r services/ingestion-support/requirements-dev.txt
           (cd services/ingestion-support && env -u INGESTION_SUPPORT_BASE_URL python3 -m pytest)
 
