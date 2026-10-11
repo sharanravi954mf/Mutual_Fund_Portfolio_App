@@ -13,6 +13,11 @@ from pathlib import Path
 
 from contract import Rejected, git, load_policy, manifest, push_event, require, target, revision
 
+# Cover the existing 15-minute frontend fallback timer without adding a scheduler.
+# Leave five minutes in the Actions job for in-flight reads and report publication.
+OBSERVATION_TIMEOUT = 20 * 60
+MAX_OBSERVATIONS = 121
+
 
 class Pending(Rejected):
     """An authenticated, correctly bound deployment is still propagating."""
@@ -135,7 +140,8 @@ def ancestor(repo, old, new):
 
 
 def observe(event, env, policy, expected, latest, read, frontend_url, evidence_url,
-            attempts=30, pause=time.sleep, now=time.time, read_asset=read_digest, is_ancestor=lambda old, new: False):
+            attempts=MAX_OBSERVATIONS, pause=time.sleep, now=time.time, read_asset=read_digest,
+            is_ancestor=lambda old, new: False, timeout=OBSERVATION_TIMEOUT, monotonic=time.monotonic):
     report = {'schema_version': 1, 'observed_at': now(), 'environment': env if env in ('dev', 'qa') else 'invalid',
               'state': 'failed', 'code_validated': 'not_observed', 'deployment': 'not_observed',
               'backend': 'unknown', 'frontend': 'unknown', 'services': 'unknown',
@@ -144,21 +150,33 @@ def observe(event, env, policy, expected, latest, read, frontend_url, evidence_u
         require(env in ('dev', 'qa'), 'invalid_environment')
         # QA has no real project, so this must precede identity validation and all network access.
         require(policy[env]['deployment_enabled'] is True, 'environment_not_commissioned')
+        require(type(attempts) is int and 1 <= attempts <= MAX_OBSERVATIONS
+                and type(timeout) in (int, float) and 0 < timeout <= OBSERVATION_TIMEOUT,
+                'invalid_observation_budget')
+        deadline = monotonic() + timeout
+        last_error = 'deployment_timeout'
+        def check_deadline():
+            if monotonic() >= deadline:
+                report['last_observation'] = last_error
+                raise Rejected('deployment_timeout')
         sha = push_event(event, env, policy)
         report['git_commit'] = sha
         if latest() != sha:
             return superseded(report)
         report['deployment'] = 'detected'
         require(frontend_url and evidence_url, 'owner_evidence_not_commissioned')
-        last_error = 'deployment_timeout'
         for attempt in range(attempts):
+            check_deadline()
             if latest() != sha:
                 return superseded(report)
             try:
+                check_deadline()
                 receipt = read(evidence_url.rstrip('/') + '/' + sha + '.json')
+                check_deadline()
                 verify_receipt(receipt, env, sha, expected, policy, now())
                 report.update(backend='deployed', services='deployed')
                 front = read(frontend_url.rstrip('/') + '/deployment.json?revision=' + sha)
+                check_deadline()
                 require(isinstance(front, dict), 'invalid_evidence')
                 served = revision(front.get('git_commit'))
                 identity(front, env, served, policy)
@@ -171,14 +189,18 @@ def observe(event, env, policy, expected, latest, read, frontend_url, evidence_u
                 assets = front.get('assets', {})
                 require(set(assets) == {'index.html', 'main.dart.js'}, 'frontend_assets_missing')
                 for name, digest in assets.items():
+                    check_deadline()
                     require(isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest), 'invalid_asset_digest')
                     require(read_asset(frontend_url.rstrip('/') + '/' + name + '?revision=' + sha) == digest,
                             'served_asset_mismatch')
                 report['frontend'] = 'deployed'
+                check_deadline()
                 health = read(frontend_url.rstrip('/') + '/release-health.json?revision=' + sha)
+                check_deadline()
                 require(health == {'git_commit': sha, 'healthy': True}, 'frontend_health_failed')
                 if latest() != sha:
                     return superseded(report)
+                check_deadline()
                 report.update(state='pass', observed_at=now(), post_deployment='passed', environment_release='verified')
                 return report
             except Rejected as error:
@@ -187,7 +209,9 @@ def observe(event, env, policy, expected, latest, read, frontend_url, evidence_u
                 if not isinstance(error, Pending):
                     raise
                 if attempt + 1 < attempts:
-                    pause(10)
+                    check_deadline()
+                    pause(min(10, max(0, deadline - monotonic())))
+        check_deadline()
         if latest() != sha:
             return superseded(report)
         report['last_observation'] = last_error

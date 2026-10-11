@@ -87,6 +87,76 @@ class SystemdConfigTests(unittest.TestCase):
 
 
 class WaitTests(unittest.TestCase):
+    def timed_observer(self, ready_at=0, read_seconds=0, asset_seconds=0, use_clock=True, wall_clock=None, **kwargs):
+        elapsed, reads, pauses = [0], [], []
+        def pause(seconds):
+            pauses.append(seconds)
+            elapsed[0] += seconds
+        def read(url):
+            reads.append(elapsed[0])
+            elapsed[0] += read_seconds
+            if 'backend.invalid' in url:
+                if elapsed[0] < ready_at:
+                    raise Pending('evidence_not_published')
+                value = receipt()
+                value['observed_at'] = NOW + elapsed[0]
+                return value
+            if 'deployment.json' in url:
+                return frontend()
+            return {'git_commit': A, 'healthy': True}
+        def asset(url):
+            reads.append(elapsed[0])
+            elapsed[0] += asset_seconds
+            return 'f' * 64
+        clock = {'monotonic': lambda: elapsed[0]} if use_clock else {}
+        result = observe(event(), 'dev', policy(), EXPECTED, lambda: A, read,
+                         'https://frontend.invalid', 'https://backend.invalid',
+                         pause=pause, now=wall_clock or (lambda: NOW + elapsed[0]),
+                         read_asset=asset, **clock, **kwargs)
+        return result, reads, pauses, elapsed[0]
+
+    def test_existing_fifteen_minute_reconciler_can_converge(self):
+        result, _, pauses, elapsed = self.timed_observer(ready_at=16 * 60, use_clock=False)
+        self.assertEqual(result['state'], 'pass')
+        self.assertEqual(elapsed, 16 * 60)
+        self.assertEqual(len(pauses), 96)
+
+    def test_default_deadline_reports_failure_before_workflow_timeout(self):
+        result, reads, _, elapsed = self.timed_observer(ready_at=9999)
+        self.assertEqual(result['reason'], 'deployment_timeout')
+        self.assertEqual(result['last_observation'], 'evidence_not_published')
+        self.assertEqual(result['environment_release'], 'not_verified')
+        self.assertEqual(elapsed, 20 * 60)
+        self.assertLess(max(reads), 20 * 60)
+
+    def test_slow_reads_count_toward_monotonic_deadline(self):
+        result, reads, pauses, elapsed = self.timed_observer(ready_at=9999, read_seconds=7, timeout=30)
+        self.assertEqual(result['reason'], 'deployment_timeout')
+        self.assertEqual(reads, [0, 17])
+        self.assertEqual(pauses, [10, 6])
+        self.assertEqual(elapsed, 30)
+
+    def test_no_pass_when_last_verification_finishes_after_deadline(self):
+        result, reads, _, _ = self.timed_observer(asset_seconds=16, timeout=30)
+        self.assertEqual(result['reason'], 'deployment_timeout')
+        self.assertEqual(result['environment_release'], 'not_verified')
+        self.assertEqual(reads, [0, 0, 0, 16])
+
+    def test_read_deadline_is_not_extended_by_wall_clock_adjustments(self):
+        # Receipt timestamps use wall time; timeout accounting must never use it.
+        result, _, _, elapsed = self.timed_observer(ready_at=9999, timeout=25, wall_clock=lambda: NOW)
+        self.assertEqual(result['reason'], 'deployment_timeout')
+        self.assertEqual(elapsed, 25)
+
+    def test_invalid_observation_budget_fails_before_reads(self):
+        for changes in ({'timeout': 0}, {'timeout': 1201}, {'timeout': float('nan')},
+                        {'attempts': 0}, {'attempts': 122}):
+            with self.subTest(changes=changes):
+                result, reads, pauses, _ = self.timed_observer(**changes)
+                self.assertEqual(result['reason'], 'invalid_observation_budget')
+                self.assertEqual(reads, [])
+                self.assertEqual(pauses, [])
+
     def run_observer(self, samples, head=lambda: A, front=None, is_ancestor=lambda *_: False):
         calls, pauses = [], []
         iterator = iter(samples)

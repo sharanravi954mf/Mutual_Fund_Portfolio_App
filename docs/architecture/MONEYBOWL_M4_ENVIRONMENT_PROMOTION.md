@@ -1,6 +1,10 @@
 # MONEYBOWL M4 — unified environment promotion
 
 Status: DEV compatibility remediation candidate, 2026-10-11; **end-to-end commissioning BLOCKED**.
+Latest execution staged the published `bc1870c5ca87962d9768a9000ba02798c7175df4`
+controller without activation and verified a legacy API recovery archive. Capacity
+now passes. See the [current commissioning record](MONEYBOWL_M4_DEV_REMEDIATION_001.md#github-actions-completion-execution--2026-10-11)
+for the remaining private gates; earlier inspection statements below are historical.
 The [DEV remediation record](MONEYBOWL_M4_DEV_REMEDIATION_001.md) contains actual
 read-only Oracle discovery, the four/five-layer compatibility contract, capacity
 remediation and the precise remaining private commissioning gates. It supersedes
@@ -131,8 +135,15 @@ owner. Redirects, proxies, unbounded JSON and credentials in URLs are rejected.
 HTTP 404, safe transient transport/408/429/5xx reads, explicit pending components,
 and a correctly bound frontend at a proven ancestor may be retried. HTTP 401/403,
 untrusted TLS, malformed/mismatched evidence and owner failures are permanent.
-Only bounded **reads** are retried (30 observations,
-ten-second interval, per-request ten-second timeout; workflow capped at 25 minutes).
+Only bounded **reads** are retried (at most 121 observations,
+ten-second interval, twenty-minute monotonic deadline; workflow capped at 25 minutes).
+This covers the existing fifteen-minute fallback timer plus five minutes of
+convergence after observation begins. It is not a cold-build duration guarantee.
+Elapsed reads count toward the deadline, sleeps use only the remaining budget,
+and no PASS is emitted after expiry. In-flight HTTP reads retain their ten-second
+socket timeout and Git reads their existing 120-second command timeout; the workflow
+is the outer execution bound. Slow builds remain failed until a later independent
+verification or an authorized Actions rerun observes valid fresh evidence.
 Migrations, financial operations and deployment writes are never retried by the observer.
 
 The independent [evidence owner](../../tools/deployment/evidence_owner.py) and

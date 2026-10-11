@@ -9,6 +9,18 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV commissioning — reconciliation observation window — 2026-10-11
+
+- Extended release observation to cover the existing fifteen-minute frontend
+  fallback timer, bounded by a twenty-minute monotonic deadline inside the existing
+  twenty-five-minute Actions job. Invalid evidence still fails immediately.
+- Added six offline timing regressions, including delayed convergence, slow reads,
+  deadline expiry, wall-clock independence and rejection of excessive budgets.
+- Staged the published controller beside the previous installation and verified an
+  exact legacy API recovery export without claiming source provenance or changing
+  running services. Automatic DEV deployment remains blocked by private commissioning;
+  see the [current execution record](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md#github-actions-completion-execution--2026-10-11).
+
 ## M4 DEV commissioning — systemd credential compatibility — 2026-10-11
 
 - Actual isolated systemd execution reproduced rejection of `LoadCredential`

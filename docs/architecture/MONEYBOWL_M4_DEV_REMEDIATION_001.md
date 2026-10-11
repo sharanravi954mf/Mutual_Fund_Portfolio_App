@@ -1,5 +1,9 @@
 # M4 DEV commissioning remediation 001
 
+The [latest execution record](#github-actions-completion-execution--2026-10-11)
+supersedes historical capacity and installation blockers below. DEV is still not
+commissioned; staging is not a successful deployment.
+
 Date: 2026-10-11. Starting candidate:
 `744ded1d7650fdcbd5415baa83def3eab07774af`; fetched remote feature matched it.
 `origin/develop` and clean canonical checkout:
@@ -307,3 +311,132 @@ service selection, `--no-deps`, no profile, no build/pull, existing resource che
 an override restricted to `api`; tests inspect the full mutation argument vector and
 before/after support state. This is a tested adapter property, not a claim that real
 host commissioning has run or that a privileged external actor cannot mutate Docker.
+
+## GitHub Actions completion execution — 2026-10-11
+
+**Result: source timing correction and safe staging completed; automatic DEV release
+still BLOCKED.** Explicit fetch of both remote refs confirmed published feature
+`bc1870c5ca87962d9768a9000ba02798c7175df4` and develop
+`8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`. Both checkouts were clean before work.
+The default fetch refspec had left the feature tracking ref stale; an explicit fetch
+resolved it. PR #207 remains draft with no recorded reviews. Five workflows passed
+for the published candidate; `M4 Environment Release` was deliberately skipped.
+Neither those checks nor this implementation constitute independent release approval.
+
+The existing observer exhausted 30 ten-second attempts before a missed webhook could
+be recovered by the existing fifteen-minute frontend timer. An offline sixteen-minute
+convergence case failed on the original code. The correction allows at most 121 reads
+under a twenty-minute monotonic deadline, retaining the existing twenty-five-minute
+Actions job. Slow reads consume the budget, sleep cannot extend it, and verification
+finishing after expiry cannot emit PASS. Permanent errors, exact SHA/project/content,
+health, financial and retirement checks remain intact. No scheduler or workflow writer
+was added. Six new regressions pass; full results are in the
+[validation record](MONEYBOWL_M4_VALIDATION.md).
+
+### Actual host staging and recovery evidence
+
+- Installed 25 exact tracked files from the published candidate at
+  `/opt/moneybowl-deployment/bc1870c5ca87962d9768a9000ba02798c7175df4/tools/deployment`.
+  Source files are root-owned `0444`, directories `0555`; `INSTALLATION.json` binds
+  their SHA-256 values and records `activation=false`. This is a new version alongside
+  `535050e0bb6afcd4c019fee6d85015d2172a7672`, whose 25 files remain unchanged.
+  Existing `/etc` pins still select the older version. The new local observer correction
+  is for review; it was not substituted into this published-source installation.
+- Exported the exact legacy API image to the private recovery directory
+  `/var/lib/moneybowl-ingestion-deploy/recovery/1c38aa4946fdb961ed7b0983edb6925988961891c91a0b9e296d84ac8a59286f/`.
+  `legacy-api-image.tar` is 54,473,216 bytes, SHA-256
+  `009b26a7c81735b271100a1fe3b7051fda93ad4927c07119eaaea229d418ed49`.
+  Docker 29 identifies this image by its OCI index, not its config blob. Verification
+  traversed all 14 referenced OCI blobs, checked descriptor sizes/digests, and checked
+  all eight decompressed ARM64/Linux layer hashes against the config's rootfs diff IDs.
+  No image was loaded, built, pushed, deleted or replaced.
+- `RECOVERY.json` explicitly records `git_commit=null`, unknown source provenance,
+  no restoration test and no replacement authorization. `recovery-api.compose.json`
+  selects only the exact local legacy image ID and one API replica. It is an emergency
+  recovery input, **not** historical provenance or permission for normal M4 adoption.
+  Off-host retention and an independently reviewed restoration exercise remain pending.
+- Capacity gate passed with 68,732,805,120 available bytes before this staging.
+  All seven original container IDs/images and normalized runtime relationships remain
+  recorded. API, ClamAV, webhook and M3B receiver were healthy; Caddy and ingress
+  adapter running. Oracle dispatcher remains exited with restart `no`, persistent
+  service masks and disabled/inactive reconciliation timer.
+- Existing Flutter timer and webhook dispatch path remain enabled. No owner units,
+  timers, activation stamps, handlers, active configuration or running containers changed.
+  Receipt roots are still empty. No credentials were read, generated or rotated.
+
+Private execution evidence is under
+`/home/ubuntu/moneybowl-m4-completion-20261011`. Existing unit proposals passed syntax
+verification but still refer to the older installation and require a reviewed handoff;
+syntax acceptance is not operational commissioning.
+
+### Exact remaining prerequisites
+
+| Owner / component | Observed blocker and required operation |
+| --- | --- |
+| Repository | `develop` is unprotected; effective branch rules and M4 Actions variables are empty. Establish reviewed-PR/latest-push/check requirements with no bypass, independently review the local correction, then publish and rerun CI. This task did not push or merge. |
+| Existing infrastructure owners | Disabled ingestion config still contains `REPLACE_WITH_OWNER_REVIEW_RECORD` on all five layers and an invalid model digest. Complete the existing protected measurement transaction with authoritative `M3B_RECEIVER_IMAGE`, `M3B_RECEIVER_SECRET_FILE` and `M3B_WAKE_GID` interpolation inputs. Independently approve resolved service hashes, mounts, networks, volumes and before-state. Do not derive authorization from observed container labels. No M3B deployment or Director operation is required. |
+| Ingestion registry | `image_repository` still names `registry.example.invalid/moneybowl-ingestion-dev`; `/var/lib/moneybowl-ingestion-deploy/docker-auth` is absent. Supply an approved repository and scoped private push/pull authority, with no credential in Actions or Git. |
+| Initial API transition | No historical record exists at the configured provenance path. Complete separate review of a selected exact source SHA, new image digest/ledger and recovery procedure before replacing the unknown legacy image. The archive alone cannot authorize or attest the transition. |
+| API readiness | `service_origin` is still `https://ingestion.example.invalid`. Bind the actual Caddy-served API origin and demonstrate the existing read-only `/ready` route returns exactly the required JSON. |
+| Frontend owner | `/opt/moneybowl-toolchains/flutter-3.44.6/bin/flutter` is absent. Install a verified protected Flutter/Dart toolchain with a working cache model and pins. Review release-root write access for `moneybowl-deploy` and the existing spool/service handoff, keeping the one existing fifteen-minute timer and shared build lock. |
+| Ingestion identity | The dedicated identity lacks access through `/home/ubuntu` and lacks the reviewed Docker authority. Provision narrowly scoped access to required Compose inputs and owner state without widening unrelated home/Director access. Docker authority remains root-equivalent; evidence must never receive it. |
+| Supabase measurement | `/etc/moneybowl-deployment/credentials/measurement-token` is absent. Provision project-scoped `database_read` and `edge_functions_read`; prove the exact read-only migration/control/Cron queries and pinned CLI exports work. Existing MCP access is not a credential for the installed evidence owner. No admin fallback or schema grants were added. |
+| Readiness-only authentication | A local root `0600` readiness-only credential already exists; its value was not read. Existing commissioning records show it has not been provisioned to Edge and deployed code lacks its handler. Deploy reviewed code through the existing Supabase integration, then provision the same separate readiness-only capability privately and verify it. Do not use notification/worker/service-role secrets. |
+| Independent receipts | Backend/service/release directories contain zero receipts. Public `/m4/backend/<develop>.json` returns HTTP 200 HTML. The ingress owner must review receipt access/routing with TLS, no-store and genuine 404s, preserving shared Caddy resources; that container change was not attempted. Only then set `M4_DEV_FRONTEND_ORIGIN=https://moneybowl-app-dev.duckdns.org` and `M4_DEV_EVIDENCE_URL=https://moneybowl-app-dev.duckdns.org/m4/backend`. |
+| Final owner activation | After all gates, review new version pins, enable only the ingestion/evidence owners and adapt the existing Flutter handler/timer. Observe one genuinely merged develop SHA and fresh independent backend/image/asset receipts in Actions. QA and Production remain disabled/out of scope. |
+
+Fresh Supabase read-only checks found DEV `ACTIVE_HEALTHY`, dispatch mode `active`,
+one active fifteen-minute recovery job and 92 migrations with statement arrays.
+These counts do not establish source-content equivalence or a valid backend receipt.
+Public frontend TLS still serves exactly `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`,
+without M4 asset/configuration evidence. No automatic deployment PASS was observed.
+
+### API-only initial transition for separate review
+
+1. Keep owners disabled while completing approved Compose baselines, actual API
+   readiness origin, registry access and recovery retention. Confirm the legacy
+   image/archive/container IDs above still match. No synthetic historical record.
+2. Select and independently approve a full source SHA already in develop ancestry.
+   The source needed for the first merge is not yet known. Through the **single private
+   ingestion builder**, build that exact archive, capture its iidfile, push once to
+   the approved registry, and verify OCI revision/source-digest labels, image ID,
+   immutable registry digest and the one-worker command. Preserve the new ledger and
+   exact generated API override. This build has not been executed.
+3. Before replacement, compare every support service hash with/without that override,
+   verify runtime/resource baselines and retirement, and retain the private resolved
+   input provenance. Obtain separate review of these concrete before/after artifacts.
+   Missing historical provenance is handled by this one-time infrastructure-owner
+   transition, not by enabling or bypassing `initial_revision` in the normal reconciler.
+4. The separately authorized infrastructure owner may then select only `api` using
+   the existing ordered Compose prefix plus the reviewed override and
+   `up --detach --no-deps --no-build --pull never --scale api=1 --wait --wait-timeout 120 api`.
+   Do not perform this operation until the input/rollback review above is complete.
+   Preserve all old images/resources. Recheck API/public health, new labels/digest,
+   support identities and financial retirement before recording acceptance.
+5. For a failed transition, withhold PASS and keep reconciliation disabled. Emergency
+   recovery requires separate operator review using the preserved local image and
+   API-only recovery override against those same approved inputs. An archive integrity
+   check is not a successful restoration test. Do not automatically roll back, restart
+   support services, dispatch financial work, or move an approved Git ref backwards.
+6. Only after the new known image is running and its genuine ledger/override has been
+   independently verified can the normal owner's labelled-image path commission it.
+   Subsequent merges use the existing exact-source owner and independent observer.
+
+### Off-host ARM64 build decision
+
+[GitHub-hosted ARM64 runners are available](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+They are deferred for the first commissioned release because the current contract
+creates provenance from the private owner's exact archive, Docker iidfile, push and
+local immutable-digest verification. It has no reviewed workflow-identity/attestation
+verifier or remote ledger import path. No approved registry or credential scope is
+configured either. Adding a hosted publisher while retaining `DockerOwner.build()`
+would create two build owners; trusting an arbitrary digest would weaken provenance.
+Retain the existing single private builder. A later reviewed replacement can use a
+pinned ARM64 job, immutable digest and verified repository/workflow/SHA attestation,
+and must remove private rebuilding as part of that same ownership change. No Actions
+Supabase credentials or second Supabase deployment path are needed.
+
+The next safe operation is to supply the authoritative private Compose interpolation
+inputs and complete independent baseline measurement, while reviewing this local
+correction and provisioning the missing registry/measurement capabilities. A merge
+or live image replacement before those gates cannot produce a genuine M4 PASS.

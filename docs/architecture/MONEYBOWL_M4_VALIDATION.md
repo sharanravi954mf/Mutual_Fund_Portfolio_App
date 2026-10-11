@@ -697,3 +697,57 @@ Compose inputs, protected Flutter SDK, build headroom, read-only measurement and
 independent review remain gates. The corrected source is local for review; installed
 controller sources remain at the previously reviewed starting SHA. Exact private
 operation evidence is in `/home/ubuntu/moneybowl-m4-dev-execution-20261011`.
+
+## Actions DEV completion — observation timing and safe staging — 2026-10-11
+
+Explicit remote fetch verified feature `bc1870c5ca87962d9768a9000ba02798c7175df4`
+and develop `8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`. Both checkouts were clean.
+The local implementation changes only observation timing, its offline regressions
+and M4 documentation. The workflow itself, deployment owners, financial/SQL code,
+Supabase deployment ownership and QA policy are unchanged.
+
+| Executed command / verification | Observed result |
+| --- | --- |
+| `python3 -m unittest discover -s tools/deployment -v` before editing | 165 passed |
+| `python3 -m unittest discover -s tools/commissioning -v` before editing | 34 passed |
+| New `test_existing_fifteen_minute_reconciler_can_converge` on original observer | Failed as expected: timed out before the sixteen-minute fixture became ready |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -v` after correction | 171 passed, zero skipped |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -v` after correction | 34 passed, zero skipped |
+| Installed published-controller runtime subset | 162 passed; three repository-file tests covered by the full checkout suite |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_validate_commits.py -v` | 5 passed |
+| `python3 scripts/generate_outbox_routes.py --check` | 17 canonical routes unchanged |
+| `python3 .github/scripts/validate_migration_history.py` | 27 frozen migrations unchanged |
+| `python3 .github/scripts/validate_docs.py` | 67 documents passed |
+| `python3 .github/scripts/validate_commits.py 'fix: allow release observation across DEV reconciliation'` | Passed |
+| `systemd-analyze verify` on the existing five private service/timer proposals | Passed; pre-existing monitoring executable-mode and Director description-URL warnings only |
+| Published installation manifest and original installation comparison | 25 exact root-owned immutable files in each; original unchanged; no activation stamps |
+| Existing ingestion/evidence executable/source pin checks | Passed; frontend SDK remains missing at its protected configured path |
+| Legacy API archive validation | 14 OCI blobs and eight decompressed layers verified; 54,473,216 bytes; no load/replacement |
+| Read-only production retirement and runtime methods | Seven original container identities/images preserved; retirement passed |
+| One real read-only observer attempt against verified develop/endpoints | Failed as expected: `invalid_evidence`, `environment_release=not_verified`, `code_validated=not_observed` |
+
+Actionlint 1.7.12 was downloaded from its official release; ARM64 archive SHA-256
+`325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6`
+matched the published checksum. Unfiltered validation reported one unsupported key:
+`queue` under release concurrency. Current [GitHub documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+explicitly supports `queue: max` with `cancel-in-progress: false`, and the published
+workflow already passed hosted validation. A local rerun ignoring **only that exact
+diagnostic** passed with no other findings. No suppression or workflow weakening was
+committed; unfiltered actionlint is not reported as passing.
+
+The first test invocation inside the controller-only installation attempted all 165
+tests and reported three missing repository-fixture errors (`supabase/config.toml`
+and the workflow are deliberately outside that installation). Its 162 runtime tests
+were rerun separately and passed; all three repository tests passed in the complete
+checkout. The initial recovery verifier assumed a config-blob image identity; Docker
+29's OCI index disproved that assumption. The corrected verifier checked the already
+exported bytes through the full descriptor tree and decompressed layer hashes. These
+were staging-harness corrections, not changes to running applications or provenance.
+
+No Flutter build, new ingestion image build, SQL-container run, Supabase deployment,
+private credential round trip, image restoration or live API replacement was run.
+Application/SQL sources did not change; unavailable registry/measurement capabilities
+and separate replacement review remain explicit gates. Full merge-to-DEV acceptance
+is **blocked**, not skipped-as-success. New local source requires independent review
+and hosted CI after a separately authorized push. Exact host staging, recovery and
+remaining operations are in the [execution record](MONEYBOWL_M4_DEV_REMEDIATION_001.md#github-actions-completion-execution--2026-10-11).
