@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -476,6 +477,39 @@ class TransportTests(unittest.TestCase):
                                  docker_socket='unix:///var/run/docker.sock', environment='dev',
                                  retired_containers=[DEV_RETIRED_CONTAINER], retired_container_id='c' * 64,
                                  retired_services=DEV_RETIRED_SERVICES.copy(), retired_timers=[DEV_RETIRED_TIMER]), command=command)
+
+    def test_container_inspect_template_renders_complete_json(self):
+        # Render the actual production template, rather than returning prebuilt JSON.
+        # This small fixture supports only its explicit json/optional-health actions.
+        fields = {'.Id': 'c' * 64, '.Image': 'sha256:' + 'd' * 64,
+                  '.State.Status': 'exited', '.State.Running': False, '.State.Pid': 0,
+                  '.State.Restarting': False, '.State.Paused': False, '.State.Dead': False,
+                  '.Config.Labels': {'com.docker.compose.service': 'api'},
+                  '.Config.Cmd': API_COMMAND, '.Config.Entrypoint': None,
+                  '.HostConfig.RestartPolicy.Name': 'no', '.Mounts': [],
+                  '.NetworkSettings.Networks': {}, '.HostConfig.PortBindings': {},
+                  '.HostConfig.ReadonlyRootfs': True, '.HostConfig.Privileged': False,
+                  '.HostConfig.CapDrop': ['ALL'], '.HostConfig.SecurityOpt': [], '.Config.User': '10001'}
+        for health in (None, 'healthy'):
+            def command(argv, **kwargs):
+                self.assertEqual(argv[-1], 'synthetic-container')
+                template = argv[argv.index('--format') + 1]
+                self.assertNotIn('.Config.Env', template)
+                optional = '{{with (index .State "Health")}}{{json .Status}}{{else}}null{{end}}'
+                self.assertEqual(template.count(optional), 1)
+                rendered = template.replace(optional, json.dumps(health))
+                rendered = re.sub(r'\{\{json ([^}]+)\}\}',
+                                  lambda match: json.dumps(fields[match[1]]), rendered)
+                self.assertNotIn('{{', rendered)
+                return rendered.encode()
+            with self.subTest(health=health):
+                value = self.docker(command).container('synthetic-container')
+                self.assertEqual(value['id'], fields['.Id'])
+                self.assertEqual(value['image'], fields['.Image'])
+                self.assertEqual(value['state']['Health']['Status'], health)
+                self.assertEqual(value['security']['user'], '10001')
+                self.assertEqual(value['mounts'], [])
+                self.assertEqual(value['networks'], {})
 
     def test_only_api_is_selected_and_environment_is_not_printed(self):
         calls = []

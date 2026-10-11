@@ -579,3 +579,60 @@ installation. Existing capacity, legacy API provenance/initial-binding, registry
 readiness-only credential and independent evidence prerequisites remain unchanged in
 the [commissioning record](MONEYBOWL_M4_DEV_REMEDIATION_001.md). Local synthetic success
 and structural host compatibility are not a verified unattended environment release.
+
+## DEV commissioning 001 — container inspection correction — 2026-10-11
+
+Started from clean published/reviewed `ad7906bc2e4f53494aa447661e11d816fbc8514e`.
+Fresh refs match; canonical develop remains clean at
+`8993ce141ceed6a1cae95c2a7edbfbfcf24524f8`. GitHub independently reports PR #207 draft,
+open and unmerged, with all five PR workflows successful on that published SHA.
+Those CI results do not cover this subsequent local correction.
+
+Permitted read-only commissioning invoked the actual `DockerOwner.container()` and
+`retirement()` methods without constructing or running a deployment controller.
+Docker returned malformed JSON: the projection closed `security` but omitted the
+outer object's closing brace. Appending exactly one brace made the same private
+output parse successfully and match the original retired container ID. No raw
+inspection/configuration contents or credentials were printed. This is an operational
+defect in the published candidate, independent of any missing commissioning capability.
+
+The correction adds that single brace. The regression renders the production template's
+JSON and optional-health actions from synthetic Engine fields, rather than returning
+a prebuilt JSON document. Both health subcases failed before the source correction;
+both pass afterwards. No projected field, ownership check or retirement assertion was
+removed. Safe read-only host verification now passes the production retirement method
+and all seven original container projections, with unchanged IDs/images/states/restart
+policies, both persistent masks and the disabled/inactive timer.
+
+| Executed command / verification | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -q` | Existing baseline 157 passed; corrected final 158 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -p test_owners.py -k container_inspect_template -v` | Before fix: 1 test with 2 failing subcases; after fix: 1 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning -q` | 34 passed |
+| `python3 scripts/generate_outbox_routes.py --check` | 17 mappings unchanged |
+| `python3 .github/scripts/validate_migration_history.py` | 27 frozen migration files unchanged |
+| `/opt/moneybowl-toolchains/deno/2.9.6/aarch64-unknown-linux-gnu/deno test --deny-net --deny-env supabase/functions/outbox-dispatcher` | 95 passed; includes readiness-only authority rejection on financial paths and key substitution |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_validate_commits.py' -q` | 5 passed |
+| `PYTHONPYCACHEPREFIX=/tmp/m4-dev-commissioning-001-pycache python3 -m py_compile tools/deployment/ingestion_owner.py tools/deployment/test_owners.py` | Passed |
+| `python3 .github/scripts/validate_docs.py` | Passed |
+| `python3 .github/scripts/validate_commits.py 'fix: close Docker inspection JSON before retirement checks'` | Passed |
+| `git diff --check` and `git diff --cached --check` | Passed |
+
+Private non-secret staging, installation proposals and exact remaining authorization
+transactions are under `/home/ubuntu/moneybowl-m4-dev-commissioning-001-20261011`.
+These host-specific proposals are not installed, independently approved or repository
+deployment evidence. Staging acceptance adds 11 tests; unit syntax checks pass with
+pre-existing host unit warnings. No privileged installer/private Compose resolver ran.
+
+Read-only findings supersede the older capacity statement: about 12.44 GiB free and
+4.89 million free inodes pass the existing 12 GiB code preflight. Only about 0.44 GiB
+remains above that floor; no heavyweight build/copy was authorized or started. Three
+dedicated users, private mirrors, protected executables, registry, scoped measurement,
+readiness provisioning, trusted receipt routing and owner-approved baselines remain
+gates. Legacy API provenance remains unknown. Existing frontend identity binds develop
+but lacks M4 asset evidence; missing receipt/health URLs return SPA HTML with HTTP 200.
+No synthetic receipt or requested SHA has been substituted for live evidence.
+
+No live file, container, systemd unit, credential, Supabase project/financial state,
+QA/Production, Director data or GitHub setting changed. No publication/merge occurred.
+This narrow correction is local pending independent review; **DEV is not commissioned**.

@@ -9,6 +9,16 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV commissioning preparation — inspection correction — 2026-10-11
+
+- Fixed a missing outer JSON brace in the private ingestion owner's Docker container
+  projection, independently reproduced by read-only inspection on Oracle DEV.
+- Added a test rendering the actual production template with and without health
+  metadata; existing mocks had returned prebuilt JSON and missed the malformed output.
+- Corrected read-only retirement and container measurements pass. No controller was
+  installed or activated; private provisioning and full DEV commissioning remain
+  blocked. See the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
 ## M4 Compose compatibility fix 002 — 2026-10-11
 
 - Resolve each support service's own image from named Compose JSON configuration;
