@@ -612,6 +612,38 @@ class TransportTests(unittest.TestCase):
                                  retired_containers=[DEV_RETIRED_CONTAINER], retired_container_id='c' * 64,
                                  retired_services=DEV_RETIRED_SERVICES.copy(), retired_timers=[DEV_RETIRED_TIMER]), command=command)
 
+    def test_image_inspect_renders_missing_or_explicit_entrypoint(self):
+        # A Docker BuildKit image can omit Config.Entrypoint entirely. The image
+        # inspector must use the optional map lookup, not direct dot access.
+        image_id = 'sha256:' + 'a' * 64
+        digest = 'registry.invalid/api@sha256:' + 'b' * 64
+        labels = {'org.opencontainers.image.revision': A, 'moneybowl.source_digest': 'c' * 64}
+        fields = {'.Id': image_id, '.RepoDigests': [digest],
+                  '.Config.Labels': labels, '.Config.Cmd': API_COMMAND}
+        optional = '{{json (index .Config "Entrypoint")}}'
+        proof = dict(image=digest, image_id=image_id, git_commit=A, source_digest='c' * 64)
+        for entrypoint in (None, ['/other-entrypoint']):
+            def command(argv, **kwargs):
+                self.assertEqual(argv[-1], digest)
+                template = argv[argv.index('--format') + 1]
+                self.assertEqual(template.count(optional), 1)
+                self.assertNotIn('{{json .Config.Entrypoint}}', template)
+                rendered = template.replace(optional, json.dumps(entrypoint))
+                rendered = re.sub(r'\{\{json ([^}]+)\}\}',
+                                  lambda m: json.dumps(fields[m[1]]), rendered)
+                self.assertNotIn('{{', rendered)
+                return rendered.encode()
+            with self.subTest(entrypoint=entrypoint):
+                owner = self.docker(command)
+                image = owner.image(digest)
+                self.assertEqual(image['entrypoint'], entrypoint)
+                self.assertEqual(image['command'], API_COMMAND)
+                if entrypoint is None:
+                    owner.verify_image(proof)
+                else:
+                    with self.assertRaisesRegex(Rejected, 'single_worker_command_required'):
+                        owner.verify_image(proof)
+
     def test_container_inspect_template_renders_complete_json(self):
         # Render the actual production template, rather than returning prebuilt JSON.
         # This small fixture supports only its explicit json/optional-health actions.
