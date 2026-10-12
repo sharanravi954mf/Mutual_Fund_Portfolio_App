@@ -301,7 +301,7 @@ class DockerOwner:
 
     def image(self, image):
         data = json.loads(self.command(self.base + ['image', 'inspect', '--format',
-            '{"id":{{json .Id}},"digests":{{json .RepoDigests}},"labels":{{json .Config.Labels}},"command":{{json .Config.Cmd}},"entrypoint":{{json .Config.Entrypoint}}}', image]))
+            '{"id":{{json .Id}},"digests":{{json .RepoDigests}},"labels":{{json .Config.Labels}},"command":{{json .Config.Cmd}},"entrypoint":{{json (index .Config "Entrypoint")}}}', image]))
         require(DIGEST.fullmatch(data['id']), 'invalid_image_id')
         return data
 
