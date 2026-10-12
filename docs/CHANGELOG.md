@@ -9,6 +9,30 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 initial API transition security corrections — 2026-10-12
+
+- Replace executor-owned approval acceptance with an explicit root-operated one-time
+  cutover boundary. Reject non-root callers and insecure approval/configuration ownership,
+  ancestors, permissions and links; retain plan scope, expiry and one-use consumption.
+- Persist verification intent, archive the private initial receipt before the final
+  completion journal, and require exact plan/verification/provenance/receipt bindings
+  on every normal ingestion reconciliation. Interrupted or inconsistent publication
+  cannot authorize deployment. Keep public HTTPS receipt hosting a separate gate.
+- Add isolated self-authorization and abrupt-termination regressions and update the
+  review/runbook. No live transition, infrastructure change, credential/key provisioning
+  or push; legacy provenance stays unknown and M4 commissioning remains blocked.
+
+## M4 one-time Mailback API transition implementation — 2026-10-12
+
+- Added separate prepare, owner-authorized one-use activation and independent verification
+  phases for the exact reviewed DEV Mailback API candidate. Preserve unknown legacy
+  provenance and recovery; prohibit blind retry, automatic rollback and financial operations.
+- Bind all five existing Compose layers, container/resource/runtime/configuration identities,
+  private inputs, Git source, disk and recovery. Require remote private OCI manifest/config
+  digest verification and layer availability in both initial and regular ingestion owners.
+- Add isolated failure/security tests and commissioning runbook. This is local implementation
+  only: no registry push, live API replacement, owner activation or full M4 commissioning.
+
 ## M4 DEV ingestion image inspection compatibility — 2026-10-12
 
 - An isolated ARM64 Docker BuildKit runtime image built from the exact reviewed

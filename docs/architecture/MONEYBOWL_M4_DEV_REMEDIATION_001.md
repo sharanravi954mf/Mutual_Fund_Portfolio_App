@@ -1,5 +1,11 @@
 # M4 DEV commissioning remediation 001
 
+The 2026-10-12 [implemented one-time API transition runbook](MONEYBOWL_M4_INITIAL_API_TRANSITION.md)
+supersedes the earlier manual initial-transition proposal below. Code and synthetic tests
+are implemented for review; the legacy source remains unknown, the new ARM64 image is
+local-only, and private registry/owner approval/commissioning remain blocked. No live
+replacement or owner activation was performed.
+
 The [latest execution record](#github-actions-completion-execution--2026-10-11)
 supersedes historical capacity and installation blockers below. DEV is still not
 commissioned; staging is not a successful deployment.
@@ -440,3 +446,125 @@ The next safe operation is to supply the authoritative private Compose interpola
 inputs and complete independent baseline measurement, while reviewing this local
 correction and provisioning the missing registry/measurement capabilities. A merge
 or live image replacement before those gates cannot produce a genuine M4 PASS.
+
+## Initial API transition implementation validation — 2026-10-12
+
+Implementation is local and reviewable; **live commissioning remains BLOCKED**.
+The [new runbook](MONEYBOWL_M4_INITIAL_API_TRANSITION.md) specifies the implemented
+phases, exact candidate/legacy identities, scoped private registry provisioning,
+five-layer baseline approvals, one-use owner authorization and reviewed recovery.
+No private registry was provisioned, no image pushed/rebuilt, no live transition run,
+no owner service started, and no Supabase/Production/Caddy/Director changes occurred.
+Independent candidate inspection and Git component measurement matched the supplied
+image/source/digest. Canonical develop remains `8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5`.
+
+| Final validation command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment` | 244 passed, 0 failed; includes 73 new initial-transition/OCI cases; original baseline 171 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning` | 34 passed, 0 failed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_validate_commits.py` | 5 passed, 0 failed |
+| `env -u INGESTION_SUPPORT_BASE_URL PYTHONDONTWRITEBYTECODE=1 timeout 120 /tmp/moneybowl-m4-venv/bin/python -m pytest -o addopts='' -m 'not integration' -q` in `services/ingestion-support` | 194 passed, 0 failed, 1 live integration test deselected; authorized local test sockets only |
+| `PYTHONDONTWRITEBYTECODE=1 /tmp/b061-test-venv/bin/python -m pytest -o addopts='' -q` in `services/outbox-dispatcher` | 63 passed, 0 failed; offline compatibility tests, no dispatcher process started |
+| `PYTHONPYCACHEPREFIX=/tmp/m4-initial-api-compile python3 -m py_compile` on six changed/new Python files | Passed; all bytecode outside canonical repository |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_migration_history.py` | Passed; 27 frozen migration files unchanged |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_outbox_routes.py --check` | Passed; 17 canonical routes unchanged |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_docs.py` | Passed; documentation links/anchors validated |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_commits.py 'feat: add one-time verified Mailback API transition'` and `git diff --check` | Passed |
+
+The first restricted ingestion harness stalled on local TestClient sockets and was
+terminated; the authorized local-socket rerun completed. Quiet-mode exploratory runs
+were repeated with summaries enabled for exact counts. Final suites have zero failures;
+540 test cases passed across the five final suites. No live integration smoke was selected.
+The optional entrypoint inspector remains a separately documented PR #209 dependency
+for the regular owner. The initial controller rejects nonempty entrypoints, wrong commands,
+extra workers, root users and unsupported image/platform provenance.
+
+Final implementation review checked exact API-only command scope, the unchanged normal
+historical-provenance guard, one-use authorization/expiry/revalidation, shared locking,
+protected file/parent/link permissions, remote privacy/digests/config/layer availability,
+credential-free blob redirects, immutable failure diagnostics, preserved rollback data,
+source/branch/container/resource drift gates and publication ordering. Independent review
+subsequently reproduced approval-authority and crash-consistency gaps in that candidate;
+the corrections below supersede the original publication-ordering assessment.
+No independent security certification or full M4 release PASS is claimed.
+
+## Initial transition security review corrections — 2026-10-12
+
+Corrective work began from exact feature HEAD
+`a86515bc03f9b1c80032651582022dca7e0a16be`, with a clean worktree and canonical
+develop unchanged at `8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5`.
+
+**Approval authority:** the previous `approve()` checked private filesystem modes and a
+nonempty `owner` field but accepted the executing user's own directory/file. That was
+self-authorization, not independent authority. All initial phases, the CLI and initial
+Docker adapter now require real/effective UID 0 and explicit `root-operated-cutover-v1`.
+The CLI configuration, approval file, approval directory and every ancestor are checked
+for root ownership, protected modes and absence of symlinks; approval/configuration
+files must have one hard link. `owner` remains only a human review reference. The existing
+`moneybowl-ingestion-deploy` identity (UID 993/GID 983) cannot cross this initial boundary.
+No sudo helper, new service, key or credential was introduced. The host administrator
+is explicitly trusted; Docker socket access remains root-equivalent. Expiry, exact
+DEV/project/API/plan/branch bindings and one-use no-retry consumption remain enforced.
+
+**Completion integrity:** the previous journal could become `VERIFIED` before receipt
+publication; the normal owner trusted that state alone. Verification now durably enters
+`VERIFYING` before checks/publication, writes immutable measurement evidence, provenance
+and a permanent private `initial-service-receipt.json`, then commits the digest-bound
+completion journal last. Every normal reconciliation validates the matching journal,
+archived plan, verification, original ledger and private receipt before branch measurement
+or deployment work. Old, missing, inconsistent or interrupted completion fails closed.
+Normal report renewal and override regeneration do not alter the archived initial receipt.
+No initial success is exported to the normal report directory during the transaction.
+Preparation also requires protected `acceptance_required=true` enrollment, retained after
+handoff so disabling initial activation or deleting every archive cannot remove the gate.
+An unused disabled section without enrollment/artifacts preserves the normal owner's
+existing independently provenanced path; retained artifacts always force the gate.
+The private archive is not independently commissioned public HTTPS hosting or a full
+M4 acceptance receipt. Abrupt termination preserves unresolved durable state and immutable
+artifacts; it does not trigger retry or rollback. A termination after the final completion
+commit is accepted only with the entire validated artifact tuple.
+
+Regressions reproduce arbitrary-owner same-user approval and deny the real service UID,
+executor-owned approval/configuration or ancestors, writable ancestors, symlinks and hard
+links. Twenty before/after publication interruptions use `BaseException` and `SystemExit`
+at the verification-intent, measurement, ledger, private-receipt and completion boundaries.
+Missing/tampered tests cover each of the five completion artifacts, including the exact
+old `VERIFIED`-without-receipt failure. A legitimate synthetic transition followed by two
+normal reconciliations preserves the private receipt. Tests use disposable Git fixtures
+and synthetic Docker/registry results, never live Docker or Supabase.
+
+A fresh read-only bypass/regression reviewer found no surviving route for the two supplied
+triggers, and reproduced one compatibility regression in the first corrective candidate:
+an unused disabled initial section blocked an independently proven normal owner. The
+enrollment/artifact distinction above corrects that confirmed regression, with positive
+normal-owner and negative missing/orphaned-artifact cases. This review is not a hosted
+commissioning or independent QA certificate.
+
+The updated [runbook](MONEYBOWL_M4_INITIAL_API_TRANSITION.md) specifies the root approval
+boundary and separately reviewed handoff to the normal UID 993/GID 983 service. The legacy
+image's source revision is still unknown; the reviewed candidate remains local-only.
+Private registry publication/provenance, five-layer runtime/configuration approvals,
+recovery review, PR #209's normal-owner optional-entrypoint fix, independent review and
+public measurement/HTTPS evidence hosting remain commissioning prerequisites. No scheduler
+or Jenkins integration was added. API-only replacement, unrelated service preservation,
+financial retirement and original historical-provenance safeguards remain in force.
+M4 is not fully commissioned. No live infrastructure or canonical develop was modified.
+
+| Corrective validation command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment -p test_initial_api_transition.py` | 119 passed, 0 failed; includes 46 added authority/completion regressions |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment` | 290 passed, 0 failed; includes all focused cases |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning` | 34 passed, 0 failed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_validate_commits.py` | 5 passed, 0 failed |
+| `PYTHONPYCACHEPREFIX=/tmp/m4-corrections-compile python3 -m py_compile tools/deployment/{protected_io,initial_api_transition,initial_transition_integrity,ingestion_owner,test_initial_api_transition}.py` | Passed; bytecode outside repository |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_migration_history.py` | Passed; 27 frozen migrations unchanged |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_outbox_routes.py --check` | Passed; 17 canonical routes unchanged |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_docs.py` | Passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_commits.py 'fix: enforce initial cutover authority and completion integrity'` | Passed |
+
+The complete final owning suites total 329 passed, 0 failed; the focused 119 are included
+in that total. During test development, authority mocks and the synthetic Compose hash
+model needed adjustment; the final commands above passed. API and retired-dispatcher
+code were unchanged and their historical implementation counts above are not represented
+as new corrective runs. All tests remain offline; real execution identities are modeled,
+not acquired. No live initial transition or public commissioning validation was attempted.

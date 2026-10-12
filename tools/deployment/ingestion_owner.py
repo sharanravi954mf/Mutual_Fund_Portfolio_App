@@ -14,6 +14,9 @@ from observe import ancestor, read_json
 from owner_common import (Command, atomic_json, binding, envelope, latest, lock,
                           pinned_executable, private_config, source_tree)
 from service_manifest import service_manifest
+from private_registry import Registry
+from protected_io import deployment_lock
+import initial_transition_integrity as initial_integrity
 import compose_inventory as inventory
 
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
@@ -31,9 +34,14 @@ API_COMMAND = ['uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', '8080',
 
 
 class DockerOwner:
-    def __init__(self, config, command=None):
+    def __init__(self, config, command=None, registry=None):
         self.config = config
         inventory.layout(config)
+        # Production always requires independently provisioned private registry access.
+        # Injected command transports permit offline tests without live credentials.
+        self.registry = Registry(config) if command is None else registry
+        if command is None:
+            self.registry.credential()  # Validate Docker auth location before any plugin discovery.
         self.docker = pinned_executable(config, 'docker') if command is None else '/usr/bin/docker'
         self.systemctl = pinned_executable(config, 'systemctl') if command is None else '/usr/bin/systemctl'
         self.command = command or Command({'DOCKER_CONFIG': config['docker_config']})
@@ -315,9 +323,14 @@ class DockerOwner:
         require(image['id'] == image_id, 'built_image_changed')
         refs = [ref for ref in image['digests'] if ref.startswith(self.config['image_repository'] + '@sha256:')]
         require(len(refs) == 1, 'registry_digest_unverified')
-        return {'image': refs[0], 'image_id': image_id, 'git_commit': sha, 'source_digest': source_digest}
+        proof = {'image': refs[0], 'image_id': image_id, 'git_commit': sha, 'source_digest': source_digest}
+        if self.registry is not None:
+            self.registry.verify(proof)
+        return proof
 
     def verify_image(self, provenance):
+        if self.registry is not None:
+            self.registry.verify(provenance)
         image = self.image(provenance['image'])
         require(image['id'] == provenance['image_id'] and provenance['image'] in image['digests'], 'image_provenance_mismatch')
         require(image.get('command') == API_COMMAND and not image.get('entrypoint'), 'single_worker_command_required')
@@ -367,7 +380,11 @@ class DockerOwner:
 def reconcile(config, policy, docker, repo, current_head, now=time.time):
     env, p = binding(config, policy)
     state = Path(config['state_root'])
-    with lock(state):
+    initial = initial_integrity.required(config)
+    with deployment_lock(state) if initial else lock(state):
+        # A partial initial transition cannot race into regular reconciliation.
+        if initial_integrity.required(config):
+            initial_integrity.completed(config, policy, repo)
         sha = revision(current_head())
         report_path = Path(config['report_root']) / (sha + '.json')
         report_path.unlink(missing_ok=True)

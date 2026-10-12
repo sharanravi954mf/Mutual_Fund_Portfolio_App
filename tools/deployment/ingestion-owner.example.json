@@ -159,5 +159,40 @@
       "moneybowl-ingestion-support_caddy_data": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256",
       "moneybowl-ingestion-support_clamav_db": "REPLACE_WITH_REVIEWED_RESOURCE_SHA256"
     }
+  },
+  "registry": {
+    "repository": "registry.example.invalid/moneybowl-ingestion-dev",
+    "private": true,
+    "approval": "REPLACE_WITH_PRIVATE_REPOSITORY_AND_CREDENTIAL_SCOPE_REVIEW",
+    "token_endpoint": "https://registry.example.invalid/token",
+    "service": "registry.example.invalid",
+    "blob_redirect_hosts": []
+  },
+  "initial_transition": {
+    "enabled": false,
+    "acceptance_required": false,
+    "approval_authority": "root-operated-cutover-v1",
+    "source_revision": "8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5",
+    "source_digest": "5f06254a13cb666449336425b1a66d31fa8db4afbb30d78d0bc7687dd67d5fd5",
+    "candidate_image_id": "sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
+    "approved_branch_head": "REPLACE_WITH_REVIEWED_CURRENT_DEVELOP_HEAD",
+    "image": "REPLACE_WITH_PRIVATE_REPOSITORY_AT_REMOTE_SHA256",
+    "approval_root": "/private/independent-owner-approvals",
+    "protected_inputs": [
+      {
+        "path": "/private/ingestion-compose.env",
+        "sha256": "REPLACE_WITH_PRIVATE_INPUT_SHA256",
+        "approval": "REPLACE_WITH_OWNER_INPUT_REVIEW"
+      }
+    ],
+    "recovery": {
+      "archive": "/private/recovery/legacy-api-image.tar",
+      "record": "/private/recovery/RECOVERY.json",
+      "sha256": "009b26a7c81735b271100a1fe3b7051fda93ad4927c07119eaaea229d418ed49",
+      "size": 54473216,
+      "record_sha256": "REPLACE_WITH_REVIEWED_RECOVERY_RECORD_SHA256",
+      "image_id": "sha256:1c38aa4946fdb961ed7b0983edb6925988961891c91a0b9e296d84ac8a59286f",
+      "approval": "REPLACE_WITH_RECOVERY_AND_RETENTION_REVIEW"
+    }
   }
 }
