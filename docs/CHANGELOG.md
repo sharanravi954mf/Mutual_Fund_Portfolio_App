@@ -9,6 +9,17 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 one-time Mailback API transition implementation — 2026-10-12
+
+- Added separate prepare, owner-authorized one-use activation and independent verification
+  phases for the exact reviewed DEV Mailback API candidate. Preserve unknown legacy
+  provenance and recovery; prohibit blind retry, automatic rollback and financial operations.
+- Bind all five existing Compose layers, container/resource/runtime/configuration identities,
+  private inputs, Git source, disk and recovery. Require remote private OCI manifest/config
+  digest verification and layer availability in both initial and regular ingestion owners.
+- Add isolated failure/security tests and commissioning runbook. This is local implementation
+  only: no registry push, live API replacement, owner activation or full M4 commissioning.
+
 ## M4 DEV commissioning — reconciliation observation window — 2026-10-11
 
 - Extended release observation to cover the existing fifteen-minute frontend

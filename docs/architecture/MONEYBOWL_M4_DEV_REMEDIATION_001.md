@@ -1,5 +1,11 @@
 # M4 DEV commissioning remediation 001
 
+The 2026-10-12 [implemented one-time API transition runbook](MONEYBOWL_M4_INITIAL_API_TRANSITION.md)
+supersedes the earlier manual initial-transition proposal below. Code and synthetic tests
+are implemented for review; the legacy source remains unknown, the new ARM64 image is
+local-only, and private registry/owner approval/commissioning remain blocked. No live
+replacement or owner activation was performed.
+
 The [latest execution record](#github-actions-completion-execution--2026-10-11)
 supersedes historical capacity and installation blockers below. DEV is still not
 commissioned; staging is not a successful deployment.
@@ -440,3 +446,45 @@ The next safe operation is to supply the authoritative private Compose interpola
 inputs and complete independent baseline measurement, while reviewing this local
 correction and provisioning the missing registry/measurement capabilities. A merge
 or live image replacement before those gates cannot produce a genuine M4 PASS.
+
+## Initial API transition implementation validation — 2026-10-12
+
+Implementation is local and reviewable; **live commissioning remains BLOCKED**.
+The [new runbook](MONEYBOWL_M4_INITIAL_API_TRANSITION.md) specifies the implemented
+phases, exact candidate/legacy identities, scoped private registry provisioning,
+five-layer baseline approvals, one-use owner authorization and reviewed recovery.
+No private registry was provisioned, no image pushed/rebuilt, no live transition run,
+no owner service started, and no Supabase/Production/Caddy/Director changes occurred.
+Independent candidate inspection and Git component measurement matched the supplied
+image/source/digest. Canonical develop remains `8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5`.
+
+| Final validation command | Result |
+| --- | --- |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/deployment` | 244 passed, 0 failed; includes 73 new initial-transition/OCI cases; original baseline 171 passed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/commissioning` | 34 passed, 0 failed |
+| `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p test_validate_commits.py` | 5 passed, 0 failed |
+| `env -u INGESTION_SUPPORT_BASE_URL PYTHONDONTWRITEBYTECODE=1 timeout 120 /tmp/moneybowl-m4-venv/bin/python -m pytest -o addopts='' -m 'not integration' -q` in `services/ingestion-support` | 194 passed, 0 failed, 1 live integration test deselected; authorized local test sockets only |
+| `PYTHONDONTWRITEBYTECODE=1 /tmp/b061-test-venv/bin/python -m pytest -o addopts='' -q` in `services/outbox-dispatcher` | 63 passed, 0 failed; offline compatibility tests, no dispatcher process started |
+| `PYTHONPYCACHEPREFIX=/tmp/m4-initial-api-compile python3 -m py_compile` on six changed/new Python files | Passed; all bytecode outside canonical repository |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_migration_history.py` | Passed; 27 frozen migration files unchanged |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_outbox_routes.py --check` | Passed; 17 canonical routes unchanged |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_docs.py` | Passed; documentation links/anchors validated |
+| `PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/validate_commits.py 'feat: add one-time verified Mailback API transition'` and `git diff --check` | Passed |
+
+The first restricted ingestion harness stalled on local TestClient sockets and was
+terminated; the authorized local-socket rerun completed. Quiet-mode exploratory runs
+were repeated with summaries enabled for exact counts. Final suites have zero failures;
+540 test cases passed across the five final suites. No live integration smoke was selected.
+The optional entrypoint inspector remains a separately documented PR #209 dependency
+for the regular owner. The initial controller rejects nonempty entrypoints, wrong commands,
+extra workers, root users and unsupported image/platform provenance.
+
+Final implementation review checked exact API-only command scope, the unchanged normal
+historical-provenance guard, one-use authorization/expiry/revalidation, shared locking,
+protected file/parent/link permissions, remote privacy/digests/config/layer availability,
+credential-free blob redirects, immutable failure diagnostics, preserved rollback data,
+source/branch/container/resource drift gates and publication ordering. Receipt publication
+is the final step after verified measurements and ledger/journal persistence; a journal
+publication failure cannot expose a success receipt. An incomplete transaction blocks
+regular reconciliation and requires separate recovery review. No independent security
+certification or full M4 release PASS is claimed.

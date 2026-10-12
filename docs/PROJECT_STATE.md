@@ -18,6 +18,22 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
+## MONEYBOWL-M4 initial Mailback API replacement — implementation 2026-10-12
+
+The explicit DEV-only prepare/activate/verify controller is implemented locally with a
+one-use exact-plan owner authorization, protected evidence, shared owner lock, remote
+private OCI verification and API-only five-layer Compose replacement. Failed or uncertain
+transactions block normal reconciliation; verified transactions seed genuine provenance
+for the existing ingestion owner. Historical provenance of the legacy API stays unknown.
+The existing normal historical-record safeguard and financial retirement checks remain.
+Final validation: 244 deployment, 34 commissioning, 5 commit-validator, 194 API/security
+and 63 retired-dispatcher compatibility cases passed; zero failed, one live test deselected.
+No live infrastructure changed. The already built reviewed ARM64 candidate was independently
+inspected, without rebuild/push/activation; it remains local-only. Private registry,
+approved infrastructure/configuration/recovery inputs, independent review and PR #209's
+regular-inspector fix are required before commissioning. M4 is not fully commissioned.
+See the [implementation and commissioning runbook](architecture/MONEYBOWL_M4_INITIAL_API_TRANSITION.md).
+
 ## MONEYBOWL-M4 environment promotion — local review candidate 2026-10-11
 
 Versioned deployment contracts, feature/PR CI, read-only DEV/QA release observation,

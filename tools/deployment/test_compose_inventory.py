@@ -498,6 +498,7 @@ class ComposeInventoryTests(SourceFixture):
     def test_real_constructor_requires_the_reviewed_compose_plugin(self):
         config = {**self.config, 'docker_config': '/synthetic/no-auth'}
         with patch('ingestion_owner.pinned_executable', side_effect=lambda c, key: '/synthetic/' + key), \
+             patch('ingestion_owner.Registry'), \
              patch('ingestion_owner.Command', return_value=lambda *args, **kw: b'/unreviewed/compose'):
             with self.assertRaisesRegex(Rejected, 'compose_plugin_binding_invalid'): DockerOwner(config)
 

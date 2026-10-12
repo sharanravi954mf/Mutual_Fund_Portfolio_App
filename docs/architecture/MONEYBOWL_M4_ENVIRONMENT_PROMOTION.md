@@ -1,5 +1,11 @@
 # MONEYBOWL M4 — unified environment promotion
 
+The 2026-10-12 [implemented one-time API transition runbook](MONEYBOWL_M4_INITIAL_API_TRANSITION.md)
+supersedes the earlier manual initial-transition proposal below. Code and synthetic tests
+are implemented for review; the legacy source remains unknown, the new ARM64 image is
+local-only, and private registry/owner approval/commissioning remain blocked. No live
+replacement or owner activation was performed.
+
 Status: DEV compatibility remediation candidate, 2026-10-11; **end-to-end commissioning BLOCKED**.
 Latest execution staged the published `bc1870c5ca87962d9768a9000ba02798c7175df4`
 controller without activation and verified a legacy API recovery archive. Capacity
