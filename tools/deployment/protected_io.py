@@ -29,6 +29,22 @@ def read_private(path):
     return json.loads(protected(path).read_bytes())
 
 
+def root_controlled(path, *, directory=False):
+    """Approval/config authority is root, never the Docker service's own UID."""
+    path = Path(path)
+    require(path.is_absolute() and path.resolve() == path, 'approval_authority_invalid')
+    for parent in reversed(path.parents):
+        info = parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0
+                and not info.st_mode & 0o022, 'approval_authority_invalid')
+    info = path.lstat()
+    require(info.st_uid == 0 and stat.S_IMODE(info.st_mode) in
+            ((0o500, 0o700) if directory else (0o400, 0o600))
+            and (stat.S_ISDIR(info.st_mode) if directory else
+                 stat.S_ISREG(info.st_mode) and info.st_nlink == 1), 'approval_authority_invalid')
+    return path
+
+
 def publish(path, value, *, immutable=False):
     """Private, fsynced atomic publication. Immutable files cannot be overwritten."""
     path = Path(path)

@@ -15,7 +15,8 @@ from owner_common import (Command, atomic_json, binding, envelope, latest, lock,
                           pinned_executable, private_config, source_tree)
 from service_manifest import service_manifest
 from private_registry import Registry
-from protected_io import deployment_lock, read_private
+from protected_io import deployment_lock
+import initial_transition_integrity as initial_integrity
 import compose_inventory as inventory
 
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
@@ -379,12 +380,11 @@ class DockerOwner:
 def reconcile(config, policy, docker, repo, current_head, now=time.time):
     env, p = binding(config, policy)
     state = Path(config['state_root'])
-    transition = state / 'initial-transition.json'
-    initial = transition.exists() or transition.is_symlink()
+    initial = initial_integrity.required(config)
     with deployment_lock(state) if initial else lock(state):
         # A partial initial transition cannot race into regular reconciliation.
-        if transition.exists() or transition.is_symlink():
-            require(read_private(transition).get('state') == 'VERIFIED', 'initial_transition_not_verified')
+        if initial_integrity.required(config):
+            initial_integrity.completed(config, policy, repo)
         sha = revision(current_head())
         report_path = Path(config['report_root']) / (sha + '.json')
         report_path.unlink(missing_ok=True)

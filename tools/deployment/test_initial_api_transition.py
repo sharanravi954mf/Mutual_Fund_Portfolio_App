@@ -1,5 +1,6 @@
 """Disposable Git + synthetic Engine/OCI tests. Never access live infrastructure."""
 import base64
+import contextlib
 import copy
 import json
 import os
@@ -12,11 +13,13 @@ from unittest.mock import patch
 import compose_inventory as inventory
 import initial_api_transition as transition
 import test_compose_inventory as fixtures
+import test_owners as owner_fixtures
 from contract import DEV_PROJECT, Rejected, manifest
 from ingestion_owner import API_COMMAND, DEV_RETIRED_CONTAINER, reconcile
 from owner_common import sha256
 from private_registry import Registry
 from protected_io import deployment_lock, protected, publish, read_private
+import initial_transition_integrity as initial_integrity
 
 NOW = 1800000000
 
@@ -55,7 +58,8 @@ class TransitionTests(unittest.TestCase):
         self.config['compose_env'] = str(private)
         archive = f.root / 'legacy.tar'; archive.write_bytes(b'synthetic reviewed recovery archive'); archive.chmod(0o600)
         record = f.root / 'recovery.json'; publish(record, {'image_id': transition.LEGACY, 'git_commit': None})
-        self.config['initial_transition'] = dict(enabled=True, source_revision=f.sha,
+        self.config['initial_transition'] = dict(enabled=True, acceptance_required=True, source_revision=f.sha,
+            approval_authority=transition.APPROVAL_AUTHORITY,
             source_digest=manifest(f.repo, f.sha)['ingestion_support'], candidate_image_id=transition.CANDIDATE,
             approved_branch_head=f.sha, image='registry.invalid/api@sha256:' + 'd'*64,
             approval_root=str(approvals), protected_inputs=[dict(path=str(private), approval='private-owner-review',
@@ -79,7 +83,8 @@ class TransitionTests(unittest.TestCase):
             if 'up' in argv:
                 f.live['api']['labels']['moneybowl.source_digest'] = proof['source_digest']
             return raw
-        self.docker = transition.InitialDockerOwner(self.config, command=transport)
+        with self.root_operator():
+            self.docker = transition.InitialDockerOwner(self.config, command=transport)
         self.docker.container = lambda identifier: copy.deepcopy(self.retired if identifier in
             ('c'*64, DEV_RETIRED_CONTAINER) else next(v for v in f.live.values() if v['id'] == identifier))
         self.docker.retirement = lambda: 'retired'
@@ -91,8 +96,28 @@ class TransitionTests(unittest.TestCase):
         self.args = (self.config, f.p, self.docker, self.head, self.registry)
         self.state = Path(self.config['state_root'])
 
+    @contextlib.contextmanager
+    def root_operator(self, untrusted=()):
+        # Simulate root authority on disposable fixture paths; never acquire real privilege.
+        original = Path.lstat
+        real_uid = os.getuid()
+        def metadata(path):
+            info = original(path)
+            values = list(info)
+            if path == self.f.root or self.f.root in path.parents:
+                values[4] = 0
+            if path == Path('/tmp'):
+                values[0] &= ~0o022  # Model the authority's protected system ancestor.
+            if path in untrusted:
+                values[4] = real_uid
+            return os.stat_result(values)
+        with patch.object(Path, 'lstat', metadata), patch('os.getuid', return_value=0), \
+                patch('os.geteuid', return_value=0):
+            yield
+
     def prepare(self):
-        return transition.prepare(*self.args, now=lambda: NOW)
+        with self.root_operator():
+            return transition.prepare(*self.args, now=lambda: NOW)
 
     def approval(self):
         path = Path(self.config['initial_transition']['approval_root']) / 'approval.json'
@@ -102,10 +127,13 @@ class TransitionTests(unittest.TestCase):
         return path
 
     def activate(self, approval=None):
-        return transition.activate(*self.args, approval or self.approval(), now=lambda: NOW)
+        approval = approval or self.approval()
+        with self.root_operator():
+            return transition.activate(*self.args, approval, now=lambda: NOW)
 
     def verify(self):
-        return transition.verify(*self.args, now=lambda: NOW)
+        with self.root_operator():
+            return transition.verify(*self.args, now=lambda: NOW)
 
     def assert_no_up(self):
         self.assertFalse(any('up' in call for call in self.f.calls))
@@ -125,10 +153,12 @@ class TransitionTests(unittest.TestCase):
         self.assertEqual(unrelated, {k:v for k,v in self.f.live.items() if k!='api'})
         # Regular labelled-image validation adopts genuine ledger without historical invention.
         self.f.owner.validate_current(self.f.live['api'])
-        receipt = read_private(Path(self.config['report_root']) / (self.f.sha + '.json'))
+        receipt = read_private(self.state / 'initial-service-receipt.json')
         self.assertEqual(receipt['component']['proof'], 'running_image')
         self.assertNotIn('synthetic-secret', json.dumps(receipt))
         self.assertEqual(read_private(self.state / transition.JOURNAL)['state'], 'VERIFIED')
+        self.assertEqual(initial_integrity.completed(self.config, self.f.p, self.f.repo), receipt)
+        self.assertEqual(list(Path(self.config['report_root']).iterdir()), [])
 
     def test_unknown_history_not_fabricated_or_normal_guard_weakened(self):
         self.prepare()
@@ -150,7 +180,8 @@ class TransitionTests(unittest.TestCase):
                 self.assertEqual(template.count(optional), 1)
                 rendered = template.replace(optional, json.dumps(entrypoint))
                 return re.sub(r'\{\{json ([^}]+)\}\}',lambda match:json.dumps(fields[match[1]]),rendered).encode()
-            owner = transition.InitialDockerOwner(self.config, command=command)
+            with self.root_operator():
+                owner = transition.InitialDockerOwner(self.config, command=command)
             if entrypoint:
                 with self.assertRaisesRegex(Rejected,'single_worker_command_required'):owner.verify_image(proof)
             else: owner.verify_image(proof)
@@ -287,7 +318,7 @@ class TransitionTests(unittest.TestCase):
         self.prepare(); self.activate()
         original=transition.publish
         def fail_receipt(path,value,**kwargs):
-            if Path(path).parent == Path(self.config['report_root']): raise OSError('synthetic failure')
+            if Path(path).name == 'initial-service-receipt.json': raise OSError('synthetic failure')
             return original(path,value,**kwargs)
         with patch.object(transition,'publish',side_effect=fail_receipt): result=self.verify()
         self.assertEqual(result['state'],'UNKNOWN')
@@ -326,10 +357,228 @@ class TransitionTests(unittest.TestCase):
 
     def test_world_readable_approval(self):
         self.prepare(); approval=self.approval(); approval.chmod(0o644)
-        self.assertEqual(self.activate(approval)['reason'],'protected_permissions_invalid'); self.assert_no_up()
+        self.assertEqual(self.activate(approval)['reason'],'approval_authority_invalid'); self.assert_no_up()
 
     def test_mutable_git_cli_is_blocked(self):
         with self.assertRaisesRegex(Rejected,'privileged_code_not_installed'): transition.installed_code()
+
+
+    def assert_normal_blocked(self):
+        head = unittest.mock.Mock(side_effect=AssertionError('incomplete acceptance reached deployment'))
+        with patch.dict(self.config, commissioned=True), self.assertRaises(Rejected):
+            reconcile(self.config, self.f.p, self.f.owner, self.f.repo, head)
+        head.assert_not_called()
+
+    def test_same_executor_cannot_self_authorize_with_arbitrary_owner(self):
+        self.prepare(); approval = self.approval()
+        value = read_private(approval); value['owner'] = 'root-approved-imposter'
+        publish(approval, value)
+        self.assertEqual(approval.stat().st_uid, os.getuid())
+        journal = read_private(self.state / transition.JOURNAL)
+        plan = read_private(self.state / 'initial-plan.json')
+        with self.assertRaisesRegex(Rejected, 'cutover_requires_root_operator'):
+            transition.approve(self.config, journal, plan, approval, lambda: NOW)
+        self.assert_no_up()
+
+    def test_root_operator_rejects_executor_owned_approval_file(self):
+        self.prepare(); approval = self.approval()
+        with self.root_operator(untrusted=(approval,)):
+            result = transition.activate(*self.args, approval, now=lambda: NOW)
+        self.assertEqual(result['reason'], 'approval_authority_invalid')
+        self.assert_no_up()
+
+    def test_root_operator_rejects_executor_owned_approval_directory(self):
+        self.prepare(); approval = self.approval()
+        with self.root_operator(untrusted=(approval.parent,)):
+            with self.assertRaisesRegex(Rejected, 'approval_authority_invalid'):
+                transition.activate(*self.args, approval, now=lambda: NOW)
+        self.assert_no_up()
+
+    def test_root_operator_rejects_executor_owned_approval_ancestor(self):
+        self.prepare(); approval = self.approval()
+        with self.root_operator(untrusted=(self.f.root,)):
+            with self.assertRaisesRegex(Rejected, 'approval_authority_invalid'):
+                transition.activate(*self.args, approval, now=lambda: NOW)
+        self.assert_no_up()
+
+    def test_root_operator_rejects_writable_approval_ancestor(self):
+        self.prepare(); approval = self.approval(); self.f.root.chmod(0o770)
+        with self.root_operator():
+            with self.assertRaisesRegex(Rejected, 'approval_authority_invalid'):
+                transition.activate(*self.args, approval, now=lambda: NOW)
+        self.assert_no_up()
+
+    def test_root_operator_rejects_linked_approval_file_and_directory(self):
+        self.prepare(); approval = self.approval()
+        alias = approval.parent / 'alias.json'; alias.symlink_to(approval)
+        with self.root_operator():
+            self.assertEqual(transition.activate(*self.args, alias, now=lambda: NOW)['reason'],
+                             'approval_authority_invalid')
+        alias = self.f.root / 'linked-approvals'; alias.symlink_to(approval.parent, target_is_directory=True)
+        self.config['initial_transition']['approval_root'] = str(alias)
+        with self.root_operator():
+            with self.assertRaisesRegex(Rejected, 'approval_authority_invalid'):
+                transition.cutover_authority(self.config)
+        self.assert_no_up()
+
+    def test_root_operator_rejects_hardlinked_approval(self):
+        self.prepare(); approval = self.approval()
+        os.link(approval, approval.parent / 'hardlink')
+        with self.root_operator():
+            self.assertEqual(transition.activate(*self.args, approval, now=lambda: NOW)['reason'],
+                             'approval_authority_invalid')
+        self.assert_no_up()
+
+    def test_all_direct_initial_phases_reject_service_execution_identity(self):
+        for phase in (transition.prepare, transition.activate, transition.verify):
+            for real_uid, effective_uid in ((993, 993), (993, 0), (0, 993)):
+                with self.subTest(phase=phase.__name__, real_uid=real_uid, effective_uid=effective_uid), \
+                        patch('os.getuid', return_value=real_uid), patch('os.geteuid', return_value=effective_uid):
+                    with self.assertRaisesRegex(Rejected, 'cutover_requires_root_operator'):
+                        phase(*self.args, **({'approval': '/ignored'} if phase is transition.activate else {}))
+        self.assert_no_up()
+
+    def test_direct_initial_docker_adapter_cannot_bypass_root_boundary(self):
+        with self.assertRaisesRegex(Rejected, 'cutover_requires_root_operator'):
+            transition.InitialDockerOwner(self.config, command=self.f.command)
+        with self.assertRaisesRegex(Rejected, 'cutover_requires_root_operator'):
+            self.docker.replace_api('/ignored')
+        self.assert_no_up()
+
+    def test_root_cli_rejects_executor_controlled_config_before_docker(self):
+        import io
+        config_path = self.f.root / 'owner-config.json'; publish(config_path, self.config)
+        with self.root_operator(untrusted=(config_path,)), patch.object(transition, 'installed_code'), \
+                patch.object(transition, 'InitialDockerOwner') as docker, \
+                patch('sys.argv', ['initial', 'prepare', '--config', str(config_path)]), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(transition.main(), 1)
+        self.assertEqual(json.loads(output.getvalue())['reason'], 'approval_authority_invalid')
+        docker.assert_not_called()
+
+    def test_old_verified_journal_without_receipt_does_not_authorize(self):
+        self.prepare(); self.activate()
+        journal = read_private(self.state / transition.JOURNAL)
+        proof = transition.proof_for(self.config)
+        publish(self.state / (self.f.sha + '.provenance.json'), proof, immutable=True)
+        publish(self.state / transition.JOURNAL, {**journal, 'state': 'VERIFIED'})
+        self.assertFalse((self.state / 'initial-service-receipt.json').exists())
+        self.assert_normal_blocked()
+
+    def test_unused_disabled_stanza_preserves_independently_proven_normal_owner(self):
+        fixture = owner_fixtures.IngestionTests('runTest')
+        fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        self.assertEqual(fixture.run_owner()['state'], 'deployed')
+        fixture.config['initial_transition'] = dict(enabled=False, acceptance_required=False)
+        self.assertFalse(initial_integrity.required(fixture.config))
+        self.assertEqual(fixture.run_owner()['state'], 'deployed')
+        self.assertEqual(fixture.docker.calls.count('activate'), 1)
+
+    def test_prepare_requires_permanent_acceptance_gate_enrollment(self):
+        for value in (False, None):
+            with self.subTest(value=value), patch.dict(self.config['initial_transition'], acceptance_required=value):
+                with self.assertRaisesRegex(Rejected, 'initial_acceptance_gate_required'):
+                    self.prepare()
+        self.assert_no_up()
+
+    def test_disabled_enrolled_transition_with_all_artifacts_missing_still_blocks(self):
+        self.prepare(); self.activate(); self.verify()
+        self.config['initial_transition']['enabled'] = False
+        for name in initial_integrity.ARTIFACTS:
+            (self.state / name).unlink(missing_ok=True)
+        self.assertTrue(initial_integrity.required(self.config))
+        self.assert_normal_blocked()
+
+    def test_retained_artifact_forces_gate_even_with_unused_disabled_config(self):
+        self.prepare(); self.activate(); self.verify()
+        self.config['initial_transition'] = dict(enabled=False, acceptance_required=False)
+        (self.state / transition.JOURNAL).unlink()
+        self.assertTrue(initial_integrity.required(self.config))
+        self.assert_normal_blocked()
+
+    def test_successful_handoff_and_two_normal_reconciliations_keep_initial_receipt_intact(self):
+        self.prepare(); self.activate(); self.verify()
+        receipt = read_private(self.state / 'initial-service-receipt.json')
+        self.config['commissioned'] = True
+        self.config['initial_transition']['enabled'] = False  # Normal owner never becomes root authority.
+        self.f.owner.prefix[self.f.owner.prefix.index('--env-file') + 1] = self.config['compose_env']
+        original_hash = self.f.owner.config_hash
+        api_hash = self.f.live['api']['labels']['com.docker.compose.config-hash']
+        # Real Compose hashes the model, not the JSON whitespace changed by atomic_json.
+        def config_hash(service, override=None):
+            return api_hash if service == 'api' and override else original_hash(service, override)
+        with patch.object(self.f.owner, 'capacity'), patch.object(self.f.owner, 'config_hash', config_hash):
+            for stamp in (NOW + 10, NOW + 20):
+                result = reconcile(self.config, self.f.p, self.f.owner, self.f.repo, self.head, now=lambda: stamp)
+                self.assertEqual(result['state'], 'deployed')
+                self.assertEqual(initial_integrity.completed(self.config, self.f.p, self.f.repo), receipt)
+        self.assertEqual(read_private(self.state / 'initial-service-receipt.json'), receipt)
+        self.assertEqual(len([call for call in self.f.calls if 'up' in call]), 1)
+        # The normal owner can renew its report without invalidating permanent acceptance.
+        self.assertEqual(json.loads((Path(self.config['report_root']) / (self.f.sha + '.json')).read_text())['observed_at'],
+                         NOW + 20)
+
+
+def termination_case(boundary, after_write, termination):
+    def test(self):
+        self.prepare(); self.activate(); original = transition.publish
+        def stop(path, value, **kwargs):
+            matched = ((Path(path).name, value.get('state')) == boundary if isinstance(boundary, tuple)
+                       else Path(path).name == (self.f.sha + '.provenance.json' if boundary == 'ledger' else boundary))
+            if matched:
+                if after_write:
+                    original(path, value, **kwargs)
+                raise termination('abrupt termination')
+            return original(path, value, **kwargs)
+        with patch.object(transition, 'publish', side_effect=stop), self.assertRaises(termination):
+            self.verify()
+        complete = boundary == (transition.JOURNAL, 'VERIFIED') and after_write
+        if complete:
+            self.assertEqual(initial_integrity.completed(self.config, self.f.p, self.f.repo)['image_id'],
+                             transition.CANDIDATE)
+        else:
+            self.assertNotEqual(read_private(self.state / transition.JOURNAL)['state'], 'VERIFIED')
+            self.assert_normal_blocked()
+            if boundary != (transition.JOURNAL, 'VERIFYING') or after_write:
+                with self.assertRaisesRegex(Rejected, 'verification_not_authorized'):
+                    self.verify()
+        self.assertEqual(list(Path(self.config['report_root']).iterdir()), [])
+        self.assertEqual(len([call for call in self.f.calls if 'up' in call]), 1)
+    return test
+
+
+for index, boundary in enumerate(((transition.JOURNAL, 'VERIFYING'), 'initial-verification.json',
+                                  'ledger', 'initial-service-receipt.json', (transition.JOURNAL, 'VERIFIED'))):
+    for after_write in (False, True):
+        for termination in (BaseException, SystemExit):
+            setattr(TransitionTests, f'test_abrupt_{termination.__name__}_{index}_{"after" if after_write else "before"}',
+                    termination_case(boundary, after_write, termination))
+
+
+def missing_artifact_case(name):
+    def test(self):
+        self.prepare(); self.activate(); self.verify()
+        path = self.state / (self.f.sha + '.provenance.json' if name == 'ledger' else name)
+        path.unlink()
+        self.assert_normal_blocked()
+    return test
+
+
+def mismatched_artifact_case(name):
+    def test(self):
+        self.prepare(); self.activate(); self.verify()
+        path = self.state / (self.f.sha + '.provenance.json' if name == 'ledger' else name)
+        value = read_private(path)
+        value['receipt_digest' if name == 'initial-transition.json' else 'integrity_corruption'] = 'f' * 64
+        publish(path, value)
+        self.assert_normal_blocked()
+    return test
+
+
+for name in ('initial-transition.json', 'initial-plan.json', 'initial-verification.json',
+             'initial-service-receipt.json', 'ledger'):
+    setattr(TransitionTests, 'test_completed_gate_missing_' + name.replace('.', '_'), missing_artifact_case(name))
+    setattr(TransitionTests, 'test_completed_gate_mismatched_' + name.replace('.', '_'), mismatched_artifact_case(name))
 
 
 def precondition_case(mutate, expected):

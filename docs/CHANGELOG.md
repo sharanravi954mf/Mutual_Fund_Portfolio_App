@@ -9,6 +9,19 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 initial API transition security corrections — 2026-10-12
+
+- Replace executor-owned approval acceptance with an explicit root-operated one-time
+  cutover boundary. Reject non-root callers and insecure approval/configuration ownership,
+  ancestors, permissions and links; retain plan scope, expiry and one-use consumption.
+- Persist verification intent, archive the private initial receipt before the final
+  completion journal, and require exact plan/verification/provenance/receipt bindings
+  on every normal ingestion reconciliation. Interrupted or inconsistent publication
+  cannot authorize deployment. Keep public HTTPS receipt hosting a separate gate.
+- Add isolated self-authorization and abrupt-termination regressions and update the
+  review/runbook. No live transition, infrastructure change, credential/key provisioning
+  or push; legacy provenance stays unknown and M4 commissioning remains blocked.
+
 ## M4 one-time Mailback API transition implementation — 2026-10-12
 
 - Added separate prepare, owner-authorized one-use activation and independent verification

@@ -170,6 +170,8 @@
   },
   "initial_transition": {
     "enabled": false,
+    "acceptance_required": false,
+    "approval_authority": "root-operated-cutover-v1",
     "source_revision": "8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5",
     "source_digest": "5f06254a13cb666449336425b1a66d31fa8db4afbb30d78d0bc7687dd67d5fd5",
     "candidate_image_id": "sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",

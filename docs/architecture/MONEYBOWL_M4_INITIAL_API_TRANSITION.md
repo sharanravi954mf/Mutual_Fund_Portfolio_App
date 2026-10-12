@@ -40,8 +40,12 @@ registry push or activation. Legacy source revision/component provenance remains
 2. Install the reviewed controller and dependencies outside mutable application Git,
    under a root-owned protected version directory. The privileged initial CLI refuses
    a writable/unprotected installation. Use isolated Python (`-I -B`) and reviewed
-   Python/Docker/Compose/systemctl executables. Approve the execution identity and
-   access paths; Docker socket access is root-equivalent. No installation happened here.
+   Python/Docker/Compose/systemctl executables. The initial phases require both real
+   and effective UID 0 under the explicit `root-operated-cutover-v1` authority. The
+   existing normal service runs as `moneybowl-ingestion-deploy` (UID 993, GID 983)
+   and cannot invoke initial phases or the initial Docker adapter. Docker socket access
+   remains root-equivalent; the protected host administrator is the approval authority.
+   No installation, privilege change, key or credential provisioning happened here.
 3. Complete the existing independent infrastructure review: **all five ordered layers**
    (base ingestion, hosted ingestion, Flutter web, Director M3B, M3B ingress adapter),
    per-service hashes/container IDs/image IDs/runtime fingerprints, public mounted
@@ -68,7 +72,13 @@ registry push or activation. Legacy source revision/component provenance remains
 6. Protect state/report/approval directories and all private configuration inputs:
    absolute paths, correct owner, no symlinks at any path component, no untrusted
    writable parents, private file modes and no hard-linked protected files. Put the
-   independently supplied owner approval in the approved separate directory. Hash-bind
+   root-operated approval in the approved separate directory. The initial CLI configuration
+   and approval must be root-owned regular files (`0400` or `0600`, one hard link);
+   approval directory must be root-owned `0500` or `0700`. Every ancestor must be
+   root-owned with no group/world write access, and every path must be absolute and
+   contain no symlinks. Executor-owned files, directories or ancestors are rejected,
+   regardless of the JSON `owner` text. Set `initial_transition.approval_authority` to
+   `root-operated-cutover-v1` in the protected configuration. Hash-bind
    the Compose interpolation input and all private env/credential/config files used
    by the five layers in `initial_transition.protected_inputs`; review their completeness.
    These values appear only as hashes in private evidence. Do not grant source code
@@ -82,7 +92,12 @@ registry push or activation. Legacy source revision/component provenance remains
    readiness separately; keep the original recovery API-only override intact.
 8. Select and review the then-current full `develop` branch head. The candidate source
    must be its ancestor and keep the exact component digest above. Set the protected
-   initial configuration, explicitly enabling only this initial transition. The example
+   initial configuration with `enabled=true` and `acceptance_required=true`, explicitly
+   enrolling the normal owner in the permanent completion gate. Retain
+   `acceptance_required=true` after handoff even if `enabled` becomes false. An unused
+   disabled section without enrollment or retained transaction artifacts preserves the
+   existing independently provenanced commissioning path. Any retained transaction
+   artifact requires the completion gate regardless of these configuration flags. The example
    configuration remains disabled with deliberate placeholders and cannot commission DEV.
 
 The remote verifier follows the [OCI registry HTTP contract](https://distribution.github.io/distribution/spec/api/)
@@ -95,6 +110,8 @@ are permitted only to independently pinned HTTPS hosts and receive no registry c
 
 The following are **future operator commands**, not commands executed in this task.
 Use the installed reviewed version and protected real configuration paths, not Git files.
+All three invocations must be run by the separately authorized root operator. The
+normal service has no sudo, setuid helper or initial-transition service entry point.
 
 ```sh
 /usr/bin/python3 -I -B /opt/moneybowl-deployment/REVIEWED_VERSION/tools/deployment/initial_api_transition.py prepare --config /etc/moneybowl-deployment/ingestion.json
@@ -107,7 +124,8 @@ transaction journal. It never creates authorization. The plan holds complete int
 before/after bindings, remote proof, input hashes and explicitly unknown legacy provenance.
 Any interrupted preparation preserves its artifacts and requires review before another plan.
 
-An independent owner must supply a private JSON authorization with exactly this meaning:
+The independently authorized root operator must review the immutable plan and supply
+a protected JSON authorization with exactly this meaning:
 
 ```json
 {
@@ -123,8 +141,10 @@ An independent owner must supply a private JSON authorization with exactly this 
 }
 ```
 
-The owner chooses a real expiry no more than one hour ahead. The nonce and complete plan
-scope are consumed once. The controller supplies no approval generator. After review:
+The operator chooses a real expiry no more than one hour ahead. `owner` is a human
+review reference, not proof of authority; kernel UID and the protected root filesystem
+boundary enforce authority. The nonce and complete plan scope are consumed once.
+The controller supplies no approval generator. After review:
 
 ```sh
 /usr/bin/python3 -I -B /opt/moneybowl-deployment/REVIEWED_VERSION/tools/deployment/initial_api_transition.py activate --config /etc/moneybowl-deployment/ingestion.json --approval /private/independent-owner-approvals/approval.json
@@ -151,17 +171,30 @@ inputs and Docker state. It requires one new API container with the exact image,
 labels, non-root user, empty/absent entrypoint, one-worker command, healthy Docker health
 and successful public `/ready`. Every support container and runtime/resource relationship
 must stay identical, M3B receiver stays healthy and financial retirement stays intact.
-Only then does it atomically publish private measurement evidence, the genuine provenance
-ledger, record `VERIFIED` measurements in the journal and publish a sanitized
-existing-format service receipt as the final step. Publication failure records `UNKNOWN`.
-The report remains private until the independently commissioned evidence reader/publisher
-serves genuine receipts. Publication failure blocks normal reconciliation and emits no PASS.
+Before remeasurement it durably records `VERIFYING`, which prohibits a blind verification
+retry even if termination bypasses ordinary exception handling. Only after every check
+passes does it publish immutable private `initial-verification.json`, the genuine provenance
+ledger and `initial-service-receipt.json`. The final atomic journal update records
+`VERIFIED`, completion version 1 and exact plan/verification/provenance/receipt digests.
+No initial success is exported to the normal report directory during this transaction.
+Ordinary publication failure records `UNKNOWN`; abrupt termination leaves the last durable
+state and artifacts for independent recovery review. A terminated transaction counts as
+complete only if the final journal and every matching artifact were already committed.
+
+The normal owner independently validates the entire retained tuple before reading the
+branch head or doing deployment work. A missing/mismatched receipt, plan, verification,
+ledger or journal, including an old `VERIFIED` journal without completion bindings,
+blocks it. Retained initial artifacts also trigger the gate if the journal is missing.
+The permanent initial receipt stays private and is distinct from the normal owner's
+renewed reports and independently commissioned public HTTPS receipt hosting. Neither
+this archive nor `VERIFIED` alone establishes a public service receipt or full M4 PASS.
 
 ## Recovery and subsequent automation
 
 Observed invalid invariants produce `FAILED`. Command failure/timeout, unavailable
 measurements or interrupted activation produce `UNKNOWN` (a persisted activation intent
-also means an unresolved attempt). The journal records whether activation was attempted,
+also means an unresolved attempt). Abrupt termination may retain `ACTIVATION_ATTEMPTED`
+or `VERIFYING`; these are unresolved states, never acceptance. The journal records whether activation was attempted,
 fixed failure code, plan/approval bindings and recovery requirement. Immutable private
 failure diagnostics capture any measurable API/retirement state without exposing it in
 public receipts. Both states prohibit
@@ -171,11 +204,23 @@ rollback is a separately authorized API-only procedure using the preserved legac
 original five-layer inputs and recovery override. There is no automatic rollback, deletion,
 restart, dependency recreation, broad Compose operation or cleanup path.
 
-After independent acceptance, hand off access to the genuine ledger/override and commission
-**the existing ingestion owner**. It validates the labelled running image and Git ancestry,
+After independent acceptance, separately review the access handoff and commission
+**the existing ingestion owner**. Initial state/report directories and private inputs must
+be root-controlled during the root-operated phases. For the later normal service, the
+administrator must explicitly hand off its approved state/report directories and needed
+private runtime inputs to UID 993/GID 983, keeping directories `0700`, immutable initial
+artifacts/ledger `0400` and journal/lock `0600`. Keep the installed code, root approval
+directory, original authorizations and root CLI configuration outside executor authority.
+Retain the consumed-nonce evidence with transaction state; the handoff never authorizes
+another initial invocation or resetting the transaction.
+Supply the normal service's reviewed private configuration through its existing systemd
+credential boundary. Set `commissioned=true`; initial `enabled` may become false while
+retaining `acceptance_required=true` and the original source/image binding. This task performs no handoff or service start.
+The gate binds the archived plan and permanent receipt, so renewing normal reports or
+regenerating the API override cannot erase acceptance. It validates the labelled running image and Git ancestry,
 builds subsequent exact Git archives, pushes through the single approved registry, checks
-remote publication and deploys/verifies only `api`. A non-`VERIFIED` initial journal blocks
-that owner even if partial publication left a labelled image or ledger. The original
+remote publication and deploys/verifies only `api`. Any incomplete or inconsistent initial
+transaction blocks that owner even if partial publication left a labelled image or ledger. The original
 `initial_revision` historical-record requirement remains intact for any unlabeled image.
 No second scheduler, webhook, Supabase deployer or Director orchestration is introduced.
 Existing full M4 release evidence, branch rules, backend measurement and frontend/receipt
@@ -191,4 +236,8 @@ registry credential/publication/privacy/content/layer failures, scoped token/red
 approval validity/reuse/expiry, concurrent owners, branch moves, disk, daemon/container/Compose
 and network/volume/mount drift, replicas, entrypoints, command/workers, runtime user/health,
 public readiness, support preservation, retirement, partial activation, false success,
-protected paths/symlinks and atomic ledger/receipt failure. No live replacement was tested.
+protected paths/symlinks and atomic ledger/receipt failure. Correction regressions add
+same-user self-authorization, service-UID direct/CLI bypasses, untrusted approval ancestry,
+20 before/after `BaseException`/`SystemExit` publication interruptions, every missing or
+tampered completion artifact, and two legitimate normal reconciliations preserving the
+permanent receipt. No live replacement was tested.

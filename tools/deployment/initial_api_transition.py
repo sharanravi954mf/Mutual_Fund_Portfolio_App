@@ -17,7 +17,7 @@ from ingestion_owner import API_COMMAND, DockerOwner
 from observe import Pending, ancestor
 from owner_common import envelope, latest, sha256, source_tree
 from private_registry import Registry
-from protected_io import deployment_lock, protected, publish, read_private
+from protected_io import deployment_lock, protected, publish, read_private, root_controlled
 from service_manifest import service_manifest
 
 SOURCE = '8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5'
@@ -26,11 +26,21 @@ CANDIDATE = 'sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc8
 LEGACY = 'sha256:1c38aa4946fdb961ed7b0983edb6925988961891c91a0b9e296d84ac8a59286f'
 LEGACY_CONTAINER = '7267a578f4bae1df47d18c838b6e59a2c2b4b31522fe4e90946f4cc5d8f034c6'
 JOURNAL = 'initial-transition.json'
+APPROVAL_AUTHORITY = 'root-operated-cutover-v1'
+
+
+def cutover_authority(config):
+    # The normal moneybowl-ingestion-deploy service is deliberately not this authority.
+    require(os.getuid() == 0 and os.geteuid() == 0, 'cutover_requires_root_operator')
+    require(config.get('initial_transition', {}).get('approval_authority') == APPROVAL_AUTHORITY,
+            'approval_authority_not_configured')
+    root_controlled(config['initial_transition']['approval_root'], directory=True)
 
 
 class InitialDockerOwner(DockerOwner):
     """Only the exact approved legacy identity or planned replacement is accepted."""
     def __init__(self, config, command=None):
+        cutover_authority(config)
         super().__init__(config, command)
         self.planned = None
 
@@ -81,6 +91,7 @@ class InitialDockerOwner(DockerOwner):
         return result
 
     def replace_api(self, override):
+        cutover_authority(self.config)
         self.command(self.prefix + ['-f', str(override), 'up', '--detach', '--no-deps', '--no-build',
                                    '--pull', 'never', '--scale', 'api=1', '--wait',
                                    '--wait-timeout', '120', 'api'], timeout=180)
@@ -138,11 +149,13 @@ def bind_inputs(config, snapshot):
 
 
 def validate_config(config, policy):
+    cutover_authority(config)
     require(config.get('environment') == 'dev' and config.get('project_ref') == DEV_PROJECT,
             'initial_environment_invalid')
     p = target('dev', policy)
     require(policy['dev']['deployment_enabled'] is True and p['branch'] == 'develop', 'initial_environment_invalid')
     initial = config.get('initial_transition', {})
+    require(initial.get('acceptance_required') is True, 'initial_acceptance_gate_required')
     require(initial.get('enabled') is True and initial.get('source_revision') == SOURCE
             and initial.get('source_digest') == SOURCE_DIGEST and initial.get('candidate_image_id') == CANDIDATE,
             'initial_source_unapproved')
@@ -238,12 +251,14 @@ def load_plan(config, policy):
 
 
 def approve(config, journal, plan, approval, now):
-    path = protected(approval)
+    cutover_authority(config)
+    path = root_controlled(approval)
     require(path.parent == Path(config['initial_transition']['approval_root']), 'approval_path_invalid')
     value = read_private(path)
     require(value.get('kind') == 'moneybowl-initial-api-activation-v1'
             and value.get('plan_digest') == journal['plan_digest'] and value.get('environment') == 'dev'
             and value.get('project_ref') == DEV_PROJECT and value.get('target') == 'api'
+            # owner is only a human review reference; root filesystem authority authorizes.
             and value.get('branch_head') == plan['branch_head'] and value.get('owner')
             and re.fullmatch(r'[0-9a-f]{64}', value.get('nonce', ''))
             and type(value.get('expires_at')) in (int, float) and now() < value['expires_at'] <= now() + 3600,
@@ -278,6 +293,7 @@ def failure(state, journal, error, attempted, now, *, uncertain=False, docker=No
 
 
 def activate(config, policy, docker, head, registry, approval, now=time.time):
+    cutover_authority(config)
     state = Path(config['state_root'])
     with deployment_lock(state):
         state, journal, plan, override = load_plan(config, policy)
@@ -310,11 +326,15 @@ def activate(config, policy, docker, head, registry, approval, now=time.time):
 
 
 def verify(config, policy, docker, head, registry, now=time.time):
+    cutover_authority(config)
     state = Path(config['state_root'])
     with deployment_lock(state):
         state, journal, plan, override = load_plan(config, policy)
         require(journal['state'] == 'ACTIVATED_NOT_VERIFIED', 'verification_not_authorized')
         try:
+            # Persist the no-retry boundary even when termination bypasses Exception handlers.
+            journal = {**journal, 'state': 'VERIFYING', 'observed_at': now()}
+            publish(state / JOURNAL, journal)
             check_source(config, head); check_image(docker, plan['proof'])
             require(registry.verify(plan['proof']) == plan['remote'], 'remote_registry_changed')
             require(inputs(config) == plan['private_inputs'], 'private_inputs_changed')
@@ -333,14 +353,20 @@ def verify(config, policy, docker, head, registry, now=time.time):
                        'proof': 'running_image', 'healthy': True, 'source_digest': SOURCE_DIGEST},
                        'image': plan['proof']['image'], 'image_id': CANDIDATE}
             # Private diagnostics first, trusted ledger second, sanitized receipt last.
-            publish(state / 'initial-verification.json', {'plan_digest': journal['plan_digest'],
+            verification = {'plan_digest': journal['plan_digest'],
                     'after': after, 'remote': plan['remote'], 'receipt': receipt,
-                    'receipt_digest': inventory.digest(receipt)}, immutable=True)
+                    'receipt_digest': inventory.digest(receipt)}
+            publish(state / 'initial-verification.json', verification, immutable=True)
             publish(state / (SOURCE + '.provenance.json'), plan['proof'], immutable=True)
+            # Permanent initial receipt is distinct from the regular owner's evolving report.
+            publish(state / 'initial-service-receipt.json', receipt, immutable=True)
+            # No success is exported to the regular report root during this transaction.
+            # That owner publishes fresh measurements only after completed acceptance.
+            # Completion is last; every consumer must also independently check these bindings.
             publish(state / JOURNAL, {**journal, 'state': 'VERIFIED', 'observed_at': now(),
-                                     'receipt_digest': inventory.digest(receipt)})
-            # Receipt publication is last: an incomplete journal cannot expose success evidence.
-            publish(Path(config['report_root']) / (SOURCE + '.json'), receipt, immutable=True)
+                    'completion_version': 1, 'verification_digest': inventory.digest(verification),
+                    'provenance_digest': inventory.digest(plan['proof']),
+                    'receipt_digest': inventory.digest(receipt)})
             return {'state': 'VERIFIED', 'activation_attempted': True, 'git_commit': SOURCE}
         except Exception as error:
             return failure(state, journal, error, True, now, docker=docker)
@@ -364,7 +390,8 @@ def main():
     args = parser.parse_args()
     try:
         installed_code()
-        config = read_private(args.config)
+        require(os.getuid() == 0 and os.geteuid() == 0, 'cutover_requires_root_operator')
+        config = read_private(root_controlled(args.config))
         require(Path(config['repository']) not in Path(args.config).parents, 'owner_config_in_source')
         policy = load_policy()
         validate_config(config, policy)

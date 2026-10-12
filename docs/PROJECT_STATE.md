@@ -26,8 +26,21 @@ private OCI verification and API-only five-layer Compose replacement. Failed or 
 transactions block normal reconciliation; verified transactions seed genuine provenance
 for the existing ingestion owner. Historical provenance of the legacy API stays unknown.
 The existing normal historical-record safeguard and financial retirement checks remain.
-Final validation: 244 deployment, 34 commissioning, 5 commit-validator, 194 API/security
+Original implementation validation: 244 deployment, 34 commissioning, 5 commit-validator, 194 API/security
 and 63 retired-dispatcher compatibility cases passed; zero failed, one live test deselected.
+Independent review reproduced executor self-authorization and incomplete `VERIFIED`
+publication. The local correction requires a root-operated initial boundary, independently
+protected root approval/configuration, and a complete hash-bound journal/plan/verification/
+ledger/permanent private receipt on every normal reconciliation. Verification records
+`VERIFYING` before publication and commits `VERIFIED` last; missing or mismatched artifacts
+and abrupt termination fail closed. The normal UID 993 service remains separate and
+requires a reviewed access handoff. Public HTTPS evidence hosting remains uncommissioned.
+Protected `acceptance_required=true` enrollment persists across handoff; an unused
+disabled initial section preserves the existing independently provenanced owner path.
+Corrective validation: 290 deployment, 34 commissioning and 5 commit-validator tests
+passed, zero failed; the deployment suite includes 46 added authority/completion cases.
+Correction validation is recorded in the
+[security review record](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md#initial-transition-security-review-corrections--2026-10-12).
 No live infrastructure changed. The already built reviewed ARM64 candidate was independently
 inspected, without rebuild/push/activation; it remains local-only. Private registry,
 approved infrastructure/configuration/recovery inputs, independent review and PR #209's
