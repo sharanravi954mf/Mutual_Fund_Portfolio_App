@@ -33,6 +33,20 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 - Add isolated failure/security tests and commissioning runbook. This is local implementation
   only: no registry push, live API replacement, owner activation or full M4 commissioning.
 
+## M4 DEV ingestion image inspection compatibility — 2026-10-12
+
+- An isolated ARM64 Docker BuildKit runtime image built from the exact reviewed
+  `develop` source but exposed no `Config.Entrypoint` field. The M4 image inspector
+  previously addressed that optional field directly, causing Docker's template
+  renderer to reject an otherwise valid image.
+- Read the optional entrypoint using Docker's map-index expression, still rejecting
+  nonempty entrypoints and altered single-worker commands. Added an offline
+  missing/explicit-entrypoint regression, plus read-only inspection of the actual
+  local candidate image.
+- The candidate was **not pushed or deployed**. The live API container, unrelated
+  support services and retired Oracle financial dispatcher remain unchanged;
+  private registry commissioning and the initial API-only transition remain pending.
+
 ## M4 DEV commissioning — reconciliation observation window — 2026-10-11
 
 - Extended release observation to cover the existing fifteen-minute frontend
