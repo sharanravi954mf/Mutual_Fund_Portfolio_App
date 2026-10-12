@@ -27,6 +27,15 @@ export function signingInput(n: Notification): string {
   ].join("|");
 }
 export async function sign(n: Notification, key: string): Promise<string> {
+  return await signMessage(signingInput(n), key);
+}
+export async function signReadiness(
+  n: Notification,
+  key: string,
+): Promise<string> {
+  return await signMessage("moneybowl-readiness-v1|" + signingInput(n), key);
+}
+async function signMessage(message: string, key: string): Promise<string> {
   const encoder = new TextEncoder();
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -40,7 +49,7 @@ export async function sign(n: Notification, key: string): Promise<string> {
       await crypto.subtle.sign(
         "HMAC",
         cryptoKey,
-        encoder.encode(signingInput(n)),
+        encoder.encode(message),
       ),
     ),
     (b) => b.toString(16).padStart(2, "0"),
@@ -153,7 +162,15 @@ export function createHandler(config: Config, deps: {
     ) {
       return response(415, "outbox_content_type_invalid");
     }
-    const signature = req.headers.get("x-outbox-signature") ?? "";
+    const readinessAuth = req.headers.has("x-outbox-readiness-signature");
+    // Reject mixed authority and forbid readiness authority on every financial path.
+    if (
+      readinessAuth && (kind !== "readiness" || !config.readinessKey ||
+        req.headers.has("x-outbox-signature"))
+    ) return response(401, "outbox_unauthorized");
+    const signature = req.headers.get(
+      readinessAuth ? "x-outbox-readiness-signature" : "x-outbox-signature",
+    ) ?? "";
     if (!/^[0-9a-f]{64}$/.test(signature)) {
       return response(401, "outbox_unauthorized");
     }
@@ -188,7 +205,10 @@ export function createHandler(config: Config, deps: {
             !UUID.test(n.event_outbox_id) || n.hop !== 0
           : n.event_outbox_id !== null)
       ) throw Error();
-      if (!equal(signature, await sign(n, config.signingKey))) {
+      const expected = readinessAuth
+        ? await signReadiness(n, config.readinessKey!)
+        : await sign(n, config.signingKey);
+      if (!equal(signature, expected)) {
         return response(401, "outbox_unauthorized");
       }
     } catch {

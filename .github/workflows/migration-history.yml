@@ -2,14 +2,14 @@ name: Migration History Validation
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, qa]
     paths:
       - ".github/migration-history.json"
       - ".github/scripts/validate_migration_history.py"
       - ".github/workflows/migration-history.yml"
       - "supabase/migrations/**"
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, qa]
     paths:
       - ".github/migration-history.json"
       - ".github/scripts/validate_migration_history.py"

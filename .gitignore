@@ -9,6 +9,8 @@
 .pub/
 build/
 pubspec.lock
+# Track only the application lockfile required by enforced CI resolution.
+!/pubspec.lock
 
 # Android build/configuration outputs
 .gradle/

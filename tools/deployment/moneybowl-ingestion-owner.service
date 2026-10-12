@@ -1,0 +1,13 @@
+[Unit]
+Description=Converge the privately owned DEV ingestion API release
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=moneybowl-ingestion-deploy
+ExecStart=/usr/bin/python3 /opt/moneybowl-deployment/ingestion_owner.py --config /etc/moneybowl-deployment/ingestion.json
+TimeoutStartSec=60min
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077

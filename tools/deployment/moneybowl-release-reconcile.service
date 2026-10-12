@@ -1,0 +1,13 @@
+[Unit]
+Description=Reconcile MoneyBowl DEV frontend with current approved branch
+After=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=90min
+TimeoutStopSec=30s
+User=moneybowl-deploy
+ExecStart=/usr/bin/python3 /opt/moneybowl-deployment/host.py --config /etc/moneybowl-deployment/dev.json
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0022

@@ -18,6 +18,30 @@ Target Repository Path: docs/PROJECT_STATE.md
 
 ---
 
+## MONEYBOWL-M4 environment promotion — local review candidate 2026-10-11
+
+Versioned deployment contracts, feature/PR CI, read-only DEV/QA release observation,
+immutable frontend activation, private Supabase measurement and ingestion deployment
+owners, recurring release verification and synthetic failure tests are implemented locally.
+The final security correction separates readiness-only authority from financial signing
+and enforces the explicit DEV Oracle retirement inventory. Both await live commissioning.
+Full environment automation remains blocked on private measurement provisioning
+and service-owner commissioning. Published controller `bc1870c5ca87962d9768a9000ba02798c7175df4`
+is staged alongside the older installation, without activation; a verified recovery
+export preserves the unknown-provenance legacy API. Capacity passes after disk expansion.
+The observer now waits across the existing fifteen-minute fallback timer, with a
+twenty-minute deadline and six new offline regressions. QA remains disabled.
+Live checks confirm DEV native dispatch active and Oracle dispatch retired; older local-candidate entries
+below are historical, not authorization to restore Oracle. See the
+[M4 architecture and runbook](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+DEV remediation 001 now binds the real four/five-layer Compose architecture and
+rejects low-capacity builds. Read-only discovery verified M3B relocation and Oracle
+retirement; approved resolved configuration, initial API replacement review, registry,
+protected Flutter toolchain, scoped measurement and receipt hosting remain blocked.
+GitHub develop rules and observer variables are absent. The existing Flutter
+reconciliation timer must be adapted without duplicating ownership. See the
+[discovery, capacity plan and commissioning gates](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md).
+
 ## MONEYBOWL-M2 native dispatcher — local candidate 2026-10-09
 
 Supabase-native authenticated notifications, bounded Edge dispatch and Cron recovery

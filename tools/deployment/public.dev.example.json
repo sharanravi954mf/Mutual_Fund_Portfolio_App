@@ -1,0 +1,7 @@
+{
+  "MONEYBOWL_ENV": "dev",
+  "SUPABASE_URL": "https://rskryngwzyuzmiwtriyy.supabase.co",
+  "SUPABASE_ANON_KEY": "REPLACE_WITH_PROJECT_PUBLIC_KEY",
+  "NSE_CONSOLE_ENABLED": "true",
+  "MONEYBOWL_DEV_ONBOARDING_PREVIEW": "true"
+}

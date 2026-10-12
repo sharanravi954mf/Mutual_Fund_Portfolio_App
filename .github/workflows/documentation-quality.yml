@@ -2,9 +2,9 @@ name: Documentation Quality Validation
 
 on:
   push:
-    branches: [ main, develop, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
+    branches: [ main, develop, qa, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
   pull_request:
-    branches: [ main, develop, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
+    branches: [ main, develop, qa, 'release/*', 'feature/*', 'bugfix/*', 'hotfix/*' ]
 
 jobs:
   validate-docs:
@@ -17,7 +17,7 @@ jobs:
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-level: '3.10'
+        python-version: '3.10'
 
     - name: Run Documentation Quality and Link Audit
       run: python3 .github/scripts/validate_docs.py

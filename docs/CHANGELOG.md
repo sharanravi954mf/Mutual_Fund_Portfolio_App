@@ -9,6 +9,106 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV commissioning — reconciliation observation window — 2026-10-11
+
+- Extended release observation to cover the existing fifteen-minute frontend
+  fallback timer, bounded by a twenty-minute monotonic deadline inside the existing
+  twenty-five-minute Actions job. Invalid evidence still fails immediately.
+- Added six offline timing regressions, including delayed convergence, slow reads,
+  deadline expiry, wall-clock independence and rejection of excessive budgets.
+- Staged the published controller beside the previous installation and verified an
+  exact legacy API recovery export without claiming source provenance or changing
+  running services. Automatic DEV deployment remains blocked by private commissioning;
+  see the [current execution record](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md#github-actions-completion-execution--2026-10-11).
+
+## M4 DEV commissioning — systemd credential compatibility — 2026-10-11
+
+- Actual isolated systemd execution reproduced rejection of `LoadCredential`
+  configuration: Ubuntu systemd 255 exposes root-owned `0440` files through an ACL
+  on a read-only credential mount, rather than ordinary `0600` files.
+- Accept only the canonical `owner-config` file in the unit's protected runtime
+  credential directory, with exact root ownership/modes and read-only filesystem
+  checks. Ordinary group-readable configuration remains rejected.
+- Added positive and negative regressions and exercised the corrected check with
+  isolated installed identities. This local correction is not installed as the
+  active controller or published. DEV release commissioning remains blocked; see
+  the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
+## M4 DEV commissioning preparation — inspection correction — 2026-10-11
+
+- Fixed a missing outer JSON brace in the private ingestion owner's Docker container
+  projection, independently reproduced by read-only inspection on Oracle DEV.
+- Added a test rendering the actual production template with and without health
+  metadata; existing mocks had returned prebuilt JSON and missed the malformed output.
+- Corrected read-only retirement and container measurements pass. No controller was
+  installed or activated; private provisioning and full DEV commissioning remain
+  blocked. See the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
+## M4 Compose compatibility fix 002 — 2026-10-11
+
+- Resolve each support service's own image from named Compose JSON configuration;
+  dependency-inclusive image lists can neither reject an approved Caddy image nor
+  hide replacement behind a dependency's image. Exact running image-ID checks remain.
+- Added realistic dependency, malformed evidence and private-output regressions.
+  Read-only host projection checks passed for public image references; private
+  interpolation and full DEV commissioning remain pending. No deployment occurred.
+  See the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
+## M4 DEV commissioning remediation 001 — 2026-10-11
+
+- Bound ingestion deployment to approved ordered DEV Compose layers, per-service
+  ownership, runtime relationships, resource identities and historical M3B provenance.
+- Added a prepared API-only activation guard, independently recorded legacy image
+  binding, Compose plugin pinning and conservative disk/inode preflight rejection.
+- Recorded read-only Oracle discovery, the existing Flutter timer, unresolved private
+  commissioning dependencies and a ranked capacity plan. No installation, deployment,
+  cleanup or financial operation occurred. See the
+  [remediation record](architecture/MONEYBOWL_M4_DEV_REMEDIATION_001.md).
+
+## M4 PR #207 CI correction — 2026-10-11
+
+- Track the validated root Flutter lockfile while retaining enforced dependency
+  resolution and Flutter 3.44.6 / Dart 3.12.2.
+- Pin the disposable M2 SQL test image to the verified official Docker Hub
+  multi-platform digest for the same Supabase PostgreSQL 17.6.1.155 contents.
+  Network isolation, cleanup and all database/CI assertions remain unchanged.
+- Local correction only; fresh GitHub-hosted CI and live M4 commissioning remain
+  separate. See the [validation record](architecture/MONEYBOWL_M4_VALIDATION.md).
+
+## M4 final security boundary correction — 2026-10-10
+
+- Separated M4 readiness authentication from financial notification authority with
+  an optional independent Edge key, a dedicated header and signing domain. Existing
+  M2/M2A authentication remains compatible; M4 has no legacy-key fallback.
+- Made DEV Oracle retirement verification require the original stopped container,
+  persistent regular/template service masks and a disabled/inactive timer, including
+  loaded instance checks. Added negative boundary tests and commissioning instructions.
+- Local correction only: no live credential access/provisioning or infrastructure
+  changes. End-to-end M4 commissioning remains blocked; see the
+  [M4 runbook](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
+## M4 review corrections — 2026-10-10
+
+- Corrected bounded deployment propagation observation; permanent invalid evidence
+  and timeouts never become PASS.
+- Implemented private read-only Supabase evidence production, controlled ingestion
+  image deployment/verification and recurring independent full-release reporting.
+- Added synthetic owner transport, provenance, concurrency and security coverage.
+  No private capabilities provisioned, services installed or live deployments made.
+  Independent security review and end-to-end live commissioning remain separate;
+  see [M4 runbook and status matrix](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
+## M4 local implementation candidate — 2026-10-09
+
+- Added shared promotion/release contracts, immutable frontend host adapter,
+  independently verified deployment evidence contract, QA-disabled workflows,
+  synthetic concurrency/failure tests and private commissioning runbook.
+- Extended quality checks to QA; corrected safe PR-title shell handling and the
+  documentation Python version input. A one-line RPC `PromiseLike` type correction
+  lets the expanded Edge entrypoint gate check the existing Supabase client contract.
+- No publication or deployment. Full-stack DEV/QA commissioning remains blocked;
+  see [M4 status and ownership](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
+
 ## Unreleased
 
 ### Documentation

@@ -4,8 +4,10 @@ set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 container="moneybowl-m2-test-$$"
 trap 'docker rm --force "$container" >/dev/null' EXIT
+# Official 17.6.1.155 amd64/arm64 index, verified byte-identical to the ECR release.
+image='docker.io/supabase/postgres:17.6.1.155@sha256:3866d94d8426927e8db3f1c5d790752292bfbe27b5f1f46e199ae1b7d3c1710b'
 docker run --detach --name "$container" --network none --tmpfs /var/lib/postgresql/data:rw \
-  -e POSTGRES_PASSWORD=local_disposable_only public.ecr.aws/supabase/postgres:17.6.1.155 >/dev/null
+  -e POSTGRES_PASSWORD=local_disposable_only "$image" >/dev/null
 for attempt in {1..60}; do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
