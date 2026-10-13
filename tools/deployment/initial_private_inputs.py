@@ -10,7 +10,7 @@ import os
 import stat
 from pathlib import Path
 
-from contract import DEV_PROJECT, require
+from contract import DEV_PROJECT, Rejected, require
 from protected_io import root_controlled
 
 EXTERNAL_SECRETS = {
@@ -130,15 +130,30 @@ def binding(item):
 
 
 def bind_mounts(items, containers):
-    """Require the approved non-root reader and exactly one read-only external mount."""
+    """Reject direct/ancestor exposure; only an exact approved external file reader is allowed."""
+    binds = []
+    for container in containers:
+        for mount in container.get('mounts', []):
+            if mount.get('Type') != 'bind':
+                continue
+            source = mount.get('Source')
+            require(isinstance(source, str) and Path(source).is_absolute(), 'private_bind_source_unverifiable')
+            try:
+                canonical = Path(source).resolve(strict=True)
+            except (OSError, RuntimeError, ValueError):
+                raise Rejected('private_bind_source_unverifiable') from None
+            binds.append((container, mount, canonical))
     for item in items:
         path, _, rule, _ = checked_input(item)
-        mounts = [(container, mount) for container in containers for mount in container.get('mounts', [])
-                  if mount.get('Type') == 'bind' and mount.get('Source') == str(path)]
+        mounts = [(container, mount) for container, mount, source in binds
+                  if source == path or source in path.parents]
+        # Root-private inputs authorize host use only, never a container reader.
+        require(rule is not None or not mounts, 'private_input_mount_unapproved')
         require(all(mount.get('RW') is False for _, mount in mounts), 'private_input_mount_writable')
         if rule is not None:
             require(len(mounts) == 1, 'external_secret_mount_unapproved')
             container, mount = mounts[0]
-            require(container['labels'].get('com.docker.compose.service') == rule['service']
+            require(mount.get('Source') == str(path)
+                    and container['labels'].get('com.docker.compose.service') == rule['service']
                     and container['security'].get('user') == rule['runtime_user']
                     and mount.get('Destination') == rule['destination'], 'external_secret_mount_unapproved')

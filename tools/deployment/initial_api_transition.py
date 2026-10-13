@@ -307,6 +307,7 @@ def activate(config, policy, docker, head, registry, approval, now=time.time):
             check_source(config, head); check_image(docker, plan['proof'])
             require(registry.verify(plan['proof']) == plan['remote'], 'remote_registry_changed')
             require(inputs(config) == plan['private_inputs'], 'private_inputs_changed')
+            bind_inputs(config, plan['before'])  # Recheck older plans under current mount isolation.
             with source_tree(config['repository'], SOURCE) as source:
                 require(docker.snapshot(source) == plan['before'], 'before_state_changed')
                 require(docker.override_hashes(override) == plan['after']['override_hashes'], 'compose_configuration_changed')
@@ -339,6 +340,7 @@ def verify(config, policy, docker, head, registry, now=time.time):
             check_source(config, head); check_image(docker, plan['proof'])
             require(registry.verify(plan['proof']) == plan['remote'], 'remote_registry_changed')
             require(inputs(config) == plan['private_inputs'], 'private_inputs_changed')
+            bind_inputs(config, plan['before'])
             with source_tree(config['repository'], SOURCE) as source:
                 after = docker.snapshot(source, plan['proof'], override)
                 require(after['unrelated'] == plan['before']['unrelated'] and

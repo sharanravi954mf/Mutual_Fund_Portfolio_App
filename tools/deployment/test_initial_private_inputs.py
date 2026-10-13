@@ -291,6 +291,142 @@ class ProtectedInputTests(unittest.TestCase):
                     DockerOwner(self.t.config)
                 command.assert_not_called()
 
+    def exposure_mount(self, category, form):
+        if category == 'external':
+            # Isolate this directory from the private interpolation input so the
+            # regression proves the external policy independently rejects exposure.
+            directory = self.root / 'runtime-secrets'; directory.mkdir(mode=0o700)
+            self.secret.rename(directory / self.secret.name)
+            self.secret = directory / self.secret.name
+            self.external()
+            path = self.secret
+        else:
+            path = Path(self.t.config['compose_env'])
+        source = path if form in ('direct', 'file_alias', 'component_alias', 'normalized') else path.parent
+        if form in ('file_alias', 'directory_alias'):
+            alias = self.root / 'source-alias'; alias.symlink_to(source, target_is_directory=source.is_dir())
+            source = alias
+        elif form == 'component_alias':
+            alias = self.root / 'parent-alias'; alias.symlink_to(path.parent, target_is_directory=True)
+            source = alias / path.name
+        elif form == 'normalized':
+            source = str(path.parent / 'child' / '..' / path.name)
+            (path.parent / 'child').mkdir()
+        self.t.f.live['caddy']['mounts'].append(dict(Type='bind', Source=str(source), Destination='/exposure', RW=False))
+        self.review_runtime()  # A reviewed runtime fingerprint cannot authorize private-input exposure.
+
+    def test_prepare_rejects_external_secret_directory_exposure(self):
+        self.exposure_mount('external', 'directory')
+        self.assert_blocked('external_secret_mount_unapproved')
+
+    def test_prepare_rejects_private_compose_input_direct_exposure(self):
+        self.exposure_mount('private', 'direct')
+        self.assert_blocked('private_input_mount_unapproved')
+
+    def test_approved_external_reader_cannot_mount_parent_directory(self):
+        self.exposure_mount('external', 'directory')
+        self.t.f.live['caddy']['mounts'] = []
+        self.mount['Source'] = str(self.secret.parent)
+        self.review_runtime()
+        self.assert_blocked('external_secret_mount_unapproved')
+
+    def test_approved_external_reader_cannot_substitute_symlink_alias(self):
+        self.external(); alias = self.root / 'alias'; alias.symlink_to(self.secret)
+        self.mount['Source'] = str(alias)
+        self.review_runtime()
+        self.assert_blocked('external_secret_mount_unapproved')
+
+    def test_private_compose_input_is_not_authorized_for_api_either(self):
+        self.exposure_mount('private', 'direct')
+        self.t.f.live['api']['mounts'] = self.t.f.live['caddy']['mounts']
+        self.t.f.live['caddy']['mounts'] = []
+        self.review_runtime()
+        self.assert_blocked('private_input_mount_unapproved')
+
+    def test_unresolvable_bind_alias_fails_closed(self):
+        self.external(); alias = self.root / 'dangling'; alias.symlink_to(self.root / 'missing')
+        self.t.f.live['caddy']['mounts'] = [dict(Type='bind', Source=str(alias), Destination='/alias', RW=False)]
+        self.review_runtime()
+        self.assert_blocked('private_bind_source_unverifiable')
+
+    def test_cyclic_bind_alias_fails_closed(self):
+        alias = self.root / 'cycle'; alias.symlink_to(alias)
+        self.t.f.live['caddy']['mounts'] = [dict(Type='bind', Source=str(alias), Destination='/alias', RW=False)]
+        self.review_runtime()
+        self.assert_blocked('private_bind_source_unverifiable')
+
+    def test_legitimate_public_directories_aliases_and_existing_mounts_preserved(self):
+        self.external()
+        directory = self.root / 'external-secret-public'; directory.mkdir()
+        volume = directory / 'volume-data'; volume.mkdir()
+        alias = self.root / 'public-alias'; alias.symlink_to(directory, target_is_directory=True)
+        self.t.f.live['caddy']['mounts'] = [
+            dict(Type='bind', Source=str(directory), Destination='/public', RW=False),
+            dict(Type='bind', Source=str(alias), Destination='/public-alias', RW=False),
+            dict(Type='bind', Source=str(self.t.f.runtime / 'Caddyfile'), Destination='/etc/caddy/Caddyfile', RW=False),
+            dict(Type='volume', Source=str(volume), Destination='/data', RW=True),
+        ]
+        self.review_runtime()
+        before = copy.deepcopy({k: v['mounts'] for k, v in self.t.f.live.items()})
+        self.assertEqual(len(self.t.config['compose_layers']), 5)
+        self.assertEqual(self.t.prepare()['state'], 'PREPARED')
+        self.assertEqual(self.t.activate()['state'], 'ACTIVATED_NOT_VERIFIED')
+        self.assertEqual(self.t.verify()['state'], 'VERIFIED')
+        self.assertEqual({k: v['mounts'] for k, v in self.t.f.live.items()}, before)
+
+
+def exposure_case(category, form):
+    def test(self):
+        self.exposure_mount(category, form)
+        self.assert_blocked('external_secret_mount_unapproved' if category == 'external'
+                            else 'private_input_mount_unapproved')
+    return test
+
+
+def previously_prepared_exposure_case(category):
+    def test(self):
+        self.exposure_mount(category, 'directory' if category == 'external' else 'direct')
+        # Model a plan prepared by the vulnerable validator, without changing approval authority.
+        with patch.object(inputs, 'bind_mounts'):
+            self.assertEqual(self.t.prepare()['state'], 'PREPARED')
+        approval = self.t.approval()
+        result = self.t.activate(approval)
+        self.assertEqual(result['state'], 'FAILED')
+        self.assertEqual(result['reason'], 'external_secret_mount_unapproved' if category == 'external'
+                         else 'private_input_mount_unapproved')
+        self.t.assert_no_up()
+        self.assertFalse(list(self.t.state.glob('approval-*.consumed.json')))
+    return test
+
+
+def previously_activated_exposure_case(category):
+    def test(self):
+        self.exposure_mount(category, 'directory' if category == 'external' else 'direct')
+        # Model the older controller's acceptance; new VERIFY must not publish success.
+        with patch.object(inputs, 'bind_mounts'):
+            self.t.prepare()
+            self.assertEqual(self.t.activate()['state'], 'ACTIVATED_NOT_VERIFIED')
+        result = self.t.verify()
+        self.assertEqual(result['state'], 'FAILED')
+        self.assertEqual(result['reason'], 'external_secret_mount_unapproved' if category == 'external'
+                         else 'private_input_mount_unapproved')
+        self.assertFalse((self.t.state / 'initial-service-receipt.json').exists())
+        self.assertFalse((self.t.state / (self.t.f.sha + '.provenance.json')).exists())
+    return test
+
+
+for category, forms in (
+    ('external', ('direct', 'file_alias', 'directory_alias', 'component_alias', 'normalized')),
+    ('private', ('directory', 'file_alias', 'directory_alias', 'component_alias', 'normalized')),
+):
+    setattr(ProtectedInputTests, 'test_activation_rejects_previous_unsafe_plan_' + category,
+            previously_prepared_exposure_case(category))
+    setattr(ProtectedInputTests, 'test_verification_rejects_previous_unsafe_plan_' + category,
+            previously_activated_exposure_case(category))
+    for form in forms:
+        setattr(ProtectedInputTests, 'test_prepare_rejects_' + category + '_exposure_' + form,
+                exposure_case(category, form))
+
 
 def bad_mount_case(mutate, reason):
     def test(self):

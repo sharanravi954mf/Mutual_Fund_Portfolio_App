@@ -137,6 +137,13 @@ they are never populated from observations by PREPARE. Root-private inputs still
 root-owned trusted ancestry and `0400`/`0600`, one regular-file link and no symlinks.
 Compose interpolation must use a root-private input. ACL access/default entries are
 rejected on inputs and ancestors, rather than silently authorizing extra readers.
+Root-private inputs are for host use only and cannot be exposed through any container
+bind mount, even read-only. Bind sources are resolved strictly: a file alias or a
+containing directory (including directory aliases) counts as exposure. For external
+secrets the only permitted exposure is the exact approved file path, read-only, at
+the approved destination in the approved reader; mounting a parent directory is forbidden
+even for that reader. Missing or cyclic bind sources fail closed. Baseline approval
+cannot waive these rules. ACTIVATE and VERIFY recheck them for retained plans as well.
 
 Only two external policies exist. They require UID 0, exact `0440`, trusted root-owned
 ancestry, no ACLs/hardlinks, and exactly one read-only bind to the specified non-root reader:
@@ -454,3 +461,16 @@ changes above; raw Docker exposes root-equivalent authority and is deliberately 
 for the ordinary non-root owner. No global path/approval exemption was introduced.
 This is local code/test evidence, not independent owner approval, a live secret migration,
 tested ingress recovery, PREPARE evidence or successful commissioning.
+
+The follow-up security review reproduced two violations against local commit
+`1d92ba66654583e366f13f55ebea77c4a2baf430`: PREPARE accepted a read-only directory bind
+containing an external secret and an unrelated reader's direct bind of the root-private
+Compose input. Both remained accepted after updating synthetic runtime baselines.
+The mount-isolation correction rejects both independent of baseline approval, with
+22 added regressions covering file/directory/component aliases, normalized paths,
+approved readers trying directory/alias substitutions, unresolved sources, older unsafe
+prepared/activated plans and legitimate public mounts, volumes and five-layer operation.
+Final validation: **358 deployment tests, 34 commissioning tests and 5 commit-validator
+tests pass**, plus documentation/link and Conventional Commit checks. Synthetic
+PREPARE/ACTIVATE/VERIFY controls preserve legitimate mounts. No live credentials,
+infrastructure, service operation or secret migration was used for this verification.
