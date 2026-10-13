@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import compose_inventory as inventory
 import initial_api_transition as transition
+import initial_private_inputs as private_inputs
 import test_compose_inventory as fixtures
 import test_owners as owner_fixtures
 from contract import DEV_PROJECT, Rejected, manifest
@@ -63,7 +64,8 @@ class TransitionTests(unittest.TestCase):
             source_digest=manifest(f.repo, f.sha)['ingestion_support'], candidate_image_id=transition.CANDIDATE,
             approved_branch_head=f.sha, image='registry.invalid/api@sha256:' + 'd'*64,
             approval_root=str(approvals), protected_inputs=[dict(path=str(private), approval='private-owner-review',
-            sha256=sha256(private.read_bytes()))], recovery=dict(archive=str(archive), record=str(record),
+            sha256=sha256(private.read_bytes()), identity={**private_inputs.identity(private.stat()), 'uid': 0})],
+            recovery=dict(archive=str(archive), record=str(record),
             sha256=sha256(archive.read_bytes()), size=archive.stat().st_size, image_id=transition.LEGACY,
             record_sha256=sha256(record.read_bytes()), approval='recovery-owner-review'))
         for name, value in (('SOURCE', f.sha), ('SOURCE_DIGEST', self.config['initial_transition']['source_digest'])):
@@ -97,12 +99,11 @@ class TransitionTests(unittest.TestCase):
         self.state = Path(self.config['state_root'])
 
     @contextlib.contextmanager
-    def root_operator(self, untrusted=()):
+    def root_operator(self, untrusted=(), metadata_overrides=None):
         # Simulate root authority on disposable fixture paths; never acquire real privilege.
         original = Path.lstat
         real_uid = os.getuid()
-        def metadata(path):
-            info = original(path)
+        def mapped(path, info):
             values = list(info)
             if path == self.f.root or self.f.root in path.parents:
                 values[4] = 0
@@ -110,8 +111,20 @@ class TransitionTests(unittest.TestCase):
                 values[0] &= ~0o022  # Model the authority's protected system ancestor.
             if path in untrusted:
                 values[4] = real_uid
+            override = (metadata_overrides or {}).get(path, {})
+            for name, index in (('uid', 4), ('gid', 5), ('mode', 0)):
+                if name in override:
+                    values[index] = (values[index] & ~0o7777 | override[name]) if name == 'mode' else override[name]
             return os.stat_result(values)
-        with patch.object(Path, 'lstat', metadata), patch('os.getuid', return_value=0), \
+        def metadata(path):
+            return mapped(path, original(path))
+        original_fstat = os.fstat
+        def descriptor_metadata(fd):
+            path = Path(os.readlink('/proc/self/fd/' + str(fd)))
+            if path == self.f.root or self.f.root in path.parents:
+                return mapped(path, original_fstat(fd))
+            return original_fstat(fd)
+        with patch.object(Path, 'lstat', metadata), patch('os.fstat', descriptor_metadata), patch('os.getuid', return_value=0), \
                 patch('os.geteuid', return_value=0):
             yield
 

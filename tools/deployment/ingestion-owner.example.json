@@ -7,7 +7,7 @@
   "report_root": "/private/published-service-measurements",
   "compose_root": "/home/ubuntu/moneybowl/services/ingestion-support",
   "compose_project": "moneybowl-ingestion-support",
-  "compose_env": "/home/ubuntu/moneybowl/services/ingestion-support/.env",
+  "compose_env": "/etc/moneybowl-deployment/runtime-inputs/ingestion-compose.env",
   "docker": "/usr/bin/docker",
   "docker_sha256": "REPLACE_WITH_REVIEWED_BINARY_SHA256",
   "systemctl": "/usr/bin/systemctl",
@@ -180,9 +180,33 @@
     "approval_root": "/private/independent-owner-approvals",
     "protected_inputs": [
       {
-        "path": "/private/ingestion-compose.env",
+        "path": "/etc/moneybowl-deployment/runtime-inputs/ingestion-compose.env",
+        "policy": "root-private-v1",
         "sha256": "REPLACE_WITH_PRIVATE_INPUT_SHA256",
-        "approval": "REPLACE_WITH_OWNER_INPUT_REVIEW"
+        "approval": "REPLACE_WITH_OWNER_INPUT_REVIEW",
+        "identity": {"device": null, "inode": null, "uid": 0, "gid": 0, "mode": 256}
+      },
+      {
+        "path": "/etc/moneybowl-director/m3b-webhook-secret",
+        "policy": "m3b-webhook-v1",
+        "sha256": "REPLACE_WITH_PRIVATE_INPUT_SHA256",
+        "approval": "REPLACE_WITH_OWNER_INPUT_REVIEW",
+        "identity": {"device": null, "inode": null, "uid": 0, "gid": 10001, "mode": 288},
+        "policy_record": {
+          "path": "/etc/moneybowl-deployment/external-secrets/m3b-webhook.json",
+          "sha256": "REPLACE_WITH_ROOT_POLICY_SHA256"
+        }
+      },
+      {
+        "path": "/etc/moneybowl-deployment/runtime-secrets/github-webhook-secret",
+        "policy": "github-webhook-v1",
+        "sha256": "REPLACE_WITH_PRIVATE_INPUT_SHA256",
+        "approval": "REPLACE_WITH_OWNER_INPUT_REVIEW",
+        "identity": {"device": null, "inode": null, "uid": 0, "gid": 1001, "mode": 288},
+        "policy_record": {
+          "path": "/etc/moneybowl-deployment/external-secrets/github-webhook.json",
+          "sha256": "REPLACE_WITH_ROOT_POLICY_SHA256"
+        }
       }
     ],
     "recovery": {
