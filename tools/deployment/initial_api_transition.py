@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import compose_inventory as inventory
+import initial_private_inputs as private_inputs
 from contract import DEV_PROJECT, Rejected, load_policy, manifest, require, revision, target
 from ingestion_owner import API_COMMAND, DockerOwner
 from observe import Pending, ancestor
@@ -101,14 +102,14 @@ def inputs(config):
     """Recheck private inputs without ever publishing their contents."""
     initial = config['initial_transition']
     items = initial.get('protected_inputs', [])
-    require(isinstance(items, list) and items and
-            config['compose_env'] in {item['path'] for item in items}, 'private_inputs_unapproved')
+    require(isinstance(items, list) and items and all(isinstance(item, dict) for item in items)
+            and len({item.get('path') for item in items}) == len(items)
+            and any(item.get('path') == config['compose_env']
+                    and item.get('policy', 'root-private-v1') == 'root-private-v1' for item in items),
+            'private_inputs_unapproved')
     result = {}
     for item in items:
-        path = protected(item['path'])
-        require(item.get('approval') and sha256(path.read_bytes()) == item.get('sha256'),
-                'private_input_changed')
-        result[str(path)] = item['sha256']
+        result[item['path']] = private_inputs.binding(item)
     auth = protected(Path(config['docker_config']) / 'config.json')
     result['registry_auth'] = sha256(auth.read_bytes())
     recovery = initial.get('recovery', {})
@@ -133,8 +134,10 @@ def bind_inputs(config, snapshot):
     public = {str(Path(config['compose_root']) / 'Caddyfile'),
               *[item['path'] for item in config['compose_artifacts']],
               *[item['path'] for item in config['compose_layers']]}
-    private = {item['path'] for item in config['initial_transition']['protected_inputs']}
+    items = config['initial_transition']['protected_inputs']
+    private = {item['path'] for item in items}
     containers = [snapshot['api'], *snapshot['unrelated'].values()]
+    private_inputs.bind_mounts(items, containers)
     for container in containers:
         for mount in container.get('mounts', []):
             if mount.get('Type') != 'bind':
@@ -144,8 +147,6 @@ def bind_inputs(config, snapshot):
             if path.is_file():
                 require(str(path) in public | private and path.resolve() == path,
                         'private_bind_input_unapproved')
-                if str(path) in private:
-                    protected(path)
 
 
 def validate_config(config, policy):
@@ -306,6 +307,7 @@ def activate(config, policy, docker, head, registry, approval, now=time.time):
             check_source(config, head); check_image(docker, plan['proof'])
             require(registry.verify(plan['proof']) == plan['remote'], 'remote_registry_changed')
             require(inputs(config) == plan['private_inputs'], 'private_inputs_changed')
+            bind_inputs(config, plan['before'])  # Recheck older plans under current mount isolation.
             with source_tree(config['repository'], SOURCE) as source:
                 require(docker.snapshot(source) == plan['before'], 'before_state_changed')
                 require(docker.override_hashes(override) == plan['after']['override_hashes'], 'compose_configuration_changed')
@@ -338,6 +340,7 @@ def verify(config, policy, docker, head, registry, now=time.time):
             check_source(config, head); check_image(docker, plan['proof'])
             require(registry.verify(plan['proof']) == plan['remote'], 'remote_registry_changed')
             require(inputs(config) == plan['private_inputs'], 'private_inputs_changed')
+            bind_inputs(config, plan['before'])
             with source_tree(config['repository'], SOURCE) as source:
                 after = docker.snapshot(source, plan['proof'], override)
                 require(after['unrelated'] == plan['before']['unrelated'] and

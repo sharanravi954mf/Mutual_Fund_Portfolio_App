@@ -4,6 +4,7 @@ No deployment commands run on import. CLI requires an owner-controlled commissio
 """
 import argparse
 import json
+import os
 import re
 import tempfile
 import time
@@ -37,6 +38,10 @@ class DockerOwner:
     def __init__(self, config, command=None, registry=None):
         self.config = config
         inventory.layout(config)
+        if command is None:
+            # Raw Engine access is root-equivalent, even for inspection. No non-root
+            # execution boundary has been commissioned; a Docker-group grant is not one.
+            require(os.getuid() == os.geteuid() == 0, 'docker_execution_boundary_uncommissioned')
         # Production always requires independently provisioned private registry access.
         # Injected command transports permit offline tests without live credentials.
         self.registry = Registry(config) if command is None else registry
