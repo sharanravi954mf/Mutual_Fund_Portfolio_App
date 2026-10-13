@@ -562,6 +562,41 @@ class TransportTests(unittest.TestCase):
         for path, query in (('/secrets', None), ('/database/query', 'select 1'), ('/database/query/read-only', 'DELETE FROM x')):
             with self.assertRaisesRegex(Rejected, 'measurement_operation_forbidden'): reader.api(path, query)
 
+    def test_explicit_type_declarations_do_not_require_runtime_exports(self):
+        text = '''import type { Shape } from './types.ts';
+        import type DefaultShape from './default-types.ts';
+        import type * as Shapes from './namespace-types.ts';
+        export type { Shape } from './export-types.ts';
+        export type * from './all-types.ts';
+        import { value } from './runtime.ts';'''
+        self.assertEqual(module_specifiers(text), ['./runtime.ts'])
+
+    def test_type_named_default_and_mixed_bindings_remain_runtime_dependencies(self):
+        text = '''import type from './default-value.ts';
+        import type, { value } from './default-and-named.ts';
+        import { type Shape, value } from './mixed.ts';
+        export { type Shape, value } from './mixed-export.ts';'''
+        self.assertEqual(module_specifiers(text), ['./default-value.ts', './default-and-named.ts',
+                                                  './mixed.ts', './mixed-export.ts'])
+
+    def test_exported_runtime_bytes_with_erased_type_module_are_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = {'worker/index.ts': b'import { run } from "./handler.ts"; run();',
+                     'worker/handler.ts': b'import type { Shape } from "./types.ts"; export function run() {}'}
+            for name, data in files.items():
+                path = root / 'supabase/functions' / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            (root / 'supabase/functions/worker/types.ts').write_text('export type Shape = string;')
+            verify_files(root, 'worker', files)
+            with self.assertRaisesRegex(Rejected, 'function_dependency_unmeasured'):
+                verify_files(root, 'worker', {'worker/index.ts': files['worker/index.ts']})
+            changed = dict(files)
+            changed['worker/handler.ts'] += b'\nexport const altered = true;'
+            with self.assertRaisesRegex(Rejected, 'deployed_function_content_mismatch'):
+                verify_files(root, 'worker', changed)
+
     def test_readiness_can_only_emit_side_effect_free_kind(self):
         requests = []
         reader = SupabaseReader({'project_ref': DEV_PROJECT}, 'synthetic-token', 'k' * 32,

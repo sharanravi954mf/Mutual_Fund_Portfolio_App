@@ -124,6 +124,15 @@ def module_specifiers(text):
             literal(tail[1]); continue
         if token == 'import' and tail[0].startswith(('"', "'")):
             literal(tail[0]); continue
+        # Explicit declaration-level type imports/exports are erased by the
+        # runtime bundler. Their modules need not be in its exported closure.
+        # A default value binding named `type` remains a runtime import.
+        if tail[0] == 'type' and len(tail) >= 2:
+            type_only = (tail[1] in ('{', '*') or
+                         (token == 'import' and re.fullmatch(r'[A-Za-z_$][\w$]*', tail[1])
+                          and len(tail) >= 3 and tail[2] == 'from'))
+            if type_only:
+                continue
         if token == 'export' and tail[0] not in ('{', '*', 'type'):
             continue
         # Named/default imports or re-exports. Stop at a statement boundary.

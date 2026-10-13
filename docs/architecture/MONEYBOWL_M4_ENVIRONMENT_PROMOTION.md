@@ -167,7 +167,11 @@ certified**. The deployment integration remains the sole Supabase writer. The ow
 3. Lists deployed function IDs, versions, status and JWT configuration. Downloads each
    declared function with the pinned Supabase CLI `functions download --use-api` into
    an isolated temporary HOME. Compares actual exported local module bytes and their
-   import closure to Git. Extra functions, changed configuration, incomplete exports,
+   runtime import closure to Git. Explicit declaration-level `import type` and
+   `export type` modules may be absent from the runtime export; their erased bytes
+   are not claimed as measured. Every returned module still requires exact Git bytes,
+   and ordinary, mixed and dynamic runtime dependencies must be exported.
+   Extra functions, changed configuration, incomplete runtime exports,
    import maps/computed imports or source mismatches fail. Missing/deploying functions
    remain pending. Re-reads the metadata and migration snapshots before certifying.
 4. Reads only the private project/control identity and canonical Cron projection;
