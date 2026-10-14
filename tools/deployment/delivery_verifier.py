@@ -86,7 +86,7 @@ class GithubVerifier:
                 and not any(r.get('state') == 'CHANGES_REQUESTED' for r in latest.values()),
                 'release_independent_review_required')
 
-    def verify(self, sha):
+    def verify(self, sha, accepted=None):
         revision(sha)
         require(self.head() == sha, 'release_superseded_before_attempt')
         self.reviewed_merge(sha)
@@ -101,20 +101,29 @@ class GithubVerifier:
         run_id, attempt = run['id'], run['run_attempt']
         run_identity(run, sha, run_id, attempt)
         require(run['repository'].get('id') == self.policy['github_repository_id'], 'repository_identity_changed')
-        # Resolve immutable SHA-named output from authenticated artifact metadata.
-        artifacts = self.get(f'actions/runs/{run_id}/artifacts?per_page=100')
-        require(artifacts.get('total_count') == len(artifacts.get('artifacts', [])), 'publication_artifacts_incomplete')
-        names = [a for a in artifacts['artifacts'] if a.get('name') == f'api-identity-{sha}-{attempt}'
-                 and a.get('expired') is False]
-        require(len(names) == 1 and 0 < names[0].get('size_in_bytes', 0) <= 65536, 'publication_identity_missing')
-        # Identity is the job's successful digest output, read via authenticated logs-free
-        # GitHub artifact ZIP. It is untrusted until gh authenticates the same subject.
-        identity = self.command.artifact(run_id, names[0]['id'])
+        if accepted is None:
+            # First acceptance resolves the subject from authenticated artifact metadata.
+            artifacts = self.get(f'actions/runs/{run_id}/artifacts?per_page=100')
+            require(artifacts.get('total_count') == len(artifacts.get('artifacts', [])), 'publication_artifacts_incomplete')
+            names = [a for a in artifacts['artifacts'] if a.get('name') == f'api-identity-{sha}-{attempt}'
+                     and a.get('expired') is False]
+            require(len(names) == 1 and 0 < names[0].get('size_in_bytes', 0) <= 65536, 'publication_identity_missing')
+            identity = self.command.artifact(run_id, names[0]['id'])
+        else:
+            # Completed root journal supplies ONLY a locator. The live attestation
+            # must cryptographically authenticate its entire immutable predicate again;
+            # neither this JSON nor its hashes replace the independent trust root.
+            require(accepted.get('git_commit') == sha and accepted.get('run_id') == run_id
+                    and accepted.get('run_attempt') == attempt, 'publication_acceptance_changed')
+            identity = {'manifest_digest': accepted.get('manifest_digest')}
         require(set(identity) == {'manifest_digest'} and DIGEST.fullmatch(identity['manifest_digest']),
                 'publication_identity_invalid')
         image = IMAGE + '@' + identity['manifest_digest']
         raw = self.command.verify_attestation(image, sha)
         proof = verified_predicate(raw, sha, run_id, attempt)
+        if accepted is not None:
+            require({k: v for k, v in accepted.items() if k not in {'verified_at', 'expires_at', 'proof_id'}} == proof,
+                    'publication_acceptance_changed')
         require(proof['image'] == image and proof['source_digest'] == self.source.component(sha),
                 'publication_source_mismatch')
         completed_jobs(self.get(f'actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100'),
@@ -137,3 +146,8 @@ class GithubVerifier:
         run = self.get(f"actions/runs/{proof['run_id']}")
         run_identity(run, proof['git_commit'], proof['run_id'], proof['run_attempt'])
         require(run.get('status') in ('completed', 'in_progress'), 'publication_run_changed')
+        # Source fetch and provider reads can take time. Check HEAD again at the
+        # end so the pre-Compose guard finishes with the exact live source binding.
+        require(self.head() == proof['git_commit'], 'release_source_changed')
+        require(proof['verified_at'] <= self.clock() < proof['expires_at'] <= proof['verified_at'] + MAX_AGE,
+                'publication_proof_expired')

@@ -67,7 +67,7 @@ def runtime():
         'entrypoint': [], 'restart': 'unless-stopped', 'environment': {'CLAMAV_HOST': 'clamav', 'TEST_INPUT': 'synthetic'},
         'cap_drop': ['ALL'], 'cpus': 1.0, 'mem_limit': '512m', 'pids_limit': 128,
         'security_opt': ['no-new-privileges:true'], 'read_only': True,
-        'tmpfs': ['/tmp:size=16m,mode=1777'], 'ports': ['127.0.0.1:8080:8080'],
+        'tmpfs': ['/tmp:size=16m,mode=1777'], 'ports': [],
         'networks': {'internal': {'aliases': []}}, 'labels': {'moneybowl.environment': 'dev'},
         'healthcheck': {'test': ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=3).read()"],
             'interval': '10s', 'timeout': '5s', 'retries': 12, 'start_period': '10s'}}},
@@ -92,12 +92,25 @@ class Providers:
         self.seal_key = b'synthetic verifier fixture only; not a production trust root'
         self.authenticated_statement = None
         self.broken_signature = False
+        self.artifact_expired = False
+        self.artifact_removed = False
+        self.attestation_removed = False
+        self.package_visibility = 'private'
+        self.anonymous_token_status = 403
+        self.anonymous_manifest_status = 401
+        self.challenge = ('Bearer realm="https://ghcr.io/token",service="ghcr.io",'
+                          'scope="repository:sharanravi954mf/moneybowl-ingestion-dev:pull"')
+        self.authorized_calls = []
 
     def json(self, value):
         return 200, {}, encoded(value)
 
     def http(self, url, headers=None, method='GET', data=None):
         self.calls.append((url, method))
+        self.authorized_calls.append((url, method, dict(headers or {})))
+        if url == 'https://api.github.com/users/sharanravi954mf/packages/container/moneybowl-ingestion-dev':
+            return self.json(dict(name='moneybowl-ingestion-dev', package_type='container',
+                owner={'login': 'sharanravi954mf'}, visibility=self.package_visibility))
         if url.startswith('https://api.github.com/'):
             route = url.split('/' + oci.REPOSITORY + '/', 1)[1]
             if route.startswith('commits/'):
@@ -114,18 +127,24 @@ class Providers:
                     entries.append(dict(path=path, mode=mode, type=kind, sha=sha))
                 return self.json(dict(truncated=False, tree=entries))
             if '/jobs?' in route: return self.json(self.jobs)
-            if '/artifacts?' in route: return self.json(dict(total_count=1, artifacts=[dict(id=456,
-                name=f'api-identity-{self.sha}-1', expired=False, size_in_bytes=256)]))
+            if '/artifacts?' in route:
+                items = [] if self.artifact_removed else [dict(id=456,
+                    name=f'api-identity-{self.sha}-1', expired=self.artifact_expired, size_in_bytes=256)]
+                return self.json(dict(total_count=len(items), artifacts=items))
             if route.startswith('actions/runs?'): return self.json(dict(total_count=1, workflow_runs=[self.run]))
             if route.startswith('actions/runs/123'): return self.json(self.run)
             raise AssertionError('Unexpected GitHub API read: ' + route)
         if url.startswith('https://ghcr.io/token'):
-            if not headers or not headers.get('Authorization'): return 403, {}, b''
+            if not headers or not headers.get('Authorization'):
+                return self.anonymous_token_status, {}, encoded({'token': 'synthetic-anonymous-token'})
             return self.json({'token': 'synthetic-pull-or-push-token'})
         base = 'https://ghcr.io/v2/sharanravi954mf/moneybowl-ingestion-dev/'
         self.f.assertTrue(url.startswith(base))
         route = url[len(base):]
-        if not headers or not headers.get('Authorization'): return 401, {}, b''
+        if not headers or not headers.get('Authorization'):
+            return 401, {'WWW-Authenticate': self.challenge}, b''
+        if headers.get('Authorization') == 'Bearer synthetic-anonymous-token':
+            return self.anonymous_manifest_status, {}, self.remote.get(route, b'')
         if method == 'POST': return 202, {'Location': base + 'blobs/uploads/synthetic-upload'}, b''
         if method == 'PUT' and route.startswith('blobs/uploads/'):
             digest = __import__('urllib.parse', fromlist=['parse_qs']).parse_qs(url.split('?', 1)[1])['digest'][0]
@@ -151,6 +170,7 @@ class Providers:
         self.authenticated_statement = (raw, hmac.digest(self.seal_key, raw, 'sha256'))
 
     def gh_output(self):
+        if self.attestation_removed: raise Rejected('executor_delivery_unknown')
         raw, signature = self.authenticated_statement
         if self.broken_signature: signature = b'forged'
         if not hmac.compare_digest(signature, hmac.digest(self.seal_key, raw, 'sha256')):
@@ -172,7 +192,7 @@ class EngineTransport:
         self.f, self.providers = fixture, providers
         self.tools = {k: '/usr/bin/' + k for k in ('docker', 'compose_plugin', 'systemctl', 'gh', 'git')}
         self.calls, self.activations = [], 0
-        self.fail, self.after_change = None, None
+        self.fail, self.after_change, self.during_pull = None, None, None
         self.capacity_error = False
         self.environment = ['CLAMAV_HOST=clamav', 'TEST_INPUT=synthetic', 'PATH=/usr/local/bin:/usr/bin:/bin']
         self.live = fixture.t.f.live
@@ -248,6 +268,7 @@ class EngineTransport:
         if 'pull' in argv:
             self.f.assertEqual(argv[3:], ['image', 'pull', '--platform', 'linux/arm64', self.providers.proof['image']])
             if self.fail == 'pull': raise Rejected('executor_delivery_unknown')
+            if self.during_pull: self.during_pull(self)
             return b''
         if 'up' in argv:
             self.activations += 1
@@ -258,10 +279,26 @@ class EngineTransport:
             fd = int(path.rsplit('/', 1)[1]); self.f.assertEqual(kwargs['pass_fds'], (fd,))
             import fcntl
             self.f.assertTrue(fcntl.fcntl(fd, fcntl.F_GET_SEALS) & fcntl.F_SEAL_WRITE)
-            data = json.loads(Path(path).read_bytes())['services']['api']
+            model = json.loads(Path(path).read_bytes())
+            data = model['services']['api']
             self.f.assertEqual(data['command'], oci.COMMAND)
             self.live['api'].update(id='d'*64, image=self.providers.proof['config_digest'])
             self.live['api']['labels'].update(data['labels'])
+            # Model the effective Compose topology, rather than preserving the
+            # old fixture relationships irrespective of the planned runtime.
+            ports = {}
+            for binding in data.get('ports', []):
+                host, published, target = binding.split(':')
+                ports.setdefault(target+'/tcp', []).append({'HostIp': host, 'HostPort': published})
+            networks = {model['networks'][key]['name']: {'id': self.f.policy['resources']['network'][
+                model['networks'][key]['name']]['Id'], 'aliases': sorted([
+                    'moneybowl-ingestion-support-api-1', 'api', *value['aliases']])}
+                for key, value in data['networks'].items()}
+            mounts = [dict(Type='volume', Name=model['volumes'][m['source']]['name'],
+                Source=self.config['docker_data_root']+'/volumes/'+model['volumes'][m['source']]['name']+'/_data',
+                Destination=m['target'], RW=not m['read_only']) for m in data.get('volumes', [])]
+            self.live['api'].update(ports=ports, networks=networks, mounts=sorted(mounts, key=lambda m: m['Destination']),
+                command=data['command'], entrypoint=data['entrypoint'] or None, restart=data['restart'])
             if self.after_change: self.after_change(self)
             if self.fail == 'up': raise Rejected('executor_delivery_unknown')
             return b''
@@ -271,6 +308,8 @@ class EngineTransport:
 class DeliveryTests(unittest.TestCase):
     def setUp(self):
         self.t = initial_tests.TransitionTests('runTest'); self.t.setUp(); self.addCleanup(self.t.doCleanups)
+        self.t.f.live['api']['networks']['synthetic_internal']['aliases'] = ['api', 'moneybowl-ingestion-support-api-1']
+        self.t.config['compose_services']['api']['runtime_sha256'] = executor.inventory.runtime_identity(self.t.f.live['api'])
         self.t.prepare(); self.t.activate(); self.t.verify()
         self.repo = self.t.f.repo
         self.initial_sha = self.t.f.sha
@@ -329,6 +368,155 @@ class DeliveryTests(unittest.TestCase):
 
     def run_release(self):
         with self.t.root_operator(): return self.instance.reconcile(self.request)
+
+    def publish_fixture(self):
+        with patch.dict(os.environ, {'M4_IMAGE_PUBLICATION_ENABLED': 'owner-approved-v1', 'GITHUB_ACTOR': 'synthetic-owner'}):
+            return oci.publish(self.oci_path, self.sha, 123, 1, 'synthetic-token', self.providers.http)
+
+    def approve_runtime(self, model):
+        # Model a separately approved new seal; semantic checks must still reject
+        # forbidden changes even when inode/content and policy seals are valid.
+        publish(self.runtime_path, model)
+        self.policy['runtime_seal']['identity'] = {**executor.identity(self.runtime_path.stat()), 'uid': 0}
+        self.policy['runtime_seal']['sha256'] = executor.sha256(self.runtime_path.read_bytes())
+        self.policy_raw = encoded(self.policy); self.instance.policy_raw = self.policy_raw
+
+    def assert_no_publication_authority(self):
+        self.assertFalse(any(method in ('POST', 'PUT') or 'pull%2Cpush' in url
+                             for url, method in self.providers.calls))
+
+    def test_public_package_anonymous_token_manifest_read_rejected_before_publication(self):
+        self.providers.anonymous_token_status = 200
+        self.providers.anonymous_manifest_status = 200
+        self.providers.calls.clear(); self.providers.authorized_calls.clear()
+        with self.assertRaisesRegex(oci.Invalid, 'publication_package_public'): self.publish_fixture()
+        anonymous = [(url, headers) for url, _, headers in self.providers.authorized_calls
+                     if url.startswith('https://ghcr.io/token')]
+        self.assertEqual(len(anonymous), 1)
+        self.assertIn('%3Apull', anonymous[0][0])
+        self.assertEqual(anonymous[0][1], {})
+        probes = [headers for url, _, headers in self.providers.authorized_calls if '/manifests/' in url]
+        self.assertEqual(len(probes), 2)
+        self.assertNotIn('Authorization', probes[0])
+        self.assertEqual(probes[1]['Authorization'], 'Bearer synthetic-anonymous-token')
+        self.assert_no_publication_authority()
+
+    def test_private_package_anonymous_bearer_denied_then_digest_published(self):
+        self.providers.anonymous_token_status = 200
+        self.providers.anonymous_manifest_status = 403
+        self.assertEqual(self.publish_fixture(), self.proof)
+        self.assertEqual(self.run_release()['state'], 'deployed')
+
+    def test_unpublished_digest_requires_independent_private_package_evidence(self):
+        self.providers.anonymous_token_status = 200
+        self.providers.anonymous_manifest_status = 404
+        self.providers.package_visibility = 'public'
+        self.providers.calls.clear()
+        with self.assertRaisesRegex(oci.Invalid, 'publication_package_not_private'): self.publish_fixture()
+        self.assert_no_publication_authority()
+        self.providers.package_visibility = 'private'
+        self.assertEqual(self.publish_fixture(), self.proof)
+
+    def test_ambiguous_anonymous_or_package_results_fail_before_upload_authority(self):
+        original = self.providers.http
+        for stage, status in [('token', 302), ('token', 404), ('token', 500),
+                              ('manifest', 302), ('manifest', 500), ('package', 404), ('package', 500)]:
+            def ambiguous(url, headers=None, method='GET', data=None):
+                result = original(url, headers, method, data)
+                if (stage == 'token' and url.startswith('https://ghcr.io/token')
+                        or stage == 'manifest' and '/manifests/' in url and headers.get('Authorization')
+                        or stage == 'package' and '/packages/container/' in url):
+                    return status, {}, b''
+                return result
+            self.providers.anonymous_token_status = 200
+            self.providers.anonymous_manifest_status = 403
+            self.providers.calls.clear()
+            with self.subTest(stage=stage, status=status), patch.object(self.providers, 'http', side_effect=ambiguous), \
+                 self.assertRaises(oci.Invalid): self.publish_fixture()
+            self.assert_no_publication_authority()
+
+    def test_anonymous_challenge_cannot_select_host_scope_or_credential_destination(self):
+        good = self.providers.challenge
+        for challenge in [good.replace('https://ghcr.io/token', 'http://ghcr.io/token'),
+                          good.replace('https://ghcr.io/token', 'https://attacker.invalid/token'),
+                          good.replace(':pull"', ':pull,push"'), good+',service="ghcr.io"', '']:
+            self.providers.challenge = challenge
+            self.providers.calls.clear()
+            with self.subTest(challenge=challenge), self.assertRaises(oci.Invalid): self.publish_fixture()
+            self.assert_no_publication_authority()
+            self.assertFalse(any(url.startswith('https://ghcr.io/token') for url, _ in self.providers.calls))
+
+    def test_api_only_delivery_preserves_private_network_and_zero_host_ports(self):
+        before = copy.deepcopy(self.process.live['api'])
+        self.assertEqual(before['ports'], {})
+        self.assertEqual(self.run_release()['state'], 'deployed')
+        after = self.process.live['api']
+        for key in ('ports', 'networks', 'mounts'):
+            self.assertEqual(after[key], before[key])
+        self.assertEqual(self.process.activations, 1)
+
+    def test_approved_host_port_proposals_fail_before_pull_or_activation(self):
+        for ports in [['127.0.0.1:8080:8080'], ['0.0.0.0:8080:8080'],
+                      [{'target': 8080, 'published': '8080', 'host_ip': '127.0.0.1'}]]:
+            model = runtime(); model['services']['api']['ports'] = ports
+            self.approve_runtime(model)
+            with self.subTest(ports=ports), self.assertRaisesRegex(Rejected, 'host_ports_forbidden'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+        self.assertFalse(any('pull' in call for call in self.process.calls))
+
+    def test_approved_alias_or_mount_changes_fail_before_mutation(self):
+        model = runtime(); model['services']['api']['networks']['internal']['aliases'] = ['api']
+        self.approve_runtime(model)
+        with self.assertRaisesRegex(Rejected, 'planned_relationship_changed'): self.run_release()
+        model = runtime(); model['volumes'] = {'tmp': {'name': 'synthetic_tmp', 'external': True}}
+        model['services']['api'].pop('tmpfs')
+        model['services']['api']['volumes'] = [{'type': 'volume', 'source': 'tmp', 'target': '/tmp', 'read_only': False}]
+        self.approve_runtime(model)
+        with self.assertRaisesRegex(Rejected, 'planned_relationship_changed'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+        self.assertFalse(any('pull' in call for call in self.process.calls))
+
+    def test_unexpected_runtime_port_after_activation_quarantines(self):
+        self.process.after_change = lambda p: p.live['api'].update(
+            ports={'8080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8080'}]})
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 1)
+
+    def test_supersession_during_pull_never_activates_or_blindly_retries(self):
+        self.process.during_pull = lambda _: setattr(self.providers, 'head', 'b'*40)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(sum('pull' in call for call in self.process.calls), 1)
+
+    def test_unchanged_head_after_pull_passes_final_source_and_proof_guard(self):
+        calls_at_pull = []
+        self.process.during_pull = lambda _: calls_at_pull.append(len(self.providers.calls))
+        self.assertEqual(self.run_release()['state'], 'deployed')
+        later = self.providers.calls[calls_at_pull[0]:]
+        self.assertGreaterEqual(sum(url.endswith('git/ref/heads/develop') for url, _ in later), 4)
+        self.assertEqual(self.process.activations, 1)
+
+    def test_proof_expiry_during_pull_never_activates(self):
+        self.process.during_pull = lambda _: setattr(self.verifier, 'clock', lambda: NOW+verifier.MAX_AGE)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_root_authority_change_during_pull_never_activates(self):
+        self.process.during_pull = lambda _: setattr(self.instance, 'authority', lambda: (self.policy, b'changed'))
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_proof_expiring_during_final_source_fetch_never_activates(self):
+        original = self.source.check
+        def expire_after_fetch(sha):
+            original(sha)
+            if any('pull' in call for call in self.process.calls):
+                self.verifier.clock = lambda: NOW+verifier.MAX_AGE
+        self.source.check = expire_after_fetch
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
 
     def test_complete_real_adapter_path_and_restart_duplicate(self):
         left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -518,6 +706,75 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.run_release()['state'], 'already_deployed')
         self.assertEqual(read_private(self.root/'receipts'/(self.sha+'.json'))['observed_at'], NOW+60)
         self.assertEqual(self.run_release()['state'], 'already_deployed')
+        self.assertEqual(self.process.activations, 1)
+
+    def test_receipt_renewal_survives_expired_and_removed_identity_artifact(self):
+        self.run_release()
+        self.providers.calls.clear()
+        self.providers.artifact_expired = True
+        # Actual expiry exceeds both the artifact's 30 days and the original proof.
+        later = NOW+31*24*60*60
+        self.instance.clock = self.verifier.clock = lambda: later
+        self.assertEqual(self.run_release()['state'], 'already_deployed')
+        self.providers.artifact_removed = True
+        later += 60
+        self.instance = broker.Broker(self.policy, self.policy_raw, self.verifier, self.source, self.engine,
+            lambda: (self.policy, self.policy_raw), clock=lambda: later)
+        self.assertEqual(self.run_release()['state'], 'already_deployed')
+        self.assertEqual(read_private(self.root/'receipts'/(self.sha+'.json'))['observed_at'], later)
+        self.assertFalse(any('/artifacts?' in url for url, _ in self.providers.calls))
+        self.assertEqual(sum('attestation' in call for call in self.process.calls), 3)
+        self.assertEqual(sum('pull' in call for call in self.process.calls), 1)
+        self.assertEqual(self.process.activations, 1)
+
+    def test_identity_artifact_missing_before_first_acceptance_remains_fail_closed(self):
+        self.providers.artifact_expired = True
+        with self.assertRaisesRegex(Rejected, 'publication_identity_missing'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_renewal_rejects_missing_or_forged_live_attestation(self):
+        self.run_release()
+        old = (self.root/'receipts'/(self.sha+'.json')).read_bytes()
+        self.providers.artifact_expired = True
+        self.instance.clock = lambda: NOW+60
+        for field in ('attestation_removed', 'broken_signature'):
+            setattr(self.providers, field, True)
+            with self.subTest(field=field), self.assertRaises(Rejected): self.run_release()
+            setattr(self.providers, field, False)
+            self.assertEqual((self.root/'receipts'/(self.sha+'.json')).read_bytes(), old)
+        self.assertEqual(self.process.activations, 1)
+
+    def test_self_authored_completed_acceptance_cannot_replace_signed_predicate(self):
+        self.run_release()
+        key = next((self.root/'journal').glob('*.intent.json')).name.split('.')[0]
+        intent_path = self.root/'journal'/(key+'.intent.json')
+        complete_path = self.root/'journal'/(key+'.complete.json')
+        intent = read_private(intent_path); complete = read_private(complete_path)
+        intent['proof']['archive_digest'] = 'sha256:'+'0'*64
+        complete['intent_sha256'] = executor.sha256(encoded(intent))
+        # Even a coherently rehashed journal is only a locator, not provenance.
+        publish(intent_path, intent); publish(complete_path, complete)
+        self.providers.artifact_expired = True
+        with self.assertRaisesRegex(Rejected, 'publication_acceptance_changed'): self.run_release()
+        self.assertEqual(self.process.activations, 1)
+
+    def test_renewal_still_requires_current_head_registry_runtime_and_root_policy(self):
+        self.run_release()
+        self.providers.artifact_expired = True
+        old = (self.root/'receipts'/(self.sha+'.json')).read_bytes()
+        self.instance.clock = lambda: NOW+60
+        self.providers.head = 'b'*40
+        with self.assertRaises(Rejected): self.run_release()
+        self.providers.head = self.sha
+        remote_manifest = self.providers.remote.pop('manifests/'+self.proof['manifest_digest'])
+        with self.assertRaises(Rejected): self.run_release()
+        self.providers.remote['manifests/'+self.proof['manifest_digest']] = remote_manifest
+        self.process.live['api']['ports'] = {'8080/tcp': [{'HostPort': '8080'}]}
+        with self.assertRaises(Rejected): self.run_release()
+        self.process.live['api']['ports'] = {}
+        self.instance.authority = lambda: (self.policy, b'changed')
+        with self.assertRaisesRegex(Rejected, 'authority_changed'): self.run_release()
+        self.assertEqual((self.root/'receipts'/(self.sha+'.json')).read_bytes(), old)
         self.assertEqual(self.process.activations, 1)
 
     def test_interrupted_renewal_quarantines_without_activation_retry(self):

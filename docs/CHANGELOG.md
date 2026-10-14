@@ -11,6 +11,13 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ## M4 backend artifact delivery and API execution V2 — 2026-10-14
 
+- Correct all four independent review reproductions: anonymous-token/package
+  privacy proof, zero API host bindings with exact runtime relationships, attested
+  receipt renewal after identity-artifact expiry, and a final source/proof guard
+  after image pull. Add positive/negative synthetic regressions and document live
+  attestation/Actions retention limits. Local source corrections only; root and
+  Evidence Owner commissioning, rollback/recovery anchors and real acceptance
+  remain pending. See the [correction evidence](architecture/MONEYBOWL_M4_BACKEND_DELIVERY_V2.md#independent-review-corrections--2026-10-14).
 - Add gated disposable ARM64 build and separate private GHCR publication with
   bounded OCI validation, immutable digest identity and authenticated attestations.
 - Implement fixed Unix-socket owner client, root source/provenance verifier and

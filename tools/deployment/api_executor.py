@@ -307,7 +307,8 @@ def runtime_model(raw, proof):
     require(type(api.get('networks')) is dict and set(api['networks']) <= set(model.get('networks', {}))
             and all(set(v) == {'aliases'} and v['aliases'] in ([], ['api']) for v in api['networks'].values()),
             'executor_network_scope')
-    require(api.get('ports') == ['127.0.0.1:8080:8080'] and api.get('healthcheck') == {
+    require(api.get('ports', []) == [], 'executor_host_ports_forbidden')
+    require(api.get('healthcheck') == {
         'test': ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=3).read()"],
         'interval': '10s', 'timeout': '5s', 'retries': 12, 'start_period': '10s'}, 'executor_probe_scope')
     require(api.get('labels') == {'moneybowl.environment': 'dev'}, 'executor_runtime_labels')
@@ -377,6 +378,7 @@ class ApiEngine:
                 require(value['id'] == self.policy['unrelated'][name]['id']
                         and value['image'] == self.policy['unrelated'][name]['image'], 'executor_unrelated_drift')
         api = result['api']
+        require(api['ports'] == {}, 'executor_host_ports_forbidden')
         # Compare actual environment privately against the sealed runtime input.
         # Values are kept only in root memory and never copied into observations,
         # journals, receipts, exceptions or stdout.
@@ -437,13 +439,22 @@ class ApiEngine:
         self.planned = runtime_model(raw, proof)
         model = json.loads(self.planned)
         api = self.containers('api')
-        desired_networks = {model['networks'][key]['name'] for key in model['services']['api']['networks']}
-        desired_volumes = {model['volumes'][m['source']]['name'] for m in model['services']['api'].get('volumes', [])}
-        require(desired_networks == set(api['networks']) and desired_volumes ==
-                {m['Name'] for m in api['mounts'] if m['Type'] == 'volume'}, 'executor_planned_relationship_changed')
+        desired = model['services']['api']
+        require({model['networks'][key]['name'] for key in desired['networks']} <=
+                set(self.policy['resources'].get('network', {})), 'executor_planned_relationship_changed')
+        desired_networks = {model['networks'][key]['name']: {
+            'id': self.policy['resources']['network'][model['networks'][key]['name']]['Id'],
+            'aliases': sorted(['moneybowl-ingestion-support-api-1', 'api', *value['aliases']])}
+            for key, value in desired['networks'].items()}
+        desired_mounts = sorted([{'Type': 'volume', 'Name': model['volumes'][m['source']]['name'],
+            'Destination': m['target'], 'RW': not m['read_only']}
+            for m in desired.get('volumes', [])], key=lambda m: m['Destination'])
+        require(api['ports'] == {} and desired_networks == api['networks'] and desired_mounts ==
+                [{k: m[k] for k in ('Type', 'Name', 'Destination', 'RW')} for m in api['mounts']],
+                'executor_planned_relationship_changed')
         return sha256(self.planned)
 
-    def activate(self, proof):
+    def activate(self, proof, before_activation):
         require(self.planned is not None, 'executor_not_prepared')
         planned, self.planned = self.planned, None
         self.command(self.base + ['image', 'pull', '--platform', 'linux/arm64', proof['image']], timeout=180)
@@ -460,6 +471,9 @@ class ApiEngine:
                 and actual['labels'].get('org.opencontainers.image.revision') == proof['build_source']
                 and actual['labels'].get('moneybowl.source_digest') == proof['source_digest'], 'executor_pulled_image_mismatch')
         with sealed_memfd(planned) as fd:
+            # Root broker rechecks source, proof freshness, authority and runtime
+            # after the potentially long pull/inspect and just before the sole up.
+            before_activation()
             self.command(self.base + ['compose', '--project-name', 'moneybowl-ingestion-support',
                 '--project-directory', '/etc/moneybowl-deployment', '--env-file', '/dev/null',
                 '-f', '/proc/' + str(os.getpid()) + '/fd/' + str(fd), 'up', '--detach', '--no-deps', '--no-build',

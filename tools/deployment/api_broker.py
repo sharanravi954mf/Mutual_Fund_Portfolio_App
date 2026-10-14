@@ -140,7 +140,7 @@ class Broker:
                 if old['request_id'] == request['request_id']:
                     require(old == request, 'executor_request_replayed')
                 if old['git_commit'] == request['git_commit']:
-                    fresh = self.verifier.verify(request['git_commit'])
+                    fresh = self.verifier.verify(request['git_commit'], accepted=intent['proof'])
                     require(fresh['proof_id'] == intent['proof']['proof_id'], 'executor_completed_proof_changed')
                     require(self.engine.observation() == observed['after'], 'executor_completed_runtime_changed')
                     self.verifier.recheck(fresh)
@@ -189,7 +189,11 @@ class Broker:
                 self.verifier.recheck(proof)
                 self.check_authority()
                 require(self.engine.observation() == before, 'executor_pre_activation_drift')
-                self.engine.activate(proof)  # exactly one permitted attempt
+                def before_activation():
+                    self.check_authority()
+                    require(self.engine.observation() == before, 'executor_pre_activation_drift')
+                    self.verifier.recheck(proof)
+                self.engine.activate(proof, before_activation)  # exactly one permitted attempt
                 after = self.engine.verify_after(before, proof)
                 self.verifier.recheck(proof)  # branch move after attempt quarantines
                 self.check_authority()

@@ -98,6 +98,19 @@ and never forwards package authority to an arbitrary URL. Each new release SHA
 builds a new image with truthful build-source and release-source labels. Component
 reuse never relabels a historical image.
 
+Before requesting a credentialed GHCR pull/push token, publication checks the
+exact manifest using the standard anonymous pull challenge. Realm, service and
+repository pull scope must match fixed GHCR policy; no challenge URL is followed.
+An anonymous bearer token that reads the manifest rejects publication, even when
+the initial request returned 401. Separately, authenticated read-only
+[package metadata](https://docs.github.com/en/rest/packages/packages#get-a-package-for-a-user)
+must identify the fixed existing container package and explicitly report PRIVATE.
+This package-scope evidence is required even when a new SHA's manifest returns
+404. Unknown challenges, responses, missing metadata or other visibility fail
+closed before upload authority. Anonymous probes receive no owner credentials;
+no package visibility change or new credential is introduced. Commissioning must
+prove that the existing publisher token can read this package metadata.
+
 ## Permission and disclosure review
 
 This is an explicit proposed change from the prior read-only Actions policy.
@@ -245,14 +258,18 @@ State and `.owner.lock` remain root-controlled and shared with the original init
 controller; the old proposed UID 993 state handoff must NOT be used for V2.
 
 Runtime is an independently approved, private API-only JSON snapshot, not checkout
-Compose. It contains the fixed worker/user/security/limits/healthcheck/loopback port,
+Compose. It contains the fixed worker/user/security/limits/healthcheck, zero host ports,
 exact reviewed environment and existing external resources. Source binds, hooks,
 builds, dependencies, secret/config-file passthrough and extra services are rejected.
 The generated release snapshot changes only digest and release labels. Literal
 secret dollars are escaped, no inherited interpolation input is used, and the JSON
 is held in a write/grow/shrink-sealed memfd. Compose opens `/proc/<worker-pid>/fd/N`
 while that descriptor remains held; this avoids both pathname substitution and
-Go plugin FD-inheritance assumptions. Planned API networks/volumes must match the measured current API before mutation.
+Go plugin FD-inheritance assumptions. Planned API network names/IDs, effective
+Compose aliases and named-volume targets/write modes must match the measured
+current API before mutation. The approved hosted override already resets API
+ports to an empty list: Caddy reaches it through its private network. Both sealed
+model and runtime observations forbid host bindings, including loopback bindings.
 Use empty extra alias lists when the initial service uses Compose defaults; adding
 an explicit duplicate `api` alias would change the measured relationship. No active
 source mount is silently rewritten.
@@ -287,6 +304,12 @@ transaction. Unexpected labelled images are not accepted merely through ancestry
 Before pull or activation the broker publishes/fsyncs immutable intent consuming
 proof/run/attempt/digest identity, release SHA and request nonce. It rechecks source,
 policy, initial tuple and observations immediately before one activation attempt.
+After the potentially long pull and image inspection, the Engine invokes a fixed
+root-broker guard immediately before the sole Compose up. That guard rechecks
+root authority, unchanged observations, exact reviewed source/run/attempt and
+proof freshness, ending with a fresh authenticated develop HEAD and expiry check.
+Supersession or expiry during pull produces zero Compose activations; because
+pull has consumed a durable transaction, it remains quarantined without retries.
 Sequence numbers preserve ordering. It then independently observes, rechecks source/
 proof/authority, archives observations, publishes a sanitized timestamped service
 receipt and finally archives completion. Any crash, timeout, uncertain Engine delivery,
@@ -297,6 +320,25 @@ Only genuine pre-attempt supersession may return `superseded`.
 
 Duplicate/restarted requests cannot activate again. They authenticate the retained
 publication again, measure the current service, and renew the sanitized receipt.
+The original immutable completed intent supplies the exact image/run/attempt
+locator after the 30-day Actions identity artifact expires or disappears. The
+locator and journal hashes confer no publication authority: every renewal invokes
+the supported attestation verifier against that OCI subject and requires its
+cryptographically authenticated immutable predicate to equal the entire originally
+accepted predicate. Current HEAD, independent review, source seals, successful
+publication jobs, private registry bytes, runtime and root policy remain mandatory.
+Neither self-authored acceptance JSON nor an image digest alone can renew a receipt.
+
+Renewal does **not** promise indefinite freshness. It still depends on live GitHub
+attestation, workflow-run/attempt/jobs and review availability, GHCR image/layers,
+trust roots and read access. [GitHub allows attestation deletion](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/manage-attestations);
+this implementation retains a locator, not an offline signed bundle. Since
+October 1, 2026, [Actions run/check/status metadata follows configured Actions retention](https://github.blog/changelog/2026-08-27-actions-retention-will-cover-checks-workflow-runs-and-statuses/)
+(default 90 days, public-repository cap 90 days). The actual repository/organization
+retention has not been inspected here. If those independent records expire or are
+deleted, renewal fails closed and the existing receipt becomes stale. Surviving
+that dependency requires separately reviewed cryptographically authenticated
+archival evidence and recovery policy; a root-authored cache is insufficient.
 A durable renewal intent/completion also quarantines interrupted receipt renewal.
 Receipt identity remains separate from caller-requested identity. Initial immutable
 artifacts are never rewritten. Root-only journal retention, backups and restore
@@ -335,6 +377,9 @@ Every item below is pending. No checkbox is authorization.
 - [ ] Provision a root-controlled bare mirror, private journal/shared initial state,
   audited registry pull-only auth, optional read-only GitHub auth, binary inode/digest
   pins and supported gh/trust roots. API registry policy stays exact GHCR pull scope.
+- [ ] Verify existing package metadata read access and anonymous pull denial,
+  attestation and Actions run/jobs retention for receipt renewal, and an audited
+  response to stale evidence. Do not claim indefinite autonomous freshness.
 - [ ] Privately create the approved API-only runtime snapshot from approved inputs;
   compare its effective runtime/env/mount/resource relationships against the accepted
   initial API. Treat any differences or support mount relocation as separate review.
@@ -390,7 +435,7 @@ reactivation, unrelated mutation, failed health/readiness, interrupted publicati
 renewal, concurrent lock and replay. Existing source suites continue to validate
 initial, commissioning and independent evidence owner boundaries.
 
-Final source validation on 2026-10-14:
+Original V2 source validation on 2026-10-14, before the independent corrections:
 
 | Required check | Actual result |
 | --- | --- |
@@ -404,6 +449,41 @@ Final source validation on 2026-10-14:
 | Python AST, workflow YAML and embedded shell syntax | Passed |
 | Workflow dependency/gate/scope/pin/credential separation | Passed |
 
+## Independent review corrections — 2026-10-14
+
+Starting HEAD was exactly `474a70eca67a168b5e7ec099b3b3fb825ceb49e0`, with a
+clean worktree on the same feature branch. The supplied review is dated 2026-10-15;
+this correction record uses the execution date. The baseline was 520 deployment
+tests. All transports remain synthetic, and the executor remains disabled by default.
+
+| Reproduced finding | Positive regression | Negative regression |
+| --- | --- | --- |
+| Public package behind 401 challenge | Anonymous bearer denied plus explicit package PRIVATE permits digest publication | Anonymous token reads manifest 200 rejects before upload authority; 404 with public/missing package evidence, unknown statuses and substituted challenge fail |
+| Host port change | Complete Engine path preserves empty host bindings, exact networks/aliases/mounts | Approved loopback/public/structured port proposals and changed aliases/mounts fail before pull; post-up port drift quarantines |
+| Expiring identity artifact | Renewal after 31 days with expired, then removed identity artifact and broker restart re-authenticates attestation and refreshes receipt without another pull/up | Forged/missing live attestation, coherently rehashed acceptance substitution, missing initial artifact and changed source/registry/runtime/root policy reject without receipt refresh |
+| Supersession during pull | Unchanged source completes final guard and activates once | HEAD move, proof expiry or root-policy substitution during pull produces zero up calls; post-up HEAD move remains quarantined |
+
+Correction validation (all passed):
+
+| Required check | Actual result |
+| --- | --- |
+| Complete deployment suite | 539 passed; 520 baseline plus 19 new regressions; 67 API delivery tests |
+| Complete commissioning suite | 34 passed |
+| Complete commit-validator suite | 5 passed; proposed message and existing feature-branch messages valid |
+| Complete documentation/link audit | 71 Markdown files passed |
+| Migration history and outbox route parity | 27 frozen files unchanged; all 17 canonical routes match |
+| Python AST, workflow YAML and embedded bash syntax | All deployment modules and 18 workflow run steps passed; steps were not executed |
+| Workflow source equality, pins, gates and credential separation | Passed in the complete deployment suite |
+| Whitespace validation | `git diff --check` passed |
+
+The exact correction commit is reported with task delivery.
+The checklist above remains pending: root installation/initial acceptance, supported
+attestation CLI/trust roots and disclosure approval, retention/recovery/rollback
+anchor, Evidence Owner measurement capabilities and HTTPS receipt routes, and a
+separately authorized real end-to-end acceptance. No live credentials, Docker,
+running-service changes, installation, workflow dispatch, upload, push or merge
+were used to obtain passing source tests.
+
 The test fixture models authenticated provider responses and verifier output; actual
 Sigstore cryptography, hosted builds/publication, installed socket/unit and Engine
 operations were not exercised. No live Engine, registry, financial API, secret/protected write,
@@ -414,9 +494,12 @@ separately authorized acceptance. The observed old gh capability is a concrete
 prerequisite, not a reason to fabricate provenance or weaken a guard.
 
 
-## Exact local change manifest
+## Original V2 change manifest
 
-The local commit SHA is reported in the task delivery. Its complete file set is:
+The original V2 commit `474a70eca67a168b5e7ec099b3b3fb825ceb49e0` introduced the
+file set below. The subsequent bounded corrections touch only the embedded
+workflow publisher, OCI publisher, verifier, API engine, broker, delivery tests,
+this runbook and changelog; their exact commit is reported with correction delivery.
 
 | File | Change |
 | --- | --- |
