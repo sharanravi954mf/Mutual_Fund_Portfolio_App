@@ -1,0 +1,143 @@
+{
+  "kind": "moneybowl-api-executor-v2",
+  "enabled": false,
+  "owner_review": null,
+  "publication_disclosure_approved": false,
+  "repository": "sharanravi954mf/Mutual_Fund_Portfolio_App",
+  "image_repository": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev",
+  "project_ref": "rskryngwzyuzmiwtriyy",
+  "branch": "develop",
+  "github_repository_id": null,
+  "approved_reviewers": {},
+  "initial_source": "8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5",
+  "initial_component": "5f06254a13cb666449336425b1a66d31fa8db4afbb30d78d0bc7687dd67d5fd5",
+  "initial_image": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev@sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
+  "namespace": "host-user-and-pid-v1",
+  "owner_cgroup": "/system.slice/moneybowl-ingestion-deploy.service",
+  "owner_config_seal": {
+    "path": "/etc/moneybowl-deployment/initial-mailback-dev.json",
+    "identity": {
+      "device": null,
+      "inode": null,
+      "uid": 0,
+      "gid": 0,
+      "mode": 256
+    },
+    "sha256": null
+  },
+  "code_seals": [],
+  "source_authority_seals": [],
+  "initial_acceptance_seals": [],
+  "runtime_relationship_seals": [],
+  "protected_inputs": [],
+  "state_root": "/var/lib/moneybowl-m4-initial-dev",
+  "journal_root": "/var/lib/moneybowl-api-executor-v2/journal",
+  "receipt_root": "/srv/moneybowl-m4-receipts/service",
+  "source_mirror": "/var/lib/moneybowl-api-executor-v2/source.git",
+  "runtime_seal": {
+    "path": "/etc/moneybowl-deployment/api-runtime-v2.json",
+    "identity": {
+      "device": null,
+      "inode": null,
+      "uid": 0,
+      "gid": 0,
+      "mode": 256
+    },
+    "sha256": null
+  },
+  "daemon_id": null,
+  "runtime_identities": {},
+  "unrelated": {},
+  "resources": {},
+  "api_limits": {
+    "cpu": 1000000000,
+    "memory": 536870912,
+    "pids": 128,
+    "tmpfs": {
+      "/tmp": "size=16m,mode=1777"
+    }
+  },
+  "executables": {
+    "docker": {
+      "path": "/REVIEW_AND_PIN_INSTALLED/docker",
+      "identity": {
+        "device": null,
+        "inode": null,
+        "uid": 0,
+        "gid": 0,
+        "mode": 256
+      },
+      "sha256": null
+    },
+    "compose_plugin": {
+      "path": "/REVIEW_AND_PIN_INSTALLED/compose_plugin",
+      "identity": {
+        "device": null,
+        "inode": null,
+        "uid": 0,
+        "gid": 0,
+        "mode": 256
+      },
+      "sha256": null
+    },
+    "systemctl": {
+      "path": "/REVIEW_AND_PIN_INSTALLED/systemctl",
+      "identity": {
+        "device": null,
+        "inode": null,
+        "uid": 0,
+        "gid": 0,
+        "mode": 256
+      },
+      "sha256": null
+    },
+    "git": {
+      "path": "/REVIEW_AND_PIN_INSTALLED/git",
+      "identity": {
+        "device": null,
+        "inode": null,
+        "uid": 0,
+        "gid": 0,
+        "mode": 256
+      },
+      "sha256": null
+    },
+    "gh": {
+      "path": "/REVIEW_AND_PIN_INSTALLED/gh",
+      "identity": {
+        "device": null,
+        "inode": null,
+        "uid": 0,
+        "gid": 0,
+        "mode": 256
+      },
+      "sha256": null
+    }
+  },
+  "infrastructure_source_sha256": {
+    ".github/workflows/environment-promotion.yml": null,
+    "services/ingestion-support/compose.yaml": null,
+    "services/ingestion-support/compose.hosted.yaml": null,
+    "services/ingestion-support/Caddyfile": null
+  },
+  "environment_policy": {
+    "dev": {
+      "branch": "develop",
+      "project_ref": "rskryngwzyuzmiwtriyy",
+      "deployment_enabled": true,
+      "host_authority": "oracle-dev",
+      "financial_policy": "preserve",
+      "nse_origin": "https://nseinvestuat.nseindia.com"
+    },
+    "qa": {
+      "branch": "qa",
+      "project_ref": null,
+      "deployment_enabled": false,
+      "host_authority": "qa-private",
+      "financial_policy": "disabled",
+      "nse_origin": "https://www.nseinvest.com"
+    }
+  },
+  "service_origin": "https://REVIEW_ACTUAL_NONFINANCIAL_API_ORIGIN.invalid",
+  "credential_seals": []
+}

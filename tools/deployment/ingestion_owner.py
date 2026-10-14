@@ -461,13 +461,18 @@ def main():
         config = private_config(args.config)
         env, p = binding(config, load_policy())
         repo = config['repository']
-        result = reconcile(config, load_policy(), DockerOwner(config), repo, lambda: latest(repo, p['branch']))
+        if config.get('execution_boundary') == 'api-executor-v2':
+            require(env == 'dev', 'execution_environment_invalid')
+            from api_broker import client
+            result = client(latest(repo, p['branch']))
+        else:
+            result = reconcile(config, load_policy(), DockerOwner(config), repo, lambda: latest(repo, p['branch']))
     except Rejected as error:
         result = {'state': 'failed', 'reason': str(error)}
     except Exception:
         result = {'state': 'failed', 'reason': 'service_owner_failed'}
     print(json.dumps(result, sort_keys=True))
-    return 0 if result['state'] in ('deployed', 'superseded') else 1
+    return 0 if result['state'] in ('deployed', 'already_deployed', 'superseded') else 1
 
 
 if __name__ == '__main__':

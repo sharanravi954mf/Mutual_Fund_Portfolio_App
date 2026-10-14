@@ -1,5 +1,11 @@
 # MONEYBOWL M4 DEV restricted execution boundary V1
 
+The [2026-10-14 backend delivery V2 source candidate](MONEYBOWL_M4_BACKEND_DELIVERY_V2.md)
+adds isolated artifact publication and a root API executor with one consolidated
+review/install/activate/verify checklist. It supersedes the proposed host-build and
+UID 993 private-state handoff for subsequent automation. Historical facts below
+remain unchanged; V2 is not installed or live accepted.
+
 **SOURCE CANDIDATE; NOT COMMISSIONED — 2026-10-14.** No DEV deployment is inferred.
 This task authorizes source preparation, synthetic offline tests and a local feature
 commit only. It does not authorize protected publication, installation, credentials,

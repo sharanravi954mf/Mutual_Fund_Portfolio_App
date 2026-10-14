@@ -1,5 +1,11 @@
 # M4 DEV commissioning readiness
 
+The [2026-10-14 backend delivery V2 source candidate](MONEYBOWL_M4_BACKEND_DELIVERY_V2.md)
+adds isolated artifact publication and a root API executor with one consolidated
+review/install/activate/verify checklist. It supersedes the proposed host-build and
+UID 993 private-state handoff for subsequent automation. Historical facts below
+remain unchanged; V2 is not installed or live accepted.
+
 Local implementation for independent review, 2026-10-14. No protected installation,
 publication, initial PREPARE, API activation, owner/timer enablement or image operation
 was performed. The existing [initial transition](MONEYBOWL_M4_INITIAL_API_TRANSITION.md)
