@@ -654,7 +654,7 @@ class TransportTests(unittest.TestCase):
         digest = 'registry.invalid/api@sha256:' + 'b' * 64
         labels = {'org.opencontainers.image.revision': A, 'moneybowl.source_digest': 'c' * 64}
         fields = {'.Id': image_id, '.RepoDigests': [digest],
-                  '.Config.Labels': labels, '.Config.Cmd': API_COMMAND}
+                  '(index .Config "Labels")': labels, '(index .Config "Cmd")': API_COMMAND}
         optional = '{{json (index .Config "Entrypoint")}}'
         proof = dict(image=digest, image_id=image_id, git_commit=A, source_digest='c' * 64)
         for entrypoint in (None, ['/other-entrypoint']):

@@ -9,6 +9,17 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV commissioning readiness — 2026-10-14
+
+- Add a bounded INSPECT → STAGE → REVIEW → PUBLISH utility for a distinct protected
+  initial configuration and complete M3B interpolation input. Preserve originals,
+  reviewed file identity, recovery/Caddy history and independent root authority.
+- Reuse the initial controller's restricted transport and security gates for exact
+  six-service preflight. Handle omitted support-image labels without allowing
+  missing candidate provenance. Add offline failure/drift/transaction regressions.
+- Local implementation only; no protected publication, PREPARE, activation or owner
+  enablement. See [commissioning readiness](architecture/MONEYBOWL_M4_COMMISSIONING_READINESS.md).
+
 ## M4 initial API transition security corrections — 2026-10-12
 
 - Replace executor-owned approval acceptance with an explicit root-operated one-time
