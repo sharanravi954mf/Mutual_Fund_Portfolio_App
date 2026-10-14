@@ -9,6 +9,16 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 DEV restricted execution boundary V1 — 2026-10-14
+
+- Add bounded Unix-peer/request admission and an append-only offline transaction
+  model with exact pins, approval consumption, drift/replay and crash rejection.
+  Deny the ordinary live host-Engine build path pending proven build isolation.
+- Document root readiness, isolated-builder/broker dependencies and the existing
+  evidence-owner/CI commissioning handoff. **SOURCE CANDIDATE; NOT COMMISSIONED**:
+  no live broker, installation, API transition or DEV deployment. See the
+  [boundary candidate](architecture/MONEYBOWL_M4_RESTRICTED_EXECUTION_BOUNDARY_V1.md).
+
 ## M4 DEV commissioning readiness — 2026-10-14
 
 - Add a bounded INSPECT → STAGE → REVIEW → PUBLISH utility for a distinct protected

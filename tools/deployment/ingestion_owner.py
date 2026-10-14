@@ -38,10 +38,13 @@ class DockerOwner:
     def __init__(self, config, command=None, registry=None):
         self.config = config
         inventory.layout(config)
+        if command is not None:
+            require(not isinstance(command, Command), 'live_command_injection_forbidden')
         if command is None:
             # Raw Engine access is root-equivalent, even for inspection. No non-root
             # execution boundary has been commissioned; a Docker-group grant is not one.
             require(os.getuid() == os.geteuid() == 0, 'docker_execution_boundary_uncommissioned')
+        self._offline_transport = command is not None
         # Production always requires independently provisioned private registry access.
         # Injected command transports permit offline tests without live credentials.
         self.registry = Registry(config) if command is None else registry
@@ -313,6 +316,10 @@ class DockerOwner:
         return data
 
     def build(self, source, sha, source_digest):
+        # A source archive does not isolate Dockerfile RUN instructions from the
+        # privileged host Engine. No live isolated builder has been reviewed.
+        # There is intentionally no configuration flag that enables this path.
+        require(self._offline_transport, 'untrusted_build_isolation_uncommissioned')
         self.capacity()
         context = source / 'services/ingestion-support'
         require(not (context / '.env').exists(), 'secret_build_context_rejected')
