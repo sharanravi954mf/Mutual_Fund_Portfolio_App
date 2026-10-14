@@ -306,8 +306,10 @@ class DockerOwner:
 
     def image(self, image):
         data = json.loads(self.command(self.base + ['image', 'inspect', '--format',
-            '{"id":{{json .Id}},"digests":{{json .RepoDigests}},"labels":{{json .Config.Labels}},"command":{{json .Config.Cmd}},"entrypoint":{{json (index .Config "Entrypoint")}}}', image]))
+            '{"id":{{json .Id}},"digests":{{json .RepoDigests}},"labels":{{json (index .Config "Labels")}},"command":{{json (index .Config "Cmd")}},"entrypoint":{{json (index .Config "Entrypoint")}}}', image]))
         require(DIGEST.fullmatch(data['id']), 'invalid_image_id')
+        require(data.get('labels') is None or isinstance(data['labels'], dict), 'invalid_image_labels')
+        data['labels'] = data.get('labels') or {}
         return data
 
     def build(self, source, sha, source_digest):

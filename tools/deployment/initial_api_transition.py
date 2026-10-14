@@ -48,11 +48,13 @@ class InitialDockerOwner(DockerOwner):
     def image(self, image):
         # This richer bootstrap inspector is separate from PR #209's regular inspector.
         raw = self.command(self.base + ['image', 'inspect', '--format',
-            '{"id":{{json .Id}},"digests":{{json .RepoDigests}},"labels":{{json .Config.Labels}},'
-            '"command":{{json .Config.Cmd}},"entrypoint":{{json (index .Config "Entrypoint")}},'
-            '"user":{{json .Config.User}},"architecture":{{json .Architecture}},"os":{{json .Os}}}', image])
+            '{"id":{{json .Id}},"digests":{{json .RepoDigests}},"labels":{{json (index .Config "Labels")}},'
+            '"command":{{json (index .Config "Cmd")}},"entrypoint":{{json (index .Config "Entrypoint")}},'
+            '"user":{{json (index .Config "User")}},"architecture":{{json .Architecture}},"os":{{json .Os}}}', image])
         value = json.loads(raw)
         require(re.fullmatch(r'sha256:[0-9a-f]{64}', value['id']), 'invalid_image_id')
+        require(value.get('labels') is None or isinstance(value['labels'], dict), 'invalid_image_labels')
+        value['labels'] = value.get('labels') or {}
         return value
 
     def validate_current(self, current):

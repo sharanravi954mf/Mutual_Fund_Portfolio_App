@@ -183,9 +183,9 @@ class TransitionTests(unittest.TestCase):
     def test_optional_entrypoint_template_and_rejection(self):
         proof = transition.proof_for(self.config)
         fields = {'.Id': proof['image_id'], '.RepoDigests': [proof['image']],
-            '.Config.Labels': {'org.opencontainers.image.revision': self.f.sha,
+            '(index .Config "Labels")': {'org.opencontainers.image.revision': self.f.sha,
                               'moneybowl.source_digest': proof['source_digest']},
-            '.Config.Cmd': API_COMMAND, '.Config.User': '10001:10001', '.Architecture': 'arm64', '.Os': 'linux'}
+            '(index .Config "Cmd")': API_COMMAND, '(index .Config "User")': '10001:10001', '.Architecture': 'arm64', '.Os': 'linux'}
         for entrypoint in (None, [], ['unauthorized']):
             def command(argv, **kwargs):
                 template = argv[argv.index('--format') + 1]

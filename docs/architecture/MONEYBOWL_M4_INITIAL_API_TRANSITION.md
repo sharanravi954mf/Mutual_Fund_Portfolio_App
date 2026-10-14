@@ -1,5 +1,9 @@
 # M4 one-time Mailback API transition
 
+The [2026-10-14 commissioning readiness implementation](MONEYBOWL_M4_COMMISSIONING_READINESS.md)
+adds a separate protected-input staging/review/publication transaction. Its local
+readiness does not authorize protected publication or invoke this controller's PREPARE.
+
 Controller merged in PR #211; compatibility correction: 2026-10-13.
 **Code readiness does not establish live commissioning.** A prior sealed controller
 installation is recorded in the owner checkpoint; this correction has not been installed
