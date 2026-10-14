@@ -1,5 +1,11 @@
 # M4 one-time Mailback API transition
 
+The [2026-10-14 backend delivery V2 source candidate](MONEYBOWL_M4_BACKEND_DELIVERY_V2.md)
+adds isolated artifact publication and a root API executor with one consolidated
+review/install/activate/verify checklist. It supersedes the proposed host-build and
+UID 993 private-state handoff for subsequent automation. Historical facts below
+remain unchanged; V2 is not installed or live accepted.
+
 The [2026-10-14 commissioning readiness implementation](MONEYBOWL_M4_COMMISSIONING_READINESS.md)
 adds a separate protected-input staging/review/publication transaction. Its local
 readiness does not authorize protected publication or invoke this controller's PREPARE.

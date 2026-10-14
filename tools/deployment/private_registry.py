@@ -116,13 +116,15 @@ class Registry:
                     'registry_content_mismatch')
             return json.loads(raw)
 
+        manifest_digest = root
         manifest = fetch('manifests', root)
         if 'manifests' in manifest:
             matches = [item for item in manifest['manifests'] if
                        item.get('platform', {}).get('os') == 'linux' and
                        item.get('platform', {}).get('architecture') == 'arm64']
             require(len(matches) == 1, 'registry_platform_invalid')
-            manifest = fetch('manifests', matches[0]['digest'], matches[0]['size'])
+            manifest_digest = matches[0]['digest']
+            manifest = fetch('manifests', manifest_digest, matches[0]['size'])
         descriptor = manifest['config']
         config = fetch('blobs', descriptor['digest'], descriptor['size'])
         require(manifest.get('schemaVersion') == 2 and isinstance(manifest.get('layers'), list)
@@ -144,4 +146,4 @@ class Registry:
                 and runtime.get('User') == '10001:10001', 'registry_runtime_invalid')
         return {'image': image, 'image_id': proof['image_id'], 'config_digest': descriptor['digest'],
                 'git_commit': proof['git_commit'], 'source_digest': proof['source_digest'],
-                'private': True, 'remote_verified': True}
+                'manifest_digest': manifest_digest, 'registry_digest': root, 'private': True, 'remote_verified': True}

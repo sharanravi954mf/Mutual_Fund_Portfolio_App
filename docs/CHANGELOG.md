@@ -9,6 +9,38 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 backend artifact delivery and API execution V2 — 2026-10-14
+
+- Correct all four independent review reproductions: anonymous-token/package
+  privacy proof, zero API host bindings with exact runtime relationships, attested
+  receipt renewal after identity-artifact expiry, and a final source/proof guard
+  after image pull. Add positive/negative synthetic regressions and document live
+  attestation/Actions retention limits. Local source corrections only; root and
+  Evidence Owner commissioning, rollback/recovery anchors and real acceptance
+  remain pending. See the [correction evidence](architecture/MONEYBOWL_M4_BACKEND_DELIVERY_V2.md#independent-review-corrections--2026-10-14).
+- Add gated disposable ARM64 build and separate private GHCR publication with
+  bounded OCI validation, immutable digest identity and authenticated attestations.
+- Implement fixed Unix-socket owner client, root source/provenance verifier and
+  sealed API-only runtime executor, durable intent/quarantine/replay protection,
+  independent post-observation and receipt renewal without duplicate deployment.
+- Preserve initial acceptance, existing frontend/Supabase/evidence owners and all
+  live approval boundaries. **IMPLEMENTED_AND_TESTED_SOURCE; REVIEW_PENDING;
+  NOT_INSTALLED; LIVE_ACCEPTANCE_PENDING**. Supported host attestation CLI and all
+  external commissioning remain pending. Offline validation: 520 deployment tests,
+  34 commissioning tests and 5 commit-validator tests passed, plus documentation,
+  migration-history, route, syntax, workflow/pin/separation and whitespace checks.
+  See the [review and consolidated runbook](architecture/MONEYBOWL_M4_BACKEND_DELIVERY_V2.md).
+
+## M4 DEV restricted execution boundary V1 — 2026-10-14
+
+- Add bounded Unix-peer/request admission and an append-only offline transaction
+  model with exact pins, approval consumption, drift/replay and crash rejection.
+  Deny the ordinary live host-Engine build path pending proven build isolation.
+- Document root readiness, isolated-builder/broker dependencies and the existing
+  evidence-owner/CI commissioning handoff. **SOURCE CANDIDATE; NOT COMMISSIONED**:
+  no live broker, installation, API transition or DEV deployment. See the
+  [boundary candidate](architecture/MONEYBOWL_M4_RESTRICTED_EXECUTION_BOUNDARY_V1.md).
+
 ## M4 DEV commissioning readiness — 2026-10-14
 
 - Add a bounded INSPECT → STAGE → REVIEW → PUBLISH utility for a distinct protected

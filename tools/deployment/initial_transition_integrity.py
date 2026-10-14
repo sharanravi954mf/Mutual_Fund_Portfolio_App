@@ -20,7 +20,7 @@ def required(config):
         (state / name).exists() or (state / name).is_symlink() for name in ARTIFACTS)
 
 
-def completed(config, policy, repo):
+def completed(config, policy, repo, component_manifest=None):
     """Reject partial/old VERIFIED states and every missing or mismatched retained artifact.
 
     The regular owner's live report and generated override evolve on each reconciliation.
@@ -36,7 +36,7 @@ def completed(config, policy, repo):
         sha = revision(plan['git_commit'])
         proof = read_private(state / (sha + '.provenance.json'))
         initial = config['initial_transition']
-        expected = manifest(repo, sha)['ingestion_support']
+        expected = (manifest if component_manifest is None else component_manifest)(repo, sha)['ingestion_support']
         identity = envelope('dev', target('dev', policy), sha)
         valid = (journal.get('completion_version') == 1 and journal.get('activation_attempted') is True
                  and journal['plan_digest'] == inventory.digest(plan) == verification['plan_digest']

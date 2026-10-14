@@ -38,10 +38,13 @@ class DockerOwner:
     def __init__(self, config, command=None, registry=None):
         self.config = config
         inventory.layout(config)
+        if command is not None:
+            require(not isinstance(command, Command), 'live_command_injection_forbidden')
         if command is None:
             # Raw Engine access is root-equivalent, even for inspection. No non-root
             # execution boundary has been commissioned; a Docker-group grant is not one.
             require(os.getuid() == os.geteuid() == 0, 'docker_execution_boundary_uncommissioned')
+        self._offline_transport = command is not None
         # Production always requires independently provisioned private registry access.
         # Injected command transports permit offline tests without live credentials.
         self.registry = Registry(config) if command is None else registry
@@ -313,6 +316,10 @@ class DockerOwner:
         return data
 
     def build(self, source, sha, source_digest):
+        # A source archive does not isolate Dockerfile RUN instructions from the
+        # privileged host Engine. No live isolated builder has been reviewed.
+        # There is intentionally no configuration flag that enables this path.
+        require(self._offline_transport, 'untrusted_build_isolation_uncommissioned')
         self.capacity()
         context = source / 'services/ingestion-support'
         require(not (context / '.env').exists(), 'secret_build_context_rejected')
@@ -454,13 +461,18 @@ def main():
         config = private_config(args.config)
         env, p = binding(config, load_policy())
         repo = config['repository']
-        result = reconcile(config, load_policy(), DockerOwner(config), repo, lambda: latest(repo, p['branch']))
+        if config.get('execution_boundary') == 'api-executor-v2':
+            require(env == 'dev', 'execution_environment_invalid')
+            from api_broker import client
+            result = client(latest(repo, p['branch']))
+        else:
+            result = reconcile(config, load_policy(), DockerOwner(config), repo, lambda: latest(repo, p['branch']))
     except Rejected as error:
         result = {'state': 'failed', 'reason': str(error)}
     except Exception:
         result = {'state': 'failed', 'reason': 'service_owner_failed'}
     print(json.dumps(result, sort_keys=True))
-    return 0 if result['state'] in ('deployed', 'superseded') else 1
+    return 0 if result['state'] in ('deployed', 'already_deployed', 'superseded') else 1
 
 
 if __name__ == '__main__':
