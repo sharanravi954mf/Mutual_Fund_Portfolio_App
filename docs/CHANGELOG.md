@@ -9,6 +9,21 @@ This CHANGELOG.md is the sole authoritative release-history document. Historical
 
 ---
 
+## M4 single-owner release authorization correction — 2026-10-15
+
+- Add explicit DEV root-policy mode `solo-owner-protected-merge-v1`: authenticate
+  exact repository/owner numeric identities, full owner-merged feature PR, merge
+  parents, branch governance and pinned successful CI; retain independent APPROVED
+  review as the default. No runtime flag selects single-owner governance.
+- Bind versioned private acceptance and authenticated receipt renewal to the same
+  owner merge, publication and root policy; preserve API-only execution, initial
+  acceptance, seals, supersession/expiry and immutable replay/quarantine controls.
+- Offline validation: 567 deployment, 34 commissioning and 5 commit-validator
+  tests passed, plus documentation, migration/outbox, workflow/syntax and whitespace checks.
+- **SOURCE CANDIDATE — NOT INSTALLED, NOT COMMISSIONED.** No push, merge, root
+  approval, publication, provisioning or live service change. See the
+  [policy, migration, bootstrap and commissioning runbook](architecture/MONEYBOWL_M4_BACKEND_DELIVERY_V2.md#single-owner-release-authorization-correction--2026-10-15).
+
 ## M4 backend artifact delivery and API execution V2 — 2026-10-14
 
 - Correct all four independent review reproductions: anonymous-token/package

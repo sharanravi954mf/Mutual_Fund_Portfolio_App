@@ -9,6 +9,10 @@
   "branch": "develop",
   "github_repository_id": null,
   "approved_reviewers": {},
+  "release_authorization": {
+    "mode": "independent-review-v1"
+  },
+  "github_token_seal": null,
   "initial_source": "8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5",
   "initial_component": "5f06254a13cb666449336425b1a66d31fa8db4afbb30d78d0bc7687dd67d5fd5",
   "initial_image": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev@sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
