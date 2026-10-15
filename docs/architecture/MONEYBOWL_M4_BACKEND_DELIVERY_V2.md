@@ -5,6 +5,220 @@ Source candidate, 2026-10-14. Status: **IMPLEMENTED_AND_TESTED_SOURCE**;
 Tests establish source behavior with synthetic providers. No operational automatic
 pipeline, registry publication, host transition or environment release is claimed.
 
+## Single-owner release authorization correction — 2026-10-15
+
+**SOURCE CANDIDATE — NOT INSTALLED, NOT COMMISSIONED.** This correction starts
+at `280ac71169e9f6d87d48be821ad70743c031f6be` in the isolated worktree
+`/home/ubuntu/moneybowl-worktrees/m4-solo-owner-release-v1`, branch
+`feature/m4-solo-owner-release-v1`. Canonical develop was clean at that exact
+commit. The installed controller and protected mirror remain at that base and
+were not operated. A separately installed, hashed **gh 2.102.0** is available
+per the handoff; the older CLI observations below are historical, not a request
+to reinstall it. Its exact installed inode/hash, trust roots and provider behavior
+still require protected-policy commissioning.
+
+The owner is the only available maintainer. GitHub cannot supply an independent
+APPROVED review from the author themselves. Root policy may explicitly select
+`solo-owner-protected-merge-v1` for DEV. Under that governance model, the owner's
+intentional merge is the per-release authorization after technical source review
+and required CI. This is one-owner governance; it provides no two-person separation.
+Comments, PR authorship, Actions actors and claimed reviewer identities confer no
+merge authority. Technical review is not recorded as a human GitHub APPROVED event.
+
+### Protected policy and provider evidence
+
+The disabled example retains `release_authorization.mode: independent-review-v1`.
+An absent legacy `release_authorization` field also requires the existing allowed
+APPROVED review at the exact PR head, with both reviewer login and numeric ID.
+An explicitly present null, empty, unknown or malformed mode rejects. Selecting
+solo-owner requires a reviewed installation of root policy; socket packets, CLI
+flags, environment variables and the Actions publication gate cannot select it.
+Solo-owner policy rejects a nonempty independent-reviewer policy and every live
+contradictory required-review setting. Removing the mode cannot turn an empty
+reviewer list into an independent authorization.
+
+The following is an **incomplete policy fragment, not approval evidence**. The
+`null` app ID must be independently established from authenticated provider
+metadata, and every actual required check must be included before installation.
+No app identity is inferred from its display name or copied from a test fixture.
+
+```json
+{
+  "repository": "sharanravi954mf/Mutual_Fund_Portfolio_App",
+  "github_repository_id": 1303872993,
+  "branch": "develop",
+  "project_ref": "rskryngwzyuzmiwtriyy",
+  "approved_reviewers": {},
+  "release_authorization": {
+    "mode": "solo-owner-protected-merge-v1",
+    "owner": {"login": "sharanravi954mf", "id": 306140954},
+    "required_checks": [{"context": "M4 Required CI", "app_id": null}]
+  }
+}
+```
+
+Authenticated repository metadata and both full PR repositories must match the
+full repository name, numeric repository ID, owner login and numeric owner ID.
+Commit-associated PR summaries only discover a single candidate. A separate full
+PR read must prove `merged: true`, closed state, exact `feature/* -> develop`,
+same non-fork repository, PR identity, head SHA, merge time and requested current
+develop merge SHA. Its `merged_by.login` **and** numeric ID must equal the pinned
+owner, even when that owner authored the PR. The authenticated Git commit must
+have two parents with the feature head as its second parent: use a normal merge
+commit; direct pushes, squash/rebase substitutions and mismatched heads reject.
+Missing, ambiguous, truncated or unreadable evidence rejects.
+
+This bounded implementation supports **classic branch protection only**, plus an
+independent branch-rules read proving no additional active rulesets. Any active
+ruleset is unsupported and rejects; do not remove or weaken it to obtain a pass.
+A ruleset-only deployment needs a separate reviewed implementation before use.
+Classic protection must require PRs with zero approving reviews, dismiss stale
+reviews, require conversation resolution, enforce administrators, prohibit force
+pushes/deletions, forbid PR bypass allowances, and require up-to-date status checks.
+Code-owner and latest-push independent approval requirements conflict with this
+explicit one-owner policy and reject. Any active CHANGES_REQUESTED or PENDING
+review also rejects, regardless of reviewer; a later comment cannot clear it.
+
+All configured required check contexts and numeric app IDs must exactly match the
+reviewed root list, which includes `M4 Required CI`. Retain the existing
+commit/documentation and integration migration checks under the repository's
+reviewed policy; establish their actual context names/app IDs rather than guessing.
+Each required check must independently report success at the exact release SHA
+from its pinned app. Legacy commit-status-only requirements are unsupported and
+must not be dropped to pass. M4's check-run ID must also match the job returned
+from the exact authenticated publication run/attempt. The existing fixed workflow,
+push/develop/source/repository/run/attempt identity and successful CI, isolated
+ARM64 build and private publication job checks remain mandatory. Every final
+guard rereads those jobs/checks and governance; a failed or missing check cannot
+authorize activation. Overall workflow status may still await the passive observer.
+
+**Historical limit:** today's protection/rules reads do not prove that protection
+was identical at merge time, or that an administrator never temporarily bypassed
+it. The verifier does not claim such proof. Admission additionally requires the
+actual owner merge event, exact merge/source binding, and the independently
+verified successful release CI/build/publication run/attempt. Provider audit-history
+archival, if required, needs separate policy; current settings are not historical
+non-bypass evidence.
+
+### Read permissions and owner's release step
+
+The Oracle verifier needs a sealed, nonempty GitHub read credential in solo-owner
+mode, restricted to this repository. Configure its approved private
+`github_token_seal`; the adapter reads that seal into its sanitized process
+environment, without inheriting a caller's token. Use repository-scoped fine-grained/App
+permissions: Metadata read for repository identity and effective branch rules,
+Contents read for refs/Git commits/source and commit-to-PR association, Pull
+requests read for full PRs/reviews, Actions read for runs/jobs/artifact download,
+Checks read for check runs, Attestations read for authenticated provenance, and
+**Administration read** for classic branch protection. The
+[branch protection endpoint](https://docs.github.com/en/rest/branches/branch-protection#get-branch-protection)
+requires that read permission; PUBLIC source visibility alone does not grant it.
+[Effective rules](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch)
+and [full PR reads](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request)
+are separate reads. Public endpoints may be anonymously readable, but this mode
+still requires authenticated requests. Private source needs the same permissions
+and explicit repository access; 401/403/404, rate limits or incomplete provider
+records fail closed. No write/admin bypass capability is needed by the executor.
+
+Private GHCR pull authority remains separately root sealed, limited to package
+read/pull access for the existing DEV package. Package metadata read and anonymous
+pull denial still prove PRIVATE visibility. Publication retains its existing
+separate, gated Actions permissions; no merge, review, contents write, branch-rule
+write or workflow-dispatch permission is added to Oracle. Credential creation or
+rotation is outside this source correction.
+
+For a release, the owner first obtains technical review of the exact feature head
+and checks that required PR CI succeeds and conversations are resolved. The
+pinned owner then intentionally merges the same-repository feature PR to develop
+using a normal merge commit through the protected GitHub path, without bypass.
+The later develop run must independently pass the required source/CI/build/publish
+checks before the executor can admit that exact current SHA. No second maintainer,
+bot approval or specially worded comment is manufactured.
+
+### Migration, corrective-release bootstrap and renewal limits
+
+1. Review this exact source candidate through the normal feature-PR source review
+   path, including the one-owner governance change, provider permissions, check
+   pins and complete root-policy/code/input seal changes. This task creates only
+   a local commit. Existing multi-review protection remains authoritative until a
+   separately reviewed owner governance migration; no runtime downgrade is allowed.
+2. Use the established separate INSPECT/STAGE/REVIEW/PUBLISH process to install the
+   reviewed root policy and new sealed controller closure. Existing root approvals,
+   originals and immutable acceptance artifacts cannot be invented or rewritten.
+   Any DEV governance migration is an explicit reviewed infrastructure change,
+   preserving required CI, admin enforcement and force/bypass prohibitions; no
+   global review/CI disablement is part of this implementation.
+3. Bootstrap the corrective release itself explicitly: the old verifier cannot
+   authorize the owner's self-review and must stay closed. After source review and
+   separately authorized governance migration, the owner merges this corrective PR;
+   its resulting develop merge SHA receives fresh CI/publication. Separately install
+   the reviewed new verifier and root seals before asking it to admit that SHA.
+   If prerequisites are unavailable, leave publication/execution disabled. The
+   corrective commit, decision JSON and examples are not root activation approvals.
+4. First API admission still requires the original permanent initial acceptance
+   tuple and its plan-bound authorization, exact source ancestry, API-only sealed
+   runtime/inputs, authenticated attestation and private registry bytes. No initial
+   acceptance, protected mirror or installed controller was operated by this task.
+
+PRIVATE immutable intent proof now carries `release_authorization` with
+`kind: moneybowl-release-authorization-v1`, `schema_version: 1`, verified mode,
+repository/owner pins, PR ID/number/head/ref, merge SHA/time and verified owner
+merger login/ID. It never labels the merge as an independent APPROVED review.
+The proof ID binds this event as well as publication run/attempt/digest. Sanitized
+service receipts disclose none of that private authorization identity.
+
+Renewal authenticates the same full authorization event and entire signed
+publication predicate again, using the completed immutable intent only as a
+locator. It requires the **same accepted root-policy hash**, current HEAD, live
+governance/reviews/checks/run/attempt/attestation, sealed source, private image and
+unchanged actual runtime. Renewal intents bind both policy and authorization
+hashes. Expired/deleted temporary identity artifacts are unnecessary after first
+acceptance; missing live authoritative records still block refresh. A replaced
+mode, event or root policy cannot renew an older acceptance. Repeated refresh
+performs no second pull or API activation. Earlier journal schemas cannot be
+silently upgraded, inferred as solo-owner or rewritten; any migration/recovery
+requires separate review. Interrupted/uncertain journal or renewal publication
+retains quarantine with no blind retry, automatic rollback or recovery endpoint.
+
+### Remaining live prerequisites
+
+The recorded decisions approve one-owner governance, private DEV image publication
+and the described public provenance metadata disclosure. They do **not** publish
+root approvals or activate services. Still required: review/merge and real CI of
+this candidate; authenticated repository/governance/check pin commissioning;
+reviewed root controller/policy/mirror/runtime/input/binary seals; original
+protected-input publication and initial PREPARE/plan review/ACTIVATE/VERIFY;
+retained initial acceptance and retirement baseline; separately enabled fixed
+socket/unit/marker and UID 993 client; private GHCR read/publication access and
+gate; live attestation verification; evidence-owner credentials/measurements and
+HTTPS receipt routes; end-to-end real acceptance, duplicate-refresh/rejection
+checks, unchanged unrelated services and reviewed quarantine/recovery procedure.
+
+Backup remains a separate private OCI Object Storage destination:
+`moneybowl-dev-recovery`, Standard tier, versioning enabled, unique dated
+content-addressed keys, HTTPS and default at-rest encryption, minimum object
+create/read verification scope without executor delete/bucket-admin authority.
+Exact same-region tenancy/region, price, access, bucket creation, archive upload,
+external recovery anchor and restore test remain uncommissioned. Same-tenancy,
+same-region backup is not independent regional/tenancy-compromise disaster
+recovery. No lifecycle deletion or retention lock is authorized here. This source
+change provisions, uploads and operates none of it.
+
+### Correction validation
+
+Offline validation passed: **567 deployment tests** (28 added authorization
+regressions; 95 API delivery tests total), **34 commissioning tests**, **5 commit
+validator tests**, documentation/link audit of **71 Markdown files**, **27 frozen
+migrations**, **17 canonical outbox routes** plus dispatcher route validation,
+Python AST for **30 deployment modules**, YAML for **5 workflows**, bash syntax
+for **35 workflow run steps** and the outbox bootstrap/SQL/concurrency scripts,
+workflow source/pin/gate/credential-separation regressions, and `git diff --check`.
+The conventional commit message was also validated. Execution providers and
+ownership/Engine responses were synthetic. No live Engine/container SQL tests,
+cloud/registry/GitHub writes, service commands, credentials or root publication
+were used. Workflow steps were parsed, not executed. Real source review, hosted
+CI, installed-provider behavior and commissioning remain separate.
+
 This extends [restricted boundary V1](MONEYBOWL_M4_RESTRICTED_EXECUTION_BOUNDARY_V1.md).
 V1's offline CLI remains a compatibility model and cannot deploy. The new V2
 production entrypoint has a callable success path; it is gated by independently
@@ -237,9 +451,10 @@ signer/source SHA, develop ref, hosted runner and custom predicate type. The
 verified statement is then checked against the independent run/attempt/source and
 private registry bytes. [The CLI documents these supported flags and verified JSON](https://cli.github.com/manual/gh_attestation_verify).
 A label, JSON file or successful mocked command never authorizes production.
-The actual host CLI observed here is **gh 2.45.0**, which rejects `attestation` as an
-unknown command. It was not upgraded. A supported, reviewed binary and its trust
-root/network/auth behavior are therefore exact external prerequisites.
+The host CLI observed during the original 2026-10-14 work was **gh 2.45.0**, which
+rejected `attestation`; that task did not upgrade it. The 2026-10-15 handoff above
+records a separately installed, hashed gh 2.102.0. Its reviewed installed seal and
+trust-root/network/auth behavior remain external commissioning prerequisites.
 
 The root-controlled bare source mirror rejects writable/link/ACL ancestry,
 shallow/grafted/alternate sources and unsafe Git configuration. Fixed HTTPS fetch,
@@ -354,7 +569,9 @@ assets. Tests cannot populate that owner's live graph or make release CI green.
 
 ## Consolidated later commissioning checklist
 
-Every item below is pending. No checkbox is authorization.
+This historical checklist remains pending except for the owner decisions recorded
+in the 2026-10-15 correction above and the separately installed supported CLI.
+No checkbox is authorization.
 
 ### Review
 

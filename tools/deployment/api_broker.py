@@ -103,6 +103,7 @@ class Broker:
             records.append((intent, observed))
         require(sorted(i.get('sequence', 0) for i, _ in records) == list(range(1, len(records)+1)), 'executor_journal_quarantined')
         latest = {i['proof']['proof_id']: o['receipt'] for i, o in records}
+        accepted = {i['proof']['proof_id']: i for i, _ in records}
         for path in renewals:
             base = path.name.removesuffix('.intent.json').removesuffix('.complete.json')
             intent_path = self.root/(base+'.intent.json')
@@ -112,6 +113,8 @@ class Broker:
             key = base.split('.')[0]
             require(key in latest and read_private(complete_path) == {'renewal_sha256': sha256(encoded(renewal))},
                     'executor_journal_quarantined')
+            require(renewal.get('release_authorization_sha256') == sha256(encoded(accepted[key]['proof']['release_authorization']))
+                    and renewal.get('policy_sha256') == accepted[key]['policy_sha256'], 'executor_journal_quarantined')
             receipt = renewal['receipt']
             old = latest[key]
             stamp = receipt.get('observed_at')
@@ -140,6 +143,7 @@ class Broker:
                 if old['request_id'] == request['request_id']:
                     require(old == request, 'executor_request_replayed')
                 if old['git_commit'] == request['git_commit']:
+                    require(intent['policy_sha256'] == sha256(self.policy_raw), 'executor_acceptance_policy_changed')
                     fresh = self.verifier.verify(request['git_commit'], accepted=intent['proof'])
                     require(fresh['proof_id'] == intent['proof']['proof_id'], 'executor_completed_proof_changed')
                     require(self.engine.observation() == observed['after'], 'executor_completed_runtime_changed')
@@ -150,7 +154,8 @@ class Broker:
                     current = read_private(receipt_path)
                     if now > current['observed_at']:
                         receipt = {**observed['receipt'], 'observed_at': now}
-                        renewal = dict(receipt=receipt, proof_id=fresh['proof_id'])
+                        renewal = dict(receipt=receipt, proof_id=fresh['proof_id'], policy_sha256=intent['policy_sha256'],
+                                       release_authorization_sha256=sha256(encoded(fresh['release_authorization'])))
                         key = fresh['proof_id']+'.renewal.'+sha256(encoded(renewal))
                         publish(self.root/(key+'.intent.json'), renewal, immutable=True)
                         try:

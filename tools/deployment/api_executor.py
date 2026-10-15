@@ -23,6 +23,7 @@ from owner_common import sha256, envelope
 from protected_io import root_controlled, read_private
 from ingestion_owner import DockerOwner, API_COMMAND, DEV_RETIRED_CONTAINER, DEV_RETIRED_SERVICES, DEV_RETIRED_TIMER
 from oci_delivery import IMAGE, WORKFLOW, PREDICATE
+from delivery_verifier import authorization_policy
 from observe import read_json
 import initial_transition_integrity
 import compose_inventory as inventory
@@ -81,11 +82,7 @@ def load_authority():
             and value.get('initial_component') == INITIAL_COMPONENT, 'executor_initial_policy_invalid')
     require(value.get('namespace') == 'host-user-and-pid-v1'
             and value.get('owner_cgroup') == '/system.slice/moneybowl-ingestion-deploy.service', 'executor_peer_policy_invalid')
-    require(type(value.get('github_repository_id')) is int and value['github_repository_id'] > 0
-            and type(value.get('approved_reviewers')) is dict and value['approved_reviewers']
-            and all(type(v) is str and re.fullmatch('[a-zA-Z0-9-]{1,39}', v) and type(uid) is int and uid > 0
-                    for v, uid in value['approved_reviewers'].items()),
-            'executor_source_review_policy_invalid')
+    authorization_policy(value)
     directory = Path(__file__).resolve().parent
     code = value.get('code_seals', [])
     require({item['path'] for item in code} == {str(p) for p in directory.glob('*.py')} | {str(directory/'environments.json')},

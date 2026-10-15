@@ -81,11 +81,33 @@ class Providers:
         self.head = self.sha
         self.run = dict(id=123, run_attempt=1, event='push', head_branch='develop', head_sha=self.sha,
                         path=oci.WORKFLOW, status='completed', conclusion='success',
-                        repository={'full_name': oci.REPOSITORY, 'id': 123456},
+                        repository={'full_name': oci.REPOSITORY, 'id': 1303872993},
                         head_repository={'full_name': oci.REPOSITORY, 'fork': False})
         self.jobs = {'total_count': 3, 'jobs': [dict(name=name, labels=[label], status='completed', conclusion='success')
             for name, label in [('M4 Required CI', 'ubuntu-latest'), ('M4 Isolated ARM64 Build', 'ubuntu-24.04-arm'),
                                 ('M4 Verified Private Publication', 'ubuntu-latest')]]}
+        self.owner = dict(login='sharanravi954mf', id=306140954)
+        self.repository = dict(full_name=oci.REPOSITORY, id=1303872993, owner=self.owner, fork=False)
+        self.pull = dict(id=9001, number=42, merged=True, state='closed', merged_at='2026-10-14T00:00:00Z',
+            merge_commit_sha=self.sha, merged_by=copy.deepcopy(self.owner), user=copy.deepcopy(self.owner),
+            base={'ref': 'develop', 'repo': copy.deepcopy(self.repository)},
+            head={'sha': 'e'*40, 'ref': 'feature/synthetic', 'repo': copy.deepcopy(self.repository)})
+        self.pulls = [copy.deepcopy(self.pull)]
+        self.reviews = [dict(id=8001, user={'login': 'independent-reviewer', 'id': 9876},
+                             state='APPROVED', commit_id=self.pull['head']['sha'])]
+        self.commit = dict(sha=self.sha, parents=[{'sha': fixture.initial_sha}, {'sha': self.pull['head']['sha']}])
+        self.required_checks = [dict(context='M4 Required CI', app_id=15368)]
+        self.protection = dict(required_status_checks=dict(strict=True, contexts=['M4 Required CI'],
+                checks=copy.deepcopy(self.required_checks)), enforce_admins={'enabled': True},
+            allow_force_pushes={'enabled': False}, allow_deletions={'enabled': False},
+            required_conversation_resolution={'enabled': True},
+            required_pull_request_reviews=dict(required_approving_review_count=0, dismiss_stale_reviews=True,
+                require_code_owner_reviews=False, require_last_push_approval=False))
+        self.rules = []
+        self.checks = dict(total_count=1, check_runs=[dict(id=7001, name='M4 Required CI', head_sha=self.sha,
+            status='completed', conclusion='success', app={'id': 15368})])
+        self.jobs['jobs'][0]['check_run_url'] = f'https://api.github.com/repos/{oci.REPOSITORY}/check-runs/7001'
+        self.unavailable_routes = set()
         self.calls = []
         self.remote = {}
         self.proof = None
@@ -112,13 +134,20 @@ class Providers:
             return self.json(dict(name='moneybowl-ingestion-dev', package_type='container',
                 owner={'login': 'sharanravi954mf'}, visibility=self.package_visibility))
         if url.startswith('https://api.github.com/'):
-            route = url.split('/' + oci.REPOSITORY + '/', 1)[1]
+            base = 'https://api.github.com/repos/' + oci.REPOSITORY
+            self.f.assertTrue(url == base or url.startswith(base+'/'))
+            route = url[len(base):].lstrip('/')
+            if route in self.unavailable_routes: return 403, {}, b''
+            if route == '': return self.json(self.repository)
+            if route == 'branches/develop/protection': return self.json(self.protection)
+            if route == 'rules/branches/develop?per_page=100': return self.json(self.rules)
+            if route.startswith('git/commits/'): return self.json(self.commit)
+            if route.startswith('commits/') and '/check-runs?' in route: return self.json(self.checks)
             if route.startswith('commits/'):
-                return self.json([dict(number=42, merged_at='2026-10-14T00:00:00Z', merge_commit_sha=self.sha,
-                    base={'ref': 'develop', 'repo': {'full_name': oci.REPOSITORY}},
-                    head={'sha': self.sha, 'ref': 'feature/synthetic', 'repo': {'full_name': oci.REPOSITORY}})])
+                return self.json(self.pulls)
+            if route == 'pulls/42': return self.json(self.pull)
             if route.startswith('pulls/42/reviews'):
-                return self.json([dict(user={'login': 'independent-reviewer', 'id': 9876}, state='APPROVED', commit_id=self.sha)])
+                return self.json(self.reviews)
             if route == 'git/ref/heads/develop': return self.json({'object': {'sha': self.head}})
             if route.startswith('git/trees/'):
                 entries = []
@@ -336,7 +365,7 @@ class DeliveryTests(unittest.TestCase):
             path.chmod(path.stat().st_mode & 0o777 & ~0o022)
         (self.repo/'.git').chmod(0o700)
         (self.repo/'.git/config').chmod(0o600)
-        self.policy = dict(github_repository_id=123456, approved_reviewers={'independent-reviewer': 9876}, state_root=self.t.config['state_root'], journal_root=str(self.root/'journal'),
+        self.policy = dict(github_repository_id=1303872993, approved_reviewers={'independent-reviewer': 9876}, state_root=self.t.config['state_root'], journal_root=str(self.root/'journal'),
             receipt_root=str(self.root/'receipts'), owner_config=self.t.config, source_mirror=str(self.repo/'.git'),
             environment_policy=self.t.f.p, runtime_seal=seal(self.runtime_path), daemon_id='synthetic-daemon',
             runtime_identities={name: executor.inventory.runtime_identity(v) for name, v in self.process.live.items()},
@@ -384,6 +413,17 @@ class DeliveryTests(unittest.TestCase):
     def assert_no_publication_authority(self):
         self.assertFalse(any(method in ('POST', 'PUT') or 'pull%2Cpush' in url
                              for url, method in self.providers.calls))
+
+    def use_solo_policy(self):
+        self.policy.update(repository=oci.REPOSITORY, branch='develop', project_ref=executor.DEV_PROJECT,
+            approved_reviewers={}, release_authorization=dict(mode=verifier.SOLO_OWNER,
+                owner=copy.deepcopy(self.providers.owner), required_checks=copy.deepcopy(self.providers.required_checks)))
+        self.providers.reviews = []
+        self.sync_policy()
+
+    def sync_policy(self):
+        self.policy_raw = encoded(self.policy)
+        self.instance.policy_raw = self.policy_raw
 
     def test_public_package_anonymous_token_manifest_read_rejected_before_publication(self):
         self.providers.anonymous_token_status = 200
@@ -797,6 +837,330 @@ class DeliveryTests(unittest.TestCase):
         self.providers.remote['manifests/latest'] = b'changed mutable tag'
         self.assertEqual(self.run_release()['state'], 'deployed')
         self.assertFalse(any('latest' in url for url, _ in self.providers.calls))
+
+    def test_sole_author_owner_merge_with_ci_accepts_private_versioned_authorization(self):
+        self.use_solo_policy()
+        self.providers.calls.clear(); self.providers.authorized_calls.clear()
+        self.assertEqual(self.providers.pull['user'], self.providers.pull['merged_by'])
+        self.assertEqual(self.run_release()['state'], 'deployed')
+        intent = read_private(next((self.root/'journal').glob('*.intent.json')))
+        auth = intent['proof']['release_authorization']
+        self.assertEqual(auth, dict(kind='moneybowl-release-authorization-v1', schema_version=1,
+            mode=verifier.SOLO_OWNER, repository=oci.REPOSITORY, repository_id=1303872993,
+            owner=self.providers.owner, pull_request_id=9001, pull_request_number=42, base='develop',
+            head_ref='feature/synthetic', head_sha='e'*40, merge_commit_sha=self.sha,
+            merged_at=self.providers.pull['merged_at'], merged_by=self.providers.owner))
+        receipt = read_private(self.root/'receipts'/(self.sha+'.json'))
+        self.assertNotIn('release_authorization', receipt)
+        self.assertNotIn('APPROVED', json.dumps(auth))
+        self.assertEqual(self.process.activations, 1)
+        self.assert_no_publication_authority()
+        self.assertTrue(all(h.get('Authorization') == 'Bearer synthetic-read-token'
+            for url, _, h in self.providers.authorized_calls if '/repos/' in url))
+
+    def test_solo_different_merger_same_login_wrong_id_and_non_numeric_id_rejected(self):
+        self.use_solo_policy()
+        for merger in [dict(login='other-owner', id=306140954), dict(login='sharanravi954mf', id=99),
+                       dict(login='sharanravi954mf', id='306140954'), {}, None]:
+            self.providers.pull['merged_by'] = merger
+            with self.subTest(merger=merger), self.assertRaisesRegex(Rejected, 'owner_merge_required'):
+                self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_summary_merged_by_and_author_cannot_forge_full_record(self):
+        self.use_solo_policy()
+        self.providers.pulls[0]['merged_by'] = self.providers.owner
+        self.providers.pull['merged_by'] = dict(login='other-owner', id=99)
+        with self.assertRaisesRegex(Rejected, 'owner_merge_required'): self.run_release()
+        self.providers.pull['merged_by'] = None
+        self.providers.reviews = [dict(user=self.providers.owner, state='COMMENTED', body='I approved the merge')]
+        with self.assertRaisesRegex(Rejected, 'owner_merge_required'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_repository_and_owner_numeric_pins_checked_on_all_records(self):
+        self.use_solo_policy()
+        for repo in [self.providers.repository, self.providers.pull['base']['repo'],
+                     self.providers.pull['head']['repo'], self.providers.pulls[0]['base']['repo'],
+                     self.providers.pulls[0]['head']['repo']]:
+            for key, bad in [('id', 99), ('full_name', 'other/repo'), ('fork', True),
+                             ('owner', dict(login='sharanravi954mf', id=99)),
+                             ('owner', dict(login='other', id=306140954))]:
+                old = repo[key]; repo[key] = bad
+                with self.subTest(key=key), self.assertRaisesRegex(Rejected, 'identity_changed|reviewed_merge_required'):
+                    self.run_release()
+                repo[key] = old
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_pr_must_be_merged_closed_and_exact_authoritative_head(self):
+        self.use_solo_policy()
+        for field, value in [('merged', False), ('merged', 'true'), ('state', 'open'), ('number', 43),
+                             ('merge_commit_sha', 'b'*40), ('merged_at', None)]:
+            old = self.providers.pull[field]; self.providers.pull[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(Rejected, 'pull_identity_invalid'):
+                self.run_release()
+            self.providers.pull[field] = old
+        for side, field, value in [('head', 'sha', 'b'*40), ('head', 'ref', 'main'), ('base', 'ref', 'qa')]:
+            old = self.providers.pull[side][field]; self.providers.pull[side][field] = value
+            with self.subTest(side=side, field=field), self.assertRaisesRegex(Rejected, 'pull_identity_invalid'):
+                self.run_release()
+            self.providers.pull[side][field] = old
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_absent_ambiguous_pr_direct_push_fork_and_arbitrary_branch_rejected(self):
+        self.use_solo_policy()
+        original = copy.deepcopy(self.providers.pulls)
+        cases = [[], original*2, original*100]
+        for side, field, bad in [('head', 'ref', 'fix/arbitrary'), ('base', 'ref', 'main')]:
+            pulls = copy.deepcopy(original); pulls[0][side][field] = bad; cases.append(pulls)
+        pulls = copy.deepcopy(original); pulls[0]['head']['repo']['full_name'] = 'fork/Mutual_Fund_Portfolio_App'; cases.append(pulls)
+        pulls = copy.deepcopy(original); pulls[0]['merged_at'] = None; cases.append(pulls)
+        pulls = copy.deepcopy(original); pulls[0]['merge_commit_sha'] = 'b'*40; cases.append(pulls)
+        for pulls in cases:
+            self.providers.pulls = pulls
+            with self.subTest(count=len(pulls)), self.assertRaises(Rejected): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_merge_parent_rejects_squash_wrong_head_and_unrelated_commit(self):
+        self.use_solo_policy()
+        for parents in [[], [{'sha': 'e'*40}], [{'sha': 'a'*40}, {'sha': 'b'*40}], [{'sha': 'e'*40}]*3]:
+            self.providers.commit['parents'] = parents
+            with self.subTest(parents=parents), self.assertRaisesRegex(Rejected, 'merge_parent_mismatch'):
+                self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_absent_or_unreadable_governance_or_authoritative_identity_fails_closed(self):
+        self.use_solo_policy()
+        for route in ['', 'pulls/42', 'branches/develop/protection', 'rules/branches/develop?per_page=100',
+                      'git/commits/'+self.sha, 'pulls/42/reviews?per_page=100']:
+            self.providers.unavailable_routes = {route}
+            with self.subTest(route=route), self.assertRaises(oci.Invalid): self.run_release()
+        self.providers.unavailable_routes.clear()
+        self.providers.protection = None
+        with self.assertRaisesRegex(Rejected, 'governance_unverifiable'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_governance_bypass_force_push_review_conflict_and_unpinned_checks_reject(self):
+        self.use_solo_policy()
+        original = copy.deepcopy(self.providers.protection)
+        cases = []
+        for key in ('enforce_admins', 'allow_force_pushes', 'allow_deletions', 'required_conversation_resolution'):
+            p = copy.deepcopy(original); p[key]['enabled'] = not p[key]['enabled']; cases.append(p)
+        for key, value in [('required_approving_review_count', 1), ('require_code_owner_reviews', True),
+                           ('require_last_push_approval', True), ('bypass_pull_request_allowances', {'users': [self.providers.owner]})]:
+            p = copy.deepcopy(original); p['required_pull_request_reviews'][key] = value; cases.append(p)
+        for key, value in [('strict', False), ('checks', []), ('checks', [{'context': 'M4 Required CI', 'app_id': -1}]),
+                           ('contexts', []), ('contexts', ['M4 Required CI', 'unreviewed check'])]:
+            p = copy.deepcopy(original); p['required_status_checks'][key] = value; cases.append(p)
+        for protection in cases:
+            self.providers.protection = protection
+            with self.subTest(protection=protection), self.assertRaises(Rejected): self.run_release()
+        self.providers.protection = original
+        self.providers.rules = [{'type': 'pull_request', 'parameters': {'required_approving_review_count': 2}}]
+        with self.assertRaisesRegex(Rejected, 'rules_unsupported'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_failed_missing_or_wrong_source_app_and_attempt_ci_reject(self):
+        self.use_solo_policy()
+        original = copy.deepcopy(self.providers.checks)
+        for field, value in [('conclusion', 'failure'), ('conclusion', 'skipped'), ('status', 'queued'),
+                             ('head_sha', 'b'*40), ('app', {'id': 99}), ('id', 99)]:
+            self.providers.checks = copy.deepcopy(original)
+            self.providers.checks['check_runs'][0][field] = value
+            with self.subTest(field=field), self.assertRaises(Rejected): self.run_release()
+        for items in [[], original['check_runs']*2]:
+            self.providers.checks = dict(total_count=len(items), check_runs=items)
+            with self.assertRaises(Rejected): self.run_release()
+        self.providers.checks = original
+        for job in self.providers.jobs['jobs']:
+            job['conclusion'] = 'failure'
+            with self.assertRaises(oci.Invalid): self.run_release()
+            job['conclusion'] = 'success'
+        self.providers.jobs['jobs'].pop(); self.providers.jobs['total_count'] -= 1
+        with self.assertRaises(oci.Invalid): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_additional_root_pinned_check_is_required_at_exact_release_source(self):
+        self.use_solo_policy()
+        extra = dict(context='validate-docs', app_id=15368)
+        self.policy['release_authorization']['required_checks'].append(extra)
+        self.providers.protection['required_status_checks']['checks'].append(copy.deepcopy(extra))
+        self.providers.protection['required_status_checks']['checks'].reverse()
+        self.providers.protection['required_status_checks']['contexts'].append('validate-docs')
+        self.sync_policy()
+        with self.assertRaisesRegex(Rejected, 'check_missing'): self.run_release()
+        self.providers.checks['check_runs'].append(dict(id=7002, name='validate-docs', head_sha=self.sha,
+            status='completed', conclusion='success', app={'id': 15368}))
+        self.providers.checks['total_count'] = 2
+        self.assertEqual(self.run_release()['state'], 'deployed')
+
+    def test_solo_active_changes_requested_review_blocks_and_comments_never_authorize(self):
+        self.use_solo_policy()
+        self.providers.reviews = [dict(user={'login': 'reviewer', 'id': 5}, state='CHANGES_REQUESTED',
+            commit_id='e'*40), dict(user={'login': 'reviewer', 'id': 5}, state='COMMENTED', body='looks good')]
+        with self.assertRaisesRegex(Rejected, 'contradictory_review'): self.run_release()
+        self.providers.reviews = []
+        self.assertEqual(self.run_release()['state'], 'deployed')
+
+    def test_solo_requires_authenticated_provider_reads(self):
+        self.use_solo_policy(); self.verifier.token = ''
+        with self.assertRaisesRegex(Rejected, 'authenticated_reads_required'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_stale_source_and_changed_source_policy_still_reject(self):
+        self.use_solo_policy()
+        self.providers.head = 'b'*40
+        self.assertEqual(self.run_release()['state'], 'superseded')
+        self.providers.head = self.sha
+        self.policy['infrastructure_source_sha256'][oci.WORKFLOW] = '0'*64
+        self.sync_policy()
+        with self.assertRaisesRegex(Rejected, 'policy_change_requires_review'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_rechecks_ci_during_pull_before_activation(self):
+        self.use_solo_policy()
+        self.process.during_pull = lambda _: self.providers.checks['check_runs'][0].update(conclusion='failure')
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+
+    def test_solo_governance_change_during_pull_never_activates(self):
+        self.use_solo_policy()
+        self.process.during_pull = lambda _: self.providers.protection['enforce_admins'].update(enabled=False)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_merge_identity_change_during_pull_never_activates(self):
+        self.use_solo_policy()
+        self.process.during_pull = lambda _: self.providers.pull.update(merged_by=dict(login='other', id=5))
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+
+    def test_solo_policy_change_during_operation_never_activates(self):
+        self.use_solo_policy()
+        self.process.during_pull = lambda _: setattr(self.instance, 'authority',
+            lambda: ({**self.policy, 'release_authorization': {'mode': verifier.INDEPENDENT}}, b'changed'))
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_repeated_expired_artifact_receipt_refresh_authenticates_same_event_once(self):
+        self.use_solo_policy()
+        self.run_release()
+        intent_path = next((self.root/'journal').glob('*.intent.json'))
+        original = intent_path.read_bytes()
+        self.providers.artifact_expired = self.providers.artifact_removed = True
+        self.providers.calls.clear()
+        for days in (31, 32, 33):
+            later = NOW+days*24*60*60
+            self.instance.clock = self.verifier.clock = lambda: later
+            self.assertEqual(self.run_release()['state'], 'already_deployed')
+            renewal_paths = list((self.root/'journal').glob('*.renewal.*.intent.json'))
+            self.assertEqual(len(renewal_paths), days-30)
+            renewal = read_private(renewal_paths[-1])
+            auth = read_private(intent_path)['proof']['release_authorization']
+            self.assertEqual(renewal['release_authorization_sha256'], executor.sha256(encoded(auth)))
+        self.assertEqual(intent_path.read_bytes(), original)
+        self.assertFalse(any('/artifacts?' in url for url, _ in self.providers.calls))
+        self.assertTrue(any(url.endswith('/pulls/42') for url, _ in self.providers.calls))
+        self.assertEqual(sum('attestation' in call for call in self.process.calls), 4)
+        self.assertEqual(sum('pull' in call for call in self.process.calls), 1)
+        self.assertEqual(self.process.activations, 1)
+
+    def test_solo_renewal_rejects_changed_owner_merge_event_without_refresh(self):
+        self.use_solo_policy(); self.run_release()
+        old = (self.root/'receipts'/(self.sha+'.json')).read_bytes()
+        self.instance.clock = lambda: NOW+60
+        self.providers.pull['merged_at'] = self.providers.pulls[0]['merged_at'] = '2026-10-14T00:01:00Z'
+        with self.assertRaisesRegex(Rejected, 'acceptance_authorization_changed'): self.run_release()
+        self.assertEqual((self.root/'receipts'/(self.sha+'.json')).read_bytes(), old)
+        self.assertEqual(self.process.activations, 1)
+
+    def test_solo_rehashed_local_acceptance_cannot_forge_owner_merge_authorization(self):
+        self.use_solo_policy(); self.run_release()
+        intent_path = next((self.root/'journal').glob('*.intent.json'))
+        complete_path = Path(str(intent_path).replace('.intent.json', '.complete.json'))
+        intent = read_private(intent_path); complete = read_private(complete_path)
+        intent['proof']['release_authorization']['merged_at'] = '2026-10-14T00:01:00Z'
+        complete['intent_sha256'] = executor.sha256(encoded(intent))
+        publish(intent_path, intent); publish(complete_path, complete)
+        with self.assertRaisesRegex(Rejected, 'acceptance_authorization_changed'): self.run_release()
+        self.assertEqual(self.process.activations, 1)
+
+    def test_solo_renewal_rejects_policy_replacement_even_with_valid_independent_review(self):
+        self.use_solo_policy(); self.run_release()
+        self.policy['release_authorization'] = {'mode': verifier.INDEPENDENT}
+        self.policy['approved_reviewers'] = {'independent-reviewer': 9876}
+        self.providers.reviews = [dict(user={'login': 'independent-reviewer', 'id': 9876},
+                                      state='APPROVED', commit_id='e'*40)]
+        self.sync_policy()
+        with self.assertRaisesRegex(Rejected, 'acceptance_policy_changed'): self.run_release()
+        self.assertEqual(self.process.activations, 1)
+
+    def test_solo_removing_mode_cannot_fall_back_to_self_approval(self):
+        self.use_solo_policy(); del self.policy['release_authorization']; self.sync_policy()
+        self.providers.reviews = [dict(user=self.providers.owner, state='APPROVED', commit_id='e'*40)]
+        with self.assertRaisesRegex(Rejected, 'source_review_policy_invalid'): self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_default_and_explicit_independent_modes_still_require_real_pinned_review(self):
+        for mode in (None, {'mode': verifier.INDEPENDENT}):
+            if mode is not None: self.policy['release_authorization'] = mode
+            self.sync_policy()
+            for reviews in ([], [dict(user=self.providers.owner, state='APPROVED', commit_id='e'*40)],
+                            [dict(user={'login': 'independent-reviewer', 'id': 99}, state='APPROVED', commit_id='e'*40)],
+                            [dict(user={'login': 'independent-reviewer', 'id': 9876}, state='APPROVED', commit_id='b'*40)],
+                            [dict(user={'login': 'independent-reviewer', 'id': 9876}, state='COMMENTED', commit_id='e'*40)]):
+                self.providers.reviews = reviews
+                with self.subTest(mode=mode, reviews=reviews), self.assertRaisesRegex(Rejected, 'independent_review'):
+                    self.run_release()
+        self.assertEqual(self.process.activations, 0)
+
+    def test_solo_forged_renewal_authorization_hash_quarantines(self):
+        self.use_solo_policy(); self.run_release()
+        self.instance.clock = lambda: NOW+60
+        self.run_release()
+        path = next((self.root/'journal').glob('*.renewal.*.intent.json'))
+        renewal = read_private(path); renewal['release_authorization_sha256'] = '0'*64
+        publish(path, renewal)
+        publish(Path(str(path).replace('.intent.json', '.complete.json')),
+                {'renewal_sha256': executor.sha256(encoded(renewal))})
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_release()
+        self.assertEqual(self.process.activations, 1)
+
+
+class AuthorizationPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = dict(repository=oci.REPOSITORY, github_repository_id=1303872993,
+            branch='develop', project_ref=executor.DEV_PROJECT, approved_reviewers={},
+            release_authorization=dict(mode=verifier.SOLO_OWNER, owner=dict(login='sharanravi954mf', id=306140954),
+                required_checks=[dict(context='M4 Required CI', app_id=15368)]))
+
+    def test_malformed_unknown_and_missing_new_mode_fail_closed(self):
+        for config in (None, {}, [], 'solo-owner-protected-merge-v1', {'mode': None}, {'mode': 'solo-owner'},
+                       {'mode': verifier.SOLO_OWNER}, {'mode': verifier.INDEPENDENT, 'owner': self.policy['release_authorization']['owner']}):
+            with self.subTest(config=config), self.assertRaises(Rejected):
+                executor.authorization_policy({**self.policy, 'release_authorization': config})
+
+    def test_solo_rejects_multi_review_policy_and_malformed_identity_or_checks(self):
+        for edit in [lambda p: p.update(approved_reviewers={'other-reviewer': 1}),
+                     lambda p: p.update(branch='qa'), lambda p: p.update(project_ref='other'),
+                     lambda p: p.update(github_repository_id=True),
+                     lambda p: p['release_authorization']['owner'].update(id=True),
+                     lambda p: p['release_authorization']['owner'].update(login='other'),
+                     lambda p: p['release_authorization'].update(required_checks=[]),
+                     lambda p: p['release_authorization']['required_checks'][0].update(app_id=-1),
+                     lambda p: p['release_authorization']['required_checks'][0].update(context='unrelated'),
+                     lambda p: p['release_authorization']['required_checks'].append(p['release_authorization']['required_checks'][0])]:
+            policy = copy.deepcopy(self.policy); edit(policy)
+            with self.subTest(policy=policy), self.assertRaises(Rejected): executor.authorization_policy(policy)
+
+    def test_legacy_missing_mode_is_independent_and_cannot_enable_solo(self):
+        del self.policy['release_authorization']
+        with self.assertRaises(Rejected): executor.authorization_policy(self.policy)
+        self.policy['approved_reviewers'] = {'independent-reviewer': 9876}
+        with patch.dict(os.environ, {'M4_RELEASE_AUTHORIZATION_MODE': verifier.SOLO_OWNER,
+                                    'GITHUB_OWNER_ID': '306140954'}):
+            self.assertEqual(executor.authorization_policy(self.policy), {'mode': verifier.INDEPENDENT})
 
 
 class OciTests(unittest.TestCase):
