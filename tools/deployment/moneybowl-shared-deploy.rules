@@ -1,0 +1,9 @@
+// Install only after independent review of account UID 993:GID 983 and the sealed unit.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "moneybowl-api-deploy.service" &&
+        action.lookup("verb") == "start" &&
+        subject.user == "moneybowl-ingestion-deploy") {
+        return polkit.Result.YES;
+    }
+});

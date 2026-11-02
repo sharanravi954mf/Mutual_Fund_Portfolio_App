@@ -80,12 +80,13 @@ def sync_directory(path):
 
 
 @contextlib.contextmanager
-def deployment_lock(root):
+def deployment_lock(root, *, existing=False):
     root = protected(root, directory=True)
     path = root / '.owner.lock'  # The regular ingestion owner uses this same inode.
     if path.exists() or path.is_symlink():
         protected(path)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    flags = os.O_RDWR | os.O_NOFOLLOW
+    fd = os.open(path, flags if existing else flags | os.O_CREAT, 0o600)
     try:
         require(os.fstat(fd).st_nlink == 1, 'protected_permissions_invalid')
         try:

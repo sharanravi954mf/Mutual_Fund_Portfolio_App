@@ -210,10 +210,11 @@ def source_digest(sha, token, transport=http):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def run_identity(run, sha, run_id, attempt):
+def run_identity(run, sha, run_id, attempt, branch='develop'):
     need(type(run_id) is int and run_id > 0 and type(attempt) is int and attempt > 0
          and run.get('id') == run_id and run.get('run_attempt') == attempt
-         and run.get('event') == 'push' and run.get('head_branch') == 'develop'
+         and run.get('event') == 'push' and run.get('head_branch') == branch
+             and run.get('head_branch') in ('develop', 'qa', 'main')
          and run.get('head_sha') == sha and run.get('path') == WORKFLOW
          and run.get('repository', {}).get('full_name') == REPOSITORY
          and run.get('head_repository', {}).get('full_name') == REPOSITORY
@@ -224,7 +225,7 @@ def completed_jobs(value, names):
     need(type(value) is dict and type(value.get('jobs')) is list and value.get('total_count') == len(value['jobs'])
          and len(value['jobs']) <= 100, 'github_jobs_incomplete')
     for name, label in names.items():
-        jobs = [j for j in value['jobs'] if j.get('name') == name]
+        jobs = [j for j in value['jobs'] if j.get('name', '').rsplit(' / ', 1)[-1] == name]
         need(len(jobs) == 1 and jobs[0].get('status') == 'completed' and jobs[0].get('conclusion') == 'success'
              and label in jobs[0].get('labels', []), 'github_required_job')
 
@@ -275,10 +276,10 @@ def private_package(manifest_digest, token, transport):
          'publication_package_not_private')
 
 
-def publish(archive, sha, run_id, attempt, token, transport=http):
+def publish(archive, sha, run_id, attempt, token, transport=http, branch='develop'):
     need(os.environ.get('M4_IMAGE_PUBLICATION_ENABLED') == 'owner-approved-v1', 'publication_disabled')
     run = github(f'actions/runs/{run_id}/attempts/{attempt}', token, transport)
-    run_identity(run, sha, run_id, attempt)
+    run_identity(run, sha, run_id, attempt, branch)
     completed_jobs(github(f'actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100', token, transport),
                    {'M4 Required CI': 'ubuntu-latest', 'M4 Isolated ARM64 Build': 'ubuntu-24.04-arm'})
     component = source_digest(sha, token, transport)
@@ -314,15 +315,18 @@ def publish(archive, sha, run_id, attempt, token, transport=http):
     need(status == 201, 'publication_manifest_write')
     status, _, remote = transport(base + 'manifests/' + proof['manifest_digest'], {**headers, 'Accept': MANIFEST})
     need(status == 200 and remote == raw, 'publication_remote_digest')
+    status, _, _ = transport(base + 'manifests/component-' + component,
+                             {**headers, 'Content-Type': MANIFEST}, 'PUT', raw)
+    need(status == 201, 'publication_component_tag_failed')
     return {**proof, 'repository': REPOSITORY, 'workflow': WORKFLOW, 'event': 'push',
-            'ref': 'refs/heads/develop', 'run_id': run_id, 'run_attempt': attempt,
+            'ref': 'refs/heads/' + branch, 'run_id': run_id, 'run_attempt': attempt,
             'archive_digest': digest(Path(archive).read_bytes()), 'builder': 'github-hosted/ubuntu-24.04-arm'}
 
 
 def main():
     # No arguments/dispatch-selected SHA. Platform context and owner gate only.
     proof = publish('incoming/api.oci.tar', os.environ['GITHUB_SHA'], int(os.environ['GITHUB_RUN_ID']),
-                    int(os.environ['GITHUB_RUN_ATTEMPT']), os.environ['GH_TOKEN'])
+                    int(os.environ['GITHUB_RUN_ATTEMPT']), os.environ['GH_TOKEN'], branch=os.environ['GITHUB_REF_NAME'])
     Path('predicate.json').write_text(json.dumps(proof, sort_keys=True) + '\n')
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
         out.write('digest=' + proof['manifest_digest'] + '\n')

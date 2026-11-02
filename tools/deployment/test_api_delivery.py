@@ -181,7 +181,11 @@ class Providers:
             self.remote['blobs/' + digest] = data
             return 201, {}, b''
         if method == 'PUT' and route.startswith('manifests/'):
-            self.f.assertEqual(oci.digest(data), route.split('/', 1)[1])
+            if route.split('/', 1)[1].startswith('component-'):
+                self.f.assertEqual(route.split('/', 1)[1], 'component-' + oci.source_digest(self.sha, 'synthetic-token', self.http))
+                self.f.assertIn('manifests/' + oci.digest(data), self.remote)
+            else:
+                self.f.assertEqual(oci.digest(data), route.split('/', 1)[1])
             self.remote[route] = data
             return 201, {}, b''
         if route in self.remote: return 200, {}, b'' if method == 'HEAD' else self.remote[route]
@@ -1319,13 +1323,14 @@ class RuntimeTests(unittest.TestCase):
 class WorkflowTests(unittest.TestCase):
     def test_embedded_publisher_is_exact_reviewed_source_and_syntax(self):
         root = Path(__file__).resolve().parents[2]
-        workflow = (root/'.github/workflows/environment-promotion.yml').read_text()
+        workflow = (root/'.github/workflows/shared-release.yml').read_text()
+        caller = (root/'.github/workflows/environment-promotion.yml').read_text()
         body = workflow.split("          python3 -I -B - <<'PY_PUBLISHER'\n", 1)[1].split('          PY_PUBLISHER\n', 1)[0]
         actual = ''.join(line[10:]+'\n' for line in body.splitlines())
         self.assertEqual(actual, (root/'tools/deployment/oci_delivery.py').read_text())
         compile(actual, 'embedded-publisher', 'exec')
         build = workflow.split('  api-build:\n', 1)[1].split('  api-publish:\n', 1)[0]
-        publisher = workflow.split('  api-publish:\n', 1)[1].split('  release:\n', 1)[0]
+        publisher = workflow.split('  api-publish:\n', 1)[1].split('  flutter-artifact:\n', 1)[0]
         self.assertIn('runs-on: ubuntu-24.04-arm', build)
         self.assertIn('permissions:\n      contents: read\n    steps:', build)
         self.assertNotIn('packages: write', build)
@@ -1333,17 +1338,17 @@ class WorkflowTests(unittest.TestCase):
         for name in ('contents: read', 'actions: read', 'packages: write', 'attestations: write', 'id-token: write'):
             self.assertIn('      '+name, publisher)
         for section in (build, publisher):
-            self.assertIn("vars.M4_IMAGE_PUBLICATION_ENABLED == 'owner-approved-v1'", section)
+            self.assertIn("needs.prepare.outputs.enabled == 'true'", section)
             self.assertIn("github.event_name == 'push'", section)
-            self.assertIn("github.ref == 'refs/heads/develop'", section)
             for reference in re.findall(r'^      - uses: (\S+)', section, re.M):
                 self.assertRegex(reference, r'^[a-zA-Z0-9_./-]+@[0-9a-f]{40}$')
         self.assertNotIn('uses: actions/checkout', publisher)
         self.assertNotIn('run: python3 tools/', publisher)
         self.assertNotIn('secrets.', publisher)
-        self.assertNotIn('docker login', publisher)
-        self.assertIn('needs: [contracts, flutter, backend]', workflow)
-        self.assertIn('needs: validated', workflow.split('  release:', 1)[1])
+        self.assertIn('docker login ghcr.io', publisher)
+        self.assertIn('push-to-registry: true', publisher)
+        self.assertIn('needs: [contracts, flutter, backend]', caller)
+        self.assertIn('needs: validated', caller.split('  release:', 1)[1])
 
 
 if __name__ == '__main__':

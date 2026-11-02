@@ -39,12 +39,14 @@ def git(repo, *args):
 
 
 def target(environment, policy):
-    require(environment in ('dev', 'qa'), 'invalid_environment')
+    require(environment in ('dev', 'qa', 'prod'), 'invalid_environment')
     p = policy[environment]
-    require(p['branch'] == {'dev': 'develop', 'qa': 'qa'}[environment], 'invalid_branch_binding')
+    require(p['branch'] == {'dev': 'develop', 'qa': 'qa', 'prod': 'main'}[environment], 'invalid_branch_binding')
     project = p['project_ref']
     require(isinstance(project, str) and re.fullmatch(r'[a-z]{20}', project), 'invalid_project')
     require((environment == 'dev') == (project == DEV_PROJECT), 'wrong_project_binding')
+    require(all(other == environment or not value.get('project_ref') or value['project_ref'] != project
+                for other, value in policy.items()), 'cross_environment_project_reuse')
     require(p['financial_policy'] == ('preserve' if environment == 'dev' else 'disabled'), 'financial_policy_invalid')
     require(p['nse_origin'] == ('https://nseinvestuat.nseindia.com' if environment == 'dev' else 'https://www.nseinvest.com'), 'wrong_nse_origin')
     return p
@@ -105,12 +107,13 @@ def immutable_history(repo, base, head):
 def promotion(repo, event):
     pr = event['pull_request']
     base, head = pr['base'], pr['head']
-    require(base['ref'] in ('develop', 'qa'), 'invalid_pr_target')
+    require(base['ref'] in ('develop', 'qa', 'main'), 'invalid_pr_target')
     revision(base['sha']); revision(head['sha'])
     require(head['repo']['full_name'] == REPOSITORY, 'untrusted_pr_source')
-    if base['ref'] == 'qa':
-        require(head['ref'] == 'develop', 'qa_requires_develop')
-        git(repo, 'merge-base', '--is-ancestor', head['sha'], 'origin/develop')
+    if base['ref'] in ('qa', 'main'):
+        required = 'develop' if base['ref'] == 'qa' else 'qa'
+        require(head['ref'] == required, 'promotion_requires_previous_environment')
+        git(repo, 'merge-base', '--is-ancestor', head['sha'], 'origin/' + required)
         require(not git(repo, 'diff', head['sha'], 'HEAD', '--'), 'qa_merge_tree_differs')
     else:
         require(head['ref'].startswith('feature/'), 'develop_requires_feature')

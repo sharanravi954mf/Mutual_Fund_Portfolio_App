@@ -57,3 +57,5 @@ Carried over issues: #39, #40, #49.
 - [ ] **fix(ingestion): accept the Hosted Edge OAuth callback across the gateway boundary by validating only the configured public `/functions/v1/<function-name>/oauth/callback` pathname and its deterministically derived gateway-stripped runtime pathname, while preserving the configured external redirect URI for state binding, authorization, and code exchange without trusting caller-controlled host headers** (#119)
 
 - **Issue #95** — security follow-up discovered on 8 August 2026 after Sprint 6.1 closure. The Buy/Sell/Switch order workflow was found to directly access protected folio mapping/reference tables. The issue is tracked for implementation in Sprint 8.1 and is not counted as incomplete original Sprint 6.1 scope. Related: Issue #34 / PR #88, Issue #89 / PR #90, PR #94.
+
+- [ ] **feat(deployment): implement shared protected-merge DEV/QA/Production release workflow, restricted one-shot API host adapter and regression tests; source review only, installation and real DEV acceptance remain pending** (#218)

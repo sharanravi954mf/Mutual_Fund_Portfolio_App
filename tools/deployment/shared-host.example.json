@@ -1,0 +1,41 @@
+{
+  "kind": "moneybowl-shared-host-v1",
+  "commissioned": false,
+  "environment": "dev",
+  "runtime_environment": "DEV",
+  "branch": "develop",
+  "project_ref": "rskryngwzyuzmiwtriyy",
+  "image_repository": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev",
+  "compose_project": "moneybowl-ingestion-support",
+  "supabase_owner": "existing-github-integration",
+  "state_root": "/var/lib/moneybowl-m4-initial-dev/state",
+  "journal_root": "/var/lib/moneybowl-shared-deploy/dev",
+  "docker_config": "/etc/moneybowl-deployment/registry-pull",
+  "installed_source": null,
+  "machine_id": null,
+  "machine_id_seal": null,
+  "initial_owner_config_seal": null,
+  "runtime_seal": null,
+  "trusted_root_seal": null,
+  "baseline_image": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev@sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
+  "baseline_api_id": "b96f19b784ab2d22eb6bad0a39a08d370378313324892b606e2ef38c9b6bcba2",
+  "baseline_image_id": "sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
+  "daemon_id": null,
+  "api_runtime_identity": null,
+  "api_limits": null,
+  "unrelated": {},
+  "code_seals": [],
+  "protected_seals": [],
+  "executables": {},
+  "environment_projects": {
+    "dev": "rskryngwzyuzmiwtriyy",
+    "qa": null,
+    "production": null
+  },
+  "infrastructure_pins": {
+    "services/ingestion-support/compose.yaml": null,
+    "services/ingestion-support/compose.hosted.yaml": null,
+    "services/ingestion-support/Caddyfile": null
+  },
+  "docker_data_root": null
+}
