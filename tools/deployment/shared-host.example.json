@@ -26,6 +26,8 @@
   "unrelated": {},
   "code_seals": [],
   "protected_seals": [],
+  "private_inputs": [],
+  "public_bind_files": [],
   "executables": {},
   "environment_projects": {
     "dev": "rskryngwzyuzmiwtriyy",

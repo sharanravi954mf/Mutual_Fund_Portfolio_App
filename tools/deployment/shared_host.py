@@ -17,7 +17,7 @@ from api_executor import sealed_read, sealed_memfd, runtime_model
 from compose_inventory import capacity, runtime_identity
 from contract import DEV_PROJECT, REPOSITORY, Rejected, require, revision
 from ingestion_owner import API_COMMAND, DockerOwner
-from initial_private_inputs import file_digest, identity, no_acl, signature, trusted_path
+from initial_private_inputs import binding, bind_mounts, file_digest, identity, no_acl, signature, trusted_path
 from protected_io import deployment_lock, publish, root_controlled
 from shared_contract import IMAGE, INFRASTRUCTURE, WORKFLOW, decoded, encoded, request, target
 
@@ -32,6 +32,38 @@ def executable(seal):
     require(info.st_uid == 0 and not info.st_mode & 0o022 and info.st_mode & 0o111
             and identity(info) == seal['identity'] and file_digest(path, info) == seal['sha256'],
             'shared_host_executable_changed')
+
+
+def verified_subject(raw, expected):
+    results = decoded(raw)
+    require(type(results) is list and 0 < len(results) <= 10, 'shared_host_attestation_missing')
+    require(any(type(row) is dict and row.get('verificationResult', {}).get('signature')
+                and any(subject.get('digest', {}).get('sha256') == expected
+                        for subject in row['verificationResult'].get('statement', {}).get('subject', []))
+                for row in results), 'shared_host_attestation_subject_mismatch')
+
+
+def public_relationship(item):
+    """An explicitly approved public bind file may have existing non-root ancestry.
+
+    Preserve its exact inode/owner/mode and bytes through a checked descriptor.
+    Never treat this as authority for private/group-readable runtime secrets.
+    """
+    path = Path(item['path'])
+    require(path.is_absolute() and path.resolve() == path, 'shared_host_bind_path_invalid')
+    before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and not before.st_mode & 0o022
+            and identity(before) == item['identity'], 'shared_host_bind_identity_changed')
+    no_acl(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        require(signature(os.fstat(fd)) == signature(before), 'shared_host_bind_identity_changed')
+        raw = os.read(fd, 2 * 1024 * 1024 + 1)
+        require(len(raw) <= 2 * 1024 * 1024 and hashlib.sha256(raw).hexdigest() == item['sha256']
+                and signature(os.fstat(fd)) == signature(before)
+                and signature(path.lstat()) == signature(before), 'shared_host_bind_content_changed')
+    finally:
+        os.close(fd)
 
 
 def policy(config):
@@ -76,6 +108,16 @@ def policy(config):
         required_seals.add(config['initial_owner_config_seal']['path'])
     require(required_seals <= {v['path'] for v in config.get('protected_seals', [])}
             and config.get('code_seals'), 'shared_host_input_seals_missing')
+    require(type(config.get('private_inputs')) is list and type(config.get('public_bind_files')) is list,
+            'shared_host_mount_policy_missing')
+    if t['environment'] == 'dev':
+        from compose_inventory import DEV_ARTIFACTS
+        require(set(DEV_ARTIFACTS) <= {v['path'] for v in config['public_bind_files']}
+                and {'m3b-webhook-v1', 'github-webhook-v1'} <= {v.get('policy') for v in config['private_inputs']},
+                'shared_host_dev_mount_policy_missing')
+    else:
+        require(all(v.get('policy') == 'root-private' for v in config['private_inputs']),
+                'shared_host_dev_secret_policy_in_other_environment')
     return t
 
 
@@ -149,6 +191,10 @@ class Engine:
             sealed_read(seal, public_code=True)
         for seal in self.config['protected_seals']:
             sealed_read(seal)
+        for item in self.config['private_inputs']:
+            binding(item)
+        for item in self.config['public_bind_files']:
+            public_relationship(item)
         for seal in self.config['executables'].values():
             executable(seal)
         if self.config['environment'] == 'dev':
@@ -178,11 +224,13 @@ class Engine:
         # Local-bundle verification consumes no Oracle GitHub repository token.
         with sealed_memfd(encoded(value)) as document, sealed_memfd(encoded(bundle)) as signature:
             prefix = '/proc/' + str(os.getpid()) + '/fd/'
-            self.command([gh, 'attestation', 'verify', prefix + str(document), '--bundle', prefix + str(signature),
+            raw = self.command([gh, 'attestation', 'verify', prefix + str(document), '--bundle', prefix + str(signature),
                 '--source-digest', value['deployment_sha'], '--source-ref', 'refs/heads/' + value['branch'],
                 *common], pass_fds=(document, signature))
-        self.command([gh, 'attestation', 'verify', 'oci://' + value['image'], '--bundle-from-oci',
-                      '--source-digest', value['build_sha'], *common])
+            verified_subject(raw, hashlib.sha256(encoded(value)).hexdigest())
+        raw = self.command([gh, 'attestation', 'verify', 'oci://' + value['image'], '--bundle-from-oci',
+                           '--source-digest', value['build_sha'], *common])
+        verified_subject(raw, value['image'].split('@sha256:', 1)[1])
 
     def observation(self):
         self.authority()
@@ -209,6 +257,11 @@ class Engine:
                         and runtime_identity(value) == approved['runtime_identity'], 'shared_host_support_changed')
             result[name] = value
         require(set(result) == names, 'shared_host_inventory_changed')
+        bind_mounts(cfg['private_inputs'], list(result.values()))
+        bound = {v['path'] for v in cfg['public_bind_files'] + cfg['private_inputs']}
+        actual = {m['Source'] for v in result.values() for m in v['mounts']
+                  if m['Type'] == 'bind' and Path(m['Source']).is_file()}
+        require(actual <= bound, 'shared_host_unsealed_bind_file')
         if cfg['environment'] == 'dev':
             require(len(values) == 7, 'shared_host_inventory_changed')
             DockerOwner.retirement(self)
@@ -372,6 +425,12 @@ def main():
             os.fchown(out.fileno(), 0, 983); os.fchmod(out.fileno(), 0o640)
             out.write(encoded(result)); out.flush(); os.fsync(out.fileno())
         return 0
+    except Rejected as error:
+        code = str(error)
+        if not re.fullmatch(r'(?:shared_host|executor|private_input|initial|approval|protected|external_secret|legacy)_[a-z0-9_]{1,80}', code):
+            code = 'shared_host_stopped_review_required'
+        print(json.dumps({'state': 'failed', 'reason': code}))
+        return 1
     except Exception:
         print('{"state":"failed","reason":"shared_host_stopped_review_required"}')
         return 1

@@ -299,7 +299,11 @@ class SignatureTests(unittest.TestCase):
         calls=[]
         class Process:
             tools={'gh':'/approved/gh','docker':'/approved/docker','systemctl':'/approved/systemctl'}
-            def __call__(self, argv, **kwargs):calls.append(argv);return b'[]'
+            def __call__(self, argv, **kwargs):
+                calls.append(argv)
+                subject = argv[3].split('@sha256:', 1)[1] if argv[3].startswith('oci://') else hashlib.sha256(Path(argv[3]).read_bytes()).hexdigest()
+                return encoded([{'verificationResult':{'signature':{'certificate':'synthetic'},
+                    'statement':{'subject':[{'digest':{'sha256':subject}}]}}}])
         engine=Engine({'environment':'dev','branch':'develop','project_ref':DEV_PROJECT,
                        'infrastructure_pins':release()['infrastructure'], 'trusted_root_seal':{'path':'/approved/trust'}},Process())
         with patch('shared_host.sealed_read',return_value=b'nonsecret-trust'):
@@ -328,6 +332,12 @@ class SignatureTests(unittest.TestCase):
             self.assertEqual(engine.activations,0)
             self.assertFalse(list(path.glob('*.intent.json')))
 
+    def test_empty_failed_or_wrong_artifact_evidence_rejected(self):
+        from shared_host import verified_subject
+        for value in ([], {}, [{'verificationResult':{}}],
+                      [{'verificationResult':{'signature':{'certificate':'synthetic'},'statement':{'subject':[{'digest':{'sha256':'wrong'}}]}}}]):
+            with self.subTest(value=value), self.assertRaises(Rejected):verified_subject(encoded(value),DIGEST)
+
 
 class InboxTests(unittest.TestCase):
     def test_reading_does_not_reject_its_own_atime_update(self):
@@ -345,6 +355,28 @@ class InboxTests(unittest.TestCase):
                 return result
             with patch('shared_host.INBOX', path), patch('shared_host.os.fstat', side_effect=metadata):
                 self.assertEqual(read_inbox()[0], raw)
+
+    def test_public_bind_file_bytes_and_inode_remain_bound(self):
+        from shared_host import public_relationship
+        from initial_private_inputs import identity
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'Caddyfile'
+            path.write_bytes(b'synthetic public configuration');path.chmod(0o644)
+            value = {'path':str(path), 'identity':identity(path.stat()),
+                     'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+            public_relationship(value)
+            path.write_bytes(b'changed public configuration')
+            with self.assertRaises(Rejected):public_relationship(value)
+
+    def test_replaced_public_bind_inode_rejected(self):
+        from shared_host import public_relationship
+        from initial_private_inputs import identity
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'Caddyfile';path.write_bytes(b'synthetic');path.chmod(0o644)
+            value={'path':str(path),'identity':identity(path.stat()),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+            replacement=Path(tmp)/'new';replacement.write_bytes(b'synthetic');replacement.chmod(0o644)
+            os.replace(replacement,path)
+            with self.assertRaises(Rejected):public_relationship(value)
 
 
 class ArtifactTests(unittest.TestCase):
