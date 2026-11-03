@@ -19,7 +19,7 @@ from contract import DEV_PROJECT, REPOSITORY, Rejected, require, revision
 from ingestion_owner import API_COMMAND, DockerOwner
 from initial_private_inputs import binding, bind_mounts, file_digest, identity, no_acl, signature, trusted_path
 from protected_io import deployment_lock, publish, root_controlled
-from shared_contract import IMAGE, INFRASTRUCTURE, WORKFLOW, decoded, encoded, request, target
+from shared_contract import IMAGE, INFRASTRUCTURE, WORKFLOW, api_artifact, decoded, encoded, request, target
 
 CONFIG = Path('/etc/moneybowl-shared-deploy/host.json')
 INBOX = Path('/var/spool/moneybowl-shared-deploy/inbox/request.json')
@@ -88,10 +88,16 @@ def policy(config):
     require(bindings.get(t['environment']) == project and len(set(v for v in bindings.values() if v)) ==
             len([v for v in bindings.values() if v]), 'shared_host_project_isolation_invalid')
     if t['environment'] == 'dev':
+        from api_executor import INITIAL_COMPONENT, INITIAL_IMAGE, INITIAL_SOURCE
+        require(api_artifact(config.get('baseline_api_release')) == dict(image=INITIAL_IMAGE,
+            build_sha=INITIAL_SOURCE, component_digest=INITIAL_COMPONENT, activation_sha=INITIAL_SOURCE,
+            proof='initial_acceptance'), 'shared_host_dev_baseline_missing')
         require(config.get('compose_project') == 'moneybowl-ingestion-support'
                 and config.get('state_root') == '/var/lib/moneybowl-m4-initial-dev/state'
                 and config.get('initial_owner_config_seal'), 'shared_host_dev_baseline_missing')
     else:
+        require(api_artifact(config.get('baseline_api_release'))['proof'] == 'shared_attestation',
+                'shared_host_isolation_unapproved')
         require(config.get('isolation_review') and config.get('production_ready') is (t['environment'] == 'production')
                 and config.get('state_root') != '/var/lib/moneybowl-m4-initial-dev/state',
                 'shared_host_isolation_unapproved')
@@ -338,6 +344,15 @@ class Journal:
             complete = decoded(complete_path.read_bytes())
             require(complete['intent_sha256'] == hashlib.sha256(encoded(intent)).hexdigest()
                     and complete['release'] == intent['release'], 'shared_host_journal_corrupt')
+            actual = api_artifact(complete.get('api_release'))
+            require(actual['component_digest'] == intent['release']['component_digest']
+                    and complete['state'] == ('deployed' if intent['activation_may_be_attempted'] else 'unchanged'),
+                    'shared_host_journal_corrupt')
+            if intent['activation_may_be_attempted']:
+                require(actual == dict(image=intent['release']['image'], build_sha=intent['release']['build_sha'],
+                    component_digest=intent['release']['component_digest'],
+                    activation_sha=intent['release']['deployment_sha'], proof='shared_attestation'),
+                    'shared_host_journal_corrupt')
             result.append((intent, complete))
         require(sorted(v[0]['sequence'] for v in result) == list(range(1, len(result) + 1)),
                 'shared_host_journal_corrupt')
@@ -356,17 +371,25 @@ class Journal:
                 cfg = self.engine.config
                 require(before['api']['id'] == cfg['baseline_api_id'] and before['api']['image'] == cfg['baseline_image_id'],
                         'shared_host_baseline_changed')
+            actual = api_artifact(records[-1][1]['api_release'] if records else self.engine.config['baseline_api_release'])
+            require(before['api']['labels'].get('org.opencontainers.image.revision') == actual['activation_sha']
+                    and before['api']['labels'].get('moneybowl.source_digest') == actual['component_digest'],
+                    'shared_host_current_release_changed')
             old = [i for i, c in records if i['release']['deployment_sha'] == value['deployment_sha']]
             if old:
                 require(len(old) == 1 and old[0]['release']['image'] == value['image']
                         and old[0]['release']['component_digest'] == value['component_digest'], 'shared_host_release_conflict')
                 require(records[-1][0]['release']['deployment_sha'] == value['deployment_sha'], 'shared_host_replay_rejected')
-                return dict(state='already_deployed', release=value, api_id=before['api']['id'], image_id=before['api']['image'])
+                return dict(state='already_deployed', release=value, api_release=actual,
+                            api_id=before['api']['id'], image_id=before['api']['image'])
             require(not records or value['issued_at'] >= records[-1][0]['release']['issued_at'], 'shared_host_replay_rejected')
-            self.engine.prepare(value)
+            changed = actual['component_digest'] != value['component_digest']
+            if changed:
+                self.engine.prepare(value)
             require(self.engine.observation() == before, 'shared_host_pre_activation_drift')
+            request(value, now=self.clock())
             intent = dict(kind='moneybowl-shared-intent-v1', sequence=len(records) + 1,
-                          release=value, before=before, activation_may_be_attempted=True)
+                          release=value, before=before, activation_may_be_attempted=changed)
             path = self.root / (value['deployment_sha'] + '.intent.json')
             publish(path, intent, immutable=True)
             # From this point every failure quarantines the intent. Never retry/rollback/erase.
@@ -374,15 +397,24 @@ class Journal:
                 request(value, now=self.clock())
                 self.engine.authority()
                 require(self.engine.observation() == before, 'shared_host_pre_activation_drift')
-            image_id = self.engine.activate(value, recheck)
+            if changed:
+                image_id = self.engine.activate(value, recheck)
+                actual = dict(image=value['image'], build_sha=value['build_sha'],
+                    component_digest=value['component_digest'], activation_sha=value['deployment_sha'],
+                    proof='shared_attestation')
+            else:
+                recheck()
+                image_id = before['api']['image']
             after = self.engine.observation()
             require({k: v for k, v in after.items() if k != 'api'} ==
                     {k: v for k, v in before.items() if k != 'api'}, 'shared_host_support_changed')
             require(after['api']['image'] == image_id
-                    and after['api']['labels'].get('org.opencontainers.image.revision') == value['deployment_sha']
+                    and after['api']['labels'].get('org.opencontainers.image.revision') == actual['activation_sha']
                     and after['api']['labels'].get('moneybowl.source_digest') == value['component_digest'],
                     'shared_host_activation_unverified')
-            complete = dict(state='deployed', release=value, api_id=after['api']['id'], image_id=image_id,
+            require(changed or after == before, 'shared_host_unchanged_runtime_drift')
+            complete = dict(state='deployed' if changed else 'unchanged', release=value, api_release=actual,
+                            api_id=after['api']['id'], image_id=image_id,
                             intent_sha256=hashlib.sha256(encoded(intent)).hexdigest())
             publish(self.root / (value['deployment_sha'] + '.complete.json'), complete, immutable=True)
             return complete

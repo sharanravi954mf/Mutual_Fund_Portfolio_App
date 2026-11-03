@@ -1338,7 +1338,7 @@ class WorkflowTests(unittest.TestCase):
         for name in ('contents: read', 'actions: read', 'packages: write', 'attestations: write', 'id-token: write'):
             self.assertIn('      '+name, publisher)
         for section in (build, publisher):
-            self.assertIn("needs.prepare.outputs.enabled == 'true'", section)
+            self.assertIn("needs.prepare.outputs.artifacts_enabled == 'true'", section)
             self.assertIn("github.event_name == 'push'", section)
             for reference in re.findall(r'^      - uses: (\S+)', section, re.M):
                 self.assertRegex(reference, r'^[a-zA-Z0-9_./-]+@[0-9a-f]{40}$')

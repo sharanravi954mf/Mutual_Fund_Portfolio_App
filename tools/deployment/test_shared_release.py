@@ -3,6 +3,8 @@ import copy
 import hashlib
 import json
 import os
+import re
+import subprocess
 import tempfile
 import types
 import unittest
@@ -162,15 +164,18 @@ class AdmissionTests(unittest.TestCase):
 
 class FakeEngine:
     def __init__(self):
-        self.config={'environment':'dev','baseline_api_id':'old','baseline_image_id':'sha256:old'}
-        self.value={'api':{'id':'old','image':'sha256:old','labels':{}},'caddy':{'id':'unchanged'}}
-        self.activations=0;self.fail=None
+        self.config={'environment':'dev','baseline_api_id':'old','baseline_image_id':'sha256:old',
+            'baseline_api_release':dict(image=IMAGE+'@sha256:'+'0'*64,build_sha=A,
+                component_digest='0'*64,activation_sha=A,proof='shared_attestation')}
+        self.value={'api':{'id':'old','image':'sha256:old','labels':{
+            'org.opencontainers.image.revision':A,'moneybowl.source_digest':'0'*64}},'caddy':{'id':'unchanged'}}
+        self.activations=0;self.preparations=0;self.fail=None
     def authority(self): pass
     def verify_authorization(self, value, bundle, clock):
         request(value, now=clock())
         if value['environment']!=self.config['environment'] or bundle!={'valid':True}:raise Rejected('unauthorized')
     def observation(self):return copy.deepcopy(self.value)
-    def prepare(self,value):pass
+    def prepare(self,value):self.preparations+=1
     def activate(self,value,recheck):
         recheck();self.activations+=1
         if self.fail=='uncertain':raise TimeoutError()
@@ -200,6 +205,50 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(self.deploy()['state'],'already_deployed')
         self.assertEqual(self.engine.activations,1)
         self.assertEqual(self.engine.value['caddy']['id'],'unchanged')
+
+    def test_other_component_releases_keep_actual_api_artifact(self):
+        for component in ('flutter', 'supabase', 'documentation', 'combined_without_api'):
+            with self.subTest(component=component):
+                value=release();value['deployment_sha']=hashlib.sha1(component.encode()).hexdigest()
+                value['component_digest']='0'*64
+                before=copy.deepcopy(self.engine.value)
+                result=self.deploy(value)
+                self.assertEqual(result['state'],'unchanged')
+                self.assertEqual(result['api_release'],self.engine.config['baseline_api_release'])
+                self.assertNotEqual(result['release']['image'],result['api_release']['image'])
+                self.assertEqual(self.engine.value,before)
+                self.assertEqual(self.deploy(value)['state'],'already_deployed')
+        self.assertEqual(self.engine.activations,0)
+        self.assertEqual(self.engine.preparations,0)
+
+    def test_unchanged_after_activation_preserves_original_activation_sha(self):
+        first=self.deploy();value=release();value['deployment_sha']=C
+        second=self.deploy(value)
+        self.assertEqual(second['state'],'unchanged')
+        self.assertEqual(second['api_release'],first['api_release'])
+        self.assertEqual(second['api_release']['activation_sha'],B)
+        self.assertEqual(self.engine.activations,1)
+
+    def test_noop_interruption_quarantines_without_docker_attempt(self):
+        value=release();value['component_digest']='0'*64
+        def interrupted(*args,**kwargs):
+            publish(*args,**kwargs)
+            raise KeyboardInterrupt()
+        with patch('shared_host.publish',side_effect=interrupted):
+            with self.assertRaises(KeyboardInterrupt):self.deploy(value)
+        with self.assertRaises((Rejected,FileNotFoundError)):self.deploy(value)
+        self.assertEqual(self.engine.activations,0)
+
+    def test_baseline_label_drift_is_rejected_before_intent(self):
+        self.engine.value['api']['labels']['moneybowl.source_digest']='f'*64
+        with self.assertRaises(Rejected):self.deploy()
+        self.assertEqual(list(self.root.iterdir()),[])
+
+    def test_expiration_during_preparation_does_not_consume_intent(self):
+        def prepare(value):self.journal.clock=lambda:1901
+        with patch.object(self.engine,'prepare',side_effect=prepare), self.assertRaises(Rejected):self.deploy()
+        self.assertEqual(list(self.root.iterdir()),[])
+        self.assertEqual(self.engine.activations,0)
 
     def test_unauthorized_request_never_consumes_intent(self):
         with self.assertRaises(Rejected):self.journal.deploy(release(),{'valid':False})
@@ -270,6 +319,26 @@ class JournalTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_actual_artifact_gate_cannot_enable_deployment(self):
+        source=(Path(__file__).resolve().parents[2]/'.github/workflows/shared-release.yml').read_text()
+        gate=source.split('      - id: gate\n',1)[1].split('      - uses:',1)[0]
+        script='\n'.join(line.removeprefix('          ') for line in gate.split('        run: |\n',1)[1].splitlines())
+        for branch in ('develop','qa','main','feature/test'):
+            for publication in ('','owner-approved-v1'):
+                with self.subTest(branch=branch,publication=publication), tempfile.TemporaryDirectory() as tmp:
+                    output=Path(tmp)/'output'
+                    subprocess.run(['/bin/bash','-eu','-c',script],check=True,env={
+                        'PATH':'/usr/bin:/bin','BRANCH':'refs/heads/'+branch,'COMMISSIONED':'',
+                        'PUBLICATION':publication,'ARTIFACT_PREFLIGHT':'owner-approved-v1',
+                        'GITHUB_OUTPUT':str(output),'GITHUB_STEP_SUMMARY':str(Path(tmp)/'summary')})
+                    actual=dict(line.split('=',1) for line in output.read_text().splitlines())
+                    self.assertEqual(actual['enabled'],'false')
+                    self.assertEqual(actual['artifacts_enabled'],str(branch=='develop' and bool(publication)).lower())
+        # All jobs that can reach the host/measurement credentials still require full commissioning.
+        for job in ('flutter-artifact','backend-ready','authorize','result'):
+            section=re.split(r'\n  [a-z][a-z-]+:',source.split('\n  '+job+':',1)[1],maxsplit=1)[0]
+            self.assertIn("needs.prepare.outputs.enabled == 'true'",section)
+
     def test_workflow_boundaries(self):
         root=Path(__file__).resolve().parents[2]
         source=(root/'.github/workflows/shared-release.yml').read_text()
@@ -292,6 +361,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('action.lookup("verb") == "start"',rule)
         self.assertIn('action.lookup("unit") == "moneybowl-api-deploy.service"',rule)
         self.assertNotIn('[Install]',(root/'moneybowl-api-deploy.service').read_text().split('# No [Install]')[0])
+
+
+class LoginTests(unittest.TestCase):
+    def test_only_exact_sshd_entrypoint_is_admitted(self):
+        from shared_login import COMMAND, admitted
+        arguments=['/opt/moneybowl-shared-deploy/login','-c',COMMAND]
+        environment={'SSH_CONNECTION':'192.0.2.1 12345 192.0.2.2 22'}
+        self.assertTrue(admitted(arguments,environment,993,993,983,983,0))
+        for argv in (arguments[:1],arguments+['extra'],['login','-c','id'],['login','-c',COMMAND+'; id'],['login','-i']):
+            with self.subTest(argv=argv):self.assertFalse(admitted(argv,environment,993,993,983,983,0))
+        for env in ({},dict(environment,SSH_ORIGINAL_COMMAND='id'),dict(environment,SSH_ORIGINAL_COMMAND='internal-sftp')):
+            self.assertFalse(admitted(arguments,env,993,993,983,983,0))
+        for ids in ((0,0,983,983,0),(993,0,983,983,0),(993,993,0,983,0),(993,993,983,0,0),(993,993,983,983,1)):
+            self.assertFalse(admitted(arguments,environment,*ids))
 
 
 class SignatureTests(unittest.TestCase):

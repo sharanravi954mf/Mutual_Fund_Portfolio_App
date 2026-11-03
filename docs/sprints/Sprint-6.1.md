@@ -59,3 +59,4 @@ Carried over issues: #39, #40, #49.
 - **Issue #95** — security follow-up discovered on 8 August 2026 after Sprint 6.1 closure. The Buy/Sell/Switch order workflow was found to directly access protected folio mapping/reference tables. The issue is tracked for implementation in Sprint 8.1 and is not counted as incomplete original Sprint 6.1 scope. Related: Issue #34 / PR #88, Issue #89 / PR #90, PR #94.
 
 - [ ] **feat(deployment): implement shared protected-merge DEV/QA/Production release workflow, restricted one-shot API host adapter and regression tests; source review only, installation and real DEV acceptance remain pending** (#218)
+- [ ] **fix(deployment): preserve unchanged API releases, provide a restricted SSH login and validate DEV artifacts before host enablement; retain all existing CI and deployment owners** (#220)

@@ -54,7 +54,7 @@ def main():
                 and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o640, 'shared_client_result_invalid')
         result = decoded(RESULT.read_bytes())
         require(result['request_sha256'] == hashlib.sha256(raw).hexdigest()
-                and result['state'] in ('deployed', 'already_deployed')
+                and result['state'] in ('deployed', 'unchanged', 'already_deployed')
                 and result['release'] == envelope['release'], 'shared_client_result_mismatch')
         sys.stdout.buffer.write(encoded(result)); sys.stdout.buffer.flush()
         # Successful requests alone can be removed. Failure/timeout preserves the inbox

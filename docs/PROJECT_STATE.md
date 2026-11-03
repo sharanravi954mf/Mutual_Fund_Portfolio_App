@@ -11,6 +11,13 @@ remains ROOT_INSTALLED_INACTIVE. Its credential installation remains paused.
 QA/Production gates remain disabled. See the [implementation and DEV acceptance
 requirements](architecture/MONEYBOWL_M4_ENVIRONMENT_PROMOTION.md).
 
+Issue #220 corrects DEV commissioning blockers: unchanged API components now retain
+their actual image/activation identity; SSH uses a restricted login executable;
+DEV can validate artifacts through the existing publisher before host enablement.
+The DEV GitHub environment is restricted to develop and has public configuration.
+All release gates remain closed pending source review and real credential/export/
+attestation checks. No automatic DEV release has yet been accepted.
+
 ## Project Overview
 - **Project Name**: Money Bowl
 - **Repository Name**: Mutual_Fund_Portfolio_App

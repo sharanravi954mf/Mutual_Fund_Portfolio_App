@@ -33,33 +33,41 @@ jobs:
       pull-requests: read
     outputs:
       enabled: ${{ steps.gate.outputs.enabled }}
+      artifacts_enabled: ${{ steps.gate.outputs.artifacts_enabled }}
     steps:
       - id: gate
         env:
           COMMISSIONED: ${{ vars.SHARED_DEPLOYMENT_COMMISSIONED }}
           PUBLICATION: ${{ vars.SHARED_PUBLICATION_ENABLED }}
+          BRANCH: ${{ github.ref }}
+          ARTIFACT_PREFLIGHT: ${{ vars.MONEYBOWL_SHARED_ARTIFACT_PREFLIGHT_ENABLED }}
         run: |
+          enabled=false
+          artifacts=false
           if test "$COMMISSIONED" = owner-approved-v1 && test "$PUBLICATION" = owner-approved-v1; then
-            echo 'enabled=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'enabled=false' >> "$GITHUB_OUTPUT"
-            echo 'Environment remains uncommissioned; no release attempted.' >> "$GITHUB_STEP_SUMMARY"
+            enabled=true
+            artifacts=true
+          elif test "$BRANCH" = refs/heads/develop && test "$ARTIFACT_PREFLIGHT" = owner-approved-v1 && test "$PUBLICATION" = owner-approved-v1; then
+            artifacts=true
           fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          echo "artifacts_enabled=$artifacts" >> "$GITHUB_OUTPUT"
+          echo "Host deployment enabled: $enabled; artifact validation enabled: $artifacts" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.artifacts_enabled == 'true'
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify real owner merge and all required checks
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.artifacts_enabled == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SUPABASE_PROJECT_REF: ${{ vars.SHARED_SUPABASE_PROJECT_REF }}
           SUPABASE_PUBLIC_KEY: ${{ vars.SHARED_SUPABASE_PUBLIC_KEY }}
         run: python3 tools/deployment/shared_release.py admit
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.artifacts_enabled == 'true'
         with:
           name: shared-admission-${{ github.sha }}-${{ github.run_attempt }}
           path: admission.json
@@ -68,7 +76,7 @@ jobs:
   select:
     name: Select unchanged API component
     needs: prepare
-    if: needs.prepare.outputs.enabled == 'true'
+    if: needs.prepare.outputs.artifacts_enabled == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -94,7 +102,7 @@ jobs:
   api-build:
     name: M4 Isolated ARM64 Build
     needs: [prepare, select]
-    if: needs.prepare.outputs.enabled == 'true' && needs.select.outputs.build == 'true' && github.event_name == 'push'
+    if: needs.prepare.outputs.artifacts_enabled == 'true' && needs.select.outputs.build == 'true' && github.event_name == 'push'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     permissions:
@@ -137,7 +145,7 @@ jobs:
   api-publish:
     name: M4 Verified Private Publication
     needs: [prepare, api-build]
-    if: needs.prepare.outputs.enabled == 'true' && needs.api-build.result == 'success' && github.event_name == 'push'
+    if: needs.prepare.outputs.artifacts_enabled == 'true' && needs.api-build.result == 'success' && github.event_name == 'push'
     environment: ${{ github.ref == 'refs/heads/develop' && 'dev' || github.ref == 'refs/heads/qa' && 'qa' || 'production' }}
     outputs:
       image: ghcr.io/sharanravi954mf/moneybowl-ingestion-dev@${{ steps.publication.outputs.digest }}

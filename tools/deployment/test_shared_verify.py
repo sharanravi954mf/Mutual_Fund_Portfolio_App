@@ -58,6 +58,8 @@ class Fixture:
             component_digest='d' * 64, infrastructure={p: 'e' * 64 for p in INFRASTRUCTURE}), A,
             IMAGE + '@sha256:' + 'f' * 64, 123, 1000)
         self.host = dict(state='deployed', release=self.release, api_id='synthetic-api', image_id='sha256:synthetic')
+        self.host['api_release']=dict(image=self.release['image'],build_sha=A,component_digest='d'*64,
+                                     activation_sha=B,proof='shared_attestation')
         self.asset = b'synthetic compiled frontend'
         self.frontend = dict(git_commit=B, environment=self.t['runtime_environment'], git_branch=branch,
             supabase_project=self.project, assets={p: hashlib.sha256(self.asset).hexdigest()
@@ -135,6 +137,20 @@ class VerificationTests(unittest.TestCase):
                 self.assertTrue(f.commands)
                 self.assertTrue(all('/database/query/read-only' in url or url.endswith('/functions')
                                     or url.endswith('/outbox-dispatcher/readiness') for url, _, _ in f.calls))
+
+    def test_unchanged_api_reports_actual_image_and_separate_candidate(self):
+        f=Fixture(self.source);f.host['state']='unchanged'
+        actual=f.host['api_release'];actual['image']=IMAGE+'@sha256:'+'1'*64;actual['activation_sha']=A
+        result=f.full()
+        self.assertEqual(result['image'],actual['image'])
+        self.assertEqual(result['selected_image'],f.release['image'])
+        self.assertEqual(result['deployment_sha'],B)
+        self.assertNotEqual(result['image'],result['selected_image'])
+
+    def test_wrong_api_component_or_activation_identity_rejected(self):
+        for key,value in [('component_digest','1'*64),('image',IMAGE+'@sha256:'+'1'*64),('activation_sha',A)]:
+            f=Fixture(self.source);f.host['api_release'][key]=value
+            with self.subTest(key=key), self.assertRaises(Rejected):f.full()
 
     def test_nondev_allows_actual_inert_absence_or_one_disabled_recovery_job(self):
         for branch in ('qa', 'main'):
