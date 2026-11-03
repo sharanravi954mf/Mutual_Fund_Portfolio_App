@@ -122,6 +122,15 @@ the correction source in this PR is not installed. This is partial installation,
 not deployment enablement. The existing Supabase measurement credential fails a
 real DEV functions read with HTTP 401 and is preserved, without fallback or renewal.
 
+Real read-only preparation also diagnosed two runtime-contract defects before
+creating any host-policy intent. The support API has no Supabase URL/client; its
+47-entry sealed environment is preserved, and the environment label, signed target
+and root project policy provide the binding. Preparation rejects unexpected
+Supabase configuration instead of requiring a nonexistent `SUPABASE_URL`. The
+Docker Engine omits the optional image `Entrypoint` key, so shared image inspection
+reuses V2's `index .Config "Entrypoint"` lookup. Deterministic tests exercise the
+real runtime validator for DEV/QA/Production and the missing-entrypoint case.
+
 Before enabling the host, the existing workflow/publisher can validate real private
 OCI publication and provenance on a normal owner-merged DEV push. This requires
 repository variable `MONEYBOWL_SHARED_ARTIFACT_PREFLIGHT_ENABLED=owner-approved-v1`

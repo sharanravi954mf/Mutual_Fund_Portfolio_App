@@ -363,6 +363,60 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('[Install]',(root/'moneybowl-api-deploy.service').read_text().split('# No [Install]')[0])
 
 
+class SharedRuntimeTests(unittest.TestCase):
+    def engine(self,branch='develop'):
+        from api_executor import INITIAL_IMAGE
+        t=target('refs/heads/'+branch)
+        process=types.SimpleNamespace(tools={'docker':'/approved/docker','systemctl':'/approved/systemctl'})
+        return Engine(dict(environment=t['environment'],project_ref=DEV_PROJECT if branch=='develop' else 'abcdefghijklmnopqrst',
+            compose_project='moneybowl-ingestion-support' if branch=='develop' else 'moneybowl-'+t['environment'],
+            baseline_image=INITIAL_IMAGE,runtime_seal={'path':'/approved/private-runtime'}),process)
+
+    def snapshot(self,engine):
+        from test_api_delivery import runtime
+        model=runtime();model['name']=engine.config['compose_project']
+        model['services']['api']['labels']={'moneybowl.environment':engine.config['environment']}
+        return model
+
+    def test_real_runtime_validator_preserves_support_api_without_database_connection(self):
+        for branch in ('develop','qa','main'):
+            engine=self.engine(branch);model=self.snapshot(engine)
+            with self.subTest(branch=branch), patch('shared_host.sealed_read',return_value=encoded(model)):
+                engine.prepare(release(branch))
+                api=decoded(engine.planned)['services']['api']
+                self.assertEqual(api['environment'],model['services']['api']['environment'])
+                self.assertNotIn('SUPABASE_URL',api['environment'])
+                self.assertEqual(api['labels']['moneybowl.environment'],engine.config['environment'])
+
+    def test_wrong_runtime_environment_and_unexpected_database_credentials_rejected(self):
+        for field in ('label','database'):
+            engine=self.engine();model=self.snapshot(engine)
+            if field=='label':model['services']['api']['labels']['moneybowl.environment']='qa'
+            else:model['services']['api']['environment']['SUPABASE_SERVICE_ROLE_KEY']='synthetic-forbidden'
+            with self.subTest(field=field), patch('shared_host.sealed_read',return_value=encoded(model)), self.assertRaises(Rejected):
+                engine.prepare(release())
+
+    def test_optional_image_entrypoint_uses_engine_compatible_inspection(self):
+        from ingestion_owner import API_COMMAND
+        engine=self.engine();calls=[];value=release();rechecked=[]
+        def command(argv,**kwargs):
+            calls.append(argv)
+            if 'inspect' in argv:
+                # Actual containerd-backed Engine rejects direct .Config.Entrypoint
+                # when the optional image key is absent; index returns null.
+                template=argv[argv.index('--format')+1]
+                if '.Config.Entrypoint' in template:raise Rejected('shared_host_command_failed')
+                return encoded(dict(id='sha256:synthetic',os='linux',arch='arm64',user='10001:10001',command=API_COMMAND,
+                    entrypoint=None,digests=[value['image']],labels={'org.opencontainers.image.revision':value['build_sha'],
+                    'moneybowl.source_digest':value['component_digest']}))
+            return b''
+        engine.command=command
+        with patch('shared_host.sealed_read',return_value=encoded(self.snapshot(engine))):engine.prepare(value)
+        self.assertEqual(engine.activate(value,lambda:rechecked.append(True)),'sha256:synthetic')
+        self.assertEqual(rechecked,[True])
+        self.assertEqual(sum('up' in v for v in calls),1)
+
+
 class LoginTests(unittest.TestCase):
     def test_only_exact_sshd_entrypoint_is_admitted(self):
         from shared_login import COMMAND, admitted

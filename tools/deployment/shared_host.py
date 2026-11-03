@@ -300,8 +300,13 @@ class Engine:
         proof = dict(image=value['image'], git_commit=value['deployment_sha'], source_digest=value['component_digest'])
         self.planned = runtime_model(sealed_read(cfg['runtime_seal']), proof,
             environment=cfg['environment'], project=cfg['compose_project'], baseline_image=cfg['baseline_image'])
-        planned = decoded(self.planned, 1024 * 1024)['services']['api']['environment']
-        require(planned.get('SUPABASE_URL') == 'https://' + cfg['project_ref'] + '.supabase.co', 'shared_host_runtime_project_mismatch')
+        api = decoded(self.planned, 1024 * 1024)['services']['api']
+        # The ingestion support API has no Supabase client/database connection.
+        # Bind its sealed snapshot/environment label and signed/root target policy;
+        # never add a fictitious URL or database credential to the accepted runtime.
+        require(api['labels']['moneybowl.environment'] == cfg['environment']
+                and not any(k.startswith('SUPABASE_') for k in api['environment']),
+                'shared_host_runtime_binding_invalid')
         # Runtime values never enter results or the journal.
 
     def activate(self, value, before_activation):
@@ -309,7 +314,7 @@ class Engine:
         self.command(self.base + ['image', 'pull', '--platform', 'linux/arm64', value['image']])
         info = json.loads(self.command(self.base + ['image', 'inspect', '--format',
             '{"id":{{json .Id}},"os":{{json .Os}},"arch":{{json .Architecture}},'
-            '"user":{{json .Config.User}},"command":{{json .Config.Cmd}},"entrypoint":{{json .Config.Entrypoint}},'
+            '"user":{{json .Config.User}},"command":{{json .Config.Cmd}},"entrypoint":{{json (index .Config "Entrypoint")}},'
             '"labels":{{json .Config.Labels}},"digests":{{json .RepoDigests}}}', value['image']]))
         require(info['os'] == 'linux' and info['arch'] == 'arm64' and info['user'] == '10001:10001'
                 and info['command'] == API_COMMAND and not info['entrypoint'] and value['image'] in info['digests']
