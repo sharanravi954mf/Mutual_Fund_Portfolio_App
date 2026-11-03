@@ -700,3 +700,39 @@ Deno.test("readiness HMAC matches independent Python owner vector with domain se
   );
   assert(signature !== await sign(n, "k".repeat(32)));
 });
+
+for (const environment of ["DEV", "QA", "PROD"]) {
+  Deno.test(`readiness-only key verifies ${environment}/disabled without admission or LIVE calls`, async () => {
+    const h = harness({
+      env: {
+        ...settings(environment, "disabled"),
+        OUTBOX_READINESS_KEY: readinessKey,
+      },
+    });
+    const n = notification({
+      kind: "readiness",
+      event_outbox_id: null,
+      environment,
+      project_url: h.config.origin,
+    });
+    const response = await h.handler(await readinessRequest(n));
+    assert(response.status === 200);
+    const body = await response.json();
+    assert(
+      body.environment === environment && body.project_url === h.config.origin,
+    );
+    assert(body.mode === "disabled" && body.code === "outbox_ready");
+    assert(JSON.stringify(body.routes) === JSON.stringify(ROUTES));
+    // A readiness key never becomes financial/event authority, even in LIVE-bound projects.
+    assert(
+      (await h.handler(
+        await readinessRequest({
+          ...n,
+          kind: "event",
+          event_outbox_id: id,
+        }),
+      )).status === 401,
+    );
+    assert(h.calls.length === 0 && h.logs.length === 0);
+  });
+}

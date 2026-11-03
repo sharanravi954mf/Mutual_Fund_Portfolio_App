@@ -31,9 +31,9 @@ def revision(value):
     return value
 
 
-def git(repo, *args):
+def git(repo, *args, timeout=120):
     try:
-        return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, timeout=120)
+        return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         raise Rejected('git_failed') from None
 

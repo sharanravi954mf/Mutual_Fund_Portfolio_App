@@ -18,15 +18,16 @@ class Github:
         require(type(token) is str and token and not any(c.isspace() for c in token), 'github_token_missing')
         self.token = token
 
-    def __call__(self, path):
+    def __call__(self, path, *, timeout=30):
         require(path.startswith('/') and '..' not in path and '\\' not in path, 'github_path_invalid')
+        require(type(timeout) in (int, float) and 0 < timeout <= 30, 'github_timeout_invalid')
         url = 'https://api.github.com/repos/' + REPOSITORY + path
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         try:
             req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + self.token,
                 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
                 'User-Agent': 'moneybowl-shared-release'})
-            with opener.open(req, timeout=30) as response:
+            with opener.open(req, timeout=timeout) as response:
                 return decoded(response.read(2 * 1024 * 1024 + 1))
         except Exception:
             raise Rejected('github_read_failed') from None

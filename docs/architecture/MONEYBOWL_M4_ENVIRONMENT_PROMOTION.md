@@ -57,6 +57,29 @@ workflow/source identity and registry-carried/local bundles with sealed trust ro
 The verification job has separate read-only credentials but shares GitHub's trust
 domain. It is not claimed to provide the old resident Evidence Owner independence.
 
+## PR #219 review corrections — 2026-11-03
+
+Production readiness uses the existing authenticated `readiness` kind. The actual
+Edge handler accepts PROD and returns before RPC/worker admission even when mode
+is disabled; both M2 schemas accept PROD but prohibit active non-DEV dispatch.
+The scoped Python reader now supports that contract with a distinct project and
+readiness-only key. No financial or NSE operation is invoked. Shared QA/Production
+verification accepts the actual inert absence of recovery Cron, or the existing
+canonical inactive job. DEV retains its required active recovery contract.
+
+Both observer jobs wait read-only for existing owners, with a fixed 15-minute
+budget, at most 91 attempts and ten-second intervals. HTTP, CLI export and ancestry
+reads are limited to remaining time; each job has a 22-minute outer deadline for
+setup and result publication. The admitted project/branch/SHA and actual checkout
+are checked before waiting; the current protected head is checked before every
+attempt and after measurements. Supersession stops rather than adopting a new SHA.
+Only a known ancestor frontend may be pending, and success requires the exact
+requested SHA, assets, function exports and migration statements. Invalid targets,
+failed functions, corrupted same-SHA frontend assets and denied credentials fail
+closed. Pending owners time out with an explicit reason/attempt count in sanitized
+backend/deployment results, propagated into the final release result. Waiting
+never invokes a deployment writer, repeats API activation or enables an environment.
+
 ## DEV installation requirements — not executed
 
 1. Review the exact source commit/PR and complete deterministic and GitHub CI checks.

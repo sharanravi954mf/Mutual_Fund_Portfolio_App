@@ -572,7 +572,7 @@ jobs:
     if: needs.prepare.outputs.enabled == 'true'
     environment: ${{ github.ref == 'refs/heads/develop' && 'dev' || github.ref == 'refs/heads/qa' && 'qa' || 'production' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 22
     permissions:
       contents: read
     steps:
@@ -580,11 +580,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: shared-admission-${{ github.sha }}-${{ github.run_attempt }}
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
         with:
           version: 2.115.0
-      - name: Measure API, frontend, actual migrations, functions and controls
+      - name: Wait for existing Supabase owner at the admitted SHA
         env:
+          GH_TOKEN: ${{ github.token }}
           SUPABASE_PROJECT_REF: ${{ vars.SHARED_SUPABASE_PROJECT_REF }}
           SUPABASE_MEASUREMENT_TOKEN: ${{ secrets.SUPABASE_MEASUREMENT_TOKEN }}
           OUTBOX_READINESS_KEY: ${{ secrets.OUTBOX_READINESS_KEY }}
@@ -594,6 +599,13 @@ jobs:
           export SUPABASE_CLI="$(command -v supabase)"
           export SUPABASE_CLI_SHA256="$(sha256sum "$SUPABASE_CLI" | cut -d ' ' -f 1)"
           python3 tools/deployment/shared_verify.py backend
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: backend-result-${{ github.sha }}-${{ github.run_attempt }}
+          path: backend-result.json
+          retention-days: 30
 
   authorize:
     name: Sign bounded deployment request
@@ -689,7 +701,7 @@ jobs:
     needs: deploy
     environment: ${{ github.ref == 'refs/heads/develop' && 'dev' || github.ref == 'refs/heads/qa' && 'qa' || 'production' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 22
     permissions:
       contents: read
     steps:
@@ -697,6 +709,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: shared-request-${{ github.sha }}-${{ github.run_attempt }}
@@ -706,8 +719,9 @@ jobs:
       - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1
         with:
           version: 2.115.0
-      - name: Measure API, frontend, actual migrations, functions and controls
+      - name: Wait for exact frontend and backend convergence without writes
         env:
+          GH_TOKEN: ${{ github.token }}
           SUPABASE_PROJECT_REF: ${{ vars.SHARED_SUPABASE_PROJECT_REF }}
           SUPABASE_MEASUREMENT_TOKEN: ${{ secrets.SUPABASE_MEASUREMENT_TOKEN }}
           OUTBOX_READINESS_KEY: ${{ secrets.OUTBOX_READINESS_KEY }}
@@ -735,6 +749,10 @@ jobs:
         continue-on-error: true
         with:
           name: deployment-result-${{ github.sha }}-${{ github.run_attempt }}
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        continue-on-error: true
+        with:
+          name: backend-result-${{ github.sha }}-${{ github.run_attempt }}
       - name: Record measured verification or explicit failure
         env:
           VERIFY_RESULT: ${{ needs.verify.result }}
@@ -749,6 +767,13 @@ jobs:
           if os.environ['VERIFY_RESULT'] != 'success' or not path.is_file():
               value = {'state': 'failed', 'deployment_sha': os.environ['GITHUB_SHA'], 'reason': 'release_not_verified',
                        'stages': {key: os.environ[key] for key in ('VERIFY_RESULT', 'DEPLOY_RESULT', 'BUILD_RESULT', 'PUBLICATION_RESULT')}}
+              # Propagate an observer's sanitized failure, never promote a partial success.
+              for candidate in (path, Path('backend-result.json')):
+                  if candidate.is_file():
+                      failure = json.loads(candidate.read_bytes())
+                      if failure.get('state') == 'failed' and failure.get('deployment_sha') == os.environ['GITHUB_SHA']:
+                          value = {**failure, 'stages': value['stages']}
+                          break
           else:
               value = json.loads(path.read_bytes())
           Path('release-result.json').write_text(json.dumps(value, sort_keys=True) + '\n')
