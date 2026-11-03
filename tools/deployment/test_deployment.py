@@ -408,15 +408,17 @@ class GitPromotionTests(unittest.TestCase):
 
 
 class WorkflowSafetyTests(unittest.TestCase):
-    def test_shared_workflow_no_private_secrets_or_production_target(self):
+    def test_shared_workflow_separates_ci_and_gated_deployment(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / '.github/workflows/environment-promotion.yml').read_text()
+        ci = workflow.split('  release:', 1)[0]
         for forbidden in ('secrets.', 'self-hosted', 'pull_request_target', 'supabase db push',
                           'supabase functions deploy', 'branches: [main', 'commissioning/controller.py'):
-            self.assertNotIn(forbidden, workflow)
-        self.assertIn("branches: ['feature/**', develop, qa]", workflow)
-        self.assertIn('branches: [develop, qa]', workflow)
-        self.assertIn('cancel-in-progress: false', workflow)
+            self.assertNotIn(forbidden, ci)
+        self.assertIn("branches: ['feature/**', develop, qa, main]", workflow)
+        self.assertIn('branches: [develop, qa, main]', workflow)
+        self.assertIn('cancel-in-progress: false', (root / '.github/workflows/shared-release.yml').read_text())
+        self.assertIn("vars.MONEYBOWL_SHARED_RELEASE_ENABLED == 'owner-approved-v1'", workflow)
         self.assertNotIn('paths:', workflow)
 
     def test_no_dispatcher_mutation_in_deployment_tools(self):

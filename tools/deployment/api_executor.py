@@ -269,17 +269,17 @@ def sealed_memfd(raw):
         os.close(fd)
 
 
-def runtime_model(raw, proof):
+def runtime_model(raw, proof, *, environment='dev', project='moneybowl-ingestion-support', baseline_image=INITIAL_IMAGE):
     from restricted_execution import decoded
     model = decoded(raw, 1024 * 1024)
     require(set(model) <= {'name', 'services', 'networks', 'volumes'}
-            and model.get('name') == 'moneybowl-ingestion-support'
+            and model.get('name') == project
             and set(model.get('services', {})) == {'api'}, 'executor_runtime_scope')
     api = model['services']['api']
     allowed = {'image', 'user', 'command', 'entrypoint', 'restart', 'environment', 'healthcheck',
                'cap_drop', 'cpus', 'mem_limit', 'pids_limit', 'security_opt', 'read_only',
                'tmpfs', 'networks', 'volumes', 'ports', 'labels', 'init', 'working_dir'}
-    require(set(api) <= allowed and api.get('image') == INITIAL_IMAGE
+    require(set(api) <= allowed and api.get('image') == baseline_image
             and api.get('user') == '10001:10001' and api.get('command') == API_COMMAND
             and api.get('entrypoint') == [] and api.get('cap_drop') == ['ALL']
             and api.get('security_opt') == ['no-new-privileges:true'] and api.get('read_only') is True
@@ -308,7 +308,7 @@ def runtime_model(raw, proof):
     require(api.get('healthcheck') == {
         'test': ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=3).read()"],
         'interval': '10s', 'timeout': '5s', 'retries': 12, 'start_period': '10s'}, 'executor_probe_scope')
-    require(api.get('labels') == {'moneybowl.environment': 'dev'}, 'executor_runtime_labels')
+    require(api.get('labels') == {'moneybowl.environment': environment}, 'executor_runtime_labels')
     api['image'] = proof['image']
     api['labels'].update({'org.opencontainers.image.revision': proof['git_commit'],
                           'moneybowl.source_digest': proof['source_digest']})

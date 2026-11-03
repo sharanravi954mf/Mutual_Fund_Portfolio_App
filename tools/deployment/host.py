@@ -116,7 +116,7 @@ def flutter_builder(repo, flutter, defines):
 
 def run(config, policy, requested=None):
     env = config['environment']
-    require(env in ('dev', 'qa'), 'invalid_environment')
+    require(env in ('dev', 'qa', 'prod'), 'invalid_environment')
     require(policy[env]['deployment_enabled'] is True, 'environment_not_commissioned')
     p = target(env, policy)
     require(config['host_authority'] == p['host_authority'], 'wrong_host_authority')

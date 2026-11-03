@@ -1,4 +1,4 @@
-"""Private DEV measurement transport: fixed read-only Management queries and readiness only.
+"""Scoped measurement transport: fixed read-only Management queries and readiness only.
 
 No access to /secrets, deployment, migration writes or M2A lifecycle operations.
 """
@@ -15,7 +15,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from contract import Rejected, require
+from contract import DEV_PROJECT, Rejected, require
 from observe import NoRedirect, Pending
 from owner_common import Command, pinned_executable
 
@@ -29,7 +29,7 @@ CONTROL = """SELECT i.environment, i.project_ref, c.project_url, c.mode,
 
 
 class SupabaseReader:
-    def __init__(self, config, token, readiness_key, request=None, command=None):
+    def __init__(self, config, token, readiness_key, request=None, command=None, *, deadline=None, clock=None):
         self.project = config['project_ref']
         require(re.fullmatch('[a-z]{20}', self.project), 'invalid_project')
         require(isinstance(token, str) and token and '\n' not in token and '\r' not in token, 'measurement_token_missing')
@@ -39,13 +39,28 @@ class SupabaseReader:
         self.cli = pinned_executable(config, 'supabase_cli') if command is None else '/opt/supabase'
         self.command = command
         self.request = request or self._request
+        self.deadline, self.clock = deadline, clock or time.monotonic
+
+    def timeout(self, maximum):
+        if self.deadline is None:
+            return maximum
+        remaining = self.deadline - self.clock()
+        if remaining <= 0:
+            raise Pending('measurement_deadline_exceeded')
+        return min(maximum, remaining)
+
+    def read(self, url, body=None, headers=None):
+        self.timeout(30)
+        value = self.request(url, body, headers)
+        self.timeout(30)
+        return value
 
     def _request(self, url, body=None, headers=None):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         try:
             request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(),
                                              headers=headers or {})
-            with opener.open(request, timeout=30) as response:
+            with opener.open(request, timeout=self.timeout(30)) as response:
                 data = response.read(16 * 1024 * 1024 + 1)
                 require(len(data) <= 16 * 1024 * 1024, 'measurement_too_large')
                 return json.loads(data)
@@ -65,7 +80,7 @@ class SupabaseReader:
     def api(self, path, query=None):
         require((path == '/database/query/read-only' and query in (MIGRATIONS, CONTROL))
                 or (path == '/functions' and query is None), 'measurement_operation_forbidden')
-        return self.request('https://api.supabase.com/v1/projects/' + self.project + path,
+        return self.read('https://api.supabase.com/v1/projects/' + self.project + path,
                             None if query is None else {'query': query},
                             {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
 
@@ -86,7 +101,8 @@ class SupabaseReader:
             # CLI receives only its private project-scoped read capability, no worker/database keys.
             command = self.command or Command({'SUPABASE_ACCESS_TOKEN': self.token, 'HOME': tmp})
             command([self.cli, 'functions', 'download', slug, '--project-ref', self.project,
-                     '--use-api', '--workdir', tmp], timeout=120)
+                     '--use-api', '--workdir', tmp], timeout=self.timeout(120))
+            self.timeout(120)
             root = Path(tmp) / 'supabase/functions'
             require(root.is_dir(), 'function_export_unverifiable')
             result = {}
@@ -102,7 +118,10 @@ class SupabaseReader:
             return result
 
     def readiness(self, environment):
-        require(environment in ('DEV', 'QA'), 'invalid_environment')
+        # handler.ts returns authenticated readiness before RPC/worker admission for
+        # DEV/QA/PROD. Both M2 schemas admit PROD; active dispatch remains DEV-only.
+        require(environment in ('DEV', 'QA', 'PROD'), 'invalid_environment')
+        require((environment == 'DEV') == (self.project == DEV_PROJECT), 'readiness_project_mismatch')
         origin = 'https://' + self.project + '.supabase.co'
         payload = dict(version=1, request_id=str(uuid.uuid4()), issued_at=int(time.time()),
                        environment=environment, project_url=origin, kind='readiness',
@@ -110,5 +129,5 @@ class SupabaseReader:
         message = 'moneybowl-readiness-v1|' + '|'.join(str(payload[name]) for name in ('version', 'request_id', 'issued_at',
                             'environment', 'project_url', 'kind')) + '|-|0'
         signature = hmac.new(self.key.encode(), message.encode(), hashlib.sha256).hexdigest()
-        return self.request(origin + '/functions/v1/outbox-dispatcher/readiness', payload,
+        return self.read(origin + '/functions/v1/outbox-dispatcher/readiness', payload,
                             {'Content-Type': 'application/json', 'x-outbox-readiness-signature': signature})

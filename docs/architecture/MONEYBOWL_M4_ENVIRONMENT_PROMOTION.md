@@ -1,3 +1,168 @@
+# MoneyBowl shared protected-merge deployment — issue #218
+
+## Current implementation and preserved state
+
+The owner approved one shared release workflow on 2026-11-02. This source-only
+implementation supersedes expansion of the historical DEV-specific M4 admission
+and resident Evidence Owner path below. Historical records are retained verbatim.
+The accepted initial API cutover remains permanent. Recovery source
+`36d29db9836672b879b4c5689ddc5926d4bc3366` remains ROOT_INSTALLED_INACTIVE.
+The paused credential manifest `844ec11952bc6365c4e67e66b493ca28a545c7c4c59afc26a20aa9b08e8cd0b6`
+is not executed or repurposed. Source validation is not live acceptance.
+
+`environment-promotion.yml` retains all required CI and calls `shared-release.yml`
+only after a protected-branch push. There is no environment input, PR deployment,
+dispatch deployment or automated merge. Admission independently checks the real
+owner-merged two-parent commit, reviewed head, promotion ancestry/tree and the
+three actual GitHub Actions app-15368 checks: `M4 Required CI`, `validate-commits`,
+`validate-docs`. Mapping: develop → dev, qa → qa, main → production. Runtime names
+remain DEV/QA/PROD; Flutter names remain dev/qa/prod. QA and Production are not
+commissioned; their project bindings are absent and gates remain closed.
+
+The reusable workflow selects the private component-tagged image only after
+comparing its original build source and component tree. Otherwise it builds an
+ARM64 OCI artifact on an isolated, credential-free GitHub VM. A separate publisher
+retains the bounded OCI validator and private-package checks, publishes by digest,
+and adds standard provenance to the registry. Tags are lookup hints, never trust.
+Original build SHA and deployment merge SHA remain separate. Every environment
+also builds Flutter with public-only configuration. The commissioned Flutter
+adapter remains its publisher; the new workflow does not become a second writer.
+Its built artifact is retained for comparison/handover, not claimed as installed.
+
+Supabase remains owned by its existing GitHub integration. The workflow contains
+no migration/function deployment command. Read-only inspection observed a successful Supabase Preview check from the real
+`supabase` GitHub app and active repository hooks. This does not prove its
+deployment target/configuration. Before commissioning, inspect the real
+integration branch/project/configuration and confirm its only writer; source docs
+or a function count do not establish that fact. Read-only verification uses actual
+migration statements, deployed function exports/JWT configuration, authenticated
+outbox controls/readiness, frontend identities/assets and the host API result.
+Function export verification reuses the previously reviewed erased-type-import
+correction from `7bc5620ed0cece3567e40e0977ea3d08ac1f3d63`.
+
+The host component is a fixed systemd oneshot, without timer, broker or daemon.
+An SSH forced command running as UID/GID 993:983 accepts only a bounded signed
+JSON request and may start only `moneybowl-api-deploy.service` through the exact
+Polkit rule. No Docker group/socket, sudo, arbitrary unit/command/config path or
+root shell is granted. The host verifies the request signature, target project, approved infrastructure source pins,
+15-minute expiry, image provenance and fixed approved runtime. It uses the original
+DEV `.owner.lock`, a separate private shared-release journal, API-only Compose
+`up --no-deps --no-build --pull never --wait`, and actual post-activation identity.
+Incomplete journals, failed health, drift and uncertain outcomes stop without
+retry or rollback. Original M4 journals, consumed intents and archives are untouched.
+
+GitHub protected workflows become release authority; the host does not reconstruct
+GitHub governance through a repository PAT. Signature verification uses pinned
+workflow/source identity and registry-carried/local bundles with sealed trust roots.
+The verification job has separate read-only credentials but shares GitHub's trust
+domain. It is not claimed to provide the old resident Evidence Owner independence.
+
+## PR #219 review corrections — 2026-11-03
+
+Production readiness uses the existing authenticated `readiness` kind. The actual
+Edge handler accepts PROD and returns before RPC/worker admission even when mode
+is disabled; both M2 schemas accept PROD but prohibit active non-DEV dispatch.
+The scoped Python reader now supports that contract with a distinct project and
+readiness-only key. No financial or NSE operation is invoked. Shared QA/Production
+verification accepts the actual inert absence of recovery Cron, or the existing
+canonical inactive job. DEV retains its required active recovery contract.
+
+Both observer jobs wait read-only for existing owners, with a fixed 15-minute
+budget, at most 91 attempts and ten-second intervals. HTTP, CLI export and ancestry
+reads are limited to remaining time; each job has a 22-minute outer deadline for
+setup and result publication. The admitted project/branch/SHA and actual checkout
+are checked before waiting; the current protected head is checked before every
+attempt and after measurements. Supersession stops rather than adopting a new SHA.
+Only a known ancestor frontend may be pending, and success requires the exact
+requested SHA, assets, function exports and migration statements. Invalid targets,
+failed functions, corrupted same-SHA frontend assets and denied credentials fail
+closed. Pending owners time out with an explicit reason/attempt count in sanitized
+backend/deployment results, propagated into the final release result. Waiting
+never invokes a deployment writer, repeats API activation or enables an environment.
+
+## DEV installation requirements — not executed
+
+1. Review the exact source commit/PR and complete deterministic and GitHub CI checks.
+   Reconfirm API/support identities, retirement, initial acceptance and current seals.
+2. Review one bounded privileged installation effect list: new versioned root-owned
+   code/launchers; disabled host configuration and privately measured runtime;
+   executable/code/credential/trust-root/machine seals; new private journal; existing
+   lock relationship; inbox/result directories; inactive oneshot; restricted Polkit
+   and SSH configuration. Preserve every existing installed M4 artifact and inode.
+   No source-only helper is privileged approval. Require explicit owner approval
+   for exact installation/configuration/credential and first-enablement effects.
+3. Bind all actual facts in `shared-host.example.json`; it is disabled and incomplete.
+   Reuse independently verified root pull-only registry authority without copying
+   credentials into source. The runtime snapshot includes actual image defaults and
+   exact DEV Supabase URL. Keep secrets private and absent from results and journals.
+4. UID 993 currently has a nologin shell, legacy package-write auth and build-group
+   membership. Resolve the SSH forced-command entrypoint and investigate all legacy
+   credential/group consumers before approving any account change or isolation.
+   Do not revoke, rotate or alter those authorities implicitly. Require ForceCommand,
+   no PTY/forwarding/user RC/environment, independent host-key pin and no password login.
+5. Establish environment `dev` with branch restriction exactly `develop`; set its
+   reviewed host/project/public frontend settings, deployment key, scoped Supabase
+   measurement token and readiness-only key. Validate real export and OCI attestation
+   compatibility. No service-role, notification or financial writer fallback.
+6. Keep `MONEYBOWL_SHARED_RELEASE_ENABLED` unset until this DEV path is commissioned.
+   Each GitHub environment separately requires `SHARED_DEPLOYMENT_COMMISSIONED` and
+   `SHARED_PUBLICATION_ENABLED`, both exactly `owner-approved-v1`. Old M4 publication
+   variables are not reused or enabled. Environment secrets never reach PR jobs.
+
+## Three-environment commissioning and acceptance
+
+Protect develop/qa/main: required PRs, strict existing three check contexts/app IDs,
+administrator enforcement, no force pushes/deletions and normal merge commits.
+Zero required human approvals supports the sole owner; do not fabricate reviews.
+Enforce feature/* → develop, develop → qa, qa → main in CI and release admission.
+No direct DEV-to-Production route. Create qa only through separately approved
+repository configuration work. Bind each GitHub environment to its single branch.
+
+QA needs an independent project, URLs, credentials, host/runtime, frontend adapter
+configuration and native Supabase integration. Production requires its actual
+project/availability, independent host/credentials, recovery and incident procedures,
+and separately reviewed permissions. Root configurations bind distinct project IDs
+and machine identities. Production financial controls default disabled. The common
+unit grants no DEV state write access. DEV alone installs the supplied DEV drop-in
+for its existing lock; QA/Production lock directories live under their new private
+shared-deploy state root and never reuse the accepted DEV state.
+Only ARM64 API hosts are currently supported. Do not silently reuse a DEV destination.
+
+DEV exit: owner merges a harmless feature PR; all required CI passes; automatic
+build/private publication and cryptographic verification succeed; the API changes
+once to the recorded digest and becomes healthy; real frontend/database/function
+measurements pass; five support containers remain unchanged; the retired dispatcher
+remains stopped/restart-disabled; durable intent/completion and sanitized Actions
+result exist; duplicate reconciliation returns already_deployed without activation.
+Only this real release can establish END_TO_END_VERIFIED.
+
+## QA LIVE KYC functional boundary
+
+QA deployment acceptance is separate from NSE KYC acceptance. No deployment invokes
+NSE. Current persisted KYC workers and active dispatcher remain DEV/UAT-only.
+The exact external write is POST `/nsemfdesk/api/v1/EKYC/EKYCREG` (KYC fresh
+registration); `CLIENT_KYC_REPORT` is a separate report read. Registration may create
+real provider records/send a handoff link and is not completed KYC by itself.
+
+The next narrowly scoped functional PR must qualify
+`moneybowl_onboarding.kyc_cases`, `kyc_operations`, `kyc_evidence_scope`,
+`kyc_context_guard`, `request_onboarding_kyc` and worker claim/finalization contracts
+from migration `20261007130243_mfd_onboarding_v2a_kyc_orchestration.sql`, plus their
+shared integration/outbox evidence bindings, with QA application environment and
+LIVE provider environment. Add an exact KYC-operation allowlist through dispatcher,
+worker and transport; preserve DEV/UAT behavior and keep unrelated financial routes
+disabled. Do not merely remove `assertNseUatWorkflow` or the non-DEV dispatch guard.
+Use a new additive migration after catalog/data preflight and isolated DB tests.
+
+Before any LIVE case: record provider/member authorization, exact permitted and
+consenting test identity, allowed AMC/operation, QA credentials/project, any real
+record/communication effects and required egress allowlisting. Supabase Edge is the
+NSE caller; Oracle's address does not prove Edge egress approval. Explicit owner
+and provider authority is required for the operation. Verify registration, handoff
+and reconciled completion separately; ambiguous external writes stop for review.
+
+---
+
 # MONEYBOWL M4 — unified environment promotion
 
 The [2026-10-14 backend delivery V2 source candidate](MONEYBOWL_M4_BACKEND_DELIVERY_V2.md)

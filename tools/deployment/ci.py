@@ -9,6 +9,9 @@ def main():
     try:
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
         if os.environ['GITHUB_EVENT_NAME'] == 'pull_request':
+            from shared_contract import pr_source
+            pr = event['pull_request']
+            pr_source(pr['base']['ref'], pr['head']['ref'])
             source = promotion('.', event)
         else:
             source = revision(event['after'])

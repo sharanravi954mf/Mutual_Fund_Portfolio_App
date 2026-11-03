@@ -133,6 +133,15 @@ def module_specifiers(text):
                           and len(tail) >= 3 and tail[2] == 'from'))
             if type_only:
                 continue
+        # Explicit declaration-level type imports/exports are erased by the
+        # runtime bundler. Their modules need not be in its exported closure.
+        # A default value binding named `type` remains a runtime import.
+        if tail[0] == 'type' and len(tail) >= 2:
+            type_only = (tail[1] in ('{', '*') or
+                         (token == 'import' and re.fullmatch(r'[A-Za-z_$][\w$]*', tail[1])
+                          and len(tail) >= 3 and tail[2] == 'from'))
+            if type_only:
+                continue
         if token == 'export' and tail[0] not in ('{', '*', 'type'):
             continue
         # Named/default imports or re-exports. Stop at a statement boundary.
@@ -175,7 +184,7 @@ def verify_files(source, slug, files):
     walk(slug + '/index.ts')
 
 
-def dispatcher_measurement(source, control, readiness, env, p):
+def dispatcher_measurement(source, control, readiness, env, p, *, allow_inert_no_cron=False):
     require(control.get('environment') == env.upper() and control.get('project_ref') == p['project_ref']
             and control.get('project_url') == 'https://' + p['project_ref'] + '.supabase.co', 'measured_project_mismatch')
     routes = {name: value['worker_slug'] for name, value in json.loads((source / 'services/outbox-dispatcher/routes.json').read_text()).items()}
@@ -185,6 +194,12 @@ def dispatcher_measurement(source, control, readiness, env, p):
     mode = 'active' if env == 'dev' else 'disabled'
     require(control.get('mode') == readiness.get('mode') == mode, 'dispatcher_mode_changed')
     jobs = control.get('jobs')
+    # M2/M2A install inert infrastructure and explicitly provision no Cron job.
+    # Shared QA/PROD verification can measure that safe default without inventing
+    # an inactive job or changing the original DEV commissioning contract.
+    if allow_inert_no_cron and env != 'dev' and jobs == []:
+        return dict(mode=mode, cron_count=0, cron_schedule=None, cron_active=False,
+                    route_count=len(routes), readiness_authenticated=True)
     require(isinstance(jobs, list) and len(jobs) == 1, 'recovery_cron_count_invalid')
     job = jobs[0]
     require(job.get('schedule') == '*/15 * * * *' and job.get('command') == 'SELECT moneybowl_dispatch.notify(NULL,0);'

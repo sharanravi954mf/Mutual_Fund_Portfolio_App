@@ -28,14 +28,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise Rejected('redirect_rejected')
 
 
-def read_json(url):
+def read_json(url, *, timeout=10):
     parsed = urllib.parse.urlsplit(url)
     require(parsed.scheme == 'https' and parsed.hostname and not parsed.username
             and not parsed.password and parsed.port is None and not parsed.fragment,
             'invalid_evidence_url')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     try:
-        with opener.open(urllib.request.Request(url, headers={'Cache-Control': 'no-cache'}), timeout=10) as response:
+        with opener.open(urllib.request.Request(url, headers={'Cache-Control': 'no-cache'}), timeout=timeout) as response:
             data = response.read(262145)
             require(len(data) <= 262144, 'evidence_too_large')
             return json.loads(data)
