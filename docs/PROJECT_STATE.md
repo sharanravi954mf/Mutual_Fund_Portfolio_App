@@ -5,7 +5,8 @@ Target Repository Path: docs/PROJECT_STATE.md
 ## Shared release implementation — 2026-11-02
 
 Issue #218 implements one protected-merge Actions workflow and restricted host
-oneshot for DEV/QA/Production. Current work is source-only, not a deployment.
+oneshot for DEV/QA/Production. The merged source and disabled DEV host configuration
+are installed inactive; automatic deployment is not yet commissioned.
 The live DEV API and permanent initial acceptance are preserved; recovered M4
 remains ROOT_INSTALLED_INACTIVE. Its credential installation remains paused.
 QA/Production gates remain disabled. See the [implementation and DEV acceptance

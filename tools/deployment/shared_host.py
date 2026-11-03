@@ -4,6 +4,7 @@ The only entrypoint reads a fixed configuration and bounded signed release reque
 Existing M4 installations, authority and journals are never edited by this component.
 """
 import contextlib
+import base64
 import hashlib
 import json
 import os
@@ -171,7 +172,23 @@ class Process:
     def __call__(self, argv, timeout=180, pass_fds=()):
         require(argv[0] in self.tools.values(), 'shared_host_executable_forbidden')
         try:
-            p = subprocess.run(argv, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env = self.env
+            if argv[0] == self.tools['gh']:
+                require(argv[1:3] == ['attestation', 'verify'], 'shared_host_github_command_forbidden')
+                # gh's verify command requires login even with local/OCI bundles.
+                # Reuse the already sealed root pull credential, solely for this
+                # process. No repository PAT, new scope, token file or rotation.
+                path = self.config['docker_config'] + '/config.json'
+                seals = [v for v in self.config['protected_seals'] if v['path'] == path]
+                require(len(seals) == 1, 'shared_host_registry_binding_invalid')
+                auth = decoded(sealed_read(seals[0]))
+                require(set(auth) == {'auths'} and set(auth['auths']) == {'ghcr.io'}
+                        and set(auth['auths']['ghcr.io']) == {'auth'}, 'shared_host_registry_binding_invalid')
+                username, separator, token = base64.b64decode(auth['auths']['ghcr.io']['auth'], validate=True).decode().partition(':')
+                require(separator and re.fullmatch('[A-Za-z0-9][A-Za-z0-9-]{0,99}', username)
+                        and re.fullmatch(r'[\x21-\x7e]{1,4096}', token), 'shared_host_registry_binding_invalid')
+                env = dict(self.env, GH_TOKEN=token)
+            p = subprocess.run(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                timeout=timeout, check=True, pass_fds=pass_fds)
             require(len(p.stdout) <= 2 * 1024 * 1024, 'shared_host_output_oversized')
             return p.stdout

@@ -1,5 +1,6 @@
 """Shared pipeline regressions. No live Engine, credentials, provider calls or deployment."""
 import copy
+import base64
 import hashlib
 import json
 import os
@@ -415,6 +416,41 @@ class SharedRuntimeTests(unittest.TestCase):
         self.assertEqual(engine.activate(value,lambda:rechecked.append(True)),'sha256:synthetic')
         self.assertEqual(rechecked,[True])
         self.assertEqual(sum('up' in v for v in calls),1)
+
+
+class ProcessAuthenticationTests(unittest.TestCase):
+    def process(self):
+        from shared_host import Process
+        cfg=dict(docker_config='/approved/pull',protected_seals=[{'path':'/approved/pull/config.json'}],
+            executables={k:{'path':'/approved/'+k} for k in ('docker','compose_plugin','systemctl','gh','git')})
+        with patch('shared_host.executable'):return Process(cfg)
+
+    def credential(self,token):
+        return encoded({'auths':{'ghcr.io':{'auth':base64.b64encode(('synthetic-user:'+token).encode()).decode()}}})
+
+    def test_only_fixed_attestation_process_receives_existing_pull_authentication(self):
+        process=self.process()
+        for token in ('ghp_'+'x'*36,'ghs_12345_'+'x'*250+'.'+'y'*250+'.signature'):
+            with self.subTest(format=token[:4]), patch('shared_host.sealed_read',return_value=self.credential(token)), \
+                    patch('shared_host.subprocess.run',return_value=types.SimpleNamespace(stdout=b'[]')) as run:
+                self.assertEqual(process(['/approved/gh','attestation','verify','synthetic-bundle']),b'[]')
+                self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],token)
+                self.assertNotIn('GH_TOKEN',process.env)
+                process(['/approved/docker','info'])
+                self.assertNotIn('GH_TOKEN',run.call_args.kwargs['env'])
+
+    def test_malformed_or_unsealed_credential_and_generic_gh_commands_fail_closed(self):
+        for token in ('','with space','with\nnewline','x'*4097):
+            process=self.process()
+            with self.subTest(case=token[:4]), patch('shared_host.sealed_read',return_value=self.credential(token)), \
+                    patch('shared_host.subprocess.run') as run, self.assertRaises(Rejected):
+                process(['/approved/gh','attestation','verify','synthetic-bundle'])
+            run.assert_not_called()
+        process=self.process();process.config['protected_seals']=[]
+        with patch('shared_host.subprocess.run') as run:
+            with self.assertRaises(Rejected):process(['/approved/gh','attestation','verify','synthetic-bundle'])
+            with self.assertRaises(Rejected):process(['/approved/gh','api','anything'])
+            run.assert_not_called()
 
 
 class LoginTests(unittest.TestCase):

@@ -54,6 +54,10 @@ retry or rollback. Original M4 journals, consumed intents and archives are untou
 GitHub protected workflows become release authority; the host does not reconstruct
 GitHub governance through a repository PAT. Signature verification uses pinned
 workflow/source identity and registry-carried/local bundles with sealed trust roots.
+The real CLI requires authentication even for these bundles; the verifier process
+alone receives the existing sealed root GHCR pull credential as `GH_TOKEN`. Its
+actual scope is read:packages only. No new repository token, scope or signing
+authority is introduced; Docker/git/systemctl processes receive no `GH_TOKEN`.
 The verification job has separate read-only credentials but shares GitHub's trust
 domain. It is not claimed to provide the old resident Evidence Owner independence.
 
@@ -117,9 +121,16 @@ The merged `b55fb1a` source closure (45 public files) is installed root:root 044
 under `/opt/moneybowl-shared-deploy/b55fb1a4c6ff3ae7f05341766472095836fe8215`;
 its launcher and fixed one-shot unit are installed inactive. Independent blob/
 SHA-256/inode checks and durable create-only installation records passed. The new
-DEV release journal is empty. The host policy, SSH and Polkit grants are absent;
-the correction source in this PR is not installed. This is partial installation,
-not deployment enablement. The existing Supabase measurement credential fails a
+DEV release journal is empty. A root-only disabled host policy, inactive DEV unit
+drop-in and fixed inbox/result directories were subsequently installed after real
+runtime, permanent initial acceptance, retirement, capacity and seal checks passed.
+Its 47 runtime environment entries are unchanged. Independent admission rejects the
+disabled policy. SSH and Polkit grants remain absent; the correction source in this
+PR is not installed. A new root-private DEV SSH key and TUF-verified Sigstore trust
+snapshot are staged; DEV environment SSH and readiness-only secrets were bound by
+encrypted process pipes without disclosure. No account/group change or legacy
+credential rotation occurred. This is partial installation, not enablement.
+The existing Supabase measurement credential fails a
 real DEV functions read with HTTP 401 and is preserved, without fallback or renewal.
 
 Real read-only preparation also diagnosed two runtime-contract defects before
@@ -130,6 +141,12 @@ Supabase configuration instead of requiring a nonexistent `SUPABASE_URL`. The
 Docker Engine omits the optional image `Entrypoint` key, so shared image inspection
 reuses V2's `index .Config "Entrypoint"` lookup. Deterministic tests exercise the
 real runtime validator for DEV/QA/Production and the missing-entrypoint case.
+Real OCI verification confirmed the CLI authentication prerequisite and that the
+existing pull-only credential satisfies it. The accepted baseline has no shared
+workflow attestation and its component tag is absent (404), so the first DEV
+artifact validation must build/publish a genuinely new attested candidate. Existing
+private package metadata confirms the exact repository binding. The baseline API
+continues under its permanent acceptance; no provenance is invented for it.
 
 Before enabling the host, the existing workflow/publisher can validate real private
 OCI publication and provenance on a normal owner-merged DEV push. This requires
