@@ -20,6 +20,13 @@
   "baseline_image": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev@sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
   "baseline_api_id": "b96f19b784ab2d22eb6bad0a39a08d370378313324892b606e2ef38c9b6bcba2",
   "baseline_image_id": "sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
+  "baseline_api_release": {
+    "image": "ghcr.io/sharanravi954mf/moneybowl-ingestion-dev@sha256:257c0fd51f3d47a8d24031fd90333945c804a159ad6779301226edcd3fc80945",
+    "build_sha": "8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5",
+    "component_digest": "5f06254a13cb666449336425b1a66d31fa8db4afbb30d78d0bc7687dd67d5fd5",
+    "activation_sha": "8afa04f9db4a3429fdfeef503d4ebaf6abf18aa5",
+    "proof": "initial_acceptance"
+  },
   "daemon_id": null,
   "api_runtime_identity": null,
   "api_limits": null,

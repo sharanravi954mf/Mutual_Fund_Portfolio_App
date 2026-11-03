@@ -12,7 +12,7 @@ from pathlib import Path
 from contract import DEV_PROJECT, Rejected, git, require, revision
 from evidence_owner import dispatcher_measurement, function_index, verify_files, verify_migrations
 from observe import NoRedirect, Pending, read_json
-from shared_contract import decoded, encoded, push, request, target
+from shared_contract import api_artifact, decoded, encoded, push, request, target
 from shared_release import Github
 from supabase_reader import SupabaseReader
 
@@ -88,8 +88,19 @@ def converge(measure, ensure_current, *, deadline, clock=None, sleep=None,
 def verify(source, release, host, reader, frontend, ready, fetch_asset, *, ancestor=None):
     request(release)
     t = target('refs/heads/' + release['branch'])
-    require(host.get('state') in ('deployed', 'already_deployed') and host.get('release') == release
+    require(host.get('state') in ('deployed', 'unchanged', 'already_deployed') and host.get('release') == release
             and host.get('api_id') and host.get('image_id'), 'release_host_unverified')
+    actual = api_artifact(host.get('api_release'))
+    require(actual['component_digest'] == release['component_digest'], 'release_api_component_mismatch')
+    if actual['proof'] == 'initial_acceptance':
+        from api_executor import INITIAL_COMPONENT, INITIAL_IMAGE, INITIAL_SOURCE
+        require(t['environment'] == 'dev' and actual == dict(image=INITIAL_IMAGE, build_sha=INITIAL_SOURCE,
+            component_digest=INITIAL_COMPONENT, activation_sha=INITIAL_SOURCE, proof='initial_acceptance'),
+            'release_api_baseline_invalid')
+    if host['state'] == 'deployed':
+        require(actual == dict(image=release['image'], build_sha=release['build_sha'],
+            component_digest=release['component_digest'], activation_sha=release['deployment_sha'],
+            proof='shared_attestation'), 'release_api_activation_mismatch')
     require(ready == {'status': 'ready'}, 'release_api_unhealthy')
     # Check target identity before considering a lagging SHA to be convergence.
     require(frontend.get('environment') == t['runtime_environment']
@@ -105,7 +116,8 @@ def verify(source, release, host, reader, frontend, ready, fetch_asset, *, ances
                 'release_frontend_asset_changed')
     verify_backend(source, t, reader)
     return dict(state='verified', environment=t['environment'], deployment_sha=release['deployment_sha'],
-                build_sha=release['build_sha'], image=release['image'], api_id=host['api_id'],
+                build_sha=actual['build_sha'], image=actual['image'], api_release=actual,
+                selected_image=release['image'], selected_build_sha=release['build_sha'], api_id=host['api_id'],
                 image_id=host['image_id'], supabase_project=reader.project, frontend_sha=frontend['git_commit'],
                 observed_at=int(time.time()), nse_live_kyc='NOT_EXECUTED')
 

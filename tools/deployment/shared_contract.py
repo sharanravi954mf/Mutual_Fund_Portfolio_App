@@ -56,6 +56,18 @@ def digest(value):
     return value
 
 
+def api_artifact(value):
+    """Actual running API identity, separate from a release's selected candidate."""
+    require(type(value) is dict and set(value) == {
+        'image', 'build_sha', 'component_digest', 'activation_sha', 'proof'}, 'release_api_artifact_invalid')
+    require(type(value['image']) is str and value['image'].startswith(IMAGE + '@'), 'release_api_artifact_invalid')
+    digest(value['image'].removeprefix(IMAGE + '@'))
+    revision(value['build_sha']); revision(value['activation_sha'])
+    require(type(value['component_digest']) is str and re.fullmatch('[0-9a-f]{64}', value['component_digest'])
+            and value['proof'] in ('initial_acceptance', 'shared_attestation'), 'release_api_artifact_invalid')
+    return value
+
+
 def request(value, *, now=None):
     fields = {'schema', 'repository_id', 'environment', 'project_ref', 'branch', 'deployment_sha',
               'build_sha', 'component_digest', 'infrastructure', 'image', 'run_id', 'issued_at', 'expires_at'}

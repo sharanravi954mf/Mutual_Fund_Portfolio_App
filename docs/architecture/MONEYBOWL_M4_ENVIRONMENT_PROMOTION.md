@@ -54,6 +54,10 @@ retry or rollback. Original M4 journals, consumed intents and archives are untou
 GitHub protected workflows become release authority; the host does not reconstruct
 GitHub governance through a repository PAT. Signature verification uses pinned
 workflow/source identity and registry-carried/local bundles with sealed trust roots.
+The real CLI requires authentication even for these bundles; the verifier process
+alone receives the existing sealed root GHCR pull credential as `GH_TOKEN`. Its
+actual scope is read:packages only. No new repository token, scope or signing
+authority is introduced; Docker/git/systemctl processes receive no `GH_TOKEN`.
 The verification job has separate read-only credentials but shares GitHub's trust
 domain. It is not claimed to provide the old resident Evidence Owner independence.
 
@@ -80,7 +84,84 @@ closed. Pending owners time out with an explicit reason/attempt count in sanitiz
 backend/deployment results, propagated into the final release result. Waiting
 never invokes a deployment writer, repeats API activation or enables an environment.
 
-## DEV installation requirements — not executed
+## DEV installation and remaining requirements
+
+### DEV commissioning corrections — issue #220, 2026-11-03
+
+PR #219 is merged at `b55fb1a4c6ff3ae7f05341766472095836fe8215`.
+Fresh inspection confirms the accepted API and five support identities, retired
+dispatcher, permanent acceptance and inactive M4 authority remain intact. GitHub
+environment `dev` now restricts deployment to branch `develop`; its project and
+public application settings are bound. No release gate is enabled. The actual
+Supabase default branch reports `git_branch=develop` for project
+`rskryngwzyuzmiwtriyy`. Its integration and the existing Flutter publisher remain
+the deployment writers. The root registry credential passed actual pull-only
+scope/private-image checks. UID 993's legacy package-write token and shared build
+group remain unchanged; the existing Flutter unit still uses that build group.
+
+The corrected host journal compares API component identity before planning an
+activation. Flutter-only, Supabase-only and documentation-only releases record
+`unchanged`, retain the exact API observation and perform no Docker pull or Compose
+update. Results distinguish the selected, authenticated candidate image/build SHA
+from the actual running API image, build SHA and activation SHA. The first shared
+release can retain the permanently accepted API when its component is unchanged.
+Changed API components still require one authenticated activation, health checks
+and unchanged support services. Interrupted no-op journals also stop for review.
+
+The reviewed SSH correction uses `shared_login.py` as a root-owned, fixed login
+executable, accepting only sshd's `-c moneybowl-shared-deploy` invocation as
+UID/GID 993:983 with zero effective capabilities. It rejects requested commands,
+interactive login and subsystem requests, then executes only the sealed client
+with an empty/minimal environment. It supplies no command interpreter. Installing
+it requires an explicit account-shell change after this source is merged; current
+account metadata is unchanged. The supplied tmpfiles entry recreates only the fixed
+root:983 result parent at boot, without starting a deployment service.
+
+The merged `b55fb1a` source closure (45 public files) is installed root:root 0444
+under `/opt/moneybowl-shared-deploy/b55fb1a4c6ff3ae7f05341766472095836fe8215`;
+its launcher and fixed one-shot unit are installed inactive. Independent blob/
+SHA-256/inode checks and durable create-only installation records passed. The new
+DEV release journal is empty. A root-only disabled host policy, inactive DEV unit
+drop-in and fixed inbox/result directories were subsequently installed after real
+runtime, permanent initial acceptance, retirement, capacity and seal checks passed.
+Its 47 runtime environment entries are unchanged. Independent admission rejects the
+disabled policy. SSH and Polkit grants remain absent; the correction source in this
+PR is not installed. A new root-private DEV SSH key and TUF-verified Sigstore trust
+snapshot are staged; DEV environment SSH and readiness-only secrets were bound by
+encrypted process pipes without disclosure. No account/group change or legacy
+credential rotation occurred. This is partial installation, not enablement.
+The existing Supabase measurement credential fails a
+real DEV functions read with HTTP 401 and is preserved, without fallback or renewal.
+
+Real read-only preparation also diagnosed two runtime-contract defects before
+creating any host-policy intent. The support API has no Supabase URL/client; its
+47-entry sealed environment is preserved, and the environment label, signed target
+and root project policy provide the binding. Preparation rejects unexpected
+Supabase configuration instead of requiring a nonexistent `SUPABASE_URL`. The
+Docker Engine omits the optional image `Entrypoint` key, so shared image inspection
+reuses V2's `index .Config "Entrypoint"` lookup. Deterministic tests exercise the
+real runtime validator for DEV/QA/Production and the missing-entrypoint case.
+Real OCI verification confirmed the CLI authentication prerequisite and that the
+existing pull-only credential satisfies it. The accepted baseline has no shared
+workflow attestation and its component tag is absent (404), so the first DEV
+artifact validation must build/publish a genuinely new attested candidate. Existing
+private package metadata confirms the exact repository binding. The baseline API
+continues under its permanent acceptance; no provenance is invented for it.
+
+Before enabling the host, the existing workflow/publisher can validate real private
+OCI publication and provenance on a normal owner-merged DEV push. This requires
+repository variable `MONEYBOWL_SHARED_ARTIFACT_PREFLIGHT_ENABLED=owner-approved-v1`
+and DEV environment `SHARED_PUBLICATION_ENABLED=owner-approved-v1`. It never enables
+`SHARED_DEPLOYMENT_COMMISSIONED`, requests a host authorization, reaches measurement
+credentials or publishes Flutter. Admission still checks the exact owner merge and
+required CI. QA/Production cannot use this path. It is the same artifact producer,
+not another deployment writer or controller. The artifact-only gate is unset until
+reviewed source and public configuration are ready, and is removed after successful
+validation; normal deployment uses the existing full-release gates.
+
+Remaining installation steps below require real provider/export/provenance checks;
+source tests do not commission deployment. New code is never installed from an
+unmerged worktree. No changes to paused M4 credentials, QA or Production are made.
 
 1. Review the exact source commit/PR and complete deterministic and GitHub CI checks.
    Reconfirm API/support identities, retirement, initial acceptance and current seals.
@@ -96,7 +177,8 @@ never invokes a deployment writer, repeats API activation or enables an environm
    credentials into source. The runtime snapshot includes actual image defaults and
    exact DEV Supabase URL. Keep secrets private and absent from results and journals.
 4. UID 993 currently has a nologin shell, legacy package-write auth and build-group
-   membership. Resolve the SSH forced-command entrypoint and investigate all legacy
+   membership. Install the reviewed restricted login executable only after source
+   merge and account-consumer review; investigate all legacy
    credential/group consumers before approving any account change or isolation.
    Do not revoke, rotate or alter those authorities implicitly. Require ForceCommand,
    no PTY/forwarding/user RC/environment, independent host-key pin and no password login.
