@@ -123,6 +123,7 @@ class Providers:
         self.challenge = ('Bearer realm="https://ghcr.io/token",service="ghcr.io",'
                           'scope="repository:sharanravi954mf/moneybowl-ingestion-dev:pull"')
         self.authorized_calls = []
+        self.upload_location = None
 
     def json(self, value):
         return 200, {}, encoded(value)
@@ -174,8 +175,9 @@ class Providers:
             return 401, {'WWW-Authenticate': self.challenge}, b''
         if headers.get('Authorization') == 'Bearer synthetic-anonymous-token':
             return self.anonymous_manifest_status, {}, self.remote.get(route, b'')
-        if method == 'POST': return 202, {'Location': base + 'blobs/uploads/synthetic-upload'}, b''
-        if method == 'PUT' and route.startswith('blobs/uploads/'):
+        if method == 'POST': return 202, {'Location': self.upload_location if self.upload_location is not None
+                                        else base + 'blobs/uploads/synthetic-upload'}, b''
+        if method == 'PUT' and route.startswith(('blobs/uploads/', 'blobs/upload/')):
             digest = __import__('urllib.parse', fromlist=['parse_qs']).parse_qs(url.split('?', 1)[1])['digest'][0]
             self.f.assertEqual(oci.digest(data), digest)
             self.remote['blobs/' + digest] = data
@@ -450,6 +452,52 @@ class DeliveryTests(unittest.TestCase):
         self.providers.anonymous_manifest_status = 403
         self.assertEqual(self.publish_fixture(), self.proof)
         self.assertEqual(self.run_release()['state'], 'deployed')
+
+    def test_actual_ghcr_relative_singular_upload_location_preserves_digest(self):
+        self.providers.remote.clear();self.providers.calls.clear()
+        self.providers.upload_location='/v2/sharanravi954mf/moneybowl-ingestion-dev/blobs/upload/4.00000000-0000-4000-8000-000000000000'
+        result=self.publish_fixture()
+        self.assertEqual(result,self.proof)
+        writes=[url for url,method in self.providers.calls if method=='PUT' and '/blobs/upload/' in url]
+        self.assertTrue(writes)
+        self.assertTrue(all(url.startswith('https://ghcr.io'+self.providers.upload_location+'?digest=sha256%3A') for url in writes))
+        self.assertEqual(self.providers.remote['manifests/'+result['manifest_digest']],
+                         self.providers.remote['manifests/component-'+self.component])
+
+    def test_registry_upload_query_state_is_preserved_verbatim(self):
+        self.providers.remote.clear();self.providers.calls.clear()
+        state='_state=synthetic%2Fopaque%2Bstate&namespace=synthetic'
+        self.providers.upload_location='/v2/sharanravi954mf/moneybowl-ingestion-dev/blobs/upload/4.synthetic?'+state
+        self.publish_fixture()
+        writes=[url for url,method in self.providers.calls if method=='PUT' and '/blobs/upload/' in url]
+        self.assertTrue(writes)
+        self.assertTrue(all('?'+state+'&digest=sha256%3A' in url for url in writes))
+
+    def test_upload_location_cannot_change_trusted_endpoint_or_escape_repository(self):
+        prefix='https://ghcr.io/v2/sharanravi954mf/moneybowl-ingestion-dev/blobs/upload/'
+        locations=['',prefix.replace('https:','http:')+'4.synthetic',
+            prefix.replace('ghcr.io','attacker.invalid')+'4.synthetic',
+            prefix.replace('ghcr.io','user@ghcr.io')+'4.synthetic',
+            prefix.replace('ghcr.io','ghcr.io:443')+'4.synthetic',
+            prefix.replace('moneybowl-ingestion-dev','other-package')+'4.synthetic',
+            prefix+'../manifests/anything',prefix+'%2e%2e%2fanything',prefix+'4.synthetic#fragment',
+            prefix+'4.synthetic/extra',prefix+'x'*4097]
+        for location in locations:
+            self.providers.remote.clear();self.providers.calls.clear();self.providers.upload_location=location
+            with self.subTest(case=locations.index(location)), self.assertRaisesRegex(oci.Invalid,'publication_upload_location'):
+                self.publish_fixture()
+            self.assertFalse(any(method=='PUT' for _,method in self.providers.calls))
+
+    def test_upload_redirect_or_other_status_never_sends_blob_or_bearer_elsewhere(self):
+        original=self.providers.http
+        for status in (201,301,302,303,307,308,400,500):
+            def response(url,headers=None,method='GET',data=None):
+                result=original(url,headers,method,data)
+                return (status,result[1],result[2]) if method=='POST' else result
+            self.providers.remote.clear();self.providers.calls.clear()
+            with self.subTest(status=status), patch.object(self.providers,'http',side_effect=response), self.assertRaisesRegex(oci.Invalid,'publication_upload_location'):
+                self.publish_fixture()
+            self.assertFalse(any(method=='PUT' for _,method in self.providers.calls))
 
     def test_unpublished_digest_requires_independent_private_package_evidence(self):
         self.providers.anonymous_token_status = 200
