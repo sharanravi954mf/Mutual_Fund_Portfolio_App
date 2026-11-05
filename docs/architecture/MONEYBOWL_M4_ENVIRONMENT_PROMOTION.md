@@ -193,6 +193,40 @@ unmerged worktree. No changes to paused M4 credentials, QA or Production are mad
 
 ## Three-environment commissioning and acceptance
 
+### DEV execution and publisher correction — issue #222, 2026-11-05
+
+PR #221 merged at `afa7369118a9dc844718f3b2896870ca87c05a5e`.
+Run #60 (`41698192927`) passed required CI and isolated ARM64 build, then rejected
+GHCR's HTTP 202 relative upload location before sending blob content. GHCR uses
+`/v2/<exact package>/blobs/upload/<opaque handle>`; the publisher assumed plural
+`uploads`. The correction accepts only those two explicit paths on HTTPS ghcr.io,
+with the exact package and a bounded opaque handle. Redirects, foreign hosts,
+repository escapes and fragments remain rejected. Existing query state is retained
+verbatim when appending the content digest. Standalone and embedded publisher bytes
+remain identical; private-package and authenticated-provenance checks are unchanged.
+
+The reviewed merged host source is installed root-owned at `afa7369`, with the prior
+`b55fb1a` source and shared policy inode preserved. The restricted login executable,
+dedicated key, SSH Match fragment, exact-unit Polkit rule and result-parent tmpfiles
+entry are installed. Actual SSH tests reject invalid envelopes and arbitrary
+commands before inbox/unit creation. Actual UID/GID 993:983 has zero capabilities,
+cannot read private policy/runtime/registry/journal or access Docker, and is
+authorized by Polkit only for the fixed unit's start; other tested units/verbs
+require administrator authentication. Groups and legacy credentials are unchanged.
+The deployment policy remains disabled, its oneshot inactive and release journal
+empty. No API activation occurred; all five support identities, dispatcher
+retirement, permanent acceptance and inactive M4 state passed independent checks.
+
+The owner-provisioned DEV-only Database Read/Edge Functions Read token passed actual
+92-migration statement comparisons, all 20 function export/source/JWT checks and
+authenticated readiness, and is encrypted in environment `dev`. Expiration is
+owner-confirmed as 2027-02-01; tested APIs do not expose full token scope/expiry.
+DEV artifact validation/private publication is configured for owner merges. The
+full shared-release and DEV commissioning gates remain unset, as do old M4 gates.
+QA/Production remain uncommissioned. Run #60 is not retried. A new owner-merged
+publisher correction must prove publication/attestation before full DEV enablement
+and the separate harmless automatic-release acceptance PR.
+
 Protect develop/qa/main: required PRs, strict existing three check contexts/app IDs,
 administrator enforcement, no force pushes/deletions and normal merge commits.
 Zero required human approvals supports the sole owner; do not fabricate reviews.

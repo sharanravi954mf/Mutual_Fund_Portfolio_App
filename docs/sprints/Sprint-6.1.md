@@ -60,3 +60,4 @@ Carried over issues: #39, #40, #49.
 
 - [ ] **feat(deployment): implement shared protected-merge DEV/QA/Production release workflow, restricted one-shot API host adapter and regression tests; source review only, installation and real DEV acceptance remain pending** (#218)
 - [ ] **fix(deployment): preserve unchanged API releases, provide a restricted SSH login and validate DEV artifacts before host enablement; retain all existing CI and deployment owners** (#220)
+- [ ] **fix(deployment): accept GHCR's exact repository-bound singular blob-upload path while retaining endpoint, digest, privacy and provenance enforcement; complete safe restricted DEV host installation with full deployment disabled** (#222)

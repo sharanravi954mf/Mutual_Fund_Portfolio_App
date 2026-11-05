@@ -16,8 +16,12 @@ Issue #220 corrects DEV commissioning blockers: unchanged API components now ret
 their actual image/activation identity; SSH uses a restricted login executable;
 DEV can validate artifacts through the existing publisher before host enablement.
 The DEV GitHub environment is restricted to develop and has public configuration.
-All release gates remain closed pending source review and real credential/export/
-attestation checks. No automatic DEV release has yet been accepted.
+PR #221 is merged at `afa7369` and its restricted host source/SSH/Polkit installation
+is independently verified with deployment disabled. The DEV measurement token passed
+real migration/function-export/readiness checks. DEV artifact validation is enabled;
+run #60 passed CI/build but exposed GHCR's singular blob-upload location. Issue #222
+corrects that path without widening trusted endpoints. Full host deployment remains
+gated on genuine publication/attestation. No automatic DEV release is accepted yet.
 
 ## Project Overview
 - **Project Name**: Money Bowl

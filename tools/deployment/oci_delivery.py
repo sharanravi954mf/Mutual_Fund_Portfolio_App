@@ -303,7 +303,8 @@ def publish(archive, sha, run_id, attempt, token, transport=http, branch='develo
         location = urllib.parse.urljoin(base, response.get('Location', response.get('location', '')))
         parsed = urllib.parse.urlsplit(location)
         need(status == 202 and parsed.scheme == 'https' and parsed.netloc == host and not parsed.fragment
-             and parsed.path.startswith('/v2/' + package + '/blobs/uploads/')
+             and re.fullmatch(re.escape('/v2/' + package + '/blobs/')
+                              + r'uploads?/[A-Za-z0-9][A-Za-z0-9._~-]{0,255}', parsed.path)
              and len(location) <= 4096, 'publication_upload_location')
         location += ('&' if parsed.query else '?') + urllib.parse.urlencode({'digest': desc['digest']})
         status, _, _ = transport(location, {**headers, 'Content-Type': 'application/octet-stream'}, 'PUT',
