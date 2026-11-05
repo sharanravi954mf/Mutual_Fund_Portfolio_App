@@ -193,6 +193,43 @@ unmerged worktree. No changes to paused M4 credentials, QA or Production are mad
 
 ## Three-environment commissioning and acceptance
 
+### DEV enablement and acceptance — issue #224, 2026-11-05
+
+PR #223 merged at `7371db2f5f601bbe598d33ad02b2ea9322dc1513`; run #63
+(`42093304880`) passed required CI, isolated ARM64 build and private publication.
+Oracle independently verified image
+`sha256:8fbe3f84da04428529238fcad3d50c8ae328ed1db31b74bf4dd39a010757808d`,
+its private repository binding, ARM64 runtime configuration and registry-carried
+signature using the actual installed CLI, sealed trust roots, exact source and
+shared signer workflow. The existing pull credential remains read:packages only.
+
+The root host remains installed at reviewed `afa7369`. Only `commissioned` changed
+to true; the original disabled policy inode is preserved in the configuration
+archive. Root intent/completion `enable-dev-7371db2-20261105.*.json` bind the change
+and independent installed-authority/runtime checks. Real SSH and Polkit checks
+passed; the latter uses a trusted action-owner caller against a live zero-capability
+UID/GID 993:983 subject. Arbitrary commands and unrelated unit actions are rejected.
+Groups, secrets, initial acceptance, recovery/M4 records and shared lock are preserved.
+The API and five support containers are unchanged, dispatcher retired, oneshot
+inactive and release journal empty. Enabling the host is not deployment acceptance.
+
+GHCR's config GET actually returns 307 to its documented
+[GitHub content host](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#communication-requirements-for-github-hosted-runners).
+The selector correction admits one bounded download only from the fixed package's
+digest-addressed blob path to exact HTTPS `pkg-containers.githubusercontent.com`.
+Registry/GitHub headers are never forwarded; other redirects and further hops fail.
+The downloaded config must still match the manifest's digest. No URL query or token
+is logged. Synthetic tests cover the observed response and isolation/failure cases.
+
+The acceptance change adds `Cache-Control: no-store` to `/health`, preserving its
+status and exact JSON and introducing no business or financial operation. After
+required source checks, DEV environment commissioning plus the shared repository
+gate permit automatic releases on owner merges. QA/Production environment gates
+and legacy M4 publication stay unset. No workflow rerun, manual API activation or
+synthetic record counts as acceptance: the owner must merge the feature PR normally,
+then the real shared workflow must authenticate/deploy the changed API once, observe
+existing Supabase/Flutter convergence, and produce a complete measured release result.
+
 ### DEV execution and publisher correction — issue #222, 2026-11-05
 
 PR #221 merged at `afa7369118a9dc844718f3b2896870ca87c05a5e`.
