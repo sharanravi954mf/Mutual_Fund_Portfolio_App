@@ -3,26 +3,49 @@ import base64
 import hashlib
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from contract import git, require, revision
-from observe import NoRedirect
+from contract import Rejected, git, require, revision
 from shared_contract import IMAGE, decoded, digest
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # Expose the response; never forward registry authentication.
 
 
 def http(url, headers):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    try:
-        with opener.open(urllib.request.Request(url, headers=headers), timeout=30) as response:
+    def read(request):
+        with opener.open(request, timeout=30) as response:
             raw = response.read(2 * 1024 * 1024 + 1)
             require(len(raw) <= 2 * 1024 * 1024, 'registry_response_oversized')
             return response.status, raw
+    try:
+        return read(urllib.request.Request(url, headers=headers))
     except urllib.error.HTTPError as error:
-        require(error.code == 404, 'registry_read_rejected')
-        return 404, b''
+        if error.code == 404:
+            return 404, b''
+        blob_prefix = 'https://ghcr.io/v2/' + IMAGE.removeprefix('ghcr.io/') + '/blobs/'
+        require(error.code == 307 and re.fullmatch(re.escape(blob_prefix)
+                + r'sha256:[0-9a-f]{64}', url), 'registry_read_rejected')
+        locations = error.headers.get_all('Location', [])
+        require(len(locations) == 1 and 0 < len(locations[0]) <= 4096
+                and re.fullmatch(r'[\x21-\x7e]+', locations[0]), 'registry_download_location_invalid')
+        location = locations[0]
+        parsed = urllib.parse.urlsplit(location)
+        require(parsed.scheme == 'https' and parsed.netloc == 'pkg-containers.githubusercontent.com'
+                and parsed.path.startswith('/') and not parsed.fragment, 'registry_download_location_invalid')
+    # GHCR serves blobs through this documented GitHub content host. One GET only,
+    # no registry/GitHub headers; select() still verifies the exact config digest.
+    try:
+        return read(urllib.request.Request(location, headers={}))
+    except urllib.error.HTTPError:
+        raise Rejected('registry_download_rejected') from None
 
 
 def select(admission, token, actor, repo='.', transport=http):

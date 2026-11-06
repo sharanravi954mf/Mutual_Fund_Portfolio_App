@@ -19,9 +19,14 @@ The DEV GitHub environment is restricted to develop and has public configuration
 PR #221 is merged at `afa7369` and its restricted host source/SSH/Polkit installation
 is independently verified with deployment disabled. The DEV measurement token passed
 real migration/function-export/readiness checks. DEV artifact validation is enabled;
-run #60 passed CI/build but exposed GHCR's singular blob-upload location. Issue #222
-corrects that path without widening trusted endpoints. Full host deployment remains
-gated on genuine publication/attestation. No automatic DEV release is accepted yet.
+run #60 passed CI/build but exposed GHCR's singular blob-upload location. PR #223
+corrected that path; run #63 at `7371db2` published a private ARM64 image whose
+registry-carried attestation passed the installed Oracle CLI. The reviewed `afa7369`
+host policy is enabled, with its prior disabled inode archived and original runtime
+unchanged. Issue #224 handles GHCR's bounded credential-free config download and
+adds an unchanged-JSON health cache header for the owner-merged acceptance release.
+Full DEV release gates open after its required source checks; QA/Production and
+legacy M4 remain disabled. No automatic DEV release is accepted yet.
 
 ## Project Overview
 - **Project Name**: Money Bowl

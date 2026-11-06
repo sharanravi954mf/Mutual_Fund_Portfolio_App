@@ -144,8 +144,8 @@ def create_app(
         )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> JSONResponse:
+        return JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
 
     @app.get("/ready")
     async def ready() -> JSONResponse:

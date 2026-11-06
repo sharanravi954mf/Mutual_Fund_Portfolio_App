@@ -65,6 +65,7 @@ def test_health_exposes_no_configuration(client) -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_service_tokens_must_be_distinct(monkeypatch) -> None:
